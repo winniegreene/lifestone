@@ -1,0 +1,1190 @@
+{
+  "_license": "AGPL-3.0-only. Values extracted from the ACE world database (ACEmulator/ACE-World-16PY-Patches, AGPL-3.0), release ACE-World-Database-v0.9.296.sql. See docs/third-party/sky-nav.md.",
+  "_source": "ACE-World-Database-v0.9.296.sql (sha256 7f58832a326526f72321d3ce0ddf463fe80cef2b12a08090dbdd03964ba021b4): tables points_of_interest, weenie (class_Name), weenie_properties_string type 1 (Name), weenie_properties_position type 2 (Destination). One entry per destination weenie; poiNames are ACE's @telepoi names for it.",
+  "_generator": "tools/data/extract_ace_poi.py",
+  "_why": "The client dats do not name places; ACE's points_of_interest table (used by @telepoi) maps town and landmark names to portal weenies whose Destination is the place's drop point.",
+  "destinations": [
+    {
+      "displayName": "Ayan Baqur",
+      "poiNames": [
+        "Ayan Baqur"
+      ],
+      "wcid": 7194,
+      "weenieClassName": "portalayanbaqur",
+      "weenieName": "Ayan Baqur Portal",
+      "cell": "0x1133001F",
+      "origin": [
+        88.1,
+        166.2,
+        64.8
+      ],
+      "rotationWxyz": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "displayName": "Bandit Castle",
+      "poiNames": [
+        "Bandit Castle"
+      ],
+      "wcid": 1102,
+      "weenieClassName": "portalbanditcastle",
+      "weenieName": "Bandit Castle Portal",
+      "cell": "0xBDD00006",
+      "origin": [
+        16.9,
+        120.5,
+        115.1
+      ],
+      "rotationWxyz": [
+        0.707107,
+        0,
+        0,
+        -0.707107
+      ]
+    },
+    {
+      "displayName": "Underground City",
+      "poiNames": [
+        "Underground"
+      ],
+      "wcid": 1099,
+      "weenieClassName": "portalunderground",
+      "weenieName": "Underground City Portal",
+      "cell": "0x01E901AD",
+      "origin": [
+        120,
+        -130,
+        -11.995
+      ],
+      "rotationWxyz": [
+        -0.714424,
+        0,
+        0,
+        -0.699713
+      ]
+    },
+    {
+      "displayName": "The Marketplace of Dereth",
+      "poiNames": [
+        "Marketplace"
+      ],
+      "wcid": 23032,
+      "weenieClassName": "portalmarketplace",
+      "weenieName": "The Marketplace of Dereth",
+      "cell": "0x016C01BC",
+      "origin": [
+        49.206,
+        -31.935,
+        0.005
+      ],
+      "rotationWxyz": [
+        0.707107,
+        0,
+        0,
+        -0.707107
+      ]
+    },
+    {
+      "displayName": "Hotel Swank!",
+      "poiNames": [
+        "Hotel",
+        "Swank",
+        "HotelSwank",
+        "Hotel Swank"
+      ],
+      "wcid": 6827,
+      "weenieClassName": "portalhotelswank",
+      "weenieName": "Hotel Swank! Portal",
+      "cell": "0x018A024F",
+      "origin": [
+        120,
+        -79.9,
+        0
+      ],
+      "rotationWxyz": [
+        -0.707107,
+        0,
+        0,
+        -0.707107
+      ]
+    },
+    {
+      "displayName": "AC Storage",
+      "poiNames": [
+        "Storage"
+      ],
+      "wcid": 6844,
+      "weenieClassName": "portalacstorage",
+      "weenieName": "AC Storage Portal",
+      "cell": "0x01110108",
+      "origin": [
+        10,
+        -10,
+        0
+      ],
+      "rotationWxyz": [
+        -0.382683,
+        0,
+        0,
+        -0.92388
+      ]
+    },
+    {
+      "displayName": "Night Club",
+      "poiNames": [
+        "NightClub",
+        "Night Club"
+      ],
+      "wcid": 5590,
+      "weenieClassName": "portalnightclub",
+      "weenieName": "Night Club Portal",
+      "cell": "0x013A02AE",
+      "origin": [
+        140,
+        -40,
+        12
+      ],
+      "rotationWxyz": [
+        -0.707107,
+        0,
+        0,
+        -0.707107
+      ]
+    },
+    {
+      "displayName": "Ahurenga",
+      "poiNames": [
+        "Ahurenga"
+      ],
+      "wcid": 42827,
+      "weenieClassName": "ace42827-ahurengaportal",
+      "weenieName": "Ahurenga Portal",
+      "cell": "0x0FB90009",
+      "origin": [
+        43,
+        8.6,
+        0.005
+      ],
+      "rotationWxyz": [
+        -0.980098,
+        0,
+        0,
+        -0.198513
+      ]
+    },
+    {
+      "displayName": "Al-Arqas",
+      "poiNames": [
+        "Al-Arqas"
+      ],
+      "wcid": 42823,
+      "weenieClassName": "ace42823-portaltoalarqas",
+      "weenieName": "Portal to Al-Arqas",
+      "cell": "0x8F58003B",
+      "origin": [
+        183.851,
+        60.183,
+        9.326
+      ],
+      "rotationWxyz": [
+        0.707107,
+        0,
+        0,
+        -0.707107
+      ]
+    },
+    {
+      "displayName": "Al-Jalima",
+      "poiNames": [
+        "Al-Jalima"
+      ],
+      "wcid": 42830,
+      "weenieClassName": "ace42830-aljalimaportal",
+      "weenieName": "Al-Jalima Portal",
+      "cell": "0x8588002C",
+      "origin": [
+        120.359,
+        95.47,
+        90.049
+      ],
+      "rotationWxyz": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "displayName": "Arwic",
+      "poiNames": [
+        "Arwic"
+      ],
+      "wcid": 42819,
+      "weenieClassName": "ace42819-portaltoarwic",
+      "weenieName": "Portal to Arwic",
+      "cell": "0xC6A90009",
+      "origin": [
+        46.805,
+        4.219,
+        42.005
+      ],
+      "rotationWxyz": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "displayName": "Baishi",
+      "poiNames": [
+        "Baishi"
+      ],
+      "wcid": 42845,
+      "weenieClassName": "ace42845-baishiportal",
+      "weenieName": "Baishi Portal",
+      "cell": "0xCE410007",
+      "origin": [
+        12.6,
+        152.8,
+        55.1
+      ],
+      "rotationWxyz": [
+        -0.544639,
+        0,
+        0,
+        -0.838671
+      ]
+    },
+    {
+      "displayName": "The Beach Fort",
+      "poiNames": [
+        "Beach Fort"
+      ],
+      "wcid": 30395,
+      "weenieClassName": "portalbeachfort",
+      "weenieName": "Portal to the Beach Fort",
+      "cell": "0x42DE000C",
+      "origin": [
+        25,
+        84.5,
+        0.005
+      ],
+      "rotationWxyz": [
+        -0.681998,
+        0,
+        0,
+        -0.731354
+      ]
+    },
+    {
+      "displayName": "Bluespire",
+      "poiNames": [
+        "Bluespire"
+      ],
+      "wcid": 42825,
+      "weenieClassName": "ace42825-portaltobluespire",
+      "weenieName": "Portal to Bluespire",
+      "cell": "0x21B00017",
+      "origin": [
+        48.19,
+        165.89,
+        0.005
+      ],
+      "rotationWxyz": [
+        -0.083617,
+        0,
+        0,
+        -0.996498
+      ]
+    },
+    {
+      "displayName": "Cragstone",
+      "poiNames": [
+        "Cragstone"
+      ],
+      "wcid": 42818,
+      "weenieClassName": "ace42818-portaltocragstone",
+      "weenieName": "Portal to Cragstone",
+      "cell": "0xBB9F0040",
+      "origin": [
+        169.358,
+        168.251,
+        54.005
+      ],
+      "rotationWxyz": [
+        0.578683,
+        0,
+        0,
+        -0.815552
+      ]
+    },
+    {
+      "displayName": "Dryreach",
+      "poiNames": [
+        "Dryreach"
+      ],
+      "wcid": 42813,
+      "weenieClassName": "ace42813-portaltodryreach",
+      "weenieName": "Portal to Dryreach",
+      "cell": "0xDA75002B",
+      "origin": [
+        132,
+        60,
+        18.005
+      ],
+      "rotationWxyz": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "displayName": "Eastham",
+      "poiNames": [
+        "Eastham"
+      ],
+      "wcid": 42815,
+      "weenieClassName": "ace42815-easthamportal",
+      "weenieName": "Eastham Portal",
+      "cell": "0xCE940035",
+      "origin": [
+        151.053,
+        112.61,
+        17.417
+      ],
+      "rotationWxyz": [
+        -0.936577,
+        0,
+        0,
+        -0.350461
+      ]
+    },
+    {
+      "displayName": "Eastwatch",
+      "poiNames": [
+        "Eastwatch"
+      ],
+      "wcid": 42839,
+      "weenieClassName": "ace42839-portaltoeastwatch",
+      "weenieName": "Portal to Eastwatch",
+      "cell": "0x49F00013",
+      "origin": [
+        70,
+        70,
+        170.005
+      ],
+      "rotationWxyz": [
+        0.67559,
+        0,
+        0,
+        -0.737277
+      ]
+    },
+    {
+      "displayName": "Fiun Outpost",
+      "poiNames": [
+        "Fiun"
+      ],
+      "wcid": 42999,
+      "weenieClassName": "ace42999-fiunoutpost",
+      "weenieName": "Fiun Outpost",
+      "cell": "0x38F7001B",
+      "origin": [
+        91,
+        54,
+        -0.095
+      ],
+      "rotationWxyz": [
+        -0.48481,
+        0,
+        0,
+        -0.87462
+      ]
+    },
+    {
+      "displayName": "Fort Tethana",
+      "poiNames": [
+        "Fort Tethana"
+      ],
+      "wcid": 43001,
+      "weenieClassName": "ace43001-forttethanaportal",
+      "weenieName": "Fort Tethana Portal",
+      "cell": "0x2681001D",
+      "origin": [
+        77.7,
+        108.1,
+        240
+      ],
+      "rotationWxyz": [
+        -0.522498,
+        0,
+        0,
+        -0.85264
+      ]
+    },
+    {
+      "displayName": "Freehold",
+      "poiNames": [
+        "Freehold"
+      ],
+      "wcid": 43004,
+      "weenieClassName": "ace43004-freeholdportal",
+      "weenieName": "Freehold Portal",
+      "cell": "0xF224001A",
+      "origin": [
+        81.8,
+        33,
+        0
+      ],
+      "rotationWxyz": [
+        0.241075,
+        0,
+        0,
+        -0.970506
+      ]
+    },
+    {
+      "displayName": "Glenden Wood",
+      "poiNames": [
+        "Glenden Wood"
+      ],
+      "wcid": 42814,
+      "weenieClassName": "ace42814-glendenwoodportal",
+      "weenieName": "Glenden Wood Portal",
+      "cell": "0xA0A40025",
+      "origin": [
+        96.302,
+        119.847,
+        59.955
+      ],
+      "rotationWxyz": [
+        0.707107,
+        0,
+        0,
+        -0.707107
+      ]
+    },
+    {
+      "displayName": "Greenspire",
+      "poiNames": [
+        "Greenspire"
+      ],
+      "wcid": 42826,
+      "weenieClassName": "ace42826-portaltogreenspire",
+      "weenieName": "Portal to Greenspire",
+      "cell": "0x2BB5003C",
+      "origin": [
+        178.958,
+        86.57,
+        0.005
+      ],
+      "rotationWxyz": [
+        0.352348,
+        0,
+        0,
+        -0.935869
+      ]
+    },
+    {
+      "displayName": "Hebian-To",
+      "poiNames": [
+        "Hebian-to"
+      ],
+      "wcid": 42846,
+      "weenieClassName": "ace42846-portaltohebianto",
+      "weenieName": "Portal to Hebian-To",
+      "cell": "0xE64E002F",
+      "origin": [
+        138.304,
+        161.905,
+        20.04
+      ],
+      "rotationWxyz": [
+        0.92388,
+        0,
+        0,
+        -0.382683
+      ]
+    },
+    {
+      "displayName": "Holtburg",
+      "poiNames": [
+        "Holtburg"
+      ],
+      "wcid": 42820,
+      "weenieClassName": "ace42820-portaltoholtburg",
+      "weenieName": "Portal to Holtburg",
+      "cell": "0xA9B40019",
+      "origin": [
+        84,
+        7.1,
+        94
+      ],
+      "rotationWxyz": [
+        0.996917,
+        0,
+        0,
+        -0.078459
+      ]
+    },
+    {
+      "displayName": "Kara",
+      "poiNames": [
+        "Kara"
+      ],
+      "wcid": 42848,
+      "weenieClassName": "ace42848-portaltokara",
+      "weenieName": "Portal to Kara",
+      "cell": "0xBA170039",
+      "origin": [
+        181.2,
+        3.2,
+        167.7
+      ],
+      "rotationWxyz": [
+        -0.848048,
+        0,
+        0,
+        -0.529919
+      ]
+    },
+    {
+      "displayName": "Khayyaban",
+      "poiNames": [
+        "Khayyaban"
+      ],
+      "wcid": 42822,
+      "weenieClassName": "ace42822-portaltokhayyaban",
+      "weenieName": "Portal to Khayyaban",
+      "cell": "0x9F440012",
+      "origin": [
+        90,
+        24.553,
+        31.885
+      ],
+      "rotationWxyz": [
+        -0.782608,
+        0,
+        0,
+        -0.622514
+      ]
+    },
+    {
+      "displayName": "Kryst",
+      "poiNames": [
+        "Kryst"
+      ],
+      "wcid": 42850,
+      "weenieClassName": "ace42850-portaltokryst",
+      "weenieName": "Portal to Kryst",
+      "cell": "0xE822002A",
+      "origin": [
+        132.7,
+        37.9,
+        20.1
+      ],
+      "rotationWxyz": [
+        -0.866025,
+        0,
+        0,
+        -0.5
+      ]
+    },
+    {
+      "displayName": "Lin",
+      "poiNames": [
+        "Lin"
+      ],
+      "wcid": 42844,
+      "weenieClassName": "ace42844-linportal",
+      "weenieName": "Lin Portal",
+      "cell": "0xDC3C0011",
+      "origin": [
+        59.72,
+        10.774,
+        18.958
+      ],
+      "rotationWxyz": [
+        -0.358368,
+        0,
+        0,
+        -0.933581
+      ]
+    },
+    {
+      "displayName": "Linvak Tukal",
+      "poiNames": [
+        "Linvak Tukal"
+      ],
+      "wcid": 42838,
+      "weenieClassName": "ace42838-portaltolinvaktukal",
+      "weenieName": "Portal to Linvak Tukal",
+      "cell": "0xA21E001A",
+      "origin": [
+        83,
+        38,
+        560.4
+      ],
+      "rotationWxyz": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "displayName": "Lytelthorpe",
+      "poiNames": [
+        "Lytelthorpe"
+      ],
+      "wcid": 42816,
+      "weenieClassName": "ace42816-lytelthorpeportal",
+      "weenieName": "Lytelthorpe Portal",
+      "cell": "0xC0800007",
+      "origin": [
+        11.723,
+        155.56,
+        33.028
+      ],
+      "rotationWxyz": [
+        -0.402363,
+        0,
+        0,
+        -0.91548
+      ]
+    },
+    {
+      "displayName": "Mayoi",
+      "poiNames": [
+        "Mayoi"
+      ],
+      "wcid": 42842,
+      "weenieClassName": "ace42842-mayoiportal",
+      "weenieName": "Mayoi Portal",
+      "cell": "0xE6320021",
+      "origin": [
+        107.417,
+        10.763,
+        29.908
+      ],
+      "rotationWxyz": [
+        -0.642788,
+        0,
+        0,
+        -0.766044
+      ]
+    },
+    {
+      "displayName": "Nanto",
+      "poiNames": [
+        "Nanto"
+      ],
+      "wcid": 42843,
+      "weenieClassName": "ace42843-portaltonanto",
+      "weenieName": "Portal to Nanto",
+      "cell": "0xE63E0022",
+      "origin": [
+        96.96,
+        37.722,
+        74.542
+      ],
+      "rotationWxyz": [
+        0,
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "displayName": "Neydisa Castle",
+      "poiNames": [
+        "Neydisa"
+      ],
+      "wcid": 42828,
+      "weenieClassName": "ace42828-portaltoneydisacastle",
+      "weenieName": "Portal to Neydisa Castle",
+      "cell": "0x95D60033",
+      "origin": [
+        146.9,
+        71.3,
+        99.8
+      ],
+      "rotationWxyz": [
+        -0.731354,
+        0,
+        0,
+        -0.681998
+      ]
+    },
+    {
+      "displayName": "Danby's Outpost",
+      "poiNames": [
+        "Outpost"
+      ],
+      "wcid": 43003,
+      "weenieClassName": "ace43003-danbysoutpost",
+      "weenieName": "Danby's Outpost",
+      "cell": "0x5A9C0004",
+      "origin": [
+        23.5,
+        77.1,
+        6
+      ],
+      "rotationWxyz": [
+        0,
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "displayName": "Plateau",
+      "poiNames": [
+        "Plateau"
+      ],
+      "wcid": 42812,
+      "weenieClassName": "ace42812-plateauportal",
+      "weenieName": "Plateau Portal",
+      "cell": "0x49B70021",
+      "origin": [
+        100.1,
+        20.8,
+        238.6
+      ],
+      "rotationWxyz": [
+        -0.587785,
+        0,
+        0,
+        -0.809017
+      ]
+    },
+    {
+      "displayName": "Qalaba'r",
+      "poiNames": [
+        "Qalabar"
+      ],
+      "wcid": 42833,
+      "weenieClassName": "ace42833-qalabarportal",
+      "weenieName": "Qalaba'r Portal",
+      "cell": "0x9722003A",
+      "origin": [
+        168.354,
+        24.618,
+        102.005
+      ],
+      "rotationWxyz": [
+        -0.92279,
+        0,
+        0,
+        -0.385302
+      ]
+    },
+    {
+      "displayName": "Redspire",
+      "poiNames": [
+        "Redspire"
+      ],
+      "wcid": 42836,
+      "weenieClassName": "ace42836-portaltoredspire",
+      "weenieName": "Portal to Redspire",
+      "cell": "0x17B2002A",
+      "origin": [
+        132.623,
+        25.809,
+        44.005
+      ],
+      "rotationWxyz": [
+        0.998483,
+        0,
+        0,
+        -0.055063
+      ]
+    },
+    {
+      "displayName": "Oolutanga's Refuge",
+      "poiNames": [
+        "Refuge"
+      ],
+      "wcid": 43002,
+      "weenieClassName": "ace43002-oolutangasrefuge",
+      "weenieName": "Oolutanga's Refuge",
+      "cell": "0xF6820033",
+      "origin": [
+        145.7,
+        49.855,
+        58.005
+      ],
+      "rotationWxyz": [
+        -0.467544,
+        0,
+        0,
+        -0.88397
+      ]
+    },
+    {
+      "displayName": "Rithwic",
+      "poiNames": [
+        "Rithwic"
+      ],
+      "wcid": 42817,
+      "weenieClassName": "ace42817-portaltorithwic",
+      "weenieName": "Portal to Rithwic",
+      "cell": "0xC98C0028",
+      "origin": [
+        113.666,
+        190.259,
+        22.005
+      ],
+      "rotationWxyz": [
+        -0.707107,
+        0,
+        0,
+        -0.707107
+      ]
+    },
+    {
+      "displayName": "Samsur",
+      "poiNames": [
+        "Samsur"
+      ],
+      "wcid": 42834,
+      "weenieClassName": "ace42834-portaltosamsur",
+      "weenieName": "Portal to Samsur",
+      "cell": "0x977B000C",
+      "origin": [
+        25.811,
+        73.853,
+        0.005
+      ],
+      "rotationWxyz": [
+        0.92995,
+        0,
+        0,
+        -0.367686
+      ]
+    },
+    {
+      "displayName": "Sanamar",
+      "poiNames": [
+        "Sanamar"
+      ],
+      "wcid": 42835,
+      "weenieClassName": "ace42835-portaltosanamar",
+      "weenieName": "Portal to Sanamar",
+      "cell": "0x33D90015",
+      "origin": [
+        59.1,
+        100.3,
+        52.005
+      ],
+      "rotationWxyz": [
+        0,
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "displayName": "Sawato",
+      "poiNames": [
+        "Sawato"
+      ],
+      "wcid": 42849,
+      "weenieClassName": "ace42849-sawatoportal",
+      "weenieName": "Sawato Portal",
+      "cell": "0xC95B0001",
+      "origin": [
+        14.8,
+        0.3,
+        12
+      ],
+      "rotationWxyz": [
+        0.930418,
+        0,
+        0,
+        -0.366501
+      ]
+    },
+    {
+      "displayName": "Shoushi",
+      "poiNames": [
+        "Shoushi"
+      ],
+      "wcid": 42840,
+      "weenieClassName": "ace42840-portaltoshoushi",
+      "weenieName": "Portal to Shoushi",
+      "cell": "0xDA55001D",
+      "origin": [
+        84.8,
+        99,
+        20
+      ],
+      "rotationWxyz": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "displayName": "Silyun",
+      "poiNames": [
+        "Silyun"
+      ],
+      "wcid": 42998,
+      "weenieClassName": "ace42998-portaltosilyun",
+      "weenieName": "Portal to Silyun",
+      "cell": "0x26EC003D",
+      "origin": [
+        175.927,
+        110.334,
+        80.005
+      ],
+      "rotationWxyz": [
+        0.673993,
+        0,
+        0,
+        -0.738738
+      ]
+    },
+    {
+      "displayName": "Stonehold",
+      "poiNames": [
+        "Stonehold"
+      ],
+      "wcid": 42811,
+      "weenieClassName": "ace42811-stoneholdportal",
+      "weenieName": "Stonehold Portal",
+      "cell": "0x64D5000B",
+      "origin": [
+        30,
+        50,
+        78
+      ],
+      "rotationWxyz": [
+        0.843391,
+        0,
+        0,
+        -0.5373
+      ]
+    },
+    {
+      "displayName": "Base of the Timaru Plateau",
+      "poiNames": [
+        "Timaru"
+      ],
+      "wcid": 43000,
+      "weenieClassName": "ace43000-baseofthetimaruplateauportal",
+      "weenieName": "Base of the Timaru Plateau Portal",
+      "cell": "0x1DB60016",
+      "origin": [
+        71.3873,
+        134.291,
+        90.005
+      ],
+      "rotationWxyz": [
+        0.707107,
+        0,
+        0,
+        -0.707107
+      ]
+    },
+    {
+      "displayName": "Tou-Tou",
+      "poiNames": [
+        "Tou-Tou"
+      ],
+      "wcid": 42841,
+      "weenieClassName": "ace42841-portaltotoutou",
+      "weenieName": "Portal to Tou-Tou",
+      "cell": "0xF5590034",
+      "origin": [
+        152.59,
+        80.8,
+        20.005
+      ],
+      "rotationWxyz": [
+        0.92388,
+        0,
+        0,
+        -0.382683
+      ]
+    },
+    {
+      "displayName": "Town Network",
+      "poiNames": [
+        "Town Network",
+        "TownNetwork",
+        "TN"
+      ],
+      "wcid": 43065,
+      "weenieClassName": "ace43065-portaltotownnetwork",
+      "weenieName": "Portal to Town Network",
+      "cell": "0x00070143",
+      "origin": [
+        70,
+        -60,
+        0.005
+      ],
+      "rotationWxyz": [
+        0,
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "displayName": "Tufa",
+      "poiNames": [
+        "Tufa"
+      ],
+      "wcid": 42829,
+      "weenieClassName": "ace42829-tufaportal",
+      "weenieName": "Tufa Portal",
+      "cell": "0x876C0008",
+      "origin": [
+        2,
+        186.9,
+        18
+      ],
+      "rotationWxyz": [
+        -0.707107,
+        0,
+        0,
+        -0.707107
+      ]
+    },
+    {
+      "displayName": "Uziz",
+      "poiNames": [
+        "Uziz"
+      ],
+      "wcid": 42821,
+      "weenieClassName": "ace42821-uzizportal",
+      "weenieName": "Uziz Portal",
+      "cell": "0xA260003C",
+      "origin": [
+        182.919,
+        87.934,
+        20.005
+      ],
+      "rotationWxyz": [
+        -0.363463,
+        0,
+        0,
+        -0.931609
+      ]
+    },
+    {
+      "displayName": "Westwatch",
+      "poiNames": [
+        "Westwatch"
+      ],
+      "wcid": 42837,
+      "weenieClassName": "ace42837-portaltowestwatch",
+      "weenieName": "Portal to Westwatch",
+      "cell": "0x23DA002C",
+      "origin": [
+        140.9,
+        86,
+        2.005
+      ],
+      "rotationWxyz": [
+        -0.406737,
+        0,
+        0,
+        -0.913545
+      ]
+    },
+    {
+      "displayName": "Xarabydun",
+      "poiNames": [
+        "Xarabydun"
+      ],
+      "wcid": 42832,
+      "weenieClassName": "ace42832-portaltoxarabydun",
+      "weenieName": "Portal to Xarabydun",
+      "cell": "0x934B0021",
+      "origin": [
+        108.3,
+        6.1,
+        18.1
+      ],
+      "rotationWxyz": [
+        -0.964557,
+        0,
+        0,
+        -0.263873
+      ]
+    },
+    {
+      "displayName": "Yanshi",
+      "poiNames": [
+        "Yanshi"
+      ],
+      "wcid": 42847,
+      "weenieClassName": "ace42847-portaltoyanshi",
+      "weenieName": "Portal to Yanshi",
+      "cell": "0xB46F001E",
+      "origin": [
+        75.2,
+        124.1,
+        34.69
+      ],
+      "rotationWxyz": [
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "displayName": "Yaraq",
+      "poiNames": [
+        "Yaraq"
+      ],
+      "wcid": 42824,
+      "weenieClassName": "ace42824-portaltoyaraq",
+      "weenieName": "Portal to Yaraq",
+      "cell": "0x7D64000D",
+      "origin": [
+        31.9,
+        104.6,
+        11.9
+      ],
+      "rotationWxyz": [
+        0.577145,
+        0,
+        0,
+        -0.816642
+      ]
+    },
+    {
+      "displayName": "Zaikhal",
+      "poiNames": [
+        "Zaikhal"
+      ],
+      "wcid": 42831,
+      "weenieClassName": "ace42831-portaltozaikhal",
+      "weenieName": "Portal to Zaikhal",
+      "cell": "0x80900013",
+      "origin": [
+        64.863,
+        55.687,
+        124.005
+      ],
+      "rotationWxyz": [
+        -0.929883,
+        0,
+        0,
+        -0.367857
+      ]
+    }
+  ]
+}

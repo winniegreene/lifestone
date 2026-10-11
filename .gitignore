@@ -1,0 +1,112 @@
+# Nothing taken or rendered from the retail game is ever committed: no dats, installers, screenshots, recordings or
+# dumps. Players supply their own retail files; a checkout may hold them next to the source, plus a local server with
+# secrets. Patterns starting with '/' match at the repository root only; the others match in any folder.
+# Check a path with: git check-ignore -v --no-index <path>
+
+# --- The retail game and local setup kept in a checkout (repository root) ---
+# The rules for any folder below also catch some of these; they stay listed so narrowing those cannot expose them.
+/client/
+/install/
+/ac1install.exe
+/ac-updates.zip
+/D3D9.dll
+/dgVoodoo.conf
+
+# --- Passwords, in any folder ---
+# Not anchored on purpose, so a copy in any folder stays ignored too: the local server's passwords
+# (server/setup-server.ps1 writes these to server/runtime/). Keep personal files out of the
+# repository by listing them in .git/info/exclude, which is never shared.
+secrets.json
+mariadb-root.cnf
+mariadb-ace.cnf
+
+# --- Local runtime, caches and renders (repository root) ---
+# server/runtime/: downloaded ACE and MariaDB, the databases, logs and secrets.json (server/setup-server.ps1)
+# cache/: Godot user data (tools/godot.ps1 -IsolateUserData), smoke and hero-video work folders, DAT-derived caches
+# docs/screenshots/: renders of the retail data (terrain goldens, interior tour, golden viewpoints, cinematic stills,
+#   hero video)
+# tools/installer/out/: scratch dumps from the dat readers (acdat.scratch_out_dir)
+# vendor-eval/: third-party clones kept for reading
+/server/runtime/
+/cache/
+/docs/screenshots/
+/tools/installer/out/
+/vendor-eval/
+
+# --- Retail data, binaries, archives and logs, in any folder ---
+# Archives are opaque to review, which is how retail data would slip in (the retail updates and ACE's world database
+# both arrive as archives), so none are committed. Logs can hold account names and passwords (ACE's packet log dumps
+# the login request).
+*.dat
+*.exe
+*.dll
+*.pdb
+*.zip
+*.cab
+*.log
+
+# --- Safety net: images and video in any folder ---
+# Every Lifestone render shows retail data, so a stray screenshot, texture dump, GIF, Godot Movie Maker frame or
+# cinematic capture (.rgba, .mkv) is ignored wherever it lands. Original artwork made for the project is the
+# exception: .png, .jpg, .jpeg and .webp still images under docs/assets/ (documentation) and src/Lifestone.Game/assets/
+# (the game). Never put a render there. Video and the other formats here (.gif included) are not allow-listed, and the
+# rules above (dats, archives, ...) still apply inside both folders.
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.bmp
+*.tga
+*.dds
+*.exr
+*.avi
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.ogv
+*.rgba
+!/docs/assets/**/*.png
+!/docs/assets/**/*.jpg
+!/docs/assets/**/*.jpeg
+!/docs/assets/**/*.webp
+!/src/Lifestone.Game/assets/**/*.png
+!/src/Lifestone.Game/assets/**/*.jpg
+!/src/Lifestone.Game/assets/**/*.jpeg
+!/src/Lifestone.Game/assets/**/*.webp
+
+# --- .NET ---
+# MSBuild binary logs (dotnet build -bl) embed every project file and the environment the build read.
+bin/
+obj/
+.vs/
+*.user
+TestResults/
+*.trx
+*.binlog
+
+# --- Godot 4 ---
+# .godot/ is local only: the import cache and C# build output (.godot/mono/) are regenerated; export_credentials.cfg
+# holds per-user export secrets. *.import and *.uid files are source and stay tracked.
+.godot/
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+
+# --- Editors and OS ---
+# Editor folders are per-user (they hold machine paths such as the Godot binary), so none is shared.
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- Claude Code: agent worktrees, per-user settings and memory (a shared .claude/settings.json may be committed) ---
+/.claude/worktrees/
+**/.claude/settings.local.json
+CLAUDE.local.md

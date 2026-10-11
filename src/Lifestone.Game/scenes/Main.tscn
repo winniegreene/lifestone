@@ -1,0 +1,45 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/Main.cs" id="1_main"]
+[ext_resource type="Script" path="res://scripts/World/WorldRoot.cs" id="2_world"]
+[ext_resource type="Script" path="res://scripts/Player/FlyCamera.cs" id="3_camera"]
+[ext_resource type="Script" path="res://scripts/Player/PositionHud.cs" id="4_hud"]
+[ext_resource type="Script" path="res://scripts/Diagnostics/PerfOverlay.cs" id="5_perf"]
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="WorldRoot" type="Node3D" parent="."]
+script = ExtResource("2_world")
+
+[node name="Player" type="Node3D" parent="."]
+script = ExtResource("3_camera")
+
+[node name="Camera" type="Camera3D" parent="Player"]
+current = true
+fov = 60.0
+near = 0.1
+far = 6000.0
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+
+[node name="Hud" type="CanvasLayer" parent="."]
+
+[node name="PositionHud" type="Label" parent="Hud"]
+offset_left = 12.0
+offset_top = 10.0
+offset_right = 812.0
+offset_bottom = 110.0
+script = ExtResource("4_hud")
+
+[node name="PerfOverlay" type="Label" parent="Hud"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -812.0
+offset_top = 118.0
+offset_right = -12.0
+offset_bottom = 268.0
+grow_horizontal = 0
+horizontal_alignment = 2
+script = ExtResource("5_perf")

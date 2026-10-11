@@ -1,0 +1,54 @@
+<Project>
+  <!--
+    Shared settings for Lifestone's own projects (src/** and tests/**).
+
+    Third-party trees cloned or built inside this repo (vendor-eval/, server/) must NOT inherit
+    these settings: MSBuild picks up the nearest Directory.Build.props walking upwards, so a
+    project such as vendor-eval/ACE/Source/ACE.Server would otherwise import this file.
+    Everything below is therefore gated on the project living under src/ or tests/.
+  -->
+  <PropertyGroup>
+    <_LifestoneRelativeProjectDir>$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(MSBuildProjectDirectory)'))</_LifestoneRelativeProjectDir>
+    <IsLifestoneProject Condition="$(_LifestoneRelativeProjectDir.StartsWith('src')) Or $(_LifestoneRelativeProjectDir.StartsWith('tests'))">true</IsLifestoneProject>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsLifestoneProject)' == 'true'">
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <Authors>Lifestone contributors</Authors>
+    <Product>Lifestone</Product>
+    <IsPackable>false</IsPackable>
+    <!-- Warn (NU1901-NU1904) on known-vulnerable packages, including transitive ones. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+
+    <!--
+      Zero warnings, enforced (M1 wave 3, build-hygiene-unpinned): every compiler and analyzer warning fails the build.
+      AnalysisLevel is pinned to the 10.0 defaults so an SDK roll-forward (global.json: latestFeature) cannot switch on
+      new default analyzers and break the build without a code change; raising it is a deliberate edit. (Measured
+      2026-10-10: 'latest-recommended' would add 667 warnings, 599 of them CA1707 test names and 32 CA1861 in tests,
+      about 30 in product code.)
+      The NuGet audit codes stay warnings: an advisory published tomorrow, or an offline restore that cannot fetch the
+      vulnerability data (NU1900), must not stop the build; tools\smoke.ps1 reports any warning as a failure instead.
+    -->
+    <AnalysisLevel>10.0</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
+
+  <!--
+    Chorizite.DatReaderWriter 2.1.9 (used by Lifestone.Data) declares DotNet.Standard.Common 2.0.1 and ZLibDotNet 0.1.1
+    as dependencies for every TFM, but its net8.0 assembly references neither (checked: no assembly refs in
+    lib/net8.0/DatReaderWriter.dll; zlib is only used by its netstandard2.0/net48 builds). DotNet.Standard.Common is a
+    small third-party package with no source repository, so we keep both out of every build output. A direct reference
+    with ExcludeAssets="all" overrides the transitive one, but only in the project that declares it, hence it lives here.
+  -->
+  <ItemGroup Condition="'$(IsLifestoneProject)' == 'true'">
+    <PackageReference Include="DotNet.Standard.Common" Version="2.0.1" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="ZLibDotNet" Version="0.1.1" ExcludeAssets="all" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

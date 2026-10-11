@@ -1,0 +1,510 @@
+{
+  "_license": "AGPL-3.0-only. Values extracted from the ACE world database (ACEmulator/ACE-World-16PY-Patches, AGPL-3.0), release ACE-World-Database-v0.9.296.sql. See docs/third-party/effects.md.",
+  "_source": "ACE-World-Database-v0.9.296.sql: tables spell (projectile fields), weenie, weenie_properties_d_i_d (1 Setup, 2 MotionTable, 3 SoundTable, 22 PhysicsEffectTable), weenie_properties_float (26 MaximumVelocity, 27 RotationSpeed, 39 DefaultScale), weenie_properties_string (1 Name).",
+  "_why": "The client dats do not say which weenie a war spell launches or what a creature looks like; ACE takes both from its world database. This is the minimal subset the M1 spell viewer needs.",
+  "projectiles": [
+    {
+      "spellId": 27,
+      "spellName": "Flame Bolt I",
+      "wcid": 1499,
+      "weenieClassName": "flamebolt",
+      "weenieName": "Flame Bolt",
+      "setupId": "0x0200040D",
+      "soundTableId": "0x20000037",
+      "physicsEffectTableId": "0x34000005",
+      "defaultScale": null,
+      "maximumVelocity": 15,
+      "rotationSpeed": null,
+      "numProjectiles": 1,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 0,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        1,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 85,
+      "spellName": "Flame Bolt VI",
+      "wcid": 1499,
+      "weenieClassName": "flamebolt",
+      "weenieName": "Flame Bolt",
+      "setupId": "0x0200040D",
+      "soundTableId": "0x20000037",
+      "physicsEffectTableId": "0x34000005",
+      "defaultScale": null,
+      "maximumVelocity": 15,
+      "rotationSpeed": null,
+      "numProjectiles": 1,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 0,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        1,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 28,
+      "spellName": "Frost Bolt I",
+      "wcid": 1503,
+      "weenieClassName": "frostbolt",
+      "weenieName": "Frost Bolt",
+      "setupId": "0x020003F4",
+      "soundTableId": "0x20000036",
+      "physicsEffectTableId": "0x34000006",
+      "defaultScale": 0.4,
+      "maximumVelocity": 15,
+      "rotationSpeed": null,
+      "numProjectiles": 1,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 0,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        1,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 75,
+      "spellName": "Lightning Bolt I",
+      "wcid": 1635,
+      "weenieClassName": "lightningbolt",
+      "weenieName": "Lightning Bolt",
+      "setupId": "0x020003F0",
+      "soundTableId": "0x20000038",
+      "physicsEffectTableId": "0x34000007",
+      "defaultScale": null,
+      "maximumVelocity": 15,
+      "rotationSpeed": null,
+      "numProjectiles": 1,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 0,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        1,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 58,
+      "spellName": "Acid Stream I",
+      "wcid": 1633,
+      "weenieClassName": "acidstream",
+      "weenieName": "Acid Stream",
+      "setupId": "0x020003F6",
+      "soundTableId": "0x20000039",
+      "physicsEffectTableId": "0x3400000B",
+      "defaultScale": 0.5,
+      "maximumVelocity": 15,
+      "rotationSpeed": null,
+      "numProjectiles": 1,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 0,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        1,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 64,
+      "spellName": "Shock Wave I",
+      "wcid": 1634,
+      "weenieClassName": "shockwave",
+      "weenieName": "Shockwave",
+      "setupId": "0x020003FA",
+      "soundTableId": "0x2000003B",
+      "physicsEffectTableId": "0x34000009",
+      "defaultScale": null,
+      "maximumVelocity": 15,
+      "rotationSpeed": null,
+      "numProjectiles": 1,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 0,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        1,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 86,
+      "spellName": "Force Bolt I",
+      "wcid": 1667,
+      "weenieClassName": "forcebolt",
+      "weenieName": "Force Bolt",
+      "setupId": "0x020003F3",
+      "soundTableId": "0x2000003B",
+      "physicsEffectTableId": "0x34000009",
+      "defaultScale": 0.4,
+      "maximumVelocity": 15,
+      "rotationSpeed": null,
+      "numProjectiles": 1,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 0,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        1,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 92,
+      "spellName": "Whirling Blade I",
+      "wcid": 1636,
+      "weenieClassName": "whirlingblade",
+      "weenieName": "Whirling Blade",
+      "setupId": "0x020003FC",
+      "soundTableId": "0x2000003C",
+      "physicsEffectTableId": "0x34000008",
+      "defaultScale": 0.5,
+      "maximumVelocity": 15,
+      "rotationSpeed": 2,
+      "numProjectiles": 1,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 0,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        1,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 1796,
+      "spellName": "Flame Streak I",
+      "wcid": 7263,
+      "weenieClassName": "flamestreak",
+      "weenieName": "Flame Bolt",
+      "setupId": "0x0200040D",
+      "soundTableId": "0x20000037",
+      "physicsEffectTableId": "0x34000005",
+      "defaultScale": null,
+      "maximumVelocity": 45,
+      "rotationSpeed": null,
+      "numProjectiles": 1,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 0,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        1,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 2739,
+      "spellName": "Flame Arc I",
+      "wcid": 20974,
+      "weenieClassName": "flameboltgravity",
+      "weenieName": "Flame Bolt",
+      "setupId": "0x0200040D",
+      "soundTableId": "0x20000037",
+      "physicsEffectTableId": "0x34000005",
+      "defaultScale": null,
+      "maximumVelocity": 40,
+      "rotationSpeed": null,
+      "numProjectiles": 1,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 0,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": true,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        1,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 1785,
+      "spellName": "Cassius' Ring of Fire",
+      "wcid": 7270,
+      "weenieClassName": "flamering",
+      "weenieName": "Flame Bolt",
+      "setupId": "0x02000881",
+      "soundTableId": "0x20000037",
+      "physicsEffectTableId": null,
+      "defaultScale": null,
+      "maximumVelocity": 2,
+      "rotationSpeed": null,
+      "numProjectiles": 9,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 360,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        9,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 3806,
+      "spellName": "Flame Ring",
+      "wcid": 7270,
+      "weenieClassName": "flamering",
+      "weenieName": "Flame Bolt",
+      "setupId": "0x02000881",
+      "soundTableId": "0x20000037",
+      "physicsEffectTableId": null,
+      "defaultScale": null,
+      "maximumVelocity": 2,
+      "rotationSpeed": null,
+      "numProjectiles": 9,
+      "numProjectilesVariance": 0,
+      "spreadAngle": 360,
+      "verticalAngle": 0,
+      "defaultLaunchAngle": 0,
+      "nonTracking": false,
+      "createOffset": [
+        0,
+        0,
+        0
+      ],
+      "padding": [
+        1,
+        1,
+        1
+      ],
+      "dims": [
+        9,
+        1,
+        1
+      ],
+      "peturbation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "spellId": 5349,
+      "spellName": "Nether Bolt I",
+      "wcid": 43230,
+      "weenieClassName": "ace43230-netherbolt",
+      "weenieName": "Nether Bolt",
+      "setupId": "0x02001A28",
+      "soundTableId": "0x200000D6",
+      "physicsEffectTableId": "0x340000CC",
+      "defaultScale": null,
+      "maximumVelocity": 15,
+      "rotationSpeed": null,
+      "numProjectiles": 1,
+      "numProjectilesVariance": null,
+      "spreadAngle": 0,
+      "verticalAngle": null,
+      "defaultLaunchAngle": null,
+      "nonTracking": null,
+      "createOffset": null,
+      "padding": null,
+      "dims": null,
+      "peturbation": null
+    }
+  ],
+  "creatures": [
+    {
+      "wcid": 7,
+      "weenieClassName": "drudgeskulker",
+      "name": "Drudge Skulker",
+      "setupId": "0x020007DD",
+      "motionTableId": "0x09000008",
+      "soundTableId": "0x20000007",
+      "physicsEffectTableId": "0x3400001A",
+      "defaultScale": 0.95
+    }
+  ]
+}

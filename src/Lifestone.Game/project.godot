@@ -1,0 +1,100 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Lifestone"
+config/description="Single-player Asheron's Call client (Godot 4.7 .NET) for a bundled localhost ACE server."
+run/main_scene="res://scenes/Main.tscn"
+config/features=PackedStringArray("4.7", "C#", "Forward Plus")
+
+[autoload]
+
+GameServices="*res://scripts/Core/GameServices.cs"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[dotnet]
+
+project/assembly_name="Lifestone.Game"
+project/solution_directory="../.."
+
+[rendering]
+
+anti_aliasing/quality/msaa_3d=2
+
+[shader_globals]
+
+ac_sun_dir={
+"type": "vec3",
+"value": Vector3(0, 1, 0)
+}
+ac_sun_color={
+"type": "vec3",
+"value": Vector3(1, 1, 1)
+}
+ac_ambient={
+"type": "vec3",
+"value": Vector3(0.4, 0.4, 0.4)
+}
+ac_land_ambient={
+"type": "vec3",
+"value": Vector3(0.4, 0.4, 0.4)
+}
+ac_fog_color={
+"type": "vec3",
+"value": Vector3(0.5, 0.5, 0.5)
+}
+ac_fog_start={
+"type": "float",
+"value": 150.0
+}
+ac_fog_end={
+"type": "float",
+"value": 2400.0
+}
+ac_fog_enabled={
+"type": "bool",
+"value": true
+}
+ac_max_mip_level={
+"type": "float",
+"value": 3.0
+}
+; --- render-fidelity fix (wave 3, docs/render-contract.md §2.3): shaders output raw byte-space values; ByteSpaceBlending decodes the frame once in the tonemap pass ---
+ac_byte_space={
+"type": "bool",
+"value": false
+}
+; --- interiors track (docs/interiors.md §3.4, §4.2): indoor world ambient, the planes of the doorways looked into, the cell-state table ---
+ac_indoor_ambient={
+"type": "vec3",
+"value": Vector3(0.2, 0.2, 0.2)
+}
+ac_indoor_ambient_on={
+"type": "bool",
+"value": false
+}
+ac_doorway_planes={
+"type": "sampler2D",
+"value": ""
+}
+ac_cell_states={
+"type": "sampler2D",
+"value": ""
+}
+; --- objects track (M1 wave 3, docs/objects.md §2.6): LOD states of the statics inside EnvCells ---
+ac_object_lod={
+"type": "sampler2D",
+"value": ""
+}

@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lifestone.Client/Lifestone.Client.csproj" />
+    <Project Path="src/Lifestone.Data/Lifestone.Data.csproj" />
+    <Project Path="src/Lifestone.Game/Lifestone.Game.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lifestone.Client.Tests/Lifestone.Client.Tests.csproj" />
+    <Project Path="tests/Lifestone.Data.Tests/Lifestone.Data.Tests.csproj" />
+  </Folder>
+</Solution>

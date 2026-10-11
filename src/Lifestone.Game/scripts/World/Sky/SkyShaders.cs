@@ -1,0 +1,197 @@
+using System.Text;
+using Godot;
+using Lifestone.Client.Rendering;
+using Lifestone.Client.Sky;
+using Lifestone.Data.Geometry;
+using Lifestone.Game.Render;
+
+namespace Lifestone.Game.World.Sky;
+
+/// <summary>
+/// Shaders for sky object surfaces: the render contract's surface lighting (docs/render-contract.md §2.1) in retail's
+/// sky mode (<see cref="SkySurfaceVariant"/>), one <see cref="Shader"/> per variant (main thread), plus the background
+/// shader that shows the sky view.
+/// </summary>
+/// <remarks>
+/// <para><b>Retail sky mode</b> (<c>GameSky::Draw</c>, acclient.c:308475): drawn before the landscape with depth test
+/// ALWAYS and no depth writes, fog off, nothing deferred, lighting on, <c>zfar</c> x 4 (16,000 m). Lifestone draws the
+/// before pass in its own view (<see cref="SkyView"/>): a camera with retail's sky far plane, every surface with the
+/// depth test off, in slot / part / subset order (<c>render_priority</c>), and the result becomes the main view's
+/// background, where the world covers it exactly as "sky first, world over it" does.</para>
+/// <para><b>Byte-space blending.</b> Retail blends bytes. The before-pass shaders output raw colour values (no sRGB
+/// conversion) into the sky view's float buffer, so its blends are byte-space arithmetic, and the background puts those
+/// values on screen unchanged (<see cref="BackgroundCode"/>). This matters for the sky: the night stars layer is opaque
+/// black faded in with translucency (alpha 0.7 at dusk), which linear-space blending would leave about twice as bright
+/// as retail. <c>--sky-checks</c> pins the whole chain on the running engine. The after (weather) pass draws in the main
+/// view over the landscape with the depth test off and blends in Godot's linear space, like every other translucent
+/// surface (render-contract.md §2.3).</para>
+/// <para><b>Lighting</b> (<c>D3DPolyRender::RenderMeshSubset</c>, <c>SetCurrentMaterial</c>; see
+/// <see cref="SkyPartMaterial"/>): <c>clamp(emissive + ac_ambient + ac_sun_color x diffuse x max(0, N.L))</c>, Gouraud;
+/// the alpha is the texture's times the vertex or material alpha. Texture scroll adds the GfxObj's UV offset
+/// (<c>MeshBuffer::m_vUVDelta</c> through the D3D texture transform in <c>RenderMeshSubset</c>).</para>
+/// </remarks>
+public sealed class SkyShaders
+{
+    /// <summary>Background (sky) shader parameter holding the sky view's texture.</summary>
+    public const string ViewTextureParameter = "sky_view";
+
+    private readonly Dictionary<SkySurfaceVariant, Shader> _shaders = new();
+    private readonly Dictionary<SkySurfaceVariant, ShaderMaterial> _warm = new();
+
+    public int Count => _shaders.Count;
+
+    /// <summary>One material per warmed-up variant (the renderer draws each once to build its pipelines).</summary>
+    public IReadOnlyDictionary<SkySurfaceVariant, ShaderMaterial> WarmMaterials => _warm;
+
+    /// <summary>
+    /// Main thread, at start-up: compiles the given variants now (Godot compiles a spatial shader when the first material
+    /// using it is set up, 7-11 ms each; docs/game-core.md §3), so a sky object appearing later never stalls a frame.
+    /// One material per variant is kept so the compiled shader stays referenced.
+    /// </summary>
+    public int WarmUp(IEnumerable<SkySurfaceVariant> variants)
+    {
+        ArgumentNullException.ThrowIfNull(variants);
+        var compiled = 0;
+        foreach (var variant in variants)
+        {
+            if (_warm.ContainsKey(variant))
+            {
+                continue;
+            }
+
+            var material = new ShaderMaterial { Shader = Get(variant), ResourceName = $"lifestone_warmup_{variant.Name}" };
+            material.SetShaderParameter("vertex_alpha", 1f);
+            material.SetShaderParameter("emissive", 0f);
+            _warm.Add(variant, material);
+            compiled++;
+        }
+
+        return compiled;
+    }
+
+    /// <summary>The shader of a variant, generated on first use. Main thread.</summary>
+    public Shader Get(SkySurfaceVariant variant)
+    {
+        if (!_shaders.TryGetValue(variant, out var shader))
+        {
+            shader = new Shader { Code = GenerateCode(variant), ResourceName = $"lifestone_{variant.Name}" };
+            _shaders.Add(variant, shader);
+        }
+
+        return shader;
+    }
+
+    /// <summary>The Godot shading-language source of a variant (pure).</summary>
+    public static string GenerateCode(SkySurfaceVariant v)
+    {
+        var modes = new List<string>
+        {
+            "unshaded", "fog_disabled", "specular_disabled", "shadows_disabled", "cull_back", "depth_draw_never", "depth_test_disabled",
+        };
+        modes.Add(v.Blend switch
+        {
+            SurfaceBlend.Opaque or SurfaceBlend.Mix => "blend_mix",
+            SurfaceBlend.Premultiplied => "blend_premul_alpha",
+            _ => "blend_add",
+        });
+
+        var raw = v.Pass == SkyPass.Before;
+        var sb = new StringBuilder();
+        sb.AppendLine("// Generated by Lifestone.Game.World.Sky.SkyShaders. Contract: docs/render-contract.md, docs/sky.md.");
+        sb.AppendLine($"// Variant: {v.Name}");
+        sb.AppendLine(raw
+            ? "// Before pass: drawn in the sky view, output in raw byte space (blends are byte-space arithmetic)."
+            : "// After pass: drawn in the main view over the landscape, output converted to linear like every surface.");
+        sb.AppendLine("shader_type spatial;");
+        sb.AppendLine($"render_mode {string.Join(", ", modes)};");
+        sb.AppendLine();
+        sb.AppendLine(RenderGlobals.ShaderDeclarations);
+        if (v.Textured)
+        {
+            var repeat = v.Addressing == TextureAddressMode.Wrap ? "repeat_enable" : "repeat_disable";
+            sb.AppendLine($"uniform sampler2D {MaterialFactory.TextureParameter} : filter_linear_mipmap, {repeat};");
+        }
+        else
+        {
+            sb.AppendLine("uniform vec4 solid_color = vec4(1.0);   // retail's 1x1 solid texture");
+        }
+
+        sb.AppendLine("uniform float vertex_alpha = 1.0;      // (1 - surface translucency), or the part material's 1 - t");
+        sb.AppendLine("uniform float emissive = 0.0;          // surface luminosity if > 0, else the part material's");
+        sb.AppendLine("uniform float diffuse = 1.0;           // part material diffuse (SetDiffusion), 1 without a material");
+        sb.AppendLine("uniform vec2 uv_offset = vec2(0.0);    // texture scroll (CPhysics::UpdateTexVelocity)");
+        sb.AppendLine("uniform float alpha_ref = 200.0;       // D3DRS_ALPHAREF, GREATEREQUAL");
+        sb.AppendLine();
+        sb.AppendLine("varying vec3 v_light;");
+        sb.AppendLine();
+        if (!raw)
+        {
+            sb.AppendLine(RenderGlobals.OutputFunctionCode); // render-fidelity fix: byte space in the main view too
+        }
+
+        sb.AppendLine("void vertex() {");
+        sb.AppendLine("\tfloat n_dot_l = 0.0;");
+        sb.AppendLine("\tif (CUSTOM0.x < 0.5) {");
+        sb.AppendLine("\t\tn_dot_l = max(dot(normalize(MODEL_NORMAL_MATRIX * NORMAL), ac_sun_dir), 0.0);");
+        sb.AppendLine("\t}");
+        sb.AppendLine("\tv_light = clamp(vec3(emissive) + ac_ambient + ac_sun_color * diffuse * n_dot_l, 0.0, 1.0);");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        sb.AppendLine("void fragment() {");
+        if (v.Textured)
+        {
+            sb.AppendLine("\tvec2 uv = UV + uv_offset;");
+            sb.AppendLine($"\tfloat lod = clamp(textureQueryLod({MaterialFactory.TextureParameter}, uv).y, 0.0, ac_max_mip_level);");
+            sb.AppendLine($"\tvec4 texel = textureLod({MaterialFactory.TextureParameter}, uv, lod);");
+        }
+        else
+        {
+            sb.AppendLine("\tvec4 texel = solid_color;");
+        }
+
+        sb.AppendLine("\tfloat a = texel.a * vertex_alpha;      // TEXOP_MODULATE");
+        if (v.AlphaTest)
+        {
+            sb.AppendLine("\tif (floor(a * 255.0 + 0.5) < alpha_ref) {");
+            sb.AppendLine("\t\tdiscard;");
+            sb.AppendLine("\t}");
+        }
+
+        sb.AppendLine(raw
+            ? "\tALBEDO = texel.rgb * v_light;          // raw bytes / 255; the background shader converts once"
+            : "\tALBEDO = ac_output(texel.rgb * v_light); // the main view's blend space (render-contract §2.3)");
+        sb.AppendLine(v.Blend switch
+        {
+            SurfaceBlend.Opaque or SurfaceBlend.AddOne => "\tALPHA = 1.0;",
+            SurfaceBlend.AddInverseSourceAlpha => "\tALPHA = 1.0 - a;",
+            _ => "\tALPHA = a;",
+        });
+        sb.AppendLine("}");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The main view's background: the sky view's image. The sky view is an HDR-2D viewport, so its texture holds the
+    /// raw byte-space values as floats; they are converted once (<c>ac_srgb_to_linear</c>) so the main view's Linear
+    /// tonemapper puts exactly those bytes on screen (pinned by <c>--sky-checks</c> on Godot 4.7.2). Radiance passes get
+    /// black (ambient and reflections are disabled anyway).
+    /// </summary>
+    public static string BackgroundCode() =>
+        "// Generated by Lifestone.Game.World.Sky.SkyShaders: the sky view (raw byte-space values) as the background.\n" +
+        "// Linear blend space: converted once here, and the Linear tonemapper re-encodes, so the screen shows the raw bytes.\n" +
+        "// Byte space (render-fidelity fix): handed over raw like every world surface; the frame is converted once at the end.\n" +
+        "shader_type sky;\n\n" +
+        "global uniform bool ac_byte_space;\n" +
+        $"uniform sampler2D {ViewTextureParameter} : filter_nearest, repeat_disable;\n\n" +
+        "vec3 ac_srgb_to_linear(vec3 c) {\n" +
+        "\treturn mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));\n" +
+        "}\n\n" +
+        "void sky() {\n" +
+        "\tif (AT_CUBEMAP_PASS) {\n" +
+        "\t\tCOLOR = vec3(0.0);\n" +
+        "\t} else {\n" +
+        $"\t\tvec3 raw = clamp(textureLod({ViewTextureParameter}, SCREEN_UV, 0.0).rgb, 0.0, 1.0);\n" +
+        "\t\tCOLOR = ac_byte_space ? raw : ac_srgb_to_linear(raw);\n" +
+        "\t}\n" +
+        "}\n";
+}

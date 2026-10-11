@@ -1,0 +1,33 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+
+  <!--
+    Godot 4.7.2 (.NET) presentation layer. Game rules and data decoding live in plain net10.0 libraries
+    (Lifestone.Data, ...); this project only turns them into Godot nodes.
+
+    Notes:
+    - Godot.NET.Sdk moves bin/ and obj/ under .godot/mono/temp/ (gitignored); the editor and the runtime load
+      .godot/mono/temp/bin/<Configuration>/Lifestone.Game.dll.
+    - Do not add <FrameworkReference> items: assemblies they bring in are not resolved in editor/debug runs on 4.7
+      (godotengine/godot#120843). Plain PackageReference/ProjectReference items are fine.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>Lifestone.Game</RootNamespace>
+    <AssemblyName>Lifestone.Game</AssemblyName>
+    <!--
+      Wave-3 performance pass: server GC (dynamic heap count) with background GC, for exported builds, which read this
+      project's runtimeconfig. The editor binary ignores it (it hosts .NET through its own GodotPlugins runtimeconfig);
+      tools\godot.ps1 selects server GC for editor and -Run launches with DOTNET_gcServer=1 instead. docs/game-core.md §7.
+      TODO(perf): re-verify in an exported build once export templates exist (a later milestone).
+    -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lifestone.Data\Lifestone.Data.csproj" />
+    <ProjectReference Include="..\Lifestone.Client\Lifestone.Client.csproj" />
+  </ItemGroup>
+
+</Project>

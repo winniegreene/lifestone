@@ -1,0 +1,192 @@
+{
+  "title": "Lifestone hero video",
+  "note": "Shot list for tools/hero-video.ps1 (docs/hero-video.md). World shots: pos/look are [east, north, up] metres from the start location's spot ('ground': up is above the ground there). Spell shots orbit the spell viewer's stage. Times are Dereth day fractions (0.25 dawn, 0.5 Midsong, 0.9 Gloaming).",
+  "fps": 60,
+  "width": 1920,
+  "height": 1080,
+  "render": { "msaa": 4, "screenSpaceAA": "off", "scale3d": 1.0 },
+  "preroll": 2.0,
+  "clearance": 2.0,
+  "args": ["--object-radius=3", "--budget-ms=50"],
+  "crossfade": 0.7,
+  "font": "C:/Windows/Fonts/bahnschrift.ttf",
+  "titleCard": {
+    "shot": "a-title-dawn",
+    "title": "LIFESTONE",
+    "subtitle": "Asheron's Call, rebuilt — single player, from your own client files",
+    "in": 1.0,
+    "out": 6.4
+  },
+  "endCard": {
+    "duration": 5.0,
+    "title": "Godot 4.7 · .NET 10 · ACEmulator inside · AGPL-3.0",
+    "subtitle": "Next: logging in to Dereth"
+  },
+  "poster": { "shot": "e-arwic", "t": 5.0, "title": true },
+  "shots": [
+    {
+      "id": "a-title-dawn",
+      "note": "Sunrise over the lake, tilting down from the sky onto Holtburg's lakeside houses; the title sits in the sky.",
+      "start": "holtburg", "duration": 7.5, "time": 0.245, "timeEnd": 0.255, "ease": "sine",
+      "keys": [
+        { "pos": [-200, 70, 50], "yaw": 78, "pitch": 16 },
+        { "pos": [-190, 72, 52], "yaw": 72, "pitch": -7 }
+      ]
+    },
+    {
+      "id": "b-holtburg-lake",
+      "caption": "Holtburg",
+      "note": "Morning: in over the lake and down onto the lakeside houses, settling about 20 m above their chimneys (the smoke draws within about 60 m, objects.md 1.7, so the camera slows as it arrives).",
+      "start": "holtburg", "duration": 7.0, "time": 0.32, "fov": 52, "ease": "out",
+      "keys": [
+        { "pos": [240, 340, 45], "look": [10, 122, -22] },
+        { "pos": [120, 230, 12], "look": [10, 122, -22] },
+        { "pos": [30, 152, -13], "look": [10, 122, -22] }
+      ]
+    },
+    {
+      "id": "c-holtburg-street",
+      "note": "Noon: a low dolly along the cobbled road past a burning lamp post (22, 10.1), tilting up to the smoking chimney (39.8, 4.7).",
+      "start": "holtburg", "duration": 6.0, "time": 0.5, "ease": "ramp:0.25",
+      "keys": [
+        { "pos": [14, 13, 2.0], "ground": true, "look": [26, 8, 2.2], "lookGround": true },
+        { "pos": [22, 14.5, 2.3], "ground": true, "look": [38, 6, 6], "lookGround": true },
+        { "pos": [29, 13, 3.0], "ground": true, "look": [43, 5, 11], "lookGround": true }
+      ]
+    },
+    {
+      "id": "d-holtburg-dusk",
+      "note": "Time-lapse looking west over the lakeside houses: the sun sets behind the hills, then the camera tilts up into the stars as the fogged valley darkens.",
+      "start": "holtburg", "duration": 6.0, "time": 0.83, "timeEnd": 0.925, "ease": "sine",
+      "keys": [
+        { "pos": [150, 140, 25], "yaw": 262, "pitch": -1 },
+        { "pos": [132, 137, 23], "yaw": 266, "pitch": 23 }
+      ]
+    },
+    {
+      "id": "e-arwic",
+      "caption": "Arwic",
+      "note": "Up the south road to the walled town, rising to show the great tree behind the walls.",
+      "start": "Arwic", "duration": 6.0, "time": 0.42, "ease": "ramp:0.1,0.3",
+      "keys": [
+        { "pos": [10, -250, 22], "ground": true, "look": [30, 70, 5] },
+        { "pos": [15, -60, 45], "ground": true, "look": [40, 95, 10] }
+      ]
+    },
+    {
+      "id": "f-yaraq",
+      "caption": "Yaraq",
+      "note": "Late afternoon (0.84, before the stars come out; retail's warm dusk light only arrives with them): over the domed town towards the mesas.",
+      "start": "Yaraq", "duration": 6.0, "time": 0.84,
+      "keys": [
+        { "pos": [0, -60, 25], "ground": true, "yaw": 86, "pitch": 1 },
+        { "pos": [200, -40, 40], "ground": true, "yaw": 90, "pitch": 0 }
+      ]
+    },
+    {
+      "id": "g-shoushi",
+      "caption": "Shoushi",
+      "note": "A rising arc around the five-tiered pagoda.",
+      "start": "Shoushi", "duration": 5.5, "time": 0.45, "fov": 50, "ease": "sine",
+      "keys": [
+        { "pos": [-35, 10, 4], "ground": true, "look": [0, 48, 14] },
+        { "pos": [35, 12, 16], "ground": true, "look": [0, 48, 18] }
+      ]
+    },
+    {
+      "id": "h-glenden-wood",
+      "caption": "Glenden Wood",
+      "note": "Gliding down the forest road towards the town.",
+      "start": "Glenden Wood", "duration": 5.5, "time": 0.42,
+      "keys": [
+        { "pos": [-388, 294.6, 3], "ground": true, "yaw": 138.5, "pitch": 1 },
+        { "pos": [-335, 234.7, 3], "ground": true, "yaw": 138.5, "pitch": 1 }
+      ]
+    },
+    {
+      "id": "i-snow-peaks",
+      "note": "Flying south over the snowfields, descending towards the rock spires (landblock 0x7AC2, 53.0N 3.9W, north-west of Holtburg). No caption: neither the dats nor ACE's points of interest name a place here.",
+      "start": "7AC2", "duration": 6.0, "time": 0.36,
+      "keys": [
+        { "pos": [15, 180, 230], "yaw": 192, "pitch": -12 },
+        { "pos": [-5, -300, 170], "yaw": 186, "pitch": -6 }
+      ]
+    },
+    {
+      "id": "j-town-network",
+      "caption": "Town Network",
+      "transition": "fadeblack",
+      "note": "Arcing in on the fountain hall's fountain (portals are server objects, M2).",
+      "start": "town-network", "duration": 5.5, "fov": 60, "ease": "sine",
+      "keys": [
+        { "pos": [-9, -0.8, 3.0], "look": [0, -11.5, 1.6] },
+        { "pos": [-2.5, -1.5, 3.2], "look": [0, -11.5, 1.6] },
+        { "pos": [1.5, -4.5, 3.4], "look": [0, -11.5, 1.6] }
+      ]
+    },
+    {
+      "id": "k-holtburg-redoubt",
+      "caption": "Holtburg Redoubt",
+      "note": "Lower level: a slow dolly from the passage's mouth into the cauldron room. It starts past the doorway's wall torch, whose glow sprite shows as a lighter quad on the stone.",
+      "start": "01630110@8,-50,-18.1", "duration": 5.0, "fov": 62, "ease": "ramp:0.2",
+      "keys": [
+        { "pos": [-2.2, -0.2, 1.75], "yaw": 270, "pitch": -2 },
+        { "pos": [-7.2, -0.6, 1.65], "yaw": 264, "pitch": -5 }
+      ]
+    },
+    {
+      "id": "l-mines-of-despair",
+      "caption": "Mines of Despair",
+      "note": "Down the timbered entry tunnel past barrels, cobwebs and wall torches.",
+      "start": "mines-of-despair", "duration": 5.0, "fov": 64, "ease": "ramp:0.2",
+      "keys": [
+        { "pos": [0.3, -2, 1.7], "yaw": 359, "pitch": 0 },
+        { "pos": [-0.2, 8, 1.75], "yaw": 1, "pitch": 0 },
+        { "pos": [0.2, 17, 1.7], "yaw": 0, "pitch": 0 }
+      ]
+    },
+    {
+      "id": "m-flame-bolt",
+      "scene": "spell",
+      "transition": "fadeblack",
+      "caption": "Flame Bolt VI",
+      "note": "From above the caster's right shoulder, looking north-east at the timbered house and the road and pitched down so the stage's 480 m edge never shows: the wind-up, follow the bolt, settle on the drudge for the burst.",
+      "spell": 85, "castAt": -1.4, "duration": 3.6, "time": 0.83, "fov": 46, "smooth": 0.12,
+      "args": ["--time-of-day=0.83"],
+      "keys": [
+        { "t": 0, "yaw": 48, "pitch": -27, "distance": 3.5, "focus": "hands" },
+        { "t": 1.3, "yaw": 54, "pitch": -27, "distance": 3.9, "focus": "hands" },
+        { "t": 1.9, "yaw": 66, "pitch": -28, "distance": 5.5, "focus": "projectile" },
+        { "t": 2.4, "yaw": 72, "pitch": -29, "distance": 5.6, "focus": "target", "offset": [-1.5, 0, 0.1] },
+        { "t": 3.6, "yaw": 76, "pitch": -29, "distance": 6.0, "focus": "target", "offset": [-1.5, 0, 0.1] }
+      ]
+    },
+    {
+      "id": "n-ring-of-fire",
+      "scene": "spell",
+      "caption": "Cassius' Ring of Fire",
+      "note": "Craning up and back from the south-west as the ring bursts outwards. The offset moves the focus north-west, so the caster sits right of centre and the ring clears the lower-left caption; the houses and the road fill the top, no horizon.",
+      "spell": 1785, "castAt": -2.0, "duration": 3.8, "time": 0.83, "fov": 50, "smooth": 0.1,
+      "args": ["--time-of-day=0.83"],
+      "keys": [
+        { "t": 0, "yaw": 64, "pitch": -31, "distance": 9, "focus": "caster", "offset": [-1.3, 1.4, 0] },
+        { "t": 1.1, "yaw": 66, "pitch": -33, "distance": 10, "focus": "caster", "offset": [-1.5, 1.8, 0] },
+        { "t": 2.4, "yaw": 70, "pitch": -37, "distance": 14, "focus": "caster", "offset": [-1.9, 2.4, 0] },
+        { "t": 3.8, "yaw": 72, "pitch": -38, "distance": 15.5, "focus": "caster", "offset": [-2.0, 2.6, 0] }
+      ]
+    },
+    {
+      "id": "o-portal-recall",
+      "scene": "spell",
+      "caption": "Portal Recall",
+      "note": "Tight on the shoulders and hands from behind (the caster wears only its Setup's underwear until ObjDesc clothing in M2), the timbered house's roof behind, tilting up with the magenta glows into the sky.",
+      "spell": 2645, "castAt": -1.0, "duration": 3.6, "time": 0.83, "fov": 32, "smooth": 0.1,
+      "args": ["--time-of-day=0.83"],
+      "keys": [
+        { "t": 0, "yaw": 50, "pitch": 6, "distance": 2.6, "focus": "caster", "offset": [0, 0, 0.55] },
+        { "t": 1.6, "yaw": 51, "pitch": 10, "distance": 2.8, "focus": "caster", "offset": [0, 0, 0.7] },
+        { "t": 3.6, "yaw": 54, "pitch": 22, "distance": 3.3, "focus": "caster", "offset": [0, 0, 1.4] }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+# Text files are stored and checked out with LF on every OS (Godot's default too). Godot, dotnet, Python and
+# PowerShell 7 and 5.1 all read LF. Keep .ps1 and .psm1 files ASCII, comments included: Windows PowerShell 5.1 reads
+# a script without a BOM in the ANSI code page.
+* text=auto eol=lf
+
+# cmd.exe misreads labels and GOTO in LF-only batch files.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Hunk headers in diffs name the enclosing C# member or Markdown heading.
+*.cs diff=csharp
+*.md diff=markdown
+
+# Binary formats: never converted, diffed or merged as text. Most are ignored (.gitignore); this covers files that are
+# allow-listed or force-added.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.bmp binary
+*.tga binary
+*.dds binary
+*.exr binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.wav binary
+*.ogg binary
+*.mp4 binary
+*.avi binary
+*.mkv binary
+*.mov binary
+*.webm binary
+*.ogv binary
+*.rgba binary
+*.dat binary
+*.dll binary
+*.exe binary
+*.pdb binary
+*.zip binary
+*.cab binary

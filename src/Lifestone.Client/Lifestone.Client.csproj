@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Engine-agnostic client logic that sits between the data layer and the presentation layer: AC coordinates and map
+    coordinates, the floating origin, landblock streaming plans and main-thread/worker scheduling. No Godot references
+    (Lifestone.Game is the only project that may use Godot), no I/O, no networking.
+    TargetFramework / Nullable / LangVersion come from ../../Directory.Build.props.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Lifestone.Client</RootNamespace>
+    <AssemblyName>Lifestone.Client</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lifestone.Data\Lifestone.Data.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lifestone.Client.Tests" />
+  </ItemGroup>
+
+</Project>

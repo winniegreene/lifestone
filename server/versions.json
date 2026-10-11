@@ -1,0 +1,42 @@
+{
+  "_comment": "Pinned server-side dependencies for Lifestone. setup-server.ps1 refuses anything that does not match these pins. Update deliberately: bump version + hash together after verifying the new artifact.",
+  "ace": {
+    "repo": "https://github.com/ACEmulator/ACE.git",
+    "tag": "v1.78.4816",
+    "commit": "95ef426d412459ff619a12cc18f82bcf72c1c2a8",
+    "sourceDir": "vendor-eval/ACE",
+    "license": "AGPL-3.0"
+  },
+  "mariadb": {
+    "version": "11.4.13",
+    "series": "11.4 LTS (EOL 2029-05-29)",
+    "zipName": "mariadb-11.4.13-winx64.zip",
+    "topFolder": "mariadb-11.4.13-winx64",
+    "url": "https://archive.mariadb.org/mariadb-11.4.13/winx64-packages/mariadb-11.4.13-winx64.zip",
+    "sha256sumsUrl": "https://archive.mariadb.org/mariadb-11.4.13/winx64-packages/sha256sums.txt",
+    "sha256": "d62986d433eeebfde218560b276103831604a61e929e87f1a17f5aebd80257e2",
+    "gpgFingerprint": "177F4010FE56CA3336300305F1656F24C74CD1D8",
+    "license": "GPL-2.0"
+  },
+  "world": {
+    "repo": "ACEmulator/ACE-World-16PY-Patches",
+    "tag": "v0.9.296",
+    "assetName": "ACE-World-Database-v0.9.296.sql.zip",
+    "sqlName": "ACE-World-Database-v0.9.296.sql",
+    "url": "https://github.com/ACEmulator/ACE-World-16PY-Patches/releases/download/v0.9.296/ACE-World-Database-v0.9.296.sql.zip",
+    "sha256": "e56c594197b03a96963b14e3db61ad205d47f63a69d0c1c72e9bef78878f180c",
+    "expectedBaseVersion": "v0.8.8",
+    "license": "AGPL-3.0"
+  },
+  "network": {
+    "host": "127.0.0.1",
+    "acePort": 9000,
+    "mariadbPort": 3316
+  },
+  "server": {
+    "worldName": "Lifestone",
+    "datFilesDirectory": "client",
+    "aceDbUser": "ace",
+    "testAccountName": "lifestone"
+  }
+}

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Engine-agnostic AC data layer: DAT access + derived data (terrain meshes, ...).
+    No Godot references here; math uses System.Numerics and AC coordinates (right-handed, Z-up).
+    TargetFramework / Nullable / LangVersion come from ../../Directory.Build.props.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Lifestone.Data</RootNamespace>
+    <AssemblyName>Lifestone.Data</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      MIT, https://github.com/Chorizite/DatReaderWriter. lib/ only (no build/, buildTransitive/ or tools/ assets).
+      Its unused transitive dependencies DotNet.Standard.Common and ZLibDotNet are kept out of every build output by
+      ../../Directory.Build.props (ExcludeAssets has to be declared in each consuming project to take effect).
+    -->
+    <PackageReference Include="Chorizite.DatReaderWriter" Version="2.1.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lifestone.Data.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Small AGPL-3.0 extract of the ACE world database (war projectile + creature visuals); see docs/third-party/effects.md. -->
+    <EmbeddedResource Include="Magic\Data\*.json" LogicalName="Lifestone.Data.Magic.Data.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- M1 sky/navigation track: AGPL-3.0 extract of ACE's points of interest (teleport panel); see docs/third-party/sky-nav.md. -->
+    <EmbeddedResource Include="World\Data\*.json" LogicalName="Lifestone.Data.World.Data.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>
