@@ -1,24 +1,30 @@
 <#
 .SYNOPSIS
-  Idempotent setup of the Lifestone local game backend: ACE (built from pinned source) + portable MariaDB +
-  ACE databases (auth, shard, world). Re-running skips every step that is already complete.
+  Idempotent setup of the Lifestone local game backend: ACE (built from pinned source) + the Lifestone server mod +
+  portable MariaDB + ACE databases (auth, shard, world). Re-running skips every step that is already complete.
 
 .DESCRIPTION
   Steps (each skipped when already done):
     1. ACE source  : clone ACEmulator/ACE at the pinned tag into vendor-eval\ACE and verify the pinned commit.
     2. ACE build   : dotnet restore + publish (Release, framework-dependent net10.0) to server\runtime\ace.
-    3. MariaDB     : download the pinned Windows x64 ZIP from archive.mariadb.org, verify SHA-256 (pinned value and
+    3. Server mod  : build server\mod (the Lifestone server mod) against that ACE into server\runtime\mod-build, check
+                     the output, install it into server\runtime\ace-mods\Lifestone.ServerMod. Skipped while its build
+                     key (the mod's sources + ACE.Server.dll's SHA-256) is unchanged.
+    4. MariaDB     : download the pinned Windows x64 ZIP from archive.mariadb.org, verify SHA-256 (pinned value and
                      the archive's sha256sums.txt), extract to server\runtime\mariadb. No MSI, no service.
-    4. Secrets     : generate root / ace DB passwords + a test account into server\runtime\secrets.json (user-only ACL).
-    5. my.ini      : render templates\my.template.ini (bind-address=127.0.0.1, port 3316, skip-name-resolve).
-    6. Datadir     : mariadb-install-db.exe --datadir=server\runtime\mariadb-data (never --service).
-    7. Users       : first start uses --init-file to set the root password and create 'ace'@'127.0.0.1' with
+    5. Secrets     : server\runtime\secrets.json, schema 2 (user-only ACL): root / ace DB passwords and two game
+                     accounts, 'play' and 'test'. A schema-1 file is migrated (its testAccount becomes 'play').
+    6. my.ini      : render templates\my.template.ini (bind-address=127.0.0.1, port 3316, skip-name-resolve).
+    7. Datadir     : mariadb-install-db.exe --datadir=server\runtime\mariadb-data (never --service).
+    8. Users       : first start uses --init-file to set the root password and create 'ace'@'127.0.0.1' with
                      privileges on ace_auth / ace_shard / ace_world only. Init file is deleted right after.
-    8. Databases   : ACE base schemas (only if the database does not exist yet -- existing player data is never
+    9. Databases   : ACE base schemas (only if the database does not exist yet -- existing player data is never
                      dropped), pinned world DB release (download via gh, verify SHA-256), then ACE's bundled
                      Database\Updates scripts (tracked in DatabaseSetupScripts\Updates\*\applied_updates.txt).
-    9. ACE config  : render Config.js and log4net.config from templates.
-  mariadbd is started only for steps 7-8 and stopped again before the script exits.
+   10. Accounts    : the sentinel Admin account (random password, discarded), so ACE never promotes a new account to
+                     Admin; then an audit that warns, by name, about every other account above Player.
+   11. ACE config  : render Config.js and log4net.config from templates.
+  mariadbd is started only for steps 8-10 and stopped again before the script exits.
 
 .PARAMETER RebuildAce
   Force dotnet publish even if the pinned commit is already built.
@@ -26,12 +32,26 @@
   Drop and re-import ace_world from the pinned release (world content only; auth/shard untouched).
 .PARAMETER ResetEmptyDatabases
   Drop and recreate ace_auth, ace_shard and ace_world from scratch. Refuses if any account or character exists.
+.PARAMETER RebuildMod
+  Build and install the server mod even if its build key is unchanged.
+.PARAMETER ModOnly
+  Run only the preflight, a check of the existing ACE build and the server mod step (no MariaDB, no downloads).
+.PARAMETER ModSource
+  Build the server mod from another server\mod folder (a worktree's, to try a branch without merging it). setup-state
+  records it, and start-server.ps1 checks the installed mod against that folder.
+.PARAMETER AddAccount
+  Add a game account to secrets.json (schema 2) under this name and exit: 3 to 50 lower-case letters, digits and
+  hyphens. ACE creates it at its first login, as a Player. The password is generated and never shown.
 #>
 [CmdletBinding()]
 param(
     [switch]$RebuildAce,
     [switch]$ReimportWorld,
-    [switch]$ResetEmptyDatabases
+    [switch]$ResetEmptyDatabases,
+    [switch]$RebuildMod,
+    [switch]$ModOnly,
+    [string]$ModSource = '',
+    [string]$AddAccount = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,6 +64,30 @@ $state = Get-LsState $cfg
 $started = Get-Date
 
 # ----------------------------------------------------------------------------------------------------------------
+if ($AddAccount) {
+    if ($RebuildAce -or $ReimportWorld -or $ResetEmptyDatabases -or $RebuildMod -or $ModOnly -or $ModSource) { throw '-AddAccount runs on its own; give it no other switch.' }
+    Write-LsStep 'Secrets: add a game account'
+    if (-not (Test-Path -LiteralPath $cfg.Secrets)) { throw "Missing $($cfg.Secrets). Run server\setup-server.ps1 once first." }
+    $init = Initialize-LsSecrets $cfg
+    if ($init.Action -eq 'migrated') { Write-LsInfo 'Migrated secrets.json to schema 2 (accounts: play, test).' }
+    $name = Add-LsAccount -Cfg $cfg -Name $AddAccount
+    Write-LsInfo "Added account '$name' (password not shown). ACE creates it at its first login, as a Player account."
+    Write-LsStep "Secrets: $(Format-LsSecretsSummary (Get-LsSecrets $cfg)). Log in with --account=$name."
+    exit 0
+}
+if ($ModOnly -and ($RebuildAce -or $ReimportWorld -or $ResetEmptyDatabases)) { throw '-ModOnly builds and installs the server mod only; it cannot be combined with -RebuildAce, -ReimportWorld or -ResetEmptyDatabases.' }
+$modRoot = $cfg.ModRoot
+if ($ModSource) {
+    $modRoot = [System.IO.Path]::GetFullPath($ModSource).TrimEnd('\')
+    foreach ($f in @('Lifestone.ServerMod\Lifestone.ServerMod.csproj', 'Lifestone.ServerMod\Meta.json', 'Shared\ToolsWire.cs')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $modRoot $f) -PathType Leaf)) { throw "-ModSource $modRoot is not a server\mod folder of a Lifestone checkout (no $f)." }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent (Split-Path -Parent $modRoot)) 'Lifestone.slnx') -PathType Leaf)) {
+        throw "-ModSource $modRoot is not the server\mod folder of a Lifestone checkout (no Lifestone.slnx two folders up)."
+    }
+}
+
+# ----------------------------------------------------------------------------------------------------------------
 Write-LsStep 'Preflight'
 $running = @(Get-LsRuntimeProcesses $cfg)
 if ($running.Count -gt 0) {
@@ -52,6 +96,24 @@ if ($running.Count -gt 0) {
 foreach ($d in @($cfg.Runtime, $cfg.Downloads, $cfg.Logs, $cfg.AceModsDir, $cfg.TmpDir, $cfg.FilesDir)) { New-LsDirectory $d }
 $git = (Get-Command git.exe -ErrorAction Stop).Source
 Write-LsInfo "Runtime: $($cfg.Runtime)"
+
+# ----------------------------------------------------------------------------------------------------------------
+if ($ModOnly) {
+    Write-LsStep 'ACE build (check only)'
+    $stamp = Get-LsAceBuildStamp $cfg
+    if ([string]$stamp.commit -ne $v.ace.commit -or -not (Test-Path -LiteralPath $cfg.AceExe)) {
+        throw "The ACE build in $($cfg.AceDir) is not the pinned commit $($v.ace.commit); run the full server\setup-server.ps1."
+    }
+    Assert-LsNoElevation $cfg.AceExe
+    Write-LsInfo "OK: $($cfg.AceExe) built from $(([string]$stamp.commit).Substring(0, 12))"
+    Write-LsStep 'Lifestone server mod'
+    if ($ModSource) { Write-LsWarn "building the server mod from $modRoot (-ModSource), not this checkout's server\mod" }
+    Invoke-LsServerModSetup -Cfg $cfg -State $state -ModRoot $modRoot -Rebuild:$RebuildMod | Out-Null
+    $state.lastModSetupUtc = (Get-Date).ToUniversalTime().ToString('o')
+    Save-LsState $cfg $state
+    Write-LsStep ("Server mod setup complete in {0:N0} s. Start with: server\start-server.ps1" -f ((Get-Date) - $started).TotalSeconds)
+    exit 0
+}
 
 # ----------------------------------------------------------------------------------------------------------------
 Write-LsStep "ACE source ($($v.ace.tag) @ $($v.ace.commit.Substring(0, 12)))"
@@ -73,25 +135,15 @@ if (Test-Path -LiteralPath $cfg.AceBuildInfo) { $built = Get-Content -LiteralPat
 if ($RebuildAce -or -not (Test-Path -LiteralPath $cfg.AceExe) -or -not $built -or $built.commit -ne $v.ace.commit) {
     $dotnetRoot = Get-LsDotnetRoot
     $dotnet = Join-Path $dotnetRoot 'dotnet.exe'
-    $dotnetEnv = @{
-        DOTNET_ROOT                    = $dotnetRoot
-        PATH                           = "$dotnetRoot;$env:PATH"
-        DOTNET_CLI_TELEMETRY_OPTOUT    = '1'
-        DOTNET_NOLOGO                  = '1'
-        DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
-        # The SDK's first run (once per SDK version) otherwise appends %USERPROFILE%\.dotnet\tools to the persistent
-        # user PATH and creates an ASP.NET dev certificate in CurrentUser\My. DOTNET_SKIP_FIRST_TIME_EXPERIENCE does not stop either.
-        DOTNET_ADD_GLOBAL_TOOLS_TO_PATH    = 'false'
-        DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
-        MSBUILDDISABLENODEREUSE        = '1'
-    }
+    # No telemetry, and none of the SDK's first-run changes to the user PATH or certificates (Get-LsDotnetEnvironment).
+    $dotnetEnv = Get-LsDotnetEnvironment $dotnetRoot
     $proj = Join-Path $cfg.AceSourceDir 'Source\ACE.Server\ACE.Server.csproj'
     $sdk = (Invoke-LsTool -FilePath $dotnet -Arguments @('--version') -Environment $dotnetEnv).StdOut.Trim()
     Write-LsInfo "dotnet SDK $sdk at $dotnetRoot"
     Write-LsInfo 'dotnet restore (nuget.org)...'
-    Invoke-LsTool -FilePath $dotnet -Arguments @('restore', $proj, '-nodeReuse:false') -Environment $dotnetEnv -WorkingDirectory $cfg.AceSourceDir -TimeoutSec 1800 | Out-Null
+    Invoke-LsTool -FilePath $dotnet -Arguments @('restore', $proj, '--disable-build-servers', '-nodeReuse:false') -Environment $dotnetEnv -WorkingDirectory $cfg.AceSourceDir -TimeoutSec 1800 | Out-Null
     Write-LsInfo "dotnet publish -> $($cfg.AceDir) ..."
-    $pub = Invoke-LsTool -FilePath $dotnet -Arguments @('publish', $proj, '-c', 'Release', '-o', $cfg.AceDir, '--no-restore', '-nodeReuse:false', '-p:UseSharedCompilation=false') -Environment $dotnetEnv -WorkingDirectory $cfg.AceSourceDir -TimeoutSec 3600
+    $pub = Invoke-LsTool -FilePath $dotnet -Arguments @('publish', $proj, '-c', 'Release', '-o', $cfg.AceDir, '--no-restore', '--disable-build-servers', '-nodeReuse:false', '-p:UseSharedCompilation=false') -Environment $dotnetEnv -WorkingDirectory $cfg.AceSourceDir -TimeoutSec 3600
     $warn = ([regex]::Matches($pub.StdOut, 'warning [A-Z]+\d+')).Count
     Write-LsInfo "publish OK ($warn compiler/nuget warnings)"
     Invoke-LsTool -FilePath $dotnet -Arguments @('build-server', 'shutdown') -Environment $dotnetEnv -AllowFailure | Out-Null
@@ -101,6 +153,12 @@ if ($RebuildAce -or -not (Test-Path -LiteralPath $cfg.AceExe) -or -not $built -o
     Write-LsInfo "Skip: $($cfg.AceExe) already built from $($built.commit.Substring(0, 12)) ($($built.builtUtc))"
 }
 Assert-LsNoElevation $cfg.AceExe
+
+# ----------------------------------------------------------------------------------------------------------------
+Write-LsStep 'Lifestone server mod'
+if ($ModSource) { Write-LsWarn "building the server mod from $modRoot (-ModSource), not this checkout's server\mod" }
+Invoke-LsServerModSetup -Cfg $cfg -State $state -ModRoot $modRoot -Rebuild:$RebuildMod | Out-Null
+Save-LsState $cfg $state
 
 # ----------------------------------------------------------------------------------------------------------------
 Write-LsStep "MariaDB $($v.mariadb.version) binaries"
@@ -144,20 +202,14 @@ foreach ($exe in @($cfg.MariaDbd, $cfg.MariaDbClient, $cfg.MariaDbAdmin, $cfg.Ma
 
 # ----------------------------------------------------------------------------------------------------------------
 Write-LsStep 'Secrets'
-if (-not (Test-Path -LiteralPath $cfg.Secrets)) {
-    $new = [ordered]@{
-        note         = 'Generated by server/setup-server.ps1. Local-only credentials for the Lifestone backend. Never commit or share.'
-        generatedUtc = (Get-Date).ToUniversalTime().ToString('o')
-        mariadb      = [ordered]@{ host = $cfg.Host; port = $cfg.DbPort; rootUser = 'root'; rootPassword = (New-LsSecret 32); aceUser = $v.server.aceDbUser; acePassword = (New-LsSecret 32) }
-        testAccount  = [ordered]@{ username = $v.server.testAccountName; password = (New-LsSecret 20); note = 'ACE auto-creates this account on first login (AllowAutoAccountCreation); the first account created is promoted to Admin.' }
-    }
-    Write-LsUtf8File $cfg.Secrets ($new | ConvertTo-Json -Depth 4)
-    Protect-LsFile $cfg.Secrets
-    Write-LsInfo "Generated $($cfg.Secrets) (access restricted to $env:USERNAME)"
-} else {
-    Write-LsInfo "Skip: using existing $($cfg.Secrets)"
+$init = Initialize-LsSecrets $cfg
+switch ($init.Action) {
+    'created' { Write-LsInfo "Generated $($cfg.Secrets) (access restricted to the current user)" }
+    'migrated' { Write-LsInfo "Migrated $($cfg.Secrets) to schema 2: testAccount is now accounts.play (same login), accounts.test is new" }
+    default { Write-LsInfo "Skip: using existing $($cfg.Secrets)" }
 }
 $secrets = Get-LsSecrets $cfg
+Write-LsInfo "Secrets: $(Format-LsSecretsSummary $secrets)"
 $cnfTemplate = "[client]`r`nuser={0}`r`npassword={1}`r`nhost={2}`r`nport={3}`r`nprotocol=TCP`r`n"
 Write-LsUtf8File $cfg.RootCnf ($cnfTemplate -f 'root', $secrets.mariadb.rootPassword, $cfg.Host, $cfg.DbPort)
 Write-LsUtf8File $cfg.AceCnf ($cnfTemplate -f $secrets.mariadb.aceUser, $secrets.mariadb.acePassword, $cfg.Host, $cfg.DbPort)
@@ -358,6 +410,18 @@ try {
     $counts = (Invoke-LsSql -Cfg $cfg -Cnf $cfg.RootCnf -Sql ($countSql + ';')).StdOut.Trim() -split "`r?`n"
     foreach ($c in $counts) { Write-LsInfo ($c -replace "`t", ': ') }
 
+    # ------------------------------------------------------------------------------------------------------------
+    Write-LsStep 'ACE accounts'
+    # ACE promotes the next new account to Admin whenever no Admin account exists when it boots (owner decision D11).
+    $sentinel = Set-LsSentinelAdmin $cfg
+    switch ($sentinel) {
+        'created' { Write-LsInfo "Created the sentinel Admin account '$($cfg.SentinelAdminName)': its random password was discarded and it is banned, so nobody logs in with it; with an Admin in ace_auth, ACE never promotes a new account" }
+        'repaired' { Write-LsWarn "the sentinel Admin account '$($cfg.SentinelAdminName)' was not a banned Admin with setup's ban (its level or ban changed, or ACE created it at a login); it is again, with a fresh discarded password" }
+        default { Write-LsInfo "The sentinel Admin account '$($cfg.SentinelAdminName)' exists; its discarded password and its ban were renewed" }
+    }
+    $audit = Write-LsAccountAudit $cfg
+    if ($audit -eq 0) { Write-LsInfo 'Account audit: no account other than the sentinel is above Player' }
+
     Invoke-LsSql -Cfg $cfg -Cnf $cfg.RootCnf -Sql 'SET GLOBAL innodb_flush_log_at_trx_commit=1;' | Out-Null
     $restoreFlush = $false
 }
@@ -401,6 +465,7 @@ else { Write-LsInfo 'client_highres.dat not present (optional for ACE; it only l
 $state.aceTag = $v.ace.tag; $state.aceCommit = $v.ace.commit
 $state.mariadbVersion = $v.mariadb.version; $state.mariadbSha256 = $v.mariadb.sha256
 $state.worldTag = $v.world.tag; $state.worldSha256 = $v.world.sha256
+$state.secretsSchema = 2
 $state.lastSetupUtc = (Get-Date).ToUniversalTime().ToString('o')
 Save-LsState $cfg $state
 

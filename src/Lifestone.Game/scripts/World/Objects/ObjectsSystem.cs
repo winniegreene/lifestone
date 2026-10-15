@@ -264,6 +264,41 @@ public partial class ObjectsSystem : Node
         Stats.Registered = _entries.Count;
     }
 
+    /// <summary>
+    /// Where the landblock's objects stand on their way into the scene, for portal space's destination readiness
+    /// (<see cref="Lifestone.Client.Streaming.IWorldAttachments.Objects"/>; a cheap read of state the system already keeps,
+    /// main thread, never starts a load).
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><see cref="AttachState.Attached"/>: drawn (<c>Active</c>), or the landblock has no objects (<c>Empty</c>).</item>
+    /// <item><see cref="AttachState.Failed"/>: preparing threw (logged when it did).</item>
+    /// <item><see cref="AttachState.Disabled"/>: this system builds no objects for the landblock at all: it lies beyond
+    /// <see cref="Radius"/> rings of the ring centre (<c>--object-radius=0</c> leaves a destination's neighbours here),
+    /// so a wait never hangs on it.</item>
+    /// <item><see cref="AttachState.Pending"/>: not streamed in yet, or on its way (idle, preparing, prepared, decoding,
+    /// attaching), or the ring centre has not moved to the destination yet (it follows the streaming focus each frame).</item>
+    /// </list>
+    /// </remarks>
+    public AttachState StateOf(LandblockCoord coord)
+    {
+        if (!_entries.TryGetValue(coord, out var entry))
+        {
+            return AttachState.Pending;
+        }
+
+        switch (entry.State)
+        {
+            case EntryState.Active:
+            case EntryState.Empty:
+                return AttachState.Attached;
+            case EntryState.Failed:
+                return AttachState.Failed;
+            default:
+                return _center is { } center && ObjectRings.Ring(coord, center) > _radius ? AttachState.Disabled : AttachState.Pending;
+        }
+    }
+
     public override void _Ready() => _ = Viewer(); // first-call interop of the camera lookup, outside the first frame's work
 
     public override void _Process(double delta)

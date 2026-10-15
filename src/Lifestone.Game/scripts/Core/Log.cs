@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 using Godot;
+using Lifestone.Client.Diagnostics;
 
 namespace Lifestone.Game.Core;
 
@@ -210,5 +211,53 @@ public static class Log
         {
             GD.Print(line);
         }
+    }
+}
+
+/// <summary>
+/// The game's <see cref="ILogSink"/>: Client code (the session layer, portal space and the other engine-free systems)
+/// logs through it into <see cref="Log"/>, so its entries share the game's file, format and <see cref="Log.MinimumLevel"/>.
+/// </summary>
+/// <remarks>
+/// The game keeps its own <see cref="LogLevel"/>; <see cref="LogSeverity"/> maps one to one. Thread-safe, as
+/// <see cref="Log.Write"/> is.
+/// </remarks>
+public sealed class GodotLogSink : ILogSink
+{
+    /// <summary>The one instance.</summary>
+    public static readonly GodotLogSink Instance = new();
+
+    private GodotLogSink()
+    {
+    }
+
+    /// <summary>The game's level for a Client severity.</summary>
+    public static LogLevel ToLevel(LogSeverity severity) => severity switch
+    {
+        LogSeverity.Debug => LogLevel.Debug,
+        LogSeverity.Info => LogLevel.Info,
+        LogSeverity.Warning => LogLevel.Warning,
+        _ => LogLevel.Error,
+    };
+
+    /// <inheritdoc/>
+    public bool IsEnabled(LogSeverity severity) => ToLevel(severity) >= Log.MinimumLevel;
+
+    /// <inheritdoc/>
+    public void Write(LogSeverity severity, string category, string message, ReadOnlySpan<LogField> fields)
+    {
+        var level = ToLevel(severity);
+        if (level < Log.MinimumLevel)
+        {
+            return;
+        }
+
+        var converted = fields.IsEmpty ? [] : new (string Key, object? Value)[fields.Length];
+        for (var i = 0; i < fields.Length; i++)
+        {
+            converted[i] = (fields[i].Key, fields[i].Value);
+        }
+
+        Log.Write(level, category, message, converted);
     }
 }

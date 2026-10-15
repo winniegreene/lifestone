@@ -21,7 +21,7 @@
 - **R1. Localhost only.**
   - Automation and scripting may run only when the session's server endpoint is a loopback address (the bundled ACE). The session layer enforces this: it refuses to start runners otherwise and logs why.
   - Rationale: the project's security posture, and botting on public servers breaks their rules.
-- **R2. Same path as the human.** Bots act only through the same intent API the UI uses, which the client turns into AC GameActions. Server-side shortcuts are allowed only as explicit ACE admin commands on the local server (see the dev layer, §1.4 I).
+- **R2. Same path as the human.** Bots act only through the same intent API the UI uses, which the client turns into AC GameActions. Server-side shortcuts are allowed only through the player tools of Lifestone's server mod on the local server (§1.4 I); the play account never has admin rights.
 - **R3. Server-confirmed perception.** Conditions read state that the server has confirmed: enchantments, vitals, inventory, objects, chat. Client-side guesses never feed a condition. ACE is authoritative for every rule (`research/game-logic.md` §1).
 - **R4. Headless core.**
   - Transport, session, game state and automation are plain net10.0 libraries with no Godot dependency.
@@ -134,10 +134,11 @@ Every action returns a **handle** that completes on server confirmation, an erro
 - ACE supplies real fellowship, allegiance and XP pass-up, so none of that is re-implemented.
 - Check ACE's session and multi-account limits before relying on them (verify the config).
 
-**I. Dev / cheat layer.**
-- Commands such as give, level, set skill, teleport, godmode or learn all spells map onto **ACE's admin and developer commands**. These run on the local server for an account with elevated access level, and ACE persists their effects.
-- Lifestone provides a console with completion and help for them.
-- Each command is verified against ACE's command handlers at a pinned SHA; none are guessed.
+**I. Player tools (the dev / cheat layer).**
+- Conveniences such as teleporting to places, item search and add, adding XP and respec are built-in tools. **Real play never uses an admin account** (owner's decision, 2026-10-11).
+- They are Player-level commands of **Lifestone's server mod**, loaded by ACE's own mod loader on the local server only. The mod calls ACE's own APIs, the same ones behind ACE's admin commands, so ACE persists their effects (`milestones/m2-log-in.md` §7).
+- Lifestone provides a panel for them, and a console with completion and help.
+- Each tool is checked against ACE's code at a pinned SHA; none are guessed.
 
 **J. Runtime modes.**
 - The bot keeps running while the window is unfocused or minimized.
@@ -228,5 +229,5 @@ A0 must not slip behind rendering work: the automation core ships with the proto
 2. **Authoring model:** JSON metas with visual editors first, or a script-first approach with JSON/VTank as an import layer?
 3. **VTank compatibility:** how important is it to import real `.met`, `.utl` and `.nav` files? File formats must come from real files, not memory.
 4. **Multi-character:** how many concurrent bot sessions? Is a separate local ACE account per bot acceptable?
-5. **Dev commands:** may the local single-player account have ACE admin access so the cheat/dev console works?
+5. ~~**Dev commands**~~ — **decided:** the play account has no admin access; the conveniences come from the player tools of Lifestone's server mod (§1.4 I).
 6. **Runtime modes:** confirm that bots keep running while the window is minimized, and that nothing accrues while Lifestone (and its ACE) is closed.

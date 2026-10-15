@@ -26,12 +26,14 @@ public sealed record DecodedSurface(
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every read goes through <see cref="DatSet.Read{TResult}"/> (the dat lock) and uses DatReaderWriter's converter
-/// overload of <c>TryGet</c>, which does <b>not</b> put the record in DatReaderWriter's per-database file cache:
-/// <see cref="DatSet"/> opens the databases with the default <c>FileCachingStrategy.OnDemand</c>, under which
-/// <see cref="DatSet.TryGetPortal{T}"/> would keep every RenderSurface it ever returned (600 MB for the portal).
-/// The decode paths read RenderSurfaces as raw file bytes into pooled buffers instead (<see cref="RenderSurfaceRecord"/>,
-/// <see cref="DecodeRenderSurfacePooled"/>), which allocates no pixel array per record. Decoding happens outside the lock.
+/// Every read goes through <see cref="DatSet.Read{TResult}"/> (the dat lock). Records are read with DatReaderWriter's
+/// converter overload of <c>TryGet</c>, which never puts a record in DatReaderWriter's per-database file cache whatever
+/// the caching strategy. <see cref="DatSet"/> opens every database with <c>FileCachingStrategy.Never</c> anyway, so
+/// <see cref="DatSet.TryGetPortal{T}"/> keeps nothing either; the converter overload only keeps this loader independent
+/// of that setting (under the default <c>OnDemand</c>, every RenderSurface ever read would stay in memory, about 600 MB
+/// for the portal). The decode paths read RenderSurfaces as raw file bytes into pooled buffers
+/// (<see cref="RenderSurfaceRecord"/>, <see cref="DecodeRenderSurfacePooled"/>), which allocates no pixel array per
+/// record. Decoding happens outside the lock.
 /// </para>
 /// <para>
 /// Small derived records are cached here: SurfaceTexture resolutions and Surface materials without bound (at most
@@ -45,6 +47,8 @@ public sealed class TextureLoader
     private readonly ConcurrentDictionary<uint, SurfaceTextureResolution?> _resolutionsHigh = new();
     private readonly ConcurrentDictionary<uint, SurfaceTextureResolution?> _resolutionsLow = new();
     private readonly ConcurrentDictionary<uint, SurfaceMaterial?> _surfaces = new();
+    private readonly ConcurrentDictionary<uint, uint> _originalPalettesHigh = new();
+    private readonly ConcurrentDictionary<uint, uint> _originalPalettesLow = new();
     private readonly LruCache<uint, PaletteData> _palettes;
 
     /// <summary>Creates a loader over <paramref name="dats"/>.</summary>
@@ -141,6 +145,47 @@ public sealed class TextureLoader
             var surface = _dats.Read(d => TryReadUncached<Surface>(d.Portal, id, out var s) ? s : null);
             return surface is null ? null : SurfaceMaterial.FromDat(id, surface);
         });
+
+    /// <summary>
+    /// The palette a Surface reports as its original (<c>CSurface::GetOriginalPaletteID</c>, 11.4186 0x005363F0; 11.6096
+    /// 0x00537130), which <c>CPhysicsPart::DetermineBasePal</c> uses to decide whether an ObjDesc palette applies to a
+    /// part. Cached per <paramref name="detail"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>CSurface::Serialize</c> (11.4186 0x005365F0) reads the stored palette id of a textured Surface, then
+    /// <c>CSurface::InitEnd</c> (11.4186 0x00536400; 11.6096 0x00537140) loads the texture and, when the resolved
+    /// RenderSurface carries a palette (INDEX16/P8), overwrites the id with that default palette. So the result is the
+    /// default palette of the RenderSurface <see cref="ResolveSurfaceTexture"/> picks for <paramref name="detail"/> when it
+    /// is indexed; otherwise the stored id (<see cref="SurfaceMaterial.OriginalPaletteId"/>, 0 on every end-of-retail
+    /// Surface); 0 for an untextured or missing Surface. A texture that does not resolve keeps the stored id, as a failed
+    /// load leaves it. The record is read into a pooled buffer, since its palette id follows the pixels.
+    /// </remarks>
+    public uint GetOriginalPaletteId(uint surfaceId, TextureDetail detail = TextureDetail.High)
+    {
+        var cache = detail == TextureDetail.High ? _originalPalettesHigh : _originalPalettesLow;
+        return cache.GetOrAdd(surfaceId, id =>
+        {
+            var material = GetSurface(id);
+            if (material is null || !material.IsTextured)
+            {
+                return 0;
+            }
+
+            var resolution = ResolveSurfaceTexture(material.SurfaceTextureId, detail);
+            if (resolution is null || !resolution.IsResolved)
+            {
+                return material.OriginalPaletteId;
+            }
+
+            if (ReadRecordPooled(resolution.RenderSurfaceId) is not { } read)
+            {
+                return material.OriginalPaletteId;
+            }
+
+            ArrayPool<byte>.Shared.Return(read.Buffer);
+            return RenderSurfaceDecoder.IsIndexed(read.Record.Format) ? read.Record.DefaultPaletteId : material.OriginalPaletteId;
+        });
+    }
 
     /// <summary>
     /// Reads and decodes a RenderSurface (high-res first). INDEX16/P8 use <paramref name="palette"/> when given,

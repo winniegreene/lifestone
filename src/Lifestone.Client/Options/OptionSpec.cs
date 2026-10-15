@@ -19,7 +19,10 @@ public enum OptionRole
     Help,
 }
 
-/// <summary>The scenes an option is read in (a run shows one of them; <see cref="OptionCatalog.SceneOf"/>).</summary>
+/// <summary>
+/// The scenes an option is read in: the game's (a run shows one of them; <see cref="OptionCatalog.SceneOf"/>) and the
+/// headless host, which is not a Godot scene but reads the same registry.
+/// </summary>
 [Flags]
 public enum OptionScenes
 {
@@ -35,7 +38,14 @@ public enum OptionScenes
     /// <summary>scenes/TerrainPreview.tscn (tools\terrain-golden.ps1).</summary>
     TerrainPreview = 4,
 
-    /// <summary>Every scene (also: a run whose scene is not one of the above, where no option is out of place).</summary>
+    /// <summary>
+    /// The headless session host (<c>dotnet Lifestone.Headless.dll</c>, src/Lifestone.Headless). Not part of
+    /// <see cref="All"/>: an option the headless host also reads says so with <see cref="OptionSpec.AlsoIn"/>, so the
+    /// game's rendering options (<c>--vsync</c> and the like) are reported there instead of silently ignored.
+    /// </summary>
+    Headless = 8,
+
+    /// <summary>Every Godot scene (also: a run whose scene is not one of the above, where no option is out of place).</summary>
     All = Main | SpellViewer | TerrainPreview,
 }
 
@@ -58,6 +68,6 @@ public sealed record OptionSpec(string Name, string? Value, string Help, OptionR
 /// <summary>The options of one feature (a track or a scene), registered together.</summary>
 /// <param name="Feature">Short feature name shown as the help section title.</param>
 /// <param name="Scope">Where the options apply, in words (every scene, the main scene, a scene switch).</param>
-/// <param name="Options">The options, in help order.</param>
+/// <param name="Options">The options, in help order; may be empty (a group registered before its owner adds options), and <c>--help</c> leaves such a group out.</param>
 /// <param name="Scenes">The scenes that read the group's options; in any other scene they are reported and ignored.</param>
 public sealed record OptionGroup(string Feature, string Scope, IReadOnlyList<OptionSpec> Options, OptionScenes Scenes = OptionScenes.All);

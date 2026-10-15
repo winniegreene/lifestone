@@ -35,7 +35,8 @@ Track: `src/Lifestone.Game/scripts/World/Interiors/`, `src/Lifestone.Client/Inte
 ## ACE files used
 
 - `Source/ACE.Server/Physics/Common/ObjCell.cs` (`find_cell_list`), `EnvCell.cs` (`find_transit_cells`, `check_building_transit`, `find_visible_child_cell`, `point_in_cell`), `BuildingObj.cs` (`find_building_transit_cells`), `CellStruct.cs` (`point_in_cell`): how a moving object changes cell, read alongside the retail functions.
-- `Source/ACE.Entity/CharacterPositionExtensions.cs`: the Holtburg start position (Training Academy, cell 0x860301AD).
+- `Source/ACE.Entity/CharacterPositionExtensions.cs`: the Holtburg start position M1 used (Training Academy, cell 0x860301AD: another location of the same start area, in landblock 0x8603).
+- `Source/ACE.Server/Factories/PlayerFactory.cs` (L356–362): a new character is placed at `CharGen.StarterAreas[startArea].Locations[0]`, which the portal dat gives as cell 0x860201AD for the Holtburg area. `InteriorLocations.TrainingAcademy` has used it since M2 (step ST12).
 - `Source/ACE.Common/GameConfiguration.cs`: landblock 0x0007 is "Town Network".
 - `Source/ACE.Server/Physics/PhysicsGlobals.cs` `FloorZ` (through the cells track's `CellStructure.Floors`).
 

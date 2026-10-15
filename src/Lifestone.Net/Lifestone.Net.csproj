@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The AC network protocol (M2 net track): the reliable UDP transport, the session (handshake, DDD, login, world entry)
+    and the message codecs, spoken to the bundled ACE on localhost only. BCL only: no PackageReference and no
+    ProjectReference (Lifestone.Client references this project, never the reverse), no Godot. The only project that may
+    open a socket, and every endpoint goes through the loopback gate first.
+    TargetFramework / Nullable / LangVersion come from ../../Directory.Build.props.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Lifestone.Net</RootNamespace>
+    <AssemblyName>Lifestone.Net</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lifestone.Net.Tests" />
+    <InternalsVisibleTo Include="Lifestone.Loopback.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Lifestone.Client.Tests;
 
 namespace Lifestone.Data.Tests.TerrainRender;
 
@@ -53,17 +54,7 @@ public sealed partial class TerrainShaderGlobalsTests
     private static string Code(string source) =>
         string.Join('\n', source.Split('\n').Select(l => l.Contains("//", StringComparison.Ordinal) ? l[..l.IndexOf("//", StringComparison.Ordinal)] : l));
 
-    private static string RepoFile(params string[] parts)
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Lifestone.slnx")))
-        {
-            dir = dir.Parent;
-        }
-
-        Assert.NotNull(dir);
-        return Path.Combine([dir!.FullName, .. parts]);
-    }
+    private static string RepoFile(params string[] parts) => RepositoryFiles.PathOf(parts);
 
     [GeneratedRegex(@"(?m)^(\w+)=\{\s*""type"":\s*""(\w+)""")]
     private static partial Regex ProjectGlobals();

@@ -20,4 +20,13 @@
     <ProjectReference Include="..\..\src\Lifestone.Data\Lifestone.Data.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      tests/Shared (tests/Shared/README.md), Data-level part: the dats gates and DatSetFixture, RepositoryFiles,
+      AllocationMeasurement, ManualTimeProvider. This project does not reference Lifestone.Client, so it links neither
+      Shared/Client/** nor Shared/Loopback/**.
+    -->
+    <Compile Include="..\Shared\**\*.cs" Exclude="..\Shared\Client\**;..\Shared\Loopback\**" LinkBase="Shared" />
+  </ItemGroup>
+
 </Project>

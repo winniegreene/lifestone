@@ -34,10 +34,10 @@ What Lifestone is not:
 | Milestone | State | What it brings |
 |---|---|---|
 | **M1: Explore Dereth** | **Done** | The whole world, rendered from your dats, to fly and walk through |
-| **M2: Log in** | Next | Log in to the local ACE server: your character, movement, server-spawned objects |
-| Core gameplay | Planned | Combat, magic, inventory, NPCs, vendors and quests, with ACE as the authority |
+| **[M2: Log in](docs/milestones/m2-log-in.md)** | In progress | Log in to the local ACE server, in the retail interface and through retail portal space: your character, movement, server-spawned objects |
+| Core gameplay | Planned | Combat, magic, inventory, NPCs, vendors and quests, with ACE as the authority and their retail panels |
 | Built-in automation | Planned | Auto-buffing, then AFK dungeon hunting and looting ([automation vision](docs/automation-vision.md)) |
-| Polish | Planned | Game UI, audio, packaging |
+| Polish | Planned | Audio, the remaining UI, packaging |
 
 **Today** you can fly or walk anywhere in Dereth, at any time of day, into building interiors and down into
 dungeons, and watch any spell in the game cast in the spell viewer.
@@ -163,6 +163,17 @@ off-screen runs, timeouts).
 
 The time panel (bottom right) sets the time of day and its speed.
 
+**In the game (`--play`, the retail shell)**
+
+| Input | Action |
+|---|---|
+| `F7` | Lifestone's tools panel: Places (search and teleport), Where am I, Add XP (needs the bundled server with the Lifestone mod) |
+| `Scroll Lock` | Lifestone's automation inspector (read-only) |
+| `Shift`+`Esc` | Log off (retail's End Character Session) |
+| `F3` / `F1` | Performance overlay / About |
+
+`F7` and `Scroll Lock` are keys retail's default key map leaves unbound (`docs/retail-ui.md` section 22.1).
+
 **In the spell viewer**
 
 | Input | Action |
@@ -186,6 +197,7 @@ The time panel (bottom right) sets the time of day and its speed.
 | `--vsync=off --max-fps=0` | Uncapped frame rate, for benchmarking (with `--vsync=off` alone the cap is the display's refresh rate) |
 | `--load-radius=N` | Landblock rings to stream around you (default 8, as retail) |
 | `--retail-normals`, `--retail-sky-anchor` | Restore retail's rendering quirks (see [Principles](#principles)) |
+| `--retail-picking` | Retail's picking rules in play mode: a part's first hit polygon and per-part hit times, where a click can pick a different object than the nearest ([avatars.md](docs/avatars.md) section 18) |
 | `--dat-dir=DIR` | Read the dats from another folder |
 
 ## How it works
@@ -197,7 +209,7 @@ flowchart LR
         data["Lifestone.Data<br/>dat decoding, retail algorithms"]
         client["Lifestone.Client<br/>engine-agnostic client logic"]
         game["Lifestone.Game<br/>Godot presentation"]
-        net["Lifestone.Net (M2, planned)<br/>protocol, session, game state"]
+        net["Lifestone.Net (M2, in progress)<br/>protocol and session"]
     end
     subgraph server ["Local server (from M2)"]
         ace["ACEmulator<br/>game rules"]
@@ -216,15 +228,17 @@ flowchart LR
 - **Lifestone.Data** (`src/Lifestone.Data`, no engine) reads the dats read-only through Chorizite DatReaderWriter and
   holds every decoder and retail algorithm: textures, models, terrain blending, scenery placement, cells and portals,
   animation, particle effects and spells. It produces plain data in AC's own coordinates.
-- **Lifestone.Client** (`src/Lifestone.Client`, no engine, no I/O) decides what to load, where things are and which
+- **Lifestone.Client** (`src/Lifestone.Client`, no engine, no sockets, no file I/O) decides what to load, where things are and which
   retail render state applies: streaming and the floating origin, the worker pool and frame budget, caches, object
   LOD, living statics, interior visibility, the sky, navigation and the option registry. Because none of it depends on
   Godot, it is unit-tested directly and the engine stays replaceable.
 - **Lifestone.Game** (`src/Lifestone.Game`, Godot 4.7.2 .NET) is presentation only: nodes, meshes, materials, shaders
   and panels. AC's Z-up world becomes Godot's Y-up world in exactly one place, `scripts/Core/AcToGodot.cs`, which also
   reverses the triangle winding.
-- **Lifestone.Net** (M2, planned) will hold the AC network protocol, login and the game-state model, again with no
-  engine dependency ([protocol](docs/protocol.md)).
+- **Lifestone.Net** (M2, in progress) will hold the AC network protocol: the transport, the login session and the
+  message codecs, again with no engine dependency ([protocol](docs/protocol.md)). The game-state model that the UI,
+  the automation and the tests drive goes in Lifestone.Client, which uses Lifestone.Net's records but opens no
+  sockets.
 - **The server** (`server/`, from M2) builds ACEmulator from source at a pinned release, unpacks a portable MariaDB,
   loads the pinned ACE world database and runs both as the current user on 127.0.0.1. AC was server-authoritative, so
   this is where the game rules live. See [server/README.md](server/README.md).
@@ -250,16 +264,18 @@ flowchart LR
 ## Repository layout
 
 ```text
-Lifestone.slnx          the solution: three projects and their tests
+Lifestone.slnx          the solution: five projects and their tests
 Directory.Build.props   shared build settings (net10.0, nullable, warnings as errors)
 global.json             .NET SDK pin
 NuGet.config            packages from nuget.org only
 src/Lifestone.Data/     dat decoding and retail algorithms (no engine)
-src/Lifestone.Client/   engine-agnostic client logic (no engine, no I/O)
+src/Lifestone.Client/   engine-agnostic client logic and, from M2, the game-state session layer (no engine, no file I/O)
+src/Lifestone.Net/      the AC network protocol: transport, session, message codecs (M2, in progress)
+src/Lifestone.Headless/ a console host that plays a session without Godot (M2, in progress)
 src/Lifestone.Game/     the Godot project: scenes, scripts, shaders
-tests/                  xUnit tests for Lifestone.Data and Lifestone.Client
+tests/                  xUnit tests: Data, Client, Net, the server mod, and the loopback tests that need the local server
 server/                 the localhost ACE and MariaDB backend (setup, start, stop)
-tools/                  godot.ps1 launcher, smoke.ps1 suite, terrain-golden.ps1, hero-video.ps1, Python helpers
+tools/                  godot.ps1 launcher, play.ps1 (the backend and the game in one command), smoke.ps1 suite, terrain-golden.ps1, hero-video.ps1, Python helpers
 docs/                   design docs, milestones, research notes and third-party sources
 client/                 your retail dats (you create it; ignored by git)
 ```
@@ -278,7 +294,7 @@ $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = 'false'; $env:DOTNET_GENERATE_ASPNET_CERT
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'; $env:DOTNET_NOLOGO = '1'
 
 dotnet build Lifestone.slnx --disable-build-servers
-dotnet test Lifestone.slnx --disable-build-servers
+dotnet test Lifestone.slnx --disable-build-servers --filter "Category!=Loopback&Tier!=Soak"
 ```
 
 Or in Git Bash:
@@ -287,19 +303,47 @@ Or in Git Bash:
 export DOTNET_ROOT="$(cygpath -u "$LOCALAPPDATA")/Microsoft/dotnet"; export PATH="$DOTNET_ROOT:$PATH"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_ADD_GLOBAL_TOOLS_TO_PATH=false DOTNET_GENERATE_ASPNET_CERTIFICATE=false
 dotnet build Lifestone.slnx --disable-build-servers
-dotnet test Lifestone.slnx --disable-build-servers
+dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&Tier!=Soak'
 ```
 
 - The build treats every warning as an error, with the analysers pinned to the .NET 10 defaults. Packages come from
   nuget.org only (`NuGet.config`), and new ones are added deliberately.
 - Tests that need the retail dats are reported as skipped, not failed, when the files are missing.
 - `--disable-build-servers` keeps MSBuild and compiler servers from lingering after a build.
+- **Test categories (from M2).** Tests that need the local server carry `[Trait("Category","Loopback")]` and live in
+  `tests/Lifestone.Loopback.Tests`; they skip, with the reason, unless the backend is running with the Lifestone
+  server mod ready. Long soaks and fuzz runs carry `[Trait("Tier","Soak")]`. The `--filter` in the commands above
+  leaves both out, as the smoke suite's test step does; without it the soaks run too (minutes, not seconds). With the
+  backend running ([server/README.md](server/README.md)), `--filter "Category=Loopback&Tier!=Soak"` runs
+  the loopback tests, and `--filter "Tier=Soak"` runs the soaks.
+
+### Slice check
+
+- `pwsh -File tools\slice-check.ps1 -MinTests <count> -Steps <steps> [-Smoke] [-Rerun]` checks a slice in one command and
+  prints one line per stage, `[slicecheck] <stage> PASS|FAIL|SKIP <detail> (<seconds>s)`, then `[slicecheck] done ok=true|false`
+  (exit 0 or 1). Stages: `build` (warning and error counts), `test` (the default `dotnet test`, with the passed count per
+  assembly; `-MinTests` fails it when fewer passed), each Godot step of `-Steps` (run through `smoke.ps1 -Only <step>
+  -NoBuild -Backend auto`, so the command lines live in smoke only; `retail-ui-checks` is an alias of smoke's `retail-ui`)
+  and, with `-Smoke`, the whole smoke suite. `-Stages build,test` runs a subset; `-Rerun` reruns a failed Godot step once
+  (`PASS (rerun)`). A FAIL prints at most 15 lines of the failure and the log path; full logs are in `cache\slice-check\`.
+  It never starts the backend (`-Backend` accepts only `auto`).
+- **Window size.** Every Godot check and frame run (`play-checks`, `retail-ui`, `shell-frames`, `login-check`, `login`) is at retail's
+  native 800x600 (the owner's rule, 2026-10-14: several resolutions are a polish step at the end of the project). `-AllSizes` (on
+  `slice-check.ps1` and `smoke.ps1`) is the opt-in that adds 1920x1080 and 2560x1440; `LIFESTONE_ALL_SIZES=1` runs the one Client
+  placement test at 1920x1080. Not run by default.
 
 ### Smoke suite and golden viewpoints
 
 - `pwsh -File tools\smoke.ps1` is the integration suite: the build, the tests, `--help`, the terrain golden test,
   the four engine check suites, a spell-viewer showcase, the golden viewpoints and the Holtburg-to-Arwic flight, all
   off-screen, with a summary table and logs in `cache\smoke\`. It needs the dats and Godot.
+- **The backend in smoke runs (from M2).** A step that cannot run reports `SKIP` (yellow), which is not a failure.
+  `-Backend` decides what the steps that need the local server do:
+  - `auto` (the default) runs them only when the backend is already up, and never starts it;
+  - `start` starts the backend, then stops what it started;
+  - `require` fails them instead of skipping them when the backend is down.
+  - The `login-throwaway` step (`--login-check=throwaway`, docs/session.md section 28) creates, uses, deletes and purges a character on the test account. It is not part of
+    `--login-check=all` and runs only under `-Backend require` (skipped under `auto` and `start`).
 - The golden viewpoints render to `docs/screenshots/m1/golden/` (ignored by git) with the positions and times needed
   to take the same views in the retail client:
 
@@ -315,6 +359,8 @@ dotnet test Lifestone.slnx --disable-build-servers
   - [Goals](docs/goals.md): single-player fidelity, built-in automation, machine safety, data
   - [Automation vision](docs/automation-vision.md): built-in automation, from auto-buffing to AFK hunting
   - [M1: Explore Dereth](docs/milestones/m1-explore-dereth.md): the first milestone, with its status and evidence
+  - [M2: Log in](docs/milestones/m2-log-in.md): the current milestone, including retail portal space and the retail UI
+  - [M2 implementation plan](docs/milestones/m2-plan.md): tracks, owners, contracts, merge order and gates
   - [Protocol](docs/protocol.md): the AC network protocol as ACE implements it, for M2
   - [Local server](server/README.md): setting up and running ACE and MariaDB on 127.0.0.1
 - **Data layer**
@@ -345,6 +391,7 @@ Issues and pull requests are welcome. Contributions are made under the repositor
   behaviour that differs from retail on purpose is documented and has a flag that restores retail.
 - **Keep it green:** zero warnings, `dotnet test` passing, and `tools\smoke.ps1` for anything that touches rendering
   or streaming.
+- **Coding agents** follow [`CLAUDE.md`](CLAUDE.md): machine safety, privacy and the current milestone.
 
 ## FAQ
 
@@ -384,7 +431,7 @@ Lifestone builds on these works, which keep their own licenses:
 |---|---|---|
 | ACEmulator (ACE) | AGPL-3.0 | the bundled server; game rules and algorithms ported from its source |
 | ACE-World-16PY-Patches | AGPL-3.0 | the world database: places, portals and spell visuals |
-| OpenAC | MIT | terrain blending code (TexMerge) |
+| OpenAC | MIT | terrain blending code (TexMerge); network transport and message codecs |
 | Chorizite DatReaderWriter | MIT | reading the dat files |
 | WorldBuilder | MIT | landscape and terrain blending reference |
 | ACViewer | GPL-3.0 | terrain blending, named locations and test oracles |
@@ -416,7 +463,7 @@ Lifestone stands on the work of the Asheron's Call community:
   [world database](https://github.com/ACEmulator/ACE-World-16PY-Patches) and years of work recovering how AC behaves;
 - [Chorizite](https://github.com/Chorizite), for [DatReaderWriter](https://github.com/Chorizite/DatReaderWriter) and
   [WorldBuilder](https://github.com/Chorizite/WorldBuilder);
-- [OpenAC](https://github.com/eriknihlen/OpenAC), for its terrain blending;
+- [OpenAC](https://github.com/eriknihlen/OpenAC), for its terrain blending, network transport and message codecs;
 - [ACViewer](https://github.com/ACEmulator/ACViewer), for terrain blending, named locations and test oracles;
 - [Mag-nus/acclient-AI-RE](https://github.com/Mag-nus/acclient-AI-RE), for documenting the retail client;
 - the [Godot Engine](https://godotengine.org) contributors;

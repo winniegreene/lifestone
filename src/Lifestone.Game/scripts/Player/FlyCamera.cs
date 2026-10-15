@@ -74,8 +74,45 @@ public partial class FlyCamera : Node3D, IStreamingFocusSource
 
     public bool WalkMode { get; set; }
 
-    /// <summary>False while something else (the fly-path runner) drives the camera.</summary>
-    public bool InputEnabled { get; set; } = true;
+    private bool _inputEnabled = true;
+
+    /// <summary>
+    /// False while something else (the fly-path runner, a text field that has focus) drives the camera or holds its input. Reads
+    /// the effective state: also false while <see cref="InputSuspended"/> or <see cref="InputHeldByRetailUi"/>. Writes set the owner's
+    /// own flag, which a suspension or the retail UI's hold does not disturb.
+    /// </summary>
+    public bool InputEnabled
+    {
+        get => _inputEnabled && !InputSuspended && !InputHeldByRetailUi;
+        set => _inputEnabled = value;
+    }
+
+    /// <summary>
+    /// True while a retail UI text field has the keyboard (<c>RetailUiLayer.KeyboardCapturedChanged</c>): the retail UI's own hold, apart
+    /// from <see cref="InputEnabled"/>'s writers (the teleport panel's typing flag, the tools' runners) and <see cref="InputSuspended"/>,
+    /// so releasing it never releases another owner's hold.
+    /// </summary>
+    public bool InputHeldByRetailUi { get; set; }
+
+    /// <summary>
+    /// True while portal space is busy (retail's <c>teleportInProgress</c>): the camera ignores the keys and the mouse, so the hidden
+    /// camera cannot fly and move the readiness destination under the wait. Independent of <see cref="InputEnabled"/>'s writers (the
+    /// teleport panel's typing flag), so neither releases the other's hold.
+    /// </summary>
+    public bool InputSuspended { get; set; }
+
+    /// <summary>
+    /// True while the chase camera (<c>ChaseCamera</c>, M2 G5) drives this camera: the keys, the mouse and the walk-mode clamp of M1's free flight do
+    /// nothing, and the camera's pose is whatever the driver sets. <see cref="InputEnabled"/> is left alone, so the panels' typing flag and the other
+    /// tools' keys (T, F3, F7, F9) work as in M1.
+    /// </summary>
+    public bool Driven { get; set; }
+
+    /// <summary>
+    /// Play mode (<c>--play</c>, M2 G6; owner decision D41): M1's free-camera keys do nothing, as before there is a player to drive the camera. Tab (mouse
+    /// capture), Escape and F (walk mode) are dropped with the flight keys and the mouse look; the tool keys that belong to other nodes (F1, F3) stay.
+    /// </summary>
+    public bool Locked { get; set; }
 
     /// <summary>Speed actually used in the last frame (m/s).</summary>
     public double CurrentSpeed { get; private set; }
@@ -131,7 +168,7 @@ public partial class FlyCamera : Node3D, IStreamingFocusSource
             AddChild(Camera);
         }
 
-        Camera.Fov = 60f;
+        Camera.Fov = (float)(GameServices.Instance.Options.Fov ?? GameOptions.DefaultFov); // --fov (default 60)
         Camera.Near = 0.1f;
         Camera.Far = 6000f;
         Camera.Current = true;
@@ -139,8 +176,19 @@ public partial class FlyCamera : Node3D, IStreamingFocusSource
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (Driven || Locked)
+        {
+            return;
+        }
+
         if (!InputEnabled)
         {
+            if (_looking && @event is InputEventMouseButton { ButtonIndex: MouseButton.Right, Pressed: false })
+            {
+                _looking = false; // a mouse-look that was held when input stopped must not outlast the button
+                UpdateCapture();
+            }
+
             return;
         }
 
@@ -184,7 +232,7 @@ public partial class FlyCamera : Node3D, IStreamingFocusSource
 
     public override void _Process(double delta)
     {
-        if (InputEnabled)
+        if (InputEnabled && !Driven && !Locked)
         {
             Move(delta);
         }

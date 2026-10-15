@@ -91,9 +91,22 @@ public sealed class SurfaceShaders
         return compiled;
     }
 
+    /// <summary>
+    /// The global the vertex stage takes N.L against: <c>ac_sun_dir</c> (towards the sun), or creature mode's own
+    /// <see cref="SurfaceLightingCode.CreatureLightDirection"/> (towards its distant light).
+    /// </summary>
+    public static string LightDirectionName(SurfaceLighting lighting) =>
+        lighting == SurfaceLighting.CreatureMode ? SurfaceLightingCode.CreatureLightDirection : RenderGlobals.SunDirection;
+
     /// <summary>The Godot shading-language source of a variant (pure; testable without the engine).</summary>
     public static string GenerateCode(SurfaceShaderVariant v)
     {
+        if (v.Lighting == SurfaceLighting.CreatureMode && (v.Fog || v.Detail != SurfaceDetail.None))
+        {
+            throw new InvalidOperationException(
+                $"TODO(render): variant {v.Name} asks for fog or a detail pass creature mode never draws; build it with SurfaceShaderVariant.WithLighting(CreatureMode).");
+        }
+
         var modes = new List<string> { "unshaded", "fog_disabled", "specular_disabled", "shadows_disabled" };
         modes.Add(v.Cull == SurfaceCull.Back ? "cull_back" : "cull_disabled");
         switch (v.Blend)
@@ -124,7 +137,15 @@ public sealed class SurfaceShaders
         sb.AppendLine($"render_mode {string.Join(", ", modes)};");
         sb.AppendLine();
         sb.AppendLine(RenderGlobals.ShaderDeclarations);
-        if (v.Lighting != SurfaceLighting.Object)
+        if (v.Lighting == SurfaceLighting.CreatureMode)
+        {
+            sb.AppendLine(SurfaceLightingCode.CreatureModeDeclarations); // M2 portal view: creature mode's own light and ambient
+        }
+        else if (v.Lighting == SurfaceLighting.DynamicCellObject)
+        {
+            sb.AppendLine(SurfaceLightingCode.Declarations(v.Lighting)); // M2 moving objects in cells: the cell machinery and the light sets
+        }
+        else if (v.Lighting is not (SurfaceLighting.Object or SurfaceLighting.DynamicObject))
         {
             sb.AppendLine(SurfaceLightingCode.ShaderDeclarations); // interiors extension (docs/interiors.md §4)
         }
@@ -158,6 +179,12 @@ public sealed class SurfaceShaders
         sb.AppendLine("uniform float alpha_ref = 200.0;        // D3DRS_ALPHAREF, GREATEREQUAL");
         sb.AppendLine();
         sb.AppendLine("varying vec3 v_light;");
+        var instanceAlpha = SurfaceLightingCode.IsDynamic(v.Lighting) && v.Blend != SurfaceBlend.Opaque;
+        if (instanceAlpha)
+        {
+            sb.AppendLine("varying float v_instance_alpha;   // 1 - the instance's translucency (INSTANCE_CUSTOM.w) on blended surfaces");
+        }
+
         if (v.Fog)
         {
             sb.AppendLine("varying float v_fog;");
@@ -169,15 +196,28 @@ public sealed class SurfaceShaders
         sb.AppendLine("\tfloat n_dot_l = 0.0;");
         sb.AppendLine("\t// CUSTOM0.x = 1 marks a zero AC normal (MeshFactory); NORMAL cannot, it is octahedral-encoded (always unit).");
         sb.AppendLine("\tif (CUSTOM0.x < 0.5) {");
-        sb.AppendLine("\t\tn_dot_l = max(dot(normalize(MODEL_NORMAL_MATRIX * NORMAL), ac_sun_dir), 0.0);");
+        sb.AppendLine($"\t\tn_dot_l = max(dot(normalize(MODEL_NORMAL_MATRIX * NORMAL), {LightDirectionName(v.Lighting)}), 0.0);");
         sb.AppendLine("\t}");
         if (v.Lighting == SurfaceLighting.Object)
         {
             sb.AppendLine("\tv_light = clamp(vec3(luminosity) + ac_ambient * diffuse + ac_sun_color * diffuse * n_dot_l, 0.0, 1.0);");
         }
+        else if (v.Lighting == SurfaceLighting.DynamicObject)
+        {
+            sb.Append(SurfaceLightingCode.DynamicObjectVertexLight); // M2 moving objects outdoors
+        }
+        else if (v.Lighting == SurfaceLighting.CreatureMode)
+        {
+            sb.Append(SurfaceLightingCode.CreatureModeVertexLight);
+        }
         else
         {
             sb.Append(SurfaceLightingCode.VertexLight(v.Lighting)); // interiors extension (docs/interiors.md §4)
+        }
+
+        if (instanceAlpha)
+        {
+            sb.AppendLine("\tv_instance_alpha = 1.0 - clamp(INSTANCE_CUSTOM.w, 0.0, 1.0);");
         }
 
         if (v.Fog)
@@ -189,7 +229,7 @@ public sealed class SurfaceShaders
         sb.AppendLine("}");
         sb.AppendLine();
         sb.AppendLine("void fragment() {");
-        if (v.Lighting != SurfaceLighting.Object)
+        if (SurfaceLightingCode.IsCellRule(v.Lighting))
         {
             sb.Append(SurfaceLightingCode.FragmentPrologue()); // interiors extension (docs/interiors.md §3.4)
         }
@@ -204,7 +244,9 @@ public sealed class SurfaceShaders
             sb.AppendLine("\tvec4 texel = solid_color;");
         }
 
-        sb.AppendLine("\tfloat a = texel.a * material_alpha;   // TEXOP_MODULATE of texture and vertex alpha");
+        sb.AppendLine(instanceAlpha
+            ? "\tfloat a = texel.a * material_alpha * v_instance_alpha;   // TEXOP_MODULATE of texture and vertex alpha; the object's translucency"
+            : "\tfloat a = texel.a * material_alpha;   // TEXOP_MODULATE of texture and vertex alpha");
         if (v.AlphaTest)
         {
             // D3D compares the 8-bit alpha; round to the nearest byte before comparing.

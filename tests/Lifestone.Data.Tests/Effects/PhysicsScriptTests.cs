@@ -212,11 +212,14 @@ public sealed class PhysicsScriptTests(DatSetFixture fixture) : IClassFixture<Da
         Assert.True(fx.Scripts.IsIdle); // the FPHook has not reached 1.0 yet
 
         var playedAt = -1.0;
+        var events = new List<EffectEvent>();
         for (var i = 1; i <= 70 && playedAt < 0; i++)
         {
             var t = i / 60.0;
             fx.Update(t, AcFrame.Identity, []);
-            if (fx.DrainEvents().Any(e => e.Hook is SoundHook { SoundId: 55 }))
+            events.Clear();
+            fx.DrainEvents(events);
+            if (events.Any(e => e.Hook is SoundHook { SoundId: 55 }))
             {
                 playedAt = t;
             }

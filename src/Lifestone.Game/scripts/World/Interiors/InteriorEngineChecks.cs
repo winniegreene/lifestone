@@ -4,6 +4,7 @@ using Lifestone.Client.Rendering;
 using Lifestone.Data.Geometry;
 using Lifestone.Game.Core;
 using Lifestone.Game.Render;
+using Lifestone.Game.World.ServerObjects;
 using AcVector2 = System.Numerics.Vector2;
 using AcVector3 = System.Numerics.Vector3;
 
@@ -26,6 +27,12 @@ namespace Lifestone.Game.World.Interiors;
 /// buffer has instance blocks, an instance-uniform probe still gets its block; then, as a negative control, filling
 /// the buffer with instance-uniform instances makes the next probe lose its block (Godot prints its "Too many
 /// instances using shader instance variables" errors for those, as expected).</item>
+/// <item>The moving objects' variants (M2 W2-pre(c): <see cref="SurfaceLighting.DynamicObject"/> and
+/// <see cref="SurfaceLighting.DynamicCellObject"/>, MultiMesh instances through <see cref="DynamicObjectBatch"/>) read
+/// <c>INSTANCE_CUSTOM</c>: z overrides the luminosity, w scales the alpha of a blended surface (an instance with 0 is untouched),
+/// x is the cell's slot (a clipped slot discards outside its cone), and y is one plus a row of <c>ac_object_lights</c> whose
+/// lights are summed per vertex exactly as <see cref="CellObjectLighting.Light"/> sums them on the CPU for statics; a light out
+/// of reach adds nothing.</item>
 /// </list>
 /// </remarks>
 public partial class InteriorEngineChecks : Node
@@ -103,7 +110,7 @@ public partial class InteriorEngineChecks : Node
         });
 
         var shaders = new SurfaceShaders();
-        foreach (var lighting in new[] { SurfaceLighting.EnvCell, SurfaceLighting.CellObject })
+        foreach (var lighting in new[] { SurfaceLighting.EnvCell, SurfaceLighting.CellObject, SurfaceLighting.DynamicObject, SurfaceLighting.DynamicCellObject })
         {
             var code = SurfaceShaders.GenerateCode(Variant(lighting));
             Check(!code.Contains("instance uniform", StringComparison.Ordinal), $"the {lighting} variant declares no instance uniform", "none", code.Contains("instance uniform", StringComparison.Ordinal) ? "declared" : "none");
@@ -154,6 +161,7 @@ public partial class InteriorEngineChecks : Node
         Expect(image, 160, "indoor ambient on: cell shows CUSTOM1 + 0.1", 128);
         RenderingServer.GlobalShaderParameterSet(SurfaceLightingCode.IndoorAmbientOn, false);
 
+        await CheckDynamicObjects(viewport, shaders);
         await CheckInstanceBudget(viewport, envCell);
 
         viewport.QueueFree();
@@ -161,6 +169,96 @@ public partial class InteriorEngineChecks : Node
         Log.FlushFile();
         GetTree().Quit(_failures.Count == 0 ? 0 : 1);
     }
+
+    /// <summary>
+    /// The moving objects' variants through MultiMesh instances: the luminosity override, the translucency, the cell slot and the light
+    /// set (see the class remarks). The quads of the earlier checks are cleared first; the batches are freed at the end.
+    /// </summary>
+    private async Task CheckDynamicObjects(SubViewport viewport, SurfaceShaders shaders)
+    {
+        foreach (var node in viewport.GetChildren().OfType<MeshInstance3D>().ToArray())
+        {
+            node.QueueFree();
+        }
+
+        await Frames(2);
+        var table = new ObjectLightTable(4);
+        var near = table.Allocate();
+        var far = table.Allocate();
+
+        // The CPU's answer for statics (CellObjectLighting.Light) at the quad of x = 4, with the light 1 m in front of its centre (Godot z = +1,
+        // AC y = -1): per vertex, clamped, the same for the four corners by symmetry.
+        var nearLight = new CellLight(0, 0, AcVector3.Zero, new AcVector3(4f, -1f, 0f), new AcVector3(1f, 0.5f, 0.25f), 0.4f, 2f);
+        var quad = Quad(4f, 0f).SubMeshes[0];
+        var sums = new AcVector3[quad.Positions.Length];
+        CellObjectLighting.Light(quad.Positions, quad.Normals, [nearLight], sums);
+        var lit = new Color8(
+            (int)Math.Round((0.2 + sums[0].X) * 255.0),
+            (int)Math.Round((0.2 + sums[0].Y) * 255.0),
+            (int)Math.Round((0.2 + sums[0].Z) * 255.0));
+        Span<ObjectLight> set = stackalloc ObjectLight[ObjectLightSets.MaxLights];
+        var count = ObjectLightSets.Select(new AcVector3(4f, 0f, 0f), 1f, [nearLight], set);
+        Check(count == 1, "ObjectLightSets.Select keeps the light that reaches the sphere", "1", count.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var godot = AcToGodot.Position(set[0].Position);
+        set[0] = set[0] with { Position = new AcVector3(godot.X, godot.Y, godot.Z) };
+        table.Write(near, set, count);
+        Span<ObjectLight> farSet = [set[0] with { Reach = 0.5f }];
+        table.Write(far, farSet, 1);
+        // No Flush here on purpose: the table uploads itself before the next draw, as it does in the game (M2 5b b0: the game never called Flush, so
+        // the rows never reached the GPU while this check, which flushed by hand, passed). The quads below read the rows only if that upload happens.
+
+        var plain = DynamicVariant(SurfaceLighting.DynamicObject);
+        var blended = DynamicVariant(SurfaceLighting.DynamicObject, SurfaceBlend.Mix);
+        var inCell = DynamicVariant(SurfaceLighting.DynamicCellObject);
+        var batches = new List<DynamicObjectBatch>
+        {
+            DynamicQuad(viewport, shaders, plain, -8f, default),
+            DynamicQuad(viewport, shaders, plain, -6f, new Vector4(0f, 0f, 0.25f, 0f)),
+            DynamicQuad(viewport, shaders, blended, -4f, new Vector4(0f, 0f, 0f, 1f)),
+            DynamicQuad(viewport, shaders, blended, -2f, default),
+            DynamicQuad(viewport, shaders, blended, 0f, new Vector4(0f, 0f, 0f, 0.5f)),
+            DynamicQuad(viewport, shaders, inCell, 2f, default),
+            DynamicQuad(viewport, shaders, inCell, 4f, new Vector4(0f, near + 1f, 0f, 0f)),
+            DynamicQuad(viewport, shaders, inCell, 6f, new Vector4(0f, far + 1f, 0f, 0f)),
+            DynamicQuad(viewport, shaders, inCell, 8f, new Vector4(ClippedSlot, 0f, 0f, 0f)),
+        };
+        await Frames(4);
+        Check(table.Uploads >= 1, "the light table uploads its rows itself before a draw (no caller flushes it)", ">= 1", table.Uploads.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var image = viewport.GetTexture().GetImage();
+        Expect(image, 32, "DynamicObject, plain instance: sun and ambient as an outdoor object (0.2 + 0.5)", 178);
+        Expect(image, 96, "DynamicObject, INSTANCE_CUSTOM.z = 0.25 overrides the luminosity: 0.25 + 0.2 + 0.5", 242);
+        ExpectColor(image, 160, "DynamicObject blended, translucency 1: nothing drawn (background)", new Color8(0, 128, 0));
+        Expect(image, 224, "DynamicObject blended, translucency 0: as the plain instance", 178);
+        var half = image.GetPixel(288, ViewportSize.Y / 2);
+        Check(half.R8 > 20 && half.R8 < 170, "DynamicObject blended, translucency 0.5: between the object and the background", "20 < R < 170", $"({half.R8}, {half.G8}, {half.B8})");
+        Expect(image, 352, "DynamicCellObject, plain instance: no sun, the world ambient (0.2)", 51);
+        ExpectColor(image, 416, "DynamicCellObject with a light set: ambient + the lights summed per vertex, as CellObjectLighting.Light does on the CPU", lit);
+        Expect(image, 480, "DynamicCellObject whose light set holds a light out of reach: ambient only (0.2)", 51);
+        ExpectColor(image, 544, "DynamicCellObject with a clipped slot (INSTANCE_CUSTOM.x), outside its doorway cone: discarded (background)", new Color8(0, 128, 0));
+
+        foreach (var batch in batches)
+        {
+            batch.Dispose();
+        }
+
+        table.Dispose();
+        await Frames(2);
+    }
+
+    private static DynamicObjectBatch DynamicQuad(SubViewport viewport, SurfaceShaders shaders, SurfaceShaderVariant variant, float centreX, Vector4 custom)
+    {
+        var material = new ShaderMaterial { Shader = shaders.Get(variant) };
+        material.SetShaderParameter("solid_color", Colors.White);
+        var mesh = MeshFactory.Build(MeshFactory.Prepare(Quad(centreX, 0f)), _ => material);
+        var batch = new DynamicObjectBatch(viewport, $"Dynamic_{centreX}", 1u) { Mesh = mesh };
+        batch.Begin(1);
+        batch.Add(Transform3D.Identity, custom, mesh.GetAabb());
+        batch.End();
+        return batch;
+    }
+
+    private static SurfaceShaderVariant DynamicVariant(SurfaceLighting lighting, SurfaceBlend blend = SurfaceBlend.Opaque) =>
+        new(blend, false, blend == SurfaceBlend.Opaque, SurfaceCull.None, TextureAddressMode.Clamp, Textured: false, Fog: false, lighting);
 
     /// <summary>
     /// The cell variants take no blocks of the global shader-uniform buffer (finding: the old instance uniforms ran out

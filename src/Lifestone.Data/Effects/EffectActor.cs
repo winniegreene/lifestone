@@ -9,9 +9,10 @@ namespace Lifestone.Data.Effects;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="AdvanceTo"/> re-expresses <c>CPhysicsObj::update_object</c> (acclient 11.4186 PORTAL/cphysobj/CPhysicsObj.c):
-/// elapsed times ≤ ε or &gt; 2 s are skipped (the clock jumps), longer gaps are split into quanta of at most
-/// <see cref="MaxQuantum"/> (0.2 s), and a final remainder ≤ <see cref="MinQuantum"/> (1/30 s) is carried to the next call.
+/// <see cref="AdvanceTo"/> re-expresses <c>CPhysicsObj::update_object</c> (acclient 11.4186 PORTAL/cphysobj/CPhysicsObj.c)
+/// through <see cref="ObjectClock"/>: elapsed times ≤ ε or &gt; 2 s are skipped (the clock jumps), longer gaps are split
+/// into quanta of at most <see cref="MaxQuantum"/> (0.2 s), and a final remainder ≤ <see cref="MinQuantum"/> (1/30 s) is
+/// carried to the next call.
 /// </para>
 /// <para>
 /// Each quantum (<c>UpdateObjectInternal</c> → <c>UpdatePositionInternal</c>): the animation sequence advances and
@@ -25,12 +26,16 @@ namespace Lifestone.Data.Effects;
 /// </remarks>
 public sealed class EffectActor
 {
-    public const double MaxQuantum = 1.0 / 5.0;
-    public const double MinQuantum = 1.0 / 30.0;
+    /// <summary>Largest step in seconds (<see cref="ObjectClock.MaxQuantum"/>).</summary>
+    public const double MaxQuantum = ObjectClock.MaxQuantum;
+
+    /// <summary>Remainder carried to the next call (<see cref="ObjectClock.MinQuantum"/>).</summary>
+    public const double MinQuantum = ObjectClock.MinQuantum;
+
     private const double Epsilon = 0.00019999999;
 
     private readonly AcFrame[] _partFrames;
-    private double _updateTime;
+    private readonly ObjectClock _clock;
 
     public EffectActor(EffectObject effects, IPoseDriver? motion, int partCount, AcFrame frame, float scale, double now)
     {
@@ -39,7 +44,7 @@ public sealed class EffectActor
         Frame = frame;
         Scale = scale;
         _partFrames = new AcFrame[partCount];
-        _updateTime = now;
+        _clock = new ObjectClock(now);
         PoseParts();
         Effects.SetPlacement(now, Frame, _partFrames);
     }
@@ -68,7 +73,7 @@ public sealed class EffectActor
     public bool AlignPath { get; set; }
 
     /// <summary>The clock value of the last processed quantum.</summary>
-    public double UpdateTime => _updateTime;
+    public double UpdateTime => _clock.UpdateTime;
 
     /// <summary>Current world frames of the parts.</summary>
     public ReadOnlySpan<AcFrame> PartFrames => _partFrames;
@@ -76,36 +81,10 @@ public sealed class EffectActor
     /// <summary>Advances the object to <paramref name="now"/> (seconds on the caller's clock).</summary>
     public void AdvanceTo(double now)
     {
-        var dt = now - _updateTime;
-        if (dt <= Epsilon || dt > 2.0)
+        foreach (var (quantum, time) in _clock.Advance(now))
         {
-            _updateTime = now;
-            return;
+            UpdateObjectInternal(quantum, time);
         }
-
-        var time = _updateTime;
-        if (dt > MaxQuantum)
-        {
-            while (dt > MaxQuantum)
-            {
-                time += MaxQuantum;
-                UpdateObjectInternal(MaxQuantum, time);
-                dt -= MaxQuantum;
-            }
-
-            if (dt > MinQuantum)
-            {
-                time += dt;
-                UpdateObjectInternal(dt, time);
-            }
-        }
-        else
-        {
-            time += dt;
-            UpdateObjectInternal(dt, time);
-        }
-
-        _updateTime = time;
     }
 
     private void UpdateObjectInternal(double quantum, double time)
@@ -116,9 +95,10 @@ public sealed class EffectActor
             var update = Motion.Update(quantum);
             offset = update.RootMotion;
             offset = offset with { Origin = offset.Origin * (OnGround ? Scale : 0f) };
-            foreach (var hook in update.Hooks)
+            var hooks = update.Hooks;
+            for (var i = 0; i < hooks.Count; i++)
             {
-                Effects.QueueAnimHook(hook);
+                Effects.QueueAnimHook(hooks[i]);
             }
         }
 

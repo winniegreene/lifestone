@@ -18,10 +18,15 @@ namespace Lifestone.Client.Interiors;
 /// clamps the sum (material diffuse is the white vertex colour, <c>copyVert</c>).</para>
 /// <para>With intensities of 20-100 that saturates almost everywhere a light reaches: the sides of an object that face a
 /// torch show their full texture colour, the other sides only the ambient.</para>
-/// <para><b>Uncertain detail.</b> The decompiler lost the comparison in <c>minimize_object_lighting</c>'s static-light
-/// test (and in <c>Render::remove_object_light</c> for dynamic lights): it compares the light's distance from the
-/// sphere centre with <c>falloff + radius</c>. Lifestone keeps a light when the distance is at most that sum (a light
-/// whose reach does not touch the sphere could not light it anyway).</para>
+/// <para><b>Uncertain detail, named: <c>TODO(interiors-light-reach)</c>.</b> The decompiler lost the comparison in
+/// <c>minimize_object_lighting</c>'s static-light test (and in <c>Render::remove_object_light</c> for dynamic lights). Both builds'
+/// decompiles (11.4186 and 11.6096, <c>Render::minimize_object_lighting</c> 0x0054E090, <c>Render::remove_object_light</c>
+/// 0x0054CDC0) show the same thing: the sum <c>falloff + radius</c> is formed, and the test's result is only the x87 condition flags
+/// of a comparison whose operands are not shown. Lifestone keeps a light when the distance from the sphere centre is at most
+/// <c>falloff + radius</c> (a light whose reach does not touch the sphere could not light it anyway). Note what that rule does:
+/// the hardware light's own range is <c>falloff × 1.5</c>, so a light between <c>falloff + radius</c> and
+/// <c>falloff × 1.5 + radius</c> away would light the object if it were enabled, and under this rule it is not. A byte read of the
+/// function in the owner's <c>acclient.exe</c> (docs/research/retail-addresses-m2.md §3.1) would settle the operands.</para>
 /// <para><b>Lifestone</b> computes this on the CPU once per object part (the objects never move) and hands the clamped
 /// sum to the shader as a vertex attribute; the light list is the one <see cref="CellStaticLighting.SelectFor"/> gives
 /// for the object's cell (see there for how that approximates retail's per-viewer list).</para>

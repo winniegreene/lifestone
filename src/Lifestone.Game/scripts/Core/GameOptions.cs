@@ -1,6 +1,8 @@
 using Godot;
 using Lifestone.Client.Options;
+using Lifestone.Client.Play;
 using Lifestone.Client.Scheduling;
+using Lifestone.Client.Session;
 using Lifestone.Client.Streaming;
 using Lifestone.Client.World;
 
@@ -22,7 +24,7 @@ public enum DxtUploadPolicy
 
 /// <summary>
 /// The engine-behaviour check suite a run executes (<c>--engine-checks</c>, <c>--interior-engine-checks</c>,
-/// <c>--sky-checks</c>, <c>--blend-checks</c>).
+/// <c>--sky-checks</c>, <c>--blend-checks</c>, <c>--portal-space-checks</c>, <c>--retail-ui-checks</c>).
 /// </summary>
 public enum GameCheckSuite
 {
@@ -31,6 +33,24 @@ public enum GameCheckSuite
     InteriorEngine,
     Sky,
     Blend,
+
+    /// <summary>The portal view's engine checks (<c>--portal-space-checks</c>; scripts/PortalSpace/PortalSpaceChecks.cs).</summary>
+    PortalSpace,
+
+    /// <summary>The retail UI layer's engine checks (<c>--retail-ui-checks</c>; scripts/RetailUi/RetailUiChecks.cs).</summary>
+    RetailUi,
+
+    /// <summary>
+    /// The offline player's walk checks (<c>--offline-player-checks</c>; scripts/Player/PlayerWalkChecks.cs). Unlike the engine suites it runs the live explore
+    /// world with the player in it, so Main builds everything it builds for explore mode.
+    /// </summary>
+    OfflinePlayer,
+
+    /// <summary>
+    /// Play mode's checks on a scripted stand-in server (<c>--play-checks</c>; scripts/Session/PlayChecks.cs). Like the offline player's suite it runs the live
+    /// explore world, with the play mode in it, so Main builds everything it builds for <c>--play</c>.
+    /// </summary>
+    Play,
 }
 
 /// <summary>
@@ -76,7 +96,8 @@ public enum GameCheckSuite
 /// <item><term>--retail-normals</term><description>Retail's per-block terrain normals (default: seamless; docs/terrain-renderer.md §8).</description></item>
 /// <item><term>--blend-space=byte|linear</term><description>Blend in retail's byte space (default) or Godot's linear light (docs/render-contract.md §2.3).</description></item>
 /// <item><term>--detail=on|off</term><description>Retail's building and environment detail textures (default on; docs/render-contract.md §2.4).</description></item>
-/// <item><term>--interior-engine-checks, --sky-checks, --blend-checks</term><description>The interiors', the sky's and the blend-space check suites (<see cref="Checks"/>).</description></item>
+/// <item><term>--interior-engine-checks, --sky-checks, --blend-checks, --portal-space-checks, --retail-ui-checks</term><description>The interiors', the sky's, the blend-space, the portal view's and the retail UI layer's check suites (<see cref="Checks"/>).</description></item>
+/// <item><term>--fov=DEG</term><description>The world camera's vertical field of view (default 60; the spell viewer's 55, the terrain preview's 60); Godot's perspective mode accepts 1 to 179.</description></item>
 /// <item><term>--help</term><description>Print every registered option and quit.</description></item>
 /// </list>
 /// </remarks>
@@ -95,6 +116,16 @@ public sealed record GameOptions
     public int LoadRadius { get; init; } = StreamingSettings.RetailDefaultLoadRadius;
 
     public double MainThreadBudgetMs { get; init; } = 4.0;
+
+    /// <summary>
+    /// <c>--fov</c>: the world camera's vertical field of view in degrees, or null for the scene's own (the main scene's
+    /// <see cref="DefaultFov"/>, the spell viewer's 55). The portal zoom does not use it: it is an off-centre frustum
+    /// (D31), whose rest state is this field of view.
+    /// </summary>
+    public double? Fov { get; init; }
+
+    /// <summary>The main scene's vertical field of view: 60° (Main.tscn, FlyCamera).</summary>
+    public const double DefaultFov = 60.0;
 
     public int WorkerThreads { get; init; } = DefaultWorkerThreads;
 
@@ -176,6 +207,19 @@ public sealed record GameOptions
 
     // --- end render-fidelity fix ---
 
+    /// <summary>
+    /// The session group (<c>--play</c>, <c>--account</c>, <c>--character</c>, <c>--server</c>, <c>--record-session</c>, <c>--session-budget-ms</c>, <c>--retail-net</c>;
+    /// M2 state track), parsed by <see cref="SessionOptions"/>, whose problems are in <see cref="Errors"/>. Only the session host (scripts/Session/SessionHost.cs)
+    /// acts on it; no option here takes a password (the host reads secrets.json in the backend runtime folder as bytes).
+    /// </summary>
+    public SessionOptions Session { get; init; } = new();
+
+    /// <summary>
+    /// The play-mode group (<c>--login-check</c>; M2 G6), parsed by <see cref="PlayOptions"/>, whose problems are in <see cref="Errors"/>. A login check implies
+    /// <c>--play</c> (Main.cs).
+    /// </summary>
+    public PlayOptions Play { get; init; } = new();
+
     /// <summary>Problems found while parsing (reported by the caller; parsing never throws).</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
 
@@ -244,6 +288,15 @@ public sealed record GameOptions
                     break;
                 case "--load-radius":
                     options = options with { LoadRadius = Math.Clamp(OptionValues.Int(argument, errors, options.LoadRadius), 0, 20) };
+                    break;
+                case "--fov":
+                    // A value that does not parse is reported and leaves the scene's own field of view.
+                    var fov = OptionValues.Double(argument, errors, double.NaN);
+                    if (!double.IsNaN(fov))
+                    {
+                        options = options with { Fov = Math.Clamp(fov, 1.0, 179.0) };
+                    }
+
                     break;
                 case "--budget-ms":
                     options = options with { MainThreadBudgetMs = Math.Clamp(OptionValues.Double(argument, errors, options.MainThreadBudgetMs), 0.0, 100.0) };
@@ -342,6 +395,18 @@ public sealed record GameOptions
                 case "--blend-checks": // render-fidelity fix (wave 3): Render/BlendChecks.cs
                     options = WithCheck(options, GameCheckSuite.Blend, errors);
                     break;
+                case "--portal-space-checks": // M2 portal view: PortalSpace/PortalSpaceChecks.cs
+                    options = WithCheck(options, GameCheckSuite.PortalSpace, errors);
+                    break;
+                case "--retail-ui-checks": // M2 retail UI renderer: RetailUi/RetailUiChecks.cs
+                    options = WithCheck(options, GameCheckSuite.RetailUi, errors);
+                    break;
+                case "--play-checks": // M2 G6: Session/PlayChecks.cs (play mode on a scripted stand-in server)
+                    options = WithCheck(options, GameCheckSuite.Play, errors);
+                    break;
+                case "--offline-player-checks": // M2 G5: Player/PlayerWalkChecks.cs (also read by AvatarsOptions, which implies --offline-player)
+                    options = WithCheck(options, GameCheckSuite.OfflinePlayer, errors);
+                    break;
                 case "--help":
                     options = options with { ShowHelp = true };
                     break;
@@ -395,7 +460,16 @@ public sealed record GameOptions
             }
         }
 
-        return options with { Errors = errors };
+        var session = SessionOptions.FromArguments(arguments);
+        errors.AddRange(session.Errors);
+        var play = PlayOptions.FromArguments(arguments);
+        errors.AddRange(play.Errors);
+        if (play.PlayFramesDirectory is not null && options.Checks != GameCheckSuite.Play)
+        {
+            errors.Add("--play-frames saves the play checks' shell frames: it needs --play-checks");
+        }
+
+        return options with { Session = session, Play = play, Errors = errors };
     }
 
     private static GameOptions WithCheck(GameOptions options, GameCheckSuite suite, List<string> errors)

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Every test that talks to the bundled ACE on 127.0.0.1, in one assembly: the backend is a single shared process, so
+    these tests run one at a time (AssemblyInfo.cs, LoopbackCollection) and across processes behind the loopback lock
+    file. They skip with a reason unless the backend is ready (tests/Shared/Loopback/BackendProbe.cs), and default runs
+    exclude them with the filter Category!=Loopback. Track folders: Net/, Session/, ServerMod/, Movement/.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Lifestone.Loopback.Tests</RootNamespace>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same packages and versions as Lifestone.Data.Tests (the .NET SDK 10.0.401 'xunit' template); nothing new. -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lifestone.Data\Lifestone.Data.csproj" />
+    <ProjectReference Include="..\..\src\Lifestone.Client\Lifestone.Client.csproj" />
+    <ProjectReference Include="..\..\src\Lifestone.Headless\Lifestone.Headless.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- tests/Shared (tests/Shared/README.md): the Data-level helpers, the Client-level ones and the loopback gate. -->
+    <Compile Include="..\Shared\**\*.cs" Exclude="..\Shared\Client\**;..\Shared\Loopback\**" LinkBase="Shared" />
+    <Compile Include="..\Shared\Client\**\*.cs" LinkBase="Shared\Client" />
+    <Compile Include="..\Shared\Loopback\**\*.cs" LinkBase="Shared\Loopback" />
+    <!-- N12: the seeded lossy socket and its loss model (BCL and the public IDatagramSocket only) for the lossy soak in Net/. -->
+    <Compile Include="..\Lifestone.Net.Tests\Support\LossyDatagramSocket.cs;..\Lifestone.Net.Tests\Support\LossModel.cs" LinkBase="Net\Lossy" />
+  </ItemGroup>
+
+</Project>

@@ -37,6 +37,8 @@
     "worldName": "Lifestone",
     "datFilesDirectory": "client",
     "aceDbUser": "ace",
-    "testAccountName": "lifestone"
+    "playAccountName": "lifestone",
+    "testAccountName": "lifestone-test",
+    "sentinelAdminName": "lifestone-sentinel"
   }
 }

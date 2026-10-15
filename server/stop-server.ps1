@@ -10,11 +10,15 @@
 
 .PARAMETER Force
   Skip the graceful paths and terminate immediately (risks losing unsaved game state).
+.PARAMETER AceOnly
+  Stop ACE only and leave mariadbd running (tools\play.ps1 and smoke's -Backend start use it when MariaDB was already
+  up before they started ACE). Checks that UDP 9000-9001 are free and rewrites pids.json without its 'ace' entry.
 #>
 [CmdletBinding()]
 param(
     [int]$TimeoutSec = 120,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$AceOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,18 +27,25 @@ $cfg = Get-LsConfig
 
 $pids = Get-LsPids $cfg
 $aceProcs = @(); $dbProcs = @()
+$trackedDb = $null
 if ($pids) {
     if ($pids.PSObject.Properties['ace']) { $p = Get-LsLiveProcess $pids.ace; if ($p) { $aceProcs += $p } }
-    if ($pids.PSObject.Properties['mariadbd']) { $p = Get-LsLiveProcess $pids.mariadbd; if ($p) { $dbProcs += $p } }
+    if ($pids.PSObject.Properties['mariadbd']) { $trackedDb = Get-LsLiveProcess $pids.mariadbd; if ($trackedDb) { $dbProcs += $trackedDb } }
 }
 foreach ($p in @(Get-LsRuntimeProcesses $cfg)) {
     if ($p.ProcessName -eq 'ACE.Server') { if (@($aceProcs | ForEach-Object Id) -notcontains $p.Id) { $aceProcs += $p } }
     else { if (@($dbProcs | ForEach-Object Id) -notcontains $p.Id) { $dbProcs += $p } }
 }
+if ($AceOnly) { $dbProcs = @() }
 
 if ($aceProcs.Count -eq 0 -and $dbProcs.Count -eq 0) {
-    Write-LsStep 'Nothing to stop (no Lifestone server processes running).'
-    Remove-Item -LiteralPath $cfg.PidsFile -Force -ErrorAction SilentlyContinue
+    if ($AceOnly) {
+        Write-LsStep 'Nothing to stop: ACE is not running.'
+        Save-LsPidsWithoutAce $cfg
+    } else {
+        Write-LsStep 'Nothing to stop (no Lifestone server processes running).'
+        Remove-Item -LiteralPath $cfg.PidsFile -Force -ErrorAction SilentlyContinue
+    }
     exit 0
 }
 
@@ -72,11 +83,19 @@ foreach ($db in $dbProcs) {
 Write-LsStep 'Verifying'
 Start-Sleep -Milliseconds 500
 $left = @(Get-LsRuntimeProcesses $cfg)
-$tcp = @(Get-LsTcpListeners $cfg.DbPort)
+if ($AceOnly) { $left = @($left | Where-Object { $_.ProcessName -eq 'ACE.Server' }) }
+$tcp = @()
+if (-not $AceOnly) { $tcp = @(Get-LsTcpListeners $cfg.DbPort) }
 $udp = @(Get-LsUdpEndpoints @($cfg.AcePort, ($cfg.AcePort + 1)))
 foreach ($p in $left) { Write-LsWarn "still running: $($p.ProcessName) PID $($p.Id)" }
 foreach ($t in $tcp) { Write-LsWarn "TCP $($t.LocalAddress):$($t.LocalPort) still listening (PID $($t.OwningProcess))" }
 foreach ($u in $udp) { Write-LsWarn "UDP $($u.LocalAddress):$($u.LocalPort) still bound (PID $($u.OwningProcess))" }
 if ($left.Count -gt 0 -or $tcp.Count -gt 0 -or $udp.Count -gt 0) { Write-Host 'STOP INCOMPLETE' -ForegroundColor Red; exit 1 }
+if ($AceOnly) {
+    Save-LsPidsWithoutAce $cfg
+    $dbNote = $(if ($trackedDb -and -not $trackedDb.HasExited) { "; mariadbd PID $($trackedDb.Id) keeps running" } else { '' })
+    Write-LsStep "ACE stopped; ports 9000-9001/udp are free$dbNote."
+    exit 0
+}
 Remove-Item -LiteralPath $cfg.PidsFile -Force -ErrorAction SilentlyContinue
 Write-LsStep 'All Lifestone server processes stopped; ports 3316/tcp and 9000-9001/udp are free.'

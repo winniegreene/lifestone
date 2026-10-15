@@ -14,6 +14,9 @@ namespace Lifestone.Game.UI;
 /// Enter in the search box jumps to the best match; double-click or Enter on a row jumps to that row. Typing a kind of
 /// place ("dungeon", "interior") lists every place of that kind. Indoor places go through the interiors
 /// (<see cref="Navigator.PlaceIndoors"/>).
+/// <para><b>Portal transition (M2).</b> Every jump of the panel goes through its <see cref="Teleporter"/>, when one is
+/// installed (the portal track's offline transition, docs/portal-space.md §9), which plays portal space around the move;
+/// the "Portal transition" toggle switches that on and off. Without a teleporter the panel jumps bare and shows no toggle.</para>
 /// </remarks>
 public partial class TeleportPanel : PanelContainer
 {
@@ -25,9 +28,29 @@ public partial class TeleportPanel : PanelContainer
     private Label _status = null!;
     private IReadOnlyList<TeleportDestination> _shown = [];
     private bool _cameraBlocked;
+    private ITeleporter? _teleporter;
+    private Button? _transition;
 
     /// <summary>Toggle button shown when the panel is closed.</summary>
     public Button? OpenButton { get; private set; }
+
+    /// <summary>
+    /// The hook every jump of the panel goes through (null: jump bare, as in M1). Setting it shows the "Portal transition"
+    /// toggle, in the state of <see cref="ITeleporter.Enabled"/>.
+    /// </summary>
+    public ITeleporter? Teleporter
+    {
+        get => _teleporter;
+        set
+        {
+            _teleporter = value;
+            if (_transition is not null)
+            {
+                _transition.Visible = value is not null;
+                _transition.SetPressedNoSignal(value?.Enabled ?? false);
+            }
+        }
+    }
 
     public static TeleportPanel Create(Navigator navigator, FlyCamera camera, CanvasLayer layer)
     {
@@ -93,6 +116,18 @@ public partial class TeleportPanel : PanelContainer
         _status.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         _status.CustomMinimumSize = new Vector2(306, 0);
         box.AddChild(_status);
+
+        // M2: shown once the portal track installs a teleporter (Teleporter); the tunnel plays around every jump while it is on.
+        _transition = UiStyle.Button("Portal transition", "Play the portal tunnel around a jump here (--portal-transition). Golden viewpoints, tours and the checks never play it.", toggle: true);
+        _transition.Visible = false;
+        _transition.Toggled += on =>
+        {
+            if (_teleporter is not null)
+            {
+                _teleporter.Enabled = on;
+            }
+        };
+        box.AddChild(_transition);
         box.AddChild(UiStyle.Label("Sources: ACE points of interest; curated interiors", 10, UiStyle.DimText));
 
         OpenButton = UiStyle.Button("Teleport [T]", "Search towns, places and dungeons, or type map coordinates");
@@ -175,9 +210,22 @@ public partial class TeleportPanel : PanelContainer
             return;
         }
 
-        _navigator.Teleport(destination);
+        Jump(() => _navigator.Teleport(destination));
         _status.Text = $"Jumped to {destination.Label}.";
         GetViewport().GuiReleaseFocus();
+    }
+
+    /// <summary>Runs a jump through the <see cref="Teleporter"/> (portal space around it), or bare without one.</summary>
+    private void Jump(Action jump)
+    {
+        if (_teleporter is { } teleporter)
+        {
+            teleporter.Teleport(jump);
+        }
+        else
+        {
+            jump();
+        }
     }
 
     private void JumpToCoordinates()
@@ -188,7 +236,15 @@ public partial class TeleportPanel : PanelContainer
             return;
         }
 
-        _status.Text = _navigator.TeleportToMap(map) ? $"Jumped to {map}." : $"{map} is off the map.";
+        if (!MapCoordinateParser.TryGetCellCentre(map, out _))
+        {
+            _status.Text = $"{map} is off the map."; // checked first: an off-map jump must not start portal space
+            GetViewport().GuiReleaseFocus();
+            return;
+        }
+
+        Jump(() => _navigator.TeleportToMap(map));
+        _status.Text = $"Jumped to {map}.";
         GetViewport().GuiReleaseFocus();
     }
 }

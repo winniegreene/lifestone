@@ -102,6 +102,12 @@ public partial class SkyController : Node
             Renderer = new SkyRenderer();
             Renderer.Initialize(models, shaders, services.Render.Materials);
             AddChild(Renderer);
+
+            // M2: the sky view draws only while the 3D world does (portal space hides it, WorldVisibility); it starts again
+            // with the world's first frame.
+            _worldVisibility = services.WorldVisibility;
+            _worldVisibility.Changed += OnWorldVisibilityChanged;
+            Renderer.View.Paused = !_worldVisibility.Visible;
             if (_environment?.Environment is { } mainEnvironment)
             {
                 mainEnvironment.BackgroundMode = Godot.Environment.BGMode.Sky;
@@ -144,8 +150,24 @@ public partial class SkyController : Node
     private long _allocFramesWithGc;
     private long _allocBytesWithGc;
 
+    private WorldVisibility? _worldVisibility;
+
+    private void OnWorldVisibilityChanged(bool visible)
+    {
+        if (Renderer is not null)
+        {
+            Renderer.View.Paused = !visible;
+        }
+    }
+
     public override void _ExitTree()
     {
+        if (_worldVisibility is not null)
+        {
+            _worldVisibility.Changed -= OnWorldVisibilityChanged;
+            _worldVisibility = null;
+        }
+
         if (_allocFrames > 0)
         {
             // docs/sky.md §7: the per-frame sky update should allocate nothing while the clock runs.

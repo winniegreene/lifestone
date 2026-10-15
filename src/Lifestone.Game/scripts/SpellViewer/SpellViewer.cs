@@ -508,7 +508,7 @@ public partial class SpellViewer : Node3D
         };
         AddChild(_words);
 
-        _camera = new OrbitCamera { Name = "Camera", Current = true, Fov = 55f, Near = 0.05f, Far = 3000f };
+        _camera = new OrbitCamera { Name = "Camera", Current = true, Fov = (float)(_services.Options.Fov ?? 55.0), Near = 0.05f, Far = 3000f }; // --fov, else 55
         AddChild(_camera);
         // Default: from the south, looking north-north-east: the caster on the left facing the drudge on the right, the
         // thatched and timbered houses behind them.

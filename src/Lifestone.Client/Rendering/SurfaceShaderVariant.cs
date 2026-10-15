@@ -44,9 +44,10 @@ public enum SurfaceCull
 /// <param name="Cull">Face culling.</param>
 /// <param name="Addressing">Sampler addressing (WRAP = repeat, CLAMP = clamp to edge).</param>
 /// <param name="Textured">Samples the texture; otherwise the solid colour (retail's 1x1 solid texture).</param>
-/// <param name="Fog">Apply retail linear fog (off for Additive surfaces).</param>
+/// <param name="Fog">Apply retail linear fog (off for Additive surfaces, and always off under <see cref="SurfaceLighting.CreatureMode"/>).</param>
 /// <param name="Lighting">Retail lighting rule (interiors extension, <see cref="SurfaceLighting"/>); <see cref="For"/>
-/// always gives <see cref="SurfaceLighting.Object"/>, callers that draw cells set it with <c>with</c>.</param>
+/// always gives <see cref="SurfaceLighting.Object"/>, callers that draw cells set it with <c>with</c>, and callers that
+/// draw creature mode with <see cref="WithLighting"/>, which also drops the fog creature mode never has.</param>
 /// <param name="Detail">Retail's detail-texture pass (render-fidelity extension, <see cref="SurfaceDetail"/>); set only
 /// through <see cref="WithDetail"/>, which applies retail's rules.</param>
 public readonly record struct SurfaceShaderVariant(
@@ -62,7 +63,7 @@ public readonly record struct SurfaceShaderVariant(
 {
     /// <summary>
     /// A short stable name, e.g. <c>opaque+test.z.back.wrap.tex.fog</c> (non-default lighting appends <c>.envcell</c> /
-    /// <c>.cellobject</c>, a detail pass <c>.detail-building</c> / <c>.detail-environment</c>).
+    /// <c>.cellobject</c> / <c>.creaturemode</c>, a detail pass <c>.detail-building</c> / <c>.detail-environment</c>).
     /// </summary>
     public string Name =>
         $"{Blend.ToString().ToLowerInvariant()}{(AlphaTest ? "+test" : string.Empty)}.{(DepthWrite ? "z" : "noz")}." +
@@ -70,6 +71,16 @@ public readonly record struct SurfaceShaderVariant(
         $"{(Textured ? "tex" : "solid")}.{(Fog ? "fog" : "nofog")}" +
         (Lighting == SurfaceLighting.Object ? string.Empty : "." + Lighting.ToString().ToLowerInvariant()) +
         (Detail == SurfaceDetail.None ? string.Empty : ".detail-" + Detail.ToString().ToLowerInvariant());
+
+    /// <summary>
+    /// This variant under another lighting rule. <see cref="SurfaceLighting.CreatureMode"/> draws without fog and without
+    /// a detail pass (retail's detail surfaces belong to the world's buildings and cells), so both are cleared; every other
+    /// rule only changes <see cref="Lighting"/>.
+    /// </summary>
+    public SurfaceShaderVariant WithLighting(SurfaceLighting lighting) =>
+        lighting == SurfaceLighting.CreatureMode
+            ? this with { Lighting = lighting, Fog = false, Detail = SurfaceDetail.None }
+            : this with { Lighting = lighting };
 
     /// <summary>
     /// Whether retail's detail pass shows on this variant (<see cref="SurfaceDetail"/>): a textured, opaque surface

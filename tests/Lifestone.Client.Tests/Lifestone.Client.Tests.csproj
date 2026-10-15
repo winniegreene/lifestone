@@ -21,9 +21,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- One shared copy of the dats-gated attributes (and DatSetFixture): linked from the data tests, not duplicated. -->
-    <Compile Include="..\Lifestone.Data.Tests\RequiresDatsFactAttribute.cs" Link="Shared\RequiresDatsFactAttribute.cs" />
-    <Compile Include="..\Lifestone.Data.Tests\RequiresDatsTheoryAttribute.cs" Link="Shared\RequiresDatsTheoryAttribute.cs" />
+    <!--
+      tests/Shared (tests/Shared/README.md): one copy of the helpers the test projects share - the dats gates and
+      DatSetFixture, RepositoryFiles, AllocationMeasurement, ManualTimeProvider, and the Client-level ones - linked, not
+      duplicated. Shared/Loopback/** belongs to Lifestone.Loopback.Tests alone.
+    -->
+    <Compile Include="..\Shared\**\*.cs" Exclude="..\Shared\Client\**;..\Shared\Loopback\**" LinkBase="Shared" />
+    <Compile Include="..\Shared\Client\**\*.cs" LinkBase="Shared\Client" />
   </ItemGroup>
 
 </Project>

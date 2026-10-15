@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Godot;
+using Lifestone.Client.Audio;
 using Lifestone.Client.Scheduling;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Models;
@@ -68,6 +69,19 @@ public partial class GameServices : Node
 
     public MainThreadQueue MainThread { get; private set; } = null!;
 
+    /// <summary>
+    /// Whether the 3D world is drawn: the sole writer of the main viewport's <c>Disable3D</c>, with reference-counted
+    /// hide requests (the portal tunnel, full-screen UI screens). Created with the services; always present.
+    /// </summary>
+    public WorldVisibility WorldVisibility { get; private set; } = null!;
+
+    /// <summary>
+    /// The sound card (16 voices, UI and Effects buses): set once by the portal track's <c>AudioService</c> when it is
+    /// installed (<c>PortalSpaceSetup</c>); null until then, in the check suites and in the spell viewer. Consumers play
+    /// nothing while it is null (portal space is silent without a sink, as the headless host's is).
+    /// </summary>
+    public IAudioOutput? Audio { get; set; }
+
     /// <summary>Main-thread time of the last drain, in milliseconds.</summary>
     public double LastDrainMs { get; private set; }
 
@@ -102,6 +116,7 @@ public partial class GameServices : Node
             Log.Warn("core", "bad argument", ("problem", error));
         }
 
+        WorldVisibility = new WorldVisibility(GetViewport());
         MainThread = new MainThreadQueue(TimeSpan.FromMilliseconds(Options.MainThreadBudgetMs));
         Workers = new WorkerPool(Options.WorkerThreads);
 
@@ -180,6 +195,7 @@ public partial class GameServices : Node
                 ("dir", dats.Directory),
                 ("iterations", dats.Iterations.CacheKey),
                 ("highres", dats.HighRes is not null),
+                ("local", (object?)dats.Iterations.Local ?? "absent"), // the language dat's iteration; the retail UI needs it
                 ("ms", timer.Elapsed.TotalMilliseconds),
                 ("workers", Workers.MaxConcurrency),
                 ("budget_ms", Options.MainThreadBudgetMs),

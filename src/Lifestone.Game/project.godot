@@ -32,6 +32,11 @@ project/solution_directory="../.."
 [rendering]
 
 anti_aliasing/quality/msaa_3d=2
+; Godot's light culler builds the camera frustum's eight corners by intersecting its planes and logs an engine ERROR (create_frustum_points) when they
+; are nearly parallel. The portal zoom's frustum (docs/portal-space.md) is retail's, 179.9 degrees wide with a 0.00025 m near plane at f = 0.001, so its side
+; planes are nearly parallel to the near plane and the intersections fail. The game draws with no Godot light (lighting is in the shaders), so the culler has nothing
+; to cull; this setting switches it off for every viewport (Godot has no per-viewport switch). See docs/portal-space.md section 14.
+lights_and_shadows/tighter_shadow_caster_culling=false
 
 [shader_globals]
 
@@ -97,4 +102,22 @@ ac_cell_states={
 ac_object_lod={
 "type": "sampler2D",
 "value": ""
+}
+; --- M2 moving objects (W2-pre(c), SurfaceLighting.DynamicCellObject, scripts/World/ServerObjects/ObjectLightTable.cs): the light sets of the player and the server's objects in cells, one row per object, up to 8 lights (Render::minimize_object_lighting, D46) ---
+ac_object_lights={
+"type": "sampler2D",
+"value": ""
+}
+; --- M2 portal view (docs/portal-space.md section 6; SurfaceLighting.CreatureMode, scripts/Render/CreatureModeLighting.cs): creature mode's own ambient and distant light, so the world's sun, ambient and fog never reach a creature-mode view. Defaults are the portal tunnel's scene: ambient 0.3, light (0.3, -1.9, 0.65) normalised (towards the light, Godot axes) at white x intensity 2 ---
+ac_cm_ambient={
+"type": "vec3",
+"value": Vector3(0.3, 0.3, 0.3)
+}
+ac_cm_light_dir={
+"type": "vec3",
+"value": Vector3(0.147754, 0.320126, 0.935773)
+}
+ac_cm_light_color={
+"type": "vec3",
+"value": Vector3(2, 2, 2)
 }

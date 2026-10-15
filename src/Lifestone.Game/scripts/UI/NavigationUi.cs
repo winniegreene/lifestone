@@ -38,13 +38,18 @@ public static class NavigationUi
     /// Adds the About panel with its button next to the teleport button when the tool panels are shown
     /// (<paramref name="showUi"/>), and the teleport tour when <c>--teleport-tour</c> asks for it.
     /// </summary>
-    public static void AttachExtras(Node main, GameServices services, WorldRoot world, FlyCamera camera, Navigator navigator, bool showUi)
+    public static void AttachExtras(Node main, GameServices services, WorldRoot world, FlyCamera camera, Navigator navigator, bool showUi, bool keyOnly = false)
     {
         ArgumentNullException.ThrowIfNull(main);
         if (showUi)
         {
             // Beside "Teleport [T]" (TeleportPanel.OpenButton at 12, 120, about 80 px wide).
             AboutPanel.Attach(main, withButton: true, new Vector2(100, 120));
+        }
+        else if (keyOnly)
+        {
+            // Play mode (D41): the panels are gone, F1 still opens the legal notices.
+            AboutPanel.Attach(main, withButton: false, Vector2.Zero);
         }
 
         var errors = new List<string>();

@@ -384,8 +384,10 @@ Fly path Holtburg → Arwic at 150 m/s (5,921 m, 39.5 s; 680 landblocks attached
 | `before-town-network` / `after-town-network` | `--start=town-network` | a dry fountain, unlit torches; the HUD shows an objects ring around 0x0006 in the dungeon | the fountain sprays, the torches burn; no landscape objects (`ring around -`) |
 | `before-windmill2` / `after-windmill2` + `seq-windmill` | `--start=2438 --interior-eye=2438001E@88,132,14 --interior-look=0,0` | the sails at rest | the sails turn (`0x020003E5`, default animation `0x0300061B`) |
 | `before-flags` / `after-flags` (crop `crop-flags-before-after`, before above) | `--start=8469 --interior-eye=84690009@40,5,29 --interior-look=90,0` | the pennants `0x020007BB` at their rest pose | the pennants wave (default animation `0x030007A7`; the still catches another frame) |
-| `before-academy-lod` / `after-academy-lod` (crops `crop-before-academy`, `crop-after-academy`) | `--start=training-academy --interior-eye=860301AD@12,-28,90 --interior-look=219,-55 --interior-show-all` | every cell static at level 0, 90+ m away | far plants at their lower levels, small debris gone (retail LOD, §1.8) |
+| `before-academy-lod` / `after-academy-lod` (crops `crop-before-academy`, `crop-after-academy`) | `--start=8603 --interior-eye=860301AD@12,-28,90 --interior-look=219,-55 --interior-show-all` | every cell static at level 0, 90+ m away | far plants at their lower levels, small debris gone (retail LOD, §1.8) |
 | `sv-before-2.90` / `sv-after-2.90` | the spell viewer, `--spell=85 --no-ui --shots=2.9` | statics and buildings only | scenery too; the lamp post right of the drudge burns |
+
+The academy pair is in landblock 0x8603, where M1's `training-academy` start was. Since M2 that key starts at ACE's spawn cell, 0x860201AD in landblock 0x8602 (interiors.md §6), so the recipe names `--start=8603`; its `--interior-eye` cell is unchanged. The "Training Academy" rows of §1.7 and of the measurements below are also of landblock 0x8603.
 
 Frame sequences (Movie Maker, fixed 30 fps; GIF and an 8-frame sheet each): `seq-torch` (the lamp-post flame flickering), `seq-chimney` (smoke rising), `seq-windmill` (the sails turning).
 

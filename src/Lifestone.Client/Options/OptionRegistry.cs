@@ -19,8 +19,11 @@ namespace Lifestone.Client.Options;
 /// </remarks>
 public sealed class OptionRegistry
 {
-    /// <summary>How <see cref="FormatHelp"/> marks the options that make a run automated.</summary>
+    /// <summary>How <see cref="FormatHelp(string)"/> marks the options that make a run automated.</summary>
     public const string EndsRunMarker = "[ends run]";
+
+    /// <summary>What <see cref="Problems"/> shows in place of an argument's value.</summary>
+    public const string ValueHidden = "(value hidden)";
 
     private readonly Dictionary<string, (OptionGroup Group, OptionSpec Spec)> _byName = new(StringComparer.Ordinal);
 
@@ -77,19 +80,29 @@ public sealed class OptionRegistry
     /// One message per argument a run of <paramref name="scene"/> cannot use, in order: arguments no feature registered
     /// (truly unknown) and options only other scenes read.
     /// </summary>
+    /// <remarks>
+    /// The messages never repeat a value: an argument is named by its option name, with <c>=(value hidden)</c> when it had
+    /// a value, so a password typed into a mistyped option (<c>--pasword=...</c>) reaches no log or console. An argument
+    /// that is not shaped like an option at all (a stray word, perhaps a secret given without its option) is named only by
+    /// its position.
+    /// </remarks>
     public IReadOnlyList<string> Problems(IEnumerable<CommandLineArgument> args, OptionScenes scene)
     {
         ArgumentNullException.ThrowIfNull(args);
         var problems = new List<string>();
+        var position = 0;
         foreach (var argument in args)
         {
+            position++;
             if (!_byName.TryGetValue(argument.Name, out var entry))
             {
-                problems.Add($"unknown argument '{argument.Raw}' (--help lists every option)");
+                problems.Add(LooksLikeAnOption(argument.Name)
+                    ? $"unknown argument {Named(argument)} (--help lists every option)"
+                    : $"unknown argument #{position}, which is not an --option (hidden; --help lists every option)");
             }
             else if (!AppliesTo(argument.Name, scene))
             {
-                problems.Add($"'{argument.Raw}' is an option of the {entry.Group.Feature} ({entry.Group.Scope}), not read in this run's {SceneName(scene)}; ignored");
+                problems.Add($"{Named(argument)} is an option of the {entry.Group.Feature} ({entry.Group.Scope}), not read in this run's {SceneName(scene)}; ignored");
             }
         }
 
@@ -109,23 +122,40 @@ public sealed class OptionRegistry
         OptionScenes.Main => "main scene",
         OptionScenes.SpellViewer => "spell viewer",
         OptionScenes.TerrainPreview => "terrain preview",
+        OptionScenes.Headless => "headless host",
         _ => "scene",
     };
 
-    /// <summary>The <c>--help</c> text: every group with its scope and every option with its help line.</summary>
-    public string FormatHelp(string? preamble = null)
+    /// <summary>
+    /// The <c>--help</c> text: every group with its scope and every option with its help line. A group with no options
+    /// yet (registered ahead of its owner's options) is left out.
+    /// </summary>
+    public string FormatHelp(string? preamble = null) => FormatHelpWhere(preamble, static (_, _) => true);
+
+    /// <summary>
+    /// The help text of one run kind: only the options a run of <paramref name="scene"/> reads (<see cref="AppliesTo"/>),
+    /// under their groups; groups with none are left out. The headless host prints its <c>--help</c> this way.
+    /// </summary>
+    public string FormatHelp(string? preamble, OptionScenes scene) =>
+        FormatHelpWhere(preamble, (group, spec) => ((group.Scenes | spec.AlsoIn) & scene) != OptionScenes.None);
+
+    private string FormatHelpWhere(string? preamble, Func<OptionGroup, OptionSpec, bool> include)
     {
-        var width = Math.Min(40, _byName.Values.Max(e => e.Spec.Usage.Length) + 2);
+        var shown = Groups
+            .Select(g => (Group: g, Options: g.Options.Where(o => include(g, o)).ToArray()))
+            .Where(g => g.Options.Length > 0)
+            .ToArray();
+        var width = Math.Min(40, shown.SelectMany(g => g.Options).Select(o => o.Usage.Length).DefaultIfEmpty(0).Max() + 2);
         var sb = new StringBuilder();
         if (!string.IsNullOrEmpty(preamble))
         {
             sb.AppendLine(preamble).AppendLine();
         }
 
-        foreach (var group in Groups)
+        foreach (var (group, options) in shown)
         {
             sb.Append(group.Feature).Append(" (").Append(group.Scope).AppendLine(")");
-            foreach (var spec in group.Options)
+            foreach (var spec in options)
             {
                 var usage = spec.Usage;
                 sb.Append("  ").Append(usage);
@@ -153,4 +183,17 @@ public sealed class OptionRegistry
         && name.StartsWith("--", StringComparison.Ordinal)
         && name[2] != '-'
         && name.Skip(2).All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '-');
+
+    /// <summary>
+    /// True when an unknown argument's name may be shown: <c>--</c> and up to 60 ASCII letters, digits, dashes or
+    /// underscores (a mistyped or mis-cased option). Anything else may be a value given without its option.
+    /// </summary>
+    private static bool LooksLikeAnOption(string name) =>
+        name.Length is > 2 and <= 62
+        && name.StartsWith("--", StringComparison.Ordinal)
+        && name.Skip(2).All(c => c is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '-' or '_');
+
+    /// <summary>An argument as <see cref="Problems"/> names it: <c>'--name'</c>, or <c>'--name=(value hidden)'</c> when it had a value.</summary>
+    private static string Named(CommandLineArgument argument) =>
+        argument.HasValue ? $"'{argument.Name}={ValueHidden}'" : $"'{argument.Name}'";
 }

@@ -76,6 +76,16 @@ mariadb-ace.cnf
 !/src/Lifestone.Game/assets/**/*.jpeg
 !/src/Lifestone.Game/assets/**/*.webp
 
+# --- Safety net: audio and session recordings, in any folder ---
+# Retail sounds decode to .wav (and the dats hold one MP3), so a stray sound dump is ignored wherever it lands, as is a
+# session recording (.lsrec), which holds the server's traffic. Golden fixtures and recordings are regenerated under
+# cache/ (ignored above) and never committed. No audio format is allow-listed.
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.lsrec
+
 # --- .NET ---
 # MSBuild binary logs (dotnet build -bl) embed every project file and the environment the build read.
 bin/

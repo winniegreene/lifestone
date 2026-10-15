@@ -91,7 +91,13 @@ public sealed class EffectObject : IEffectFrames
     private const double Epsilon = 0.00019999999;
 
     private readonly IEffectSource _source;
-    private readonly List<AnimHook> _animHooks = [];
+    private List<AnimHook> _animHooks = [];
+
+    /// <summary>
+    /// The second list of the swap in <see cref="ProcessHooks"/>: the queued hooks run from here while new ones queue in
+    /// <see cref="_animHooks"/>, so processing allocates nothing.
+    /// </summary>
+    private List<AnimHook> _runningHooks = [];
     private readonly List<FpHook> _fpHooks = [];
     private readonly List<EffectEvent> _events = [];
     private readonly List<string> _warnings = [];
@@ -125,6 +131,12 @@ public sealed class EffectObject : IEffectFrames
     public bool ParticlesInDrawRange { get; set; } = true;
 
     public double CurrentTime { get; private set; }
+
+    /// <summary>
+    /// How many whole-object translucency fades (Transparent hooks with a time of at least epsilon) have been queued so far. A counter only; it changes
+    /// nothing in how the hooks run. The avatars read it to tell that an unhide has queued its materialise fade (docs/avatars.md section 17).
+    /// </summary>
+    public long TranslucencyFadesQueued { get; private set; }
 
     public AcFrame ObjectFrame { get; private set; } = AcFrame.Identity;
 
@@ -208,7 +220,9 @@ public sealed class EffectObject : IEffectFrames
         ProcessHooks();
         SetPlacement(now, objectFrame, partFrames);
         Particles.UpdateParticles(now, this, Random, ParticlesInDrawRange, _warnings);
-        Scripts.UpdateScripts(now, ExecuteHook);
+
+        // One cached delegate: a method group allocates a new delegate on every call.
+        Scripts.UpdateScripts(now, _executeHook ??= ExecuteHook);
     }
 
     // --- objects track (M1 wave 3, living statics; docs/objects.md §1.7): static objects step differently. ---
@@ -259,12 +273,32 @@ public sealed class EffectObject : IEffectFrames
         ProcessHooks();
     }
 
-    /// <summary>Returns and clears the pending engine events.</summary>
-    public EffectEvent[] DrainEvents()
+    /// <summary>
+    /// Appends the pending engine events to <paramref name="into"/>, oldest first, and clears them. Allocation-free once
+    /// <paramref name="into"/> has grown to the usual count (the caller keeps and clears its own list).
+    /// </summary>
+    /// <returns>The number of events appended.</returns>
+    public int DrainEvents(List<EffectEvent> into)
     {
-        var events = _events.ToArray();
+        ArgumentNullException.ThrowIfNull(into);
+        var count = _events.Count;
+        if (count == 0)
+        {
+            return 0;
+        }
+
+        into.AddRange(_events);
         _events.Clear();
-        return events;
+        return count;
+    }
+
+    /// <summary>Clears the pending engine events without reading them (for hosts that do not act on events yet).</summary>
+    /// <returns>The number of events dropped.</returns>
+    public int DiscardEvents()
+    {
+        var count = _events.Count;
+        _events.Clear();
+        return count;
     }
 
     /// <summary>Appends the live particles of every emitter to <paramref name="output"/>.</summary>
@@ -305,11 +339,22 @@ public sealed class EffectObject : IEffectFrames
             return;
         }
 
-        var hooks = _animHooks.ToArray();
-        _animHooks.Clear();
-        foreach (var hook in hooks)
+        // Two-list swap: run the queued hooks from the spare list, so a hook queued while they run (there is none
+        // today) waits for the next process_hooks as it would have with a copy, and nothing is allocated. The spare list
+        // is cleared even when a hook throws: otherwise the hooks already run would swap back in and run again next
+        // frame (the copy-then-clear this replaces had emptied the queue before running anything).
+        (_animHooks, _runningHooks) = (_runningHooks, _animHooks);
+        var hooks = _runningHooks;
+        try
         {
-            ExecuteHook(hook);
+            for (var i = 0; i < hooks.Count; i++)
+            {
+                ExecuteHook(hooks[i]);
+            }
+        }
+        finally
+        {
+            hooks.Clear();
         }
     }
 
@@ -379,28 +424,58 @@ public sealed class EffectObject : IEffectFrames
             case DefaultScriptHook:
                 PlayDefaultScript();
                 break;
+            // The Set*(…, delta) pattern: an FP hook when delta ≥ ε, else an immediate change. Written out per case, not
+            // as lambdas: a lambda capturing a pattern variable made every ExecuteHook call allocate a closure.
             case ScaleHook h:
                 // CPhysicsObj::SetScale(end, time): interpolates from the current scale.
-                AddFp(0, h.Time, Visual.Scale, h.End, 0, 0, immediate: () => Visual.Scale = h.End);
+                if (!TryAddFp(0, h.Time, Visual.Scale, h.End, 0))
+                {
+                    Visual.Scale = h.End;
+                }
+
                 break;
             case TransparentHook h:
                 // CPhysicsObj::SetTranslucency2: an immediate change is clamped to the original translucency.
-                AddFp(1, h.Time, h.Start, h.End, 0, 0, immediate: () => Visual.Translucency = Math.Max(h.End, Visual.TranslucencyOriginal));
+                if (!TryAddFp(1, h.Time, h.Start, h.End, 0))
+                {
+                    Visual.Translucency = Math.Max(h.End, Visual.TranslucencyOriginal);
+                }
+
                 break;
             case TransparentPartHook h:
-                AddFp(2, h.Time, h.Start, h.End, h.PartIndex, 0, immediate: () => Visual.PartTranslucencyMap[h.PartIndex] = h.End);
+                if (!TryAddFp(2, h.Time, h.Start, h.End, h.PartIndex))
+                {
+                    Visual.PartTranslucencyMap[h.PartIndex] = h.End;
+                }
+
                 break;
             case LuminousHook h:
-                AddFp(3, h.Time, h.Start, h.End, 0, 0, immediate: () => Visual.Luminosity = h.End);
+                if (!TryAddFp(3, h.Time, h.Start, h.End, 0))
+                {
+                    Visual.Luminosity = h.End;
+                }
+
                 break;
             case DiffuseHook h:
-                AddFp(4, h.Time, h.Start, h.End, 0, 0, immediate: () => Visual.Diffusion = h.End);
+                if (!TryAddFp(4, h.Time, h.Start, h.End, 0))
+                {
+                    Visual.Diffusion = h.End;
+                }
+
                 break;
             case LuminousPartHook h:
-                AddFp(5, h.Time, h.Start, h.End, h.PartIndex, 0, immediate: () => Visual.PartLuminosityMap[h.PartIndex] = h.End);
+                if (!TryAddFp(5, h.Time, h.Start, h.End, h.PartIndex))
+                {
+                    Visual.PartLuminosityMap[h.PartIndex] = h.End;
+                }
+
                 break;
             case DiffusePartHook h:
-                AddFp(6, h.Time, h.Start, h.End, h.PartIndex, 0, immediate: () => Visual.PartDiffusionMap[h.PartIndex] = h.End);
+                if (!TryAddFp(6, h.Time, h.Start, h.End, h.PartIndex))
+                {
+                    Visual.PartDiffusionMap[h.PartIndex] = h.End;
+                }
+
                 break;
             case NoDrawHook h:
                 Visual.NoDraw = h.NoDraw;
@@ -447,16 +522,23 @@ public sealed class EffectObject : IEffectFrames
         }
     }
 
-    /// <summary>The <c>Set*(…, delta)</c> pattern: an FP hook when <c>delta ≥ ε</c>, else an immediate change.</summary>
-    private void AddFp(int type, float time, float start, float end, int partIndex, uint scriptId, Action immediate)
+    /// <summary>
+    /// The <c>Set*(…, delta)</c> pattern: queues an FP hook and returns true when <c>delta ≥ ε</c>; returns false when
+    /// the caller makes the change at once.
+    /// </summary>
+    private bool TryAddFp(int type, float time, float start, float end, int partIndex)
     {
-        if (time >= Epsilon)
+        if (!(time >= Epsilon))
         {
-            _fpHooks.Add(new FpHook(type, CurrentTime, time, start, end, partIndex, scriptId));
+            return false;
         }
-        else
+
+        if (type == 1)
         {
-            immediate();
+            TranslucencyFadesQueued++;
         }
+
+        _fpHooks.Add(new FpHook(type, CurrentTime, time, start, end, partIndex, 0));
+        return true;
     }
 }

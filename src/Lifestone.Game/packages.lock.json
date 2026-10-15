@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "DotNet.Standard.Common": {
+        "type": "Direct",
+        "requested": "[2.0.1, )",
+        "resolved": "2.0.1",
+        "contentHash": "zW0m0ytHi43ccbEOTNDa10cDDnT7BAzY1R1Rb1dlhbdkiyglsALjrsyTPSEjbdnTmCOAvAvl4kkbvBLoYhC6dQ=="
+      },
+      "Godot.SourceGenerators": {
+        "type": "Direct",
+        "requested": "[4.7.2, )",
+        "resolved": "4.7.2",
+        "contentHash": "PeYESFlRxlmeClrPhlMINhVvt2HiKnx2Ux/FYA10rimDevHljji3/jmRZOMo9XDNQsZzPH4uQmDyPgQgzTFvAg=="
+      },
+      "GodotSharp": {
+        "type": "Direct",
+        "requested": "[4.7.2, )",
+        "resolved": "4.7.2",
+        "contentHash": "EPvfayB7b7MrBNdASvy86jRS5AbM9dprkVivcRD80g+ngn2M8KAIrBQH4NhyQL+pwxni0xVnuqhD9AFpZeNQpw=="
+      },
+      "GodotSharpEditor": {
+        "type": "Direct",
+        "requested": "[4.7.2, )",
+        "resolved": "4.7.2",
+        "contentHash": "Fuf2rNvajla9N8Z+ksxsSIt326wsjpB2F2uZCtxkdfWIsApabCHy5fsE2EKxOlQ4NaINGdgMIv62D0n583qe1A==",
+        "dependencies": {
+          "GodotSharp": "4.7.2"
+        }
+      },
+      "ZLibDotNet": {
+        "type": "Direct",
+        "requested": "[0.1.1, )",
+        "resolved": "0.1.1",
+        "contentHash": "QEti4O7dwRcOb9zbnLuudSrt2IT61OYjq0R7lcJb+EzUm5N6djOVGU/cp+FZIZzJUnaFIntwrpwiuRvhpS7ZHg=="
+      },
+      "Chorizite.DatReaderWriter": {
+        "type": "Transitive",
+        "resolved": "2.1.9",
+        "contentHash": "CoMkErq5bIwaZHzBkPbL3PkDIwJpELfPzC+Bttw6oEo8nL6ADHZ5d5ClWRf/Gh8GgONkgpCrbGcgWG93t+FVRg==",
+        "dependencies": {
+          "DotNet.Standard.Common": "2.0.1",
+          "ZLibDotNet": "0.1.1"
+        }
+      },
+      "lifestone.client": {
+        "type": "Project",
+        "dependencies": {
+          "Lifestone.Data": "[1.0.0, )",
+          "Lifestone.Net": "[1.0.0, )"
+        }
+      },
+      "lifestone.data": {
+        "type": "Project",
+        "dependencies": {
+          "Chorizite.DatReaderWriter": "[2.1.9, )"
+        }
+      },
+      "lifestone.net": {
+        "type": "Project"
+      }
+    }
+  }
+}

@@ -35,7 +35,8 @@ public sealed class GfxObjMesh
         ModelSphere? drawingSphere,
         ModelSphere? physicsSphere,
         uint degradeId,
-        PolygonMeshStats stats)
+        PolygonMeshStats stats,
+        IReadOnlyList<uint> surfaceIds)
     {
         Id = id;
         Mesh = mesh;
@@ -47,6 +48,7 @@ public sealed class GfxObjMesh
         PhysicsSphere = physicsSphere;
         DegradeId = degradeId;
         Stats = stats;
+        SurfaceIds = surfaceIds;
     }
 
     /// <summary>The GfxObj file id (<c>0x01xxxxxx</c>).</summary>
@@ -97,6 +99,14 @@ public sealed class GfxObjMesh
 
     /// <summary>Polygon/vertex statistics gathered while building (diagnostics and tests).</summary>
     public PolygonMeshStats Stats { get; }
+
+    /// <summary>
+    /// The GfxObj's own surface list (<c>CGfxObj::m_rgSurfaces</c>): Surface ids (<c>0x08xxxxxx</c>) in index order, the
+    /// list <see cref="SurfaceIndexRange.SurfaceIndex"/> indexes. When this GfxObj is a part's level 0, it is the part's
+    /// surface array, which ObjDesc texture and palette changes edit (<c>CPhysicsPart::SetGfxObjArray</c>; see the class
+    /// remarks).
+    /// </summary>
+    public IReadOnlyList<uint> SurfaceIds { get; }
 }
 
 /// <summary>

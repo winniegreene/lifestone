@@ -366,7 +366,7 @@ public sealed class LivingStatic
         {
             // Sound, SoundTweaked, SetLight and NoDraw hooks are handed to the engine as events. M1 has no audio and no
             // dynamic lights (docs/objects.md §4); nothing else would drain them, and a looping script would grow the list.
-            EventsDropped += Effects.DrainEvents().Length;
+            EventsDropped += Effects.DiscardEvents();
         }
 
         UpdateTime = now;

@@ -1,5 +1,6 @@
 using Godot;
 using Lifestone.Client.Interiors;
+using Lifestone.Client.Rendering;
 using Lifestone.Client.Streaming;
 using Lifestone.Client.World;
 using Lifestone.Data.Terrain;
@@ -67,6 +68,7 @@ public partial class InteriorController : Node
     private GameServices _services = null!;
     private WorldRoot _world = null!;
     private FlyCamera _camera = null!;
+    private uint _lastSweepCell;
     private WorldEnvironment? _worldEnvironment;
     private uint _cameraCullMask = 0xFFFFF;
     private bool _landscapeHidden;
@@ -78,6 +80,7 @@ public partial class InteriorController : Node
     private InteriorHud? _hud;
     private int _lights;
     private uint _viewerCellId;
+    private uint _playerCellId;
     private long _truncatedCones;
     private long _slotsExhaustedLogged;
 
@@ -129,6 +132,13 @@ public partial class InteriorController : Node
 
     /// <summary>The viewer's cell id as of this frame (0 outdoors), readable from workers (the layer meshes a dungeon's whole landblock).</summary>
     public uint ViewerCellIdForWorkers => Volatile.Read(ref _viewerCellId);
+
+    /// <summary>
+    /// The player's cell as the teleport or the session knows it (0 = none), readable from workers: the layer meshes a
+    /// whole landblock when this cell needs it (<see cref="InteriorsLayer.PrepareAsync"/>), exactly as for the viewer's cell.
+    /// Set through <see cref="SetPlayerCell"/>.
+    /// </summary>
+    public uint PlayerCellIdForWorkers => Volatile.Read(ref _playerCellId);
 
     /// <summary>Set by the layer: mesh every remaining cell of an attached landblock (see <see cref="InteriorsLayer.RequestAllCells"/>).</summary>
     public Func<LandblockCoord, bool>? RequestAllCells { get; set; }
@@ -203,6 +213,21 @@ public partial class InteriorController : Node
         PlaceViewer(location.Position.CellId, eye);
         Log.Info("interiors", teleport ? "teleport" : "placed", ("to", location.Name), ("cell", $"0x{location.Position.CellId:X8}"), ("eye", eye),
             ("seen_outside", Tracker.Cell?.SeenOutside));
+        if (teleport)
+        {
+            // With --offline-player the camera is the player's: the player goes there (the teleport panel, F7 and the interior tour all come here).
+            PlayerController.Current?.Teleport(OfflinePlayerSetup.SpawnOf(_services, location));
+        }
+    }
+
+    /// <summary>
+    /// Play mode (M2 G6): the player was placed at <paramref name="cellId"/> (the arrival, or a server teleport after the world was teleported): the shown
+    /// cells are forgotten and the viewer is put in the cell, as <see cref="PlaceCamera"/> does for a teleport, without moving the camera.
+    /// </summary>
+    public void PlaceForPlayer(uint cellId, GlobalPosition eye)
+    {
+        ClearShown();
+        PlaceViewer(cellId, eye);
     }
 
     /// <summary>
@@ -234,6 +259,53 @@ public partial class InteriorController : Node
         _walkEyeZ = _camera.WalkMode ? eye.Z : null;
         _lastKey = default;
     }
+
+    /// <summary>
+    /// The viewer's cell as the chase camera's sweep found it (<see cref="Lifestone.Data.Physics.World.PhysicsWorld.SweepViewer"/>, retail's
+    /// <c>SmartBox::update_viewer</c> transition): when it differs from the one given last time and from the tracker's, the tracker is placed in it at
+    /// <paramref name="eye"/>, so the interiors know the cell the camera is in without waiting for their own geometric search. An outdoor cell means outdoors.
+    /// </summary>
+    public void SetViewer(uint cellId, GlobalPosition eye)
+    {
+        var cell = AcCoordinates.IsEnvCell(cellId) ? cellId : 0;
+        if (cell == _lastSweepCell)
+        {
+            return;
+        }
+
+        _lastSweepCell = cell;
+        if (Tracker.CellId != cell)
+        {
+            PlaceViewer(cellId, eye);
+        }
+    }
+
+    /// <summary>
+    /// Main thread: the player's cell (0 = none). Portal space waits for the player's destination, which the camera (the
+    /// viewer) reaches only once the player exists; this makes the layer mesh a dungeon landblock, or the rest of a
+    /// landblock a cellar or a room no doorway shows lies in, for the player's cell before the viewer is placed in it
+    /// (docs/portal-space.md §4: the destination's readiness).
+    /// </summary>
+    public void SetPlayerCell(uint cellId)
+    {
+        if (Volatile.Read(ref _playerCellId) == cellId)
+        {
+            return;
+        }
+
+        Volatile.Write(ref _playerCellId, cellId);
+        _lastKey = default; // the next frame asks the layer for the cells again (RequestMissingCells)
+    }
+
+    /// <summary>
+    /// Main thread: whether the EnvCell has been through the layer's attach: its mesh node is in the scene, or it has
+    /// nothing to draw (retail skips cells without a drawing BSP). False while its landblock is not registered yet, and
+    /// for a cell the landblock did not mesh (it is not on the buildings' stab list; <see cref="SetPlayerCell"/> and
+    /// <see cref="PlaceViewer"/> make the layer mesh the rest when the player or the viewer is in such a cell). The
+    /// world adapter of portal space answers its <c>Cell</c> query from this.
+    /// </summary>
+    public bool IsCellAttached(uint cellId) =>
+        _nodes.TryGetValue(LandblockCoord.FromId(cellId), out var nodes) && nodes.ContainsKey(cellId);
 
     /// <summary>Main thread (layer attach): a landblock's interiors are available; <paramref name="cellIds"/> will be attached.</summary>
     public void Register(LandblockInteriors interiors, int lightCount, IReadOnlyCollection<uint> cellIds)
@@ -295,6 +367,13 @@ public partial class InteriorController : Node
 
     /// <summary>Main thread: a meshed cell's slot in the cell-state table, 0 when it has none (objects track: its statics' particles use it).</summary>
     public int SlotOf(uint cellId) => _slotOf.GetValueOrDefault(cellId);
+
+    /// <summary>
+    /// Main thread: the cell's mesh is drawn in the current view (the viewer's walk, or seen through a doorway). Retail draws
+    /// the objects of an EnvCell only with the cell, so the player's character in a cell is drawn only while this is true
+    /// (M2 W2-pre(c)).
+    /// </summary>
+    public bool IsCellShown(uint cellId) => _shown.Contains(cellId);
 
     /// <summary>Main thread (layer attach step): one cell is complete; <paramref name="node"/> is null when it has nothing to draw.</summary>
     public void RegisterCellNode(LandblockCoord coord, uint cellId, MeshInstance3D? node)
@@ -366,9 +445,15 @@ public partial class InteriorController : Node
         _completionRequested.Remove(coord);
     }
 
+    /// <summary>
+    /// The debug keys F7 (the interior tour: teleport to the next catalogued interior) and F9 (draw every loaded cell). False in play mode (<c>--play</c>,
+    /// M2 G6; owner decision D41): a key that moves the camera has no place when a server owns the player's position.
+    /// </summary>
+    public bool DebugKeys { get; set; } = true;
+
     public override void _UnhandledInput(InputEvent @event)
     {
-        if (@event is not InputEventKey { Pressed: true, Echo: false } key || !_camera.InputEnabled)
+        if (!DebugKeys || @event is not InputEventKey { Pressed: true, Echo: false } key || !_camera.InputEnabled)
         {
             return;
         }
@@ -427,8 +512,8 @@ public partial class InteriorController : Node
         }
 
         Volatile.Write(ref _viewerCellId, Tracker.CellId);
-        var frustum = CurrentFrustum(out var viewport);
-        var key = new ViewKey(eye, frustum.Forward, Tracker.CellId, Registry.Version, _showAll, _world.Origin.Origin, viewport, _camera.Camera.Fov);
+        var frustum = CurrentFrustum(out var viewport, out var lens);
+        var key = new ViewKey(eye, frustum.Forward, Tracker.CellId, Registry.Version, _showAll, _world.Origin.Origin, viewport, lens);
         if (key != _lastKey)
         {
             _lastKey = key;
@@ -484,12 +569,12 @@ public partial class InteriorController : Node
         try
         {
             Tracker.Place(Registry.GetCell(cellId), inside);
-            View = InteriorVisibility.Compute(Registry, Tracker, inside, CurrentFrustum(out var viewport));
+            View = InteriorVisibility.Compute(Registry, Tracker, inside, CurrentFrustum(out var viewport, out var lens));
             Apply(View);
             FlushStates();
             Tracker.Place(null, outside);
             var aspect = viewport.Y > 0 ? viewport.X / viewport.Y : 16f / 9f;
-            View = InteriorVisibility.Compute(Registry, Tracker, outside, ViewFrustum.FromCamera(outsideForward, System.Numerics.Vector3.UnitZ, _camera.Camera.Fov, aspect));
+            View = InteriorVisibility.Compute(Registry, Tracker, outside, ViewFrustum.FromLens(outsideForward, System.Numerics.Vector3.UnitZ, lens, aspect));
             Apply(View);
             FlushStates();
             Log.Debug("interiors", "warm-up views", ("doorways", View.Doorways.Count), ("cells", View.VisibleCells.Count));
@@ -517,6 +602,7 @@ public partial class InteriorController : Node
     /// </summary>
     private void RequestMissingCells()
     {
+        RequestPlayerCells();
         if (!Tracker.IsIndoors || RequestAllCells is null)
         {
             return;
@@ -547,14 +633,45 @@ public partial class InteriorController : Node
         }
     }
 
-    private ViewFrustum CurrentFrustum(out Vector2 viewport)
+    /// <summary>
+    /// The player's cell needs the rest of its landblock (<see cref="InteriorCellSets.NeedsAllCells"/>, the layer's rule
+    /// for the viewer's cell): mesh it now, the landblock being attached already (an unattached one is prepared with
+    /// <see cref="PlayerCellIdForWorkers"/> in mind).
+    /// </summary>
+    private void RequestPlayerCells()
+    {
+        var cellId = PlayerCellIdForWorkers;
+        if (cellId == 0 || RequestAllCells is null || !AcCoordinates.IsEnvCell(cellId))
+        {
+            return;
+        }
+
+        var coord = LandblockCoord.FromId(cellId);
+        if (_completionRequested.Contains(coord) || Registry.Get(coord) is not { } block
+            || !InteriorCellSets.NeedsAllCells(block.Cells, block.BuildingCellIds, cellId))
+        {
+            return;
+        }
+
+        if (RequestAllCells(coord))
+        {
+            _completionRequested.Add(coord);
+        }
+    }
+
+    /// <summary>
+    /// The view pyramid of the camera as it is drawn this frame: built from the camera's lens (its perspective, or the
+    /// portal zoom's frustum, <see cref="CameraLenses.Of"/>), so the walk shows the cells the zoom shows, however wide.
+    /// </summary>
+    private ViewFrustum CurrentFrustum(out Vector2 viewport, out CameraLens lens)
     {
         var basis = _camera.Camera.GlobalTransform.Basis;
         var forward = AcToGodot.ToAc(-basis.Z);
         var up = AcToGodot.ToAc(basis.Y);
         viewport = GetViewport().GetVisibleRect().Size;
+        lens = CameraLenses.Of(_camera.Camera);
         var aspect = viewport.Y > 0 ? viewport.X / viewport.Y : 16f / 9f;
-        return ViewFrustum.FromCamera(forward, up, _camera.Camera.Fov, aspect);
+        return ViewFrustum.FromLens(forward, up, lens, aspect);
     }
 
     private void Apply(InteriorView view)
@@ -778,7 +895,8 @@ public partial class InteriorController : Node
     /// <summary>
     /// What the view depends on; the walk only reruns when it changes. The render origin is in it because the doorway
     /// planes are written in render space (a rebase also rewrites them at once, see <see cref="Initialize"/>); the
-    /// viewport size and the field of view because they shape the frustum.
+    /// viewport size and the camera's lens (field of view, or the portal zoom's off-centre frustum) because they shape
+    /// the frustum.
     /// </summary>
     private readonly record struct ViewKey(
         GlobalPosition Eye,
@@ -788,5 +906,5 @@ public partial class InteriorController : Node
         bool ShowAll,
         LandblockCoord Origin,
         Vector2 Viewport,
-        float Fov);
+        CameraLens Lens);
 }

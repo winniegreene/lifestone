@@ -7,14 +7,81 @@ The shared Godot infrastructure every visual track plugs into: services, streami
 | Project | Engine | Role |
 |---|---|---|
 | `src/Lifestone.Data` | none | Decoding and retail algorithms (wave 1). |
-| `src/Lifestone.Client` (new) | none | Client-side logic between data and presentation. Coordinates and map coordinates, the floating origin, the landblock streaming planner, the frame-budget scheduler, the worker pool, the refcounted resource cache, surface shader variants, DXT mip chains (box filter + BC1/2/3 re-encoding), frame-time statistics, named locations. No Godot, no I/O, no networking. Tested by `tests/Lifestone.Client.Tests`. |
-| `src/Lifestone.Game` | Godot 4.7 | Presentation only. Godot nodes and resources built from the two libraries above. Axis and winding conversion happens only in `scripts/Core/AcToGodot.cs`. |
+| `src/Lifestone.Client` (new) | none | Client-side logic between data and presentation. Coordinates and map coordinates, the floating origin, the landblock streaming planner, the frame-budget scheduler, the worker pool, the refcounted resource cache, surface shader variants, DXT mip chains (box filter + BC1/2/3 re-encoding), frame-time statistics, named locations. From M2 also the session layer (A0: the game-state reducer, event bus and Action API, in `Session/`). No Godot, no sockets, no file I/O (§1.1). Tested by `tests/Lifestone.Client.Tests`. |
+| `src/Lifestone.Net` (M2) | none | The AC protocol: the transport, the session (`AcSession`), the message codecs and the loopback gate (`LoopbackPolicy`). BCL only, with no package or project reference, so it does not see Data or Client. The only project that opens sockets. Tested by `tests/Lifestone.Net.Tests`. |
+| `src/Lifestone.Headless` (M2) | none | The headless session host (DoD 13): a console program, run as `dotnet Lifestone.Headless.dll` (no app host), that logs in with the test account, enters the world with portal space's timing, checks the server mod, logs off and quits (`docs/session.md` §20). It references Data and Client, reads the files a session needs and hands Client their bytes. `--scenario=login` is built; `holtburg-laps` and `academy-exit` are loud stubs (exit 2) until step ST16. |
+| `src/Lifestone.Game` | Godot 4.7 | Presentation only. Godot nodes and resources built from the libraries above. Axis and winding conversion happens only in `scripts/Core/AcToGodot.cs`. It reaches the session only through `Lifestone.Client` and never names `Lifestone.Net` (M2). |
 
 `Lifestone.Client` keeps Godot replaceable: everything that decides *what* to load, *where* things are and *which* retail render state applies is engine-agnostic. Only resource creation and nodes are Godot-specific.
+
+| Test project | What it tests |
+|---|---|
+| `tests/Lifestone.Data.Tests`, `tests/Lifestone.Client.Tests` | Data and Client. Tests that need the dats skip when they are missing. |
+| `tests/Lifestone.Net.Tests` (M2) | Net, with no server: the protocol vectors, the codecs, a fake ACE, fuzzing and a virtual soak. |
+| `tests/Lifestone.Loopback.Tests` (M2) | Every test that needs the local backend, in one assembly whose tests run one at a time, serialised across worktrees by a lock file in the main checkout's `cache\`. Each carries `[Trait("Category","Loopback")]` and skips, with the reason, unless the backend is up with the Lifestone server mod ready. |
+| `tests/Lifestone.ServerMod.Tests` (M2) | The server mod's shared wire contract and its source rules. The mod itself builds against the pinned ACE, outside the solution. |
+
+Helpers every test project shares live in `tests/Shared/` and are compile-linked into each. Long soaks and fuzz runs carry `[Trait("Tier","Soak")]`; the everyday run and the smoke suite's test step leave them and the loopback tests out with `--filter "Category!=Loopback&Tier!=Soak"`.
+
+### 1.1 Project rules for M2
+
+- **The Client rule.** `Lifestone.Client` may use `Lifestone.Net`'s records and interfaces; it opens no sockets and does no file I/O. Hosts supply bytes and Streams: the Godot game and the headless host read the files (the server's secrets and pids files, recordings) and pass their contents in. The architecture tests enforce it: GodotSharp only in Game, `System.Net.Sockets` only in Net, and no `File.`, `FileStream`, `Directory.` or `Process.` in Client.
+- **The clock rule.**
+  - Every network, session and action timeout reads `System.TimeProvider`. Tests drive `ManualTimeProvider` (`tests/Shared`), whose timers fire on `Advance`. Net and `Client/Session` read no ambient clock (`DateTime.Now`/`UtcNow`, `Environment.TickCount`, `Stopwatch`, `Thread.Sleep`); `SessionClock` is the one exception.
+  - Frame-stepped machines (portal space, physics, avatars) take an explicit `double now`: monotonic real seconds, advanced once per frame by the host, as `LivingStatic.Animate` and `EffectActor.AdvanceTo` already do. They never read `DerethTimeController.ClientClock`, which the time panel scales and pauses.
+
+### 1.2 Process priorities and frame budget (M2)
+
+**Process priorities** (lower runs first). The M1 nodes keep theirs; the M2 rows are planned by the wave-2 tracks and are
+claimed here so no two tracks pick the same number.
+
+| Priority | Node | Owner |
+|---|---|---|
+| −2000 | `TeleportTourRunner` (its `FrameTail` node, `int.MaxValue`, runs last) | M1 |
+| −1100 | `FrameBudgetShare` (subtracts the tunnel and the session pump from the main-thread budget, below) | M2 G1 |
+| −1000 | `GameServices` (drains `MainThreadQueue`) | M1 |
+| −900 | `SessionHost` (ticks the live session) | M2 G6 |
+| −800 | `PlayMode` (runs the queued play-mode work: builds the player, teleports, tears down) | M2 G6 |
+| −20 | the player controller | M2 G5 |
+| −10 | `CinematicDirector`, `InteriorTourRunner` | M1 |
+| −5 | the chase camera | M2 G5 |
+| 0 | `FlyCamera` | M1 |
+| 5 | `ObjectsSystem`, `InteriorController` | M1 |
+| 6 | `LivingStaticsSystem` | M1 |
+| 7 | `CellObjects` | M1 |
+| 10 | `WorldRoot` | M1 |
+| 12 | the server-objects layer | M2 G5 |
+| 15 | `PortalSpacePresenter` | M2 G1 |
+| 20 | `SkyController` | M1 |
+| 25 | `RetailUiLayer` (the retail UI's frame: runtime tick, composite in its own 1 ms slice (a surface that has started always finishes), tile upload; retail-ui.md §17) | M2 G2 |
+| 30 | `GoldenViewpointsRunner` | M1 |
+| 40, 50 | `SkyChecks`, `BlendChecks` | M1 |
+| 100 | `SpellViewerSky` (spell-viewer scene) | M1 |
+
+**Frame budget** (one frame's main-thread time that the game's own work may take; the 16.7 ms frame at 60 fps also holds
+Godot's rendering, which these numbers do not include):
+
+| Share | Default | How it is bounded |
+|---|---|---|
+| `MainThreadQueue` (attach steps, uploads, everything queued through `GameServices.MainThread`) | 4 ms (`--budget-ms`) | Settable (`MainThread.Budget`). It keeps its 4 ms until a share below is taken, and is never cut below 1 ms |
+| The portal tunnel (the creature-mode view's update and its materials) | taken from the queue while it shows | `FrameBudgetShare` subtracts it from the queue's budget |
+| The session pump (decode and reduce the server's messages, 2 ms) | 2 ms (`--session-budget-ms`) | `FrameBudgetShare` subtracts it from the queue's budget |
+| The retail UI's composite | its own 1 ms slice per frame, round-robin over the roots (`RetailUiLayer.CompositeSliceMilliseconds`). `UiCompositor.Composite` always paints at least one whole surface, and each login screen is one 800x600 root, so the slice only bounds the surfaces after the first: a first paint takes 3 to 8 ms (the data check 7.6, character management 4.1, disconnected 2.9; Debug, fonts cold) and a warm full repaint 1.4 to 3.7 ms, well under the 50 ms frame limit, so the F3 overlay's "retail ui" line (last and slowest composite, tiles uploaded) will often show a max over its 1.0 slice | Separate from the queue; not subtracted |
+
+`FrameBudgetShare` (priority −1100, so it sets the budget before the queue drains at −1000) sets `MainThread.Budget` to the
+configured 4 ms less the tunnel's and the session pump's shares, **down to a floor of 1 ms**, so attach work never starves
+while a portal transition runs. Every share and the budget actually used are reported in the F3 overlay (`PerfOverlay`).
+W2-pre(a) records the table; the arithmetic is `Client/Play/BudgetShare.cs` and the node is `scripts/PortalSpace/FrameBudgetShare.cs`
+(G1 W1, installed by `PortalSpaceSetup`). The tunnel takes 1 ms while it shows; the session track's pump takes its share with
+`FrameBudgetShare.Take("session", ms)` (a static no-op when the node is not installed). The F3 overlay's "budget shares" line shows them
+while any is taken.
 
 ## 2. Lifestone.Client
 
 ### 2.1 Coordinates (`World/AcCoordinates.cs`, `World/WorldLocation.cs`)
+
+The retail `LandDefs` functions live in `src/Lifestone.Data/World/LandDefs.cs` since M2 wave 0, so the data layer
+and the physics port can use them; `AcCoordinates` delegates to them.
 
 | Type | Meaning |
 |---|---|
@@ -81,6 +148,8 @@ The shared Godot infrastructure every visual track plugs into: services, streami
 | `Render` | `RenderResources`: textures, materials, shaders, shared meshes (render-contract.md §4). `Main` calls `Render.WarmUp(dats)` before streaming. It compiles the 26 shader variants the dats' 6,152 Surfaces can map to, and runs the mesh path once on a real surface (≈ 230 ms at start-up). No attach step then pays Godot's first-use shader compile (7–11 ms per variant, measured) or first-call JIT (3–14 ms). |
 | `Workers` | Bounded worker pool for decoding |
 | `MainThread` | `MainThreadQueue`, drained first thing each frame (process priority −1000) within `--budget-ms` (default 4 ms). `InvokeAsync` lets a worker await a main-thread result. |
+| `WorldVisibility` | *(M2.)* The arbiter of whether the 3D world is drawn: the **sole writer** of the main viewport's `Disable3D`. Hide requests are reference-counted by owner (`Hide`/`Unhide`, or `Follow(owner, worldVisible)` for an owner that follows a per-frame state), the world is hidden while any is held, and the sky view pauses with it (`SkyView.Paused`). A `SubViewport` keeps rendering while it is hidden (the tunnel's view). Always present. |
+| `Audio` | *(M2.)* `IAudioOutput?`: the sound card (16 voices, UI and Effects buses). Null until the portal track's `AudioService` installs itself (`PortalSpaceSetup`); consumers are silent while it is null. |
 
 **Logging** (`scripts/Core/Log.cs`) writes one structured line per event, such as `2026-10-10T06:53:50.206Z INFO  [flypath] report frames=2856 ... max_ms=37.353`.
 - Lines go to Godot's output and to `user://logs/lifestone.log`; the previous run's log is kept as `lifestone.1.log`.
@@ -134,6 +203,16 @@ The shared Godot infrastructure every visual track plugs into: services, streami
   - **Outdoors, fly mode keeps the eye at least 0.5 m above the exact ground** (`FlyCamera.FlyClearance`, rules in `Lifestone.Client.Navigation.FlyGroundClearance`), so the camera never sits under the back-face-culled terrain and sees the sky through it. Retail has no free camera (its player never goes below the terrain), so this is the M1 stand-in, not retail behaviour. Dungeons and cellars lie below the ground, so steps that stay in EnvCells (the interiors' cell tracker, `FlyCamera.ViewerCell`) are never clamped, and after leaving a dungeon or cellar cell through a wall or a floor the eye moves freely around that landblock's cells instead of being thrown up to the surface; from a building interior it stops on the floor (docs/navigation.md §4, with before/after measurements).
 - **Walk mode** keeps the eye 1.7 m above the exact ground (`TerrainSampler`) and moves at 4 m/s, ACE's `MotionInterp.RunAnimSpeed` at run rate 1. There is no collision in M1.
   - Retail's first-person camera sits 0.18 m in front of the head pivot (`CameraSet::InHead`, acclient.c:148094). The head's height needs the player Setup, so 1.7 m is a placeholder (`TODO(M2)`).
+- **The player's camera (M2 G5, `--offline-player`).** `ChaseCamera` (priority -5, after `PlayerController` at -20) drives the `FlyCamera` node
+  (`FlyCamera.Driven`: M1's keys, mouse and clamp do nothing; `InputEnabled` is left alone, so the panels' typing flag and T, F3, F7 and F9 work as in M1).
+  It is retail's chase camera (`Client/Camera/ChaseCameraModel`, a re-expression of `CameraSet` and the viewer half of `CameraManager`:
+  pivot 1.5 m above the player, viewer offset (0, -2.5, 0.75), stiffness 0.35, orbit, raise, lower and zoom by the number pad or the mouse look,
+  first person 0.18 m in front of the pivot) or first person (`--player-camera=first`, the point key, `FirstPersonView` hides the body).
+  Each frame the smoothed viewer is swept from the pivot to where it wants to be by `PhysicsWorld.SweepViewer` (a 0.3 m sphere), so it never goes
+  through walls or the ground; the cell of the sweep goes to `InteriorController.SetViewer`. It follows the player as drawn (D26, interpolated between
+  physics steps), so the character does not shake against the view. The wheel zooms by 10 percent a notch when nothing else takes it
+  (retail's route from the wheel to the camera is not read: `TODO(g5-wheel-zoom)`). The overhead and map views, the slope alignment and the mouse-look preferences are named TODOs in
+  the model. `--physics-overlay` shows the physics and the camera sweep.
 - **`PositionHud`** shows:
   - landblock, outdoor cell and retail map coordinates; inside an EnvCell its own landblock and cell and "indoors" with no map coordinates, as retail's radar shows none there (`Lifestone.Client.Navigation.PositionReadout`);
   - the local x/y/z (in an EnvCell, relative to the cell's own landblock: dungeon cells often lie outside its square);
@@ -177,10 +256,16 @@ SkyOptions, InteriorArguments, SpellViewerOptions, TerrainPreviewOptions) with t
 - `OptionCatalogTests` scans the Game parsers' `case "--..."` labels: a parsed option missing from the catalog, or a
   registered one no parser reads, fails `dotnet test`. Adding an option means adding both.
 
-**Check mode.** `--engine-checks`, `--interior-engine-checks`, `--sky-checks` and `--blend-checks` are check suites,
-one per run. A suite owns the render globals, so `Main` installs nothing live that writes them: the engine and interior
-suites run without the world (and without dats); the sky suite gets the sky controller over an initialised world that
-streams no layers; the blend suite gets only the byte-space environment (render-contract.md §2.3).
+**Check mode.** `--engine-checks`, `--interior-engine-checks`, `--sky-checks`, `--blend-checks` and
+`--portal-space-checks` and `--retail-ui-checks` are check suites, one per run. A suite owns the render globals, so `Main` installs nothing live
+that writes them: the engine, interior and portal-space suites run without the world (and without dats); the sky suite
+gets the sky controller over an initialised world that streams no layers; the blend suite gets only the byte-space
+environment (render-contract.md §2.3). The portal-space suite (`scripts/PortalSpace/PortalSpaceChecks.cs`, M2) pins the
+camera roll, the widest lens, the world arbiter, creature-mode lighting under hostile world globals, the frustum lens
+(f = √3, 0.4, 0.01 and 0.001, centred and off-centre), that the zoom renders, and the sky view's follow of the lens
+(portal-space.md §11.5). The retail-ui suite (`scripts/RetailUi/RetailUiChecks.cs`, M2) pins the tile layer byte for byte at
+scales 1 to 3, nearest filtering, the viewport hole, the cursor, the key table, the fonts, the real screens and input
+(retail-ui.md §17); its dat-based checks skip without the dats, and `Main` runs it before the dats check like the others.
 
 **Output paths.** Relative output paths (`--screenshot`, `--golden-viewpoints`, `--interior-tour`, ...) are taken from
 the repository root, never from `src/Lifestone.Game` (`Diagnostics/ScreenshotWriter.cs` with
@@ -215,6 +300,10 @@ The core and main-scene options (the other features' options are in their docs: 
 | `--texture-budget-mb=N`, `--mesh-budget-mb=N` | Texture cache budget (default 768) and shared-mesh cache budget (default 256), render-contract.md §4.1 |
 | `--engine-checks` | Verify the engine behaviours the render path and the streamer rely on, then quit (0 = all hold); run windowed |
 | `--interior-engine-checks`, `--sky-checks` | The interiors' (interiors.md §9) and the sky's (sky.md §6) check suites; one suite per run |
+| `--portal-space-checks` | *(M2.)* The portal view's engine checks (above, portal-space.md §11.5), then quit; run off-screen |
+| `--retail-ui-checks` | *(M2.)* The retail UI layer's engine checks (above, retail-ui.md §17), then quit; run off-screen |
+| `--retail-ui=off\|standin`, `--ui-scale=N`, `--retail-ui-start=SCREEN`, `--retail-ui-frames[=DIR]`, `--retail-ui-only`, `--retail-ui-glitches`, `--retail-disconnect` | *(M2.)* The retail UI over the world, default off, which leaves the explore scene unchanged (retail-ui.md §17) |
+| `--fov=DEG` | *(M2.)* The world camera's vertical field of view, 1 to 179 (default 60: `FlyCamera`; the spell viewer's own default is 55; the terrain preview's `--fov` is the same option). The portal zoom is a frustum and ignores it: its rest state is this field of view |
 | `--blend-space=byte\|linear` | *(Wave 3.)* Blend in retail's byte space (default) or Godot's linear light (render-contract.md §2.3) |
 | `--detail=on\|off` | *(Wave 3.)* Retail's building and environment detail textures (default on; render-contract.md §2.4). Also accepts 1/0 and true/false; any other value is reported as a bad argument |
 | `--blend-checks` | *(Wave 3.)* Verify byte-space blending, the decode, the detail pass and built-in-material colours on the engine in both blend spaces, then quit (0 = all hold); run windowed |

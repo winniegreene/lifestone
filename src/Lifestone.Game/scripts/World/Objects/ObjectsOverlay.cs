@@ -51,6 +51,7 @@ public partial class ObjectsOverlay : Label
         }
 
         _sinceUpdate = 0;
+        PlaceBelowPerfOverlay();
         var s = _system.Stats;
         var ci = CultureInfo.InvariantCulture;
         Text = string.Create(
@@ -60,6 +61,23 @@ public partial class ObjectsOverlay : Label
             ci,
             $"parts {s.Parts} (drawn {s.DrawnParts}, facing {s.FacingParts})   batches {s.Nodes} (shown {s.VisibleNodes}, {s.VisibleInstances} instances)   meshes {s.Meshes}   " +
             $"lod {s.LastUpdateMs:0.00} ms (max {s.MaxUpdateMs:0.00})   attach step max {s.MaxAttachStepMs:0.00} ms") + LivingLine(ci);
+    }
+
+    /// <summary>
+    /// The perf overlay grows with every track's rows (M2 added the budget shares, the retail UI's, the player's and physics' lines), so this
+    /// line sits under its measured text instead of at a fixed height, where the two overlapped.
+    /// </summary>
+    private void PlaceBelowPerfOverlay()
+    {
+        if (GetNodeOrNull<Label>("../PerfOverlay") is not { Visible: true } perf)
+        {
+            return;
+        }
+
+        var top = perf.OffsetTop + perf.GetCombinedMinimumSize().Y + 6f;
+        var height = OffsetBottom - OffsetTop;
+        OffsetTop = top;
+        OffsetBottom = top + height;
     }
 
     /// <summary>The living statics' line (docs/objects.md §1.7), when they run.</summary>

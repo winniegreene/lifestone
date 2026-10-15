@@ -6,19 +6,25 @@ namespace Lifestone.Client.Options;
 /// </summary>
 /// <remarks>
 /// <para>One group per feature. The parsing of each group's values lives with its feature (named in each group's
-/// comment); this file is where a feature declares that an option exists and what it does. <b>Adding an option:</b>
-/// add its <c>case "--name"</c> to the feature's parser and an <see cref="OptionSpec"/> to the feature's group here.
-/// <c>OptionCatalogTests</c> fails when a parser's option is missing here or a registered option is parsed nowhere, and
-/// the game warns about (and an automated run fails on) any argument no group registers.</para>
+/// comment); this class is where a feature declares that an option exists and what it does. <b>Adding an option:</b>
+/// add its <c>case "--name"</c> to the feature's parser and an <see cref="OptionSpec"/> to the feature's group: here
+/// for the M1 groups, and in the group's own partial file (<c>OptionCatalog.&lt;Group&gt;.cs</c>) for the M2 groups,
+/// which are already listed in <see cref="Registry"/> so their owners never edit this file. A group with no options yet
+/// is left out of <c>--help</c>. <c>OptionCatalogTests</c> fails when a parser's option is missing here or a registered
+/// option is parsed nowhere (the parsers of Lifestone.Game, Lifestone.Client and Lifestone.Headless), and the game warns
+/// about (and an automated run fails on) any argument no group registers. No option takes a password or other secret
+/// (<c>OptionCatalogTests</c>; tools\godot.ps1 echoes the whole command line): secrets come from
+/// server\runtime\secrets.json as bytes.</para>
 /// <para><b>Scenes.</b> Each group names the scenes that read its options (<see cref="OptionGroup.Scenes"/>; an option
 /// another scene also reads says so with <see cref="OptionSpec.AlsoIn"/>). A run's scene comes from
 /// <see cref="SceneOf"/>; an option of another scene is reported and ignored, and does not make the run automated
 /// (<see cref="OptionRegistry.Problems"/>, <see cref="OptionRegistry.EndsRun"/>).</para>
 /// <para>An option name is registered once. Options several scenes share (<c>--screenshot</c>, <c>--frames</c>,
 /// <c>--dat-dir</c>, <c>--max-mip</c>, <c>--retail-normals</c>, <c>--day-group</c>) are registered by the first feature
-/// below that reads them, and their help says where else they apply.</para>
+/// below that reads them, and their help says where else they apply. The headless host
+/// (<see cref="OptionScenes.Headless"/>) reads the Core options marked so, and the Session and Headless groups.</para>
 /// </remarks>
-public static class OptionCatalog
+public static partial class OptionCatalog
 {
     /// <summary>The option registry of the game (all scenes).</summary>
     public static OptionRegistry Registry { get; } = new(
@@ -32,6 +38,17 @@ public static class OptionCatalog
         SpellViewer(),
         TerrainPreview(),
         Cinematic(), // hero video tooling: the cinematic directors (docs/hero-video.md)
+        Video(), // screen-capture videos of the main scene (OptionCatalog.Video.cs)
+
+        // M2 groups, one per owning track, each in its own partial file (OptionCatalog.<Group>.cs); empty until the owner
+        // adds its options together with their parser.
+        Session(),
+        Headless(),
+        PortalSpace(),
+        Audio(),
+        RetailUi(),
+        Avatars(),
+        Play(),
     ]);
 
     /// <summary>The first lines of <c>--help</c>.</summary>
@@ -86,18 +103,21 @@ public static class OptionCatalog
         return scene == OptionScenes.Main && userArgs.Any(a => a.Name == "--scene" && a.Value == SpellViewerSceneValue) ? OptionScenes.SpellViewer : scene;
     }
 
-    /// <summary>Settings every scene reads (parsed by Lifestone.Game Core/GameOptions.cs in the GameServices autoload).</summary>
+    /// <summary>
+    /// Settings every scene reads (parsed by Lifestone.Game Core/GameOptions.cs in the GameServices autoload); the headless
+    /// host reads the five marked <see cref="OptionScenes.Headless"/>, with its own parser.
+    /// </summary>
     public static OptionGroup Core() => new("Core", "every scene",
     [
-        new("--help", null, "Print every option and quit.", OptionRole.Help),
-        new("--dat-dir", "DIR", "Retail dat folder (else LIFESTONE_DAT_DIR, else the client folder of the Lifestone checkout, next to Lifestone.slnx)."),
-        new("--log-level", "debug|info|warning|error", "Minimum log level (default info)."),
+        new("--help", null, "Print every option and quit (also the headless host's, which lists its own options only).", OptionRole.Help, AlsoIn: OptionScenes.Headless),
+        new("--dat-dir", "DIR", "Retail dat folder (else LIFESTONE_DAT_DIR, else the client folder of the Lifestone checkout, next to Lifestone.slnx; also the headless host's).", AlsoIn: OptionScenes.Headless),
+        new("--log-level", "debug|info|warning|error", "Minimum log level (default info; also the headless host's).", AlsoIn: OptionScenes.Headless),
         new("--screenshot", "PATH", "Save a PNG once the scene is ready (main scene: the place complete - streaming, objects, the interiors' cells - then --frames frames and at least 2 s, so living statics' flames and smoke show, as in the golden viewpoints), then quit. Relative paths are taken from the repository root; never inside src/ or tests/. Also the spell viewer's and the terrain preview's.", OptionRole.EndsRun),
         new("--frames", "N", "Frames rendered before --screenshot (default 30; the main scene also waits at least 2 s; also the spell viewer's and the terrain preview's)."),
-        new("--quit-after", "S", "Quit with exit code 1 after S seconds whatever happens (safety net for automated runs)."),
+        new("--quit-after", "S", "Quit with exit code 1 after S seconds whatever happens (safety net for automated runs; also the headless host's).", AlsoIn: OptionScenes.Headless),
         new("--vsync", "on|off|mailbox|adaptive", "Vertical sync (default on). With off or mailbox the frame rate is capped (see --max-fps)."),
         new("--max-fps", "N", "Frame-rate cap; 0 = none (uncapped measurements). Default: none with vsync on or adaptive, the screen's refresh rate with vsync off or mailbox; a malformed or negative value keeps the default."),
-        new("--workers", "N", "Worker threads for decoding (default min(8, cores - 2), at least 1)."),
+        new("--workers", "N", "Worker threads for decoding (default min(8, cores - 2), at least 1; also the headless host's).", AlsoIn: OptionScenes.Headless),
         new("--budget-ms", "X", "Main-thread work budget per frame, in ms (default 4)."),
         new("--max-mip", "N", "Highest mip level sampled (default 3: retail's at most 4 levels; also the terrain preview's)."),
         new("--dxt", "passthrough|expand", "DXT upload: the dat's blocks with re-encoded mips (default) or RGBA8 (render-contract.md §3)."),
@@ -132,6 +152,7 @@ public static class OptionCatalog
     [
         new("--blend-space", "byte|linear", "Blend in retail's byte space (default) or Godot's linear light (render-contract.md §2.3)."),
         new("--detail", "on|off", "Retail's building and environment detail textures (default on; render-contract.md §2.4)."),
+        new("--fov", "DEG", "The world camera's vertical field of view, 1 to 179 (default 60; the spell viewer's 55; the terrain preview's, default 60). The portal zoom is a frustum and ignores it.", AlsoIn: OptionScenes.TerrainPreview),
         new("--retail-normals", null, "Retail's per-block terrain normals, with the light step at landblock edges (default: seamless normals; also the terrain preview's).", AlsoIn: OptionScenes.TerrainPreview),
         new("--seamless-normals", null, "Seamless terrain normals, now the default (kept for old command lines; also the terrain preview's).", AlsoIn: OptionScenes.TerrainPreview),
     ], OptionScenes.Main | OptionScenes.SpellViewer);
@@ -146,6 +167,10 @@ public static class OptionCatalog
         new("--interior-engine-checks", null, "Verify the engine behaviours the cell shaders rely on, then quit (0 = all hold).", OptionRole.CheckSuite),
         new("--sky-checks", null, "Verify byte-space sky blending, sky order and pass layering, then quit (0 = all hold).", OptionRole.CheckSuite),
         new("--blend-checks", null, "Verify byte-space blending, the decode, the detail pass and built-in material colours in both blend spaces, then quit (0 = all hold).", OptionRole.CheckSuite),
+        new("--portal-space-checks", null, "Run the portal-space checks and quit.", OptionRole.CheckSuite),
+        new("--offline-player-checks", null, "Walk the offline player (the real controller, driven through its intents) through Holtburg: a lap, a wall, stairs up and down into buildings, a standing and a running jump, in the chase camera and first person; verify blocking and sliding, cell tracking, the movement messages and their cadence, the camera never inside geometry and no frame over 50 ms, then quit (0 = all hold). Implies --offline-player and, unlike the other suites, runs the live world.", OptionRole.CheckSuite),
+        new("--play-checks", null, "Run play mode on a scripted stand-in server, with no backend (a scripted visit: the character list, an entry, an arrival through portal space, a teleport and a logoff) and verify the whole path in the engine: the world waits for the player, the player is built from its own CreateObject with the session's movement sink, the world streams around it, portal space plays and sends LoginComplete once, the player is placed on the ground, a server teleport moves the world, the physics and the camera, and a logoff takes it all away; then quit (0 = all hold). Implies --play; the session is the stand-in, never a live one.", OptionRole.CheckSuite),
+        new("--retail-ui-checks", null, "Verify the retail UI layer in the engine (tiles byte for byte at scales 1 to 3, nearest filtering, no seams, the viewport hole, the cursor, the key table, the fonts, the real screens, input), then quit (0 = all hold).", OptionRole.CheckSuite),
     ], OptionScenes.Main);
 
     /// <summary>Sky, time and navigation (parsed by Lifestone.Game World/Sky/SkyOptions.cs; the teleport tour by Diagnostics/TeleportTourRunner.cs).</summary>
@@ -206,7 +231,6 @@ public static class OptionCatalog
         new("--distance", "M", "Camera distance in metres."),
         new("--pitch", "DEG", "Camera pitch down from horizontal (default 28)."),
         new("--yaw", "DEG", "Compass heading the camera looks towards (default 0, north)."),
-        new("--fov", "DEG", "Field of view (default 60)."),
         new("--debug-view", "N", "Terrain debug view (0 = retail; see TerrainDebugView)."),
         new("--no-fog", null, "No fog."),
         new("--perf", null, "Log build timings and render statistics."),

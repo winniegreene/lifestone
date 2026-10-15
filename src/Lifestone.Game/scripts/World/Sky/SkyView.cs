@@ -67,7 +67,24 @@ public partial class SkyView : SubViewport
         return view;
     }
 
-    /// <summary>Copies the main camera (orientation, lens, size) with the eye at <paramref name="eyeFromAnchor"/>.</summary>
+    /// <summary>
+    /// Not drawing: the view's render target stops updating (<see cref="SubViewport.RenderTargetUpdateMode"/> disabled) and
+    /// keeps its last image. Set while the 3D world is hidden (the portal tunnel is up, a full-screen screen covers it): the
+    /// world arbiter (<see cref="Lifestone.Game.Render.WorldVisibility"/>) drives it, so the sky costs nothing then and
+    /// draws a fresh frame again with the first frame the world shows (a viewport updates before the viewport that samples
+    /// it). A SubViewport keeps rendering when the main viewport's <c>Disable3D</c> is set, which is why this is needed.
+    /// </summary>
+    public bool Paused
+    {
+        get => RenderTargetUpdateMode == UpdateMode.Disabled;
+        set => RenderTargetUpdateMode = value ? UpdateMode.Disabled : UpdateMode.Always;
+    }
+
+    /// <summary>
+    /// Copies the main camera (orientation, lens, size) with the eye at <paramref name="eyeFromAnchor"/>. The lens is the
+    /// camera's projection mode with its near plane and either the field of view or, in frustum mode (the portal zoom,
+    /// D31), the frustum's size and offset: the sky sees exactly what the world sees.
+    /// </summary>
     public void Follow(Camera3D main, Vector3 eyeFromAnchor, Vector2I size)
     {
         if (size.X > 0 && size.Y > 0 && Size != size)
@@ -75,9 +92,22 @@ public partial class SkyView : SubViewport
             Size = size;
         }
 
-        Camera.Fov = main.Fov;
         Camera.KeepAspect = main.KeepAspect;
         Camera.Projection = main.Projection;
+        if (main.Projection == Camera3D.ProjectionType.Frustum)
+        {
+            // Frustum mode: Size is the frustum's height at the near plane, so the near plane travels with it; the offset is
+            // in the same units. (Retail's near plane moves with the zoom for the sky pass too: Render::set_vdst.)
+            Camera.Near = main.Near;
+            Camera.Size = main.Size;
+            Camera.FrustumOffset = main.FrustumOffset;
+        }
+        else
+        {
+            Camera.Fov = main.Fov;
+            Camera.Near = NearClip; // retail's znear for the sky pass (acclient.c:45526)
+        }
+
         Camera.Transform = new Transform3D(main.GlobalTransform.Basis, eyeFromAnchor);
     }
 }

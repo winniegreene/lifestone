@@ -25,6 +25,12 @@
     <!-- Warn (NU1901-NU1904) on known-vulnerable packages, including transitive ones. -->
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>
+    <!--
+      Lock files (M2 wave 0, D6): restore writes packages.lock.json next to each project, and they are committed, so
+      the exact package graph, content hashes included, is reviewable and a changed graph shows up in a diff. No
+      package is added by this; adding one still needs the owner's approval.
+    -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
 
     <!--
       Zero warnings, enforced (M1 wave 3, build-hygiene-unpinned): every compiler and analyzer warning fails the build.

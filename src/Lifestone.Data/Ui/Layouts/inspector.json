@@ -1,0 +1,41 @@
+{
+  "format": "lifestone-layout/1",
+  "id": "0x7F000002",
+  "width": 800,
+  "height": 600,
+  "elements": [
+    {
+      "id": "0x7F000200", "type": 3, "x": 120, "y": 40, "width": 560, "height": 400, "zLevel": 20,
+      "children": [
+        { "id": "0x7F000201", "base": { "layout": "0x21000042", "element": "0x100002AF" },
+          "x": 0, "y": 0, "width": 560, "height": 400, "edges": { "right": "OwnSide", "bottom": "OwnSide" } },
+        { "id": "0x7F000202", "type": 2, "x": 0, "y": 0, "width": 560, "height": 26 },
+        { "id": "0x7F000203", "base": { "layout": "0x21000040", "element": "0x100002CA" },
+          "x": 16, "y": 8, "width": 528, "height": 16,
+          "properties": { "UICore_Text_one_line": true, "UICore_Text_entry": { "literal": "Automation inspector (read-only)" } } },
+        { "id": "0x7F000204", "base": { "layout": "0x21000040", "element": "0x100002CA" },
+          "x": 16, "y": 28, "width": 528, "height": 80 },
+        { "id": "0x7F000205", "base": { "layout": "0x21000040", "element": "0x100002CA" },
+          "x": 16, "y": 110, "width": 528, "height": 18,
+          "properties": { "UICore_Text_one_line": true } },
+        { "id": "0x7F000206", "type": 5, "x": 16, "y": 132, "width": 512, "height": 214,
+          "properties": {
+            "UICore_ListBox_click_select": true, "UICore_ListBox_drag_select": false,
+            "UICore_Scrollable_vertical_scrollbar": "0x7F000208",
+            "UICore_ListBox_item_normal_state": 1, "UICore_ListBox_item_selected_state": 6,
+            "UICore_ListBox_max_columns": 1, "UICore_ListBox_selected_item_state_change": true } },
+        { "id": "0x7F000208", "base": { "layout": "0x2100003E", "element": "0x10000367" },
+          "x": 528, "y": 132, "width": 16, "height": 214,
+          "properties": { "UICore_Scrollbar_hide_when_disabled": true } },
+        { "id": "0x7F000207", "base": { "layout": "0x21000040", "element": "0x100002C8" },
+          "x": 400, "y": 352, "width": 144, "height": 42,
+          "properties": { "UICore_Text_entry": { "literal": "Hide inspector" } } }
+      ]
+    },
+    {
+      "id": "0x7F000210", "base": { "layout": "0x21000040", "element": "0x100002CA" },
+      "x": 0, "y": 0, "width": 512, "height": 16,
+      "properties": { "UICore_Text_one_line": true }
+    }
+  ]
+}

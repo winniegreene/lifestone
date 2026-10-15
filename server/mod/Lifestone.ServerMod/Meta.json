@@ -1,0 +1,10 @@
+{
+  "Name": "Lifestone",
+  "Author": "Lifestone contributors",
+  "Description": "Player tools for a loopback-only, single-player ACE: places, where-am-I, add XP and network counters through @lifestone. Turns off ACE's first-account Admin auto-promotion.",
+  "Version": "0.1.0",
+  "Priority": 0,
+  "Enabled": true,
+  "HotReload": false,
+  "RegisterCommands": true
+}

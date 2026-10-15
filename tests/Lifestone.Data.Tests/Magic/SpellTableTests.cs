@@ -118,7 +118,11 @@ public sealed class SpellTableTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal("Essence of Kemeroi", c[198].Name);                 // the highest id (void spells)
     }
 
-    /// <summary>ACE <c>SpellTable.ComputeHash</c>, ported verbatim as the oracle (AGPL-3.0, @95ef426d).</summary>
+    /// <summary>ACE's spell-name hash, the test oracle.</summary>
+    /// <remarks>
+    /// Ported from ACEmulator/ACE@95ef426d Source/ACE.DatLoader/FileTypes/SpellTable.cs <c>ComputeHash</c> (AGPL-3.0)
+    /// [with changes: none; a test-only oracle].
+    /// </remarks>
     private static uint AceComputeHash(string strToHash)
     {
         long result = 0;

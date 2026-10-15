@@ -43,6 +43,11 @@
 .PARAMETER Offscreen
     With -Run: open the game window far off-screen (--position -20000,-20000) so automated runs (screenshots,
     fly-path measurements) render normally without popping up on the user's desktop. Use it for every automated run.
+    It also makes the run silent (--audio-driver Dummy, owner decision D8): Godot's audio server still runs, on a
+    driver that outputs nothing. -Audio keeps the normal driver; an --audio-driver in -GodotArgs wins over both.
+
+.PARAMETER Audio
+    With -Offscreen: keep Godot's normal audio driver, so an off-screen run can be heard.
 
 .PARAMETER TimeoutSeconds
     With -Run: kill Godot (whole process tree) if it has not exited after this many seconds. 0 = no timeout.
@@ -77,7 +82,7 @@
     Frames to render before the screenshot (default 30).
 
 .PARAMETER GameArgs
-    Extra game arguments, space separated; passed after '--' (read in C# with OS.GetCmdlineUserArgs()).
+    Extra game arguments, space separated (a double-quoted run keeps its spaces: --character="Lifestone Smoke" is one argument); passed after '--' (read in C# with OS.GetCmdlineUserArgs()).
     Use a single string; with 'pwsh -File' bind it with a colon so the leading dashes are not read as a
     parameter name, e.g. -GameArgs:'--dat-dir=D:/AC'. (Bare '-- --x' style arguments do not work with
     'pwsh -File', hence the explicit -Screenshot/-Frames/-DatDir parameters.)
@@ -99,7 +104,7 @@
 
 .EXAMPLE
     pwsh -File tools\smoke.ps1
-    The M1 integration suite (build, tests, every Godot check harness) with a summary table.
+    The integration suite (build, tests, every Godot check harness, a secret scan) with a summary table.
 #>
 [CmdletBinding()]
 param(
@@ -114,6 +119,7 @@ param(
     [string] $DatDir = '',
     [switch] $IsolateUserData,
     [switch] $Offscreen,
+    [switch] $Audio,
     [int] $TimeoutSeconds = 0,
     [switch] $WorkstationGC,
     [string] $GodotExe = '',
@@ -207,7 +213,11 @@ if ($Driver) { $arguments.Add('--rendering-driver'); $arguments.Add($Driver) }
 if ($Resolution) { $arguments.Add('--resolution'); $arguments.Add($Resolution) }
 # A window that is merely off-screen (not minimised) is still drawn by Godot and DWM, so captures stay valid.
 if ($Offscreen -and $Run) { $arguments.Add('--position'); $arguments.Add('-20000,-20000') }
-if ($GodotArgs) { foreach ($a in ($GodotArgs -split '\s+' | Where-Object { $_ })) { $arguments.Add($a) } }
+# Automated runs are silent (D8). With the Dummy driver the audio server still runs; nothing reaches a device.
+if ($Offscreen -and $Run -and -not $Audio -and $GodotArgs -notmatch '(^|\s)--audio-driver(\s|=|$)') {
+    $arguments.Add('--audio-driver'); $arguments.Add('Dummy')
+}
+if ($GodotArgs) { foreach ($a in (Split-LifestoneArguments $GodotArgs)) { $arguments.Add($a) } }
 $userArgList = [System.Collections.Generic.List[string]]::new()
 if ($Screenshot) {
     # Resolve relative to this PowerShell location; Godot prefers forward slashes.
@@ -215,7 +225,7 @@ if ($Screenshot) {
     $userArgList.Add("--screenshot=$screenshotPath")
     $userArgList.Add("--frames=$Frames")
 }
-if ($GameArgs) { foreach ($a in ($GameArgs -split '\s+' | Where-Object { $_ })) { $userArgList.Add($a) } }
+if ($GameArgs) { foreach ($a in (Split-LifestoneArguments $GameArgs)) { $userArgList.Add($a) } }
 if ($userArgList.Count -gt 0) {
     $arguments.Add('--')
     foreach ($a in $userArgList) { $arguments.Add($a) }

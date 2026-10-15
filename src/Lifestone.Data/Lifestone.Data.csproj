@@ -35,4 +35,9 @@
     <EmbeddedResource Include="World\Data\*.json" LogicalName="Lifestone.Data.World.Data.%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- M2 G7: Lifestone's own panel layouts (lifestone-layout/1: the tools panel, the automation inspector); retail templates by id, Lifestone literal text. See docs/retail-ui-data.md section 9. -->
+    <EmbeddedResource Include="Ui\Layouts\*.json" LogicalName="Lifestone.Data.Ui.Layouts.%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

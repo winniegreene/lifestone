@@ -98,6 +98,32 @@ public sealed class InteriorLocationsTests(InteriorsFixture fixture) : IClassFix
         Assert.Null(DungeonEntries.Find(fixture.Structures, new Lifestone.Data.Terrain.LandblockCoord(0x5A, 0x5A))); // open sea
     }
 
+    [Fact]
+    public void The_training_academy_is_where_ace_spawns_a_new_character()
+    {
+        // m2-plan §1.6 item 26 (ST12): CharGen StarterAreas[0].Locations[0], not M1's 0x860301AD.
+        var academy = InteriorLocations.TrainingAcademy;
+        Assert.Equal(0x860201ADu, academy.CellId);
+        Assert.Equal(new Vector3(12.3199f, -28.482f, 0.005f), academy.Location.Position.Local);
+        Assert.True(InteriorLocations.TryGet("training-academy", out var parsed));
+        Assert.Equal(0x860201ADu, parsed.Position.CellId);
+    }
+
+    [RequiresDatsFact]
+    public void The_training_academy_matches_the_portal_dats_first_holtburg_start_location()
+    {
+        Assert.True(fixture.Dats.TryGetPortal<DatReaderWriter.DBObjs.CharGen>(0x0E000002, out var chargen));
+        var start = chargen.StartingAreas[0].Locations[0];
+        var academy = InteriorLocations.TrainingAcademy;
+        Assert.Equal(start.CellId, academy.CellId);
+        Assert.True(Vector3.Distance(start.Frame.Origin, academy.Location.Position.Local) < 1e-3f, $"dat origin {start.Frame.Origin}");
+        var datHeading = WorldLocations.HeadingFromQuaternion(start.Frame.Orientation.W, start.Frame.Orientation.Z);
+        Assert.InRange(Math.Abs(((datHeading - academy.Location.HeadingDegrees + 540.0) % 360.0) - 180.0), 0.0, 0.01);
+
+        // M1's cell is one of the same start area's other locations: the same room in another landblock.
+        Assert.Contains(chargen.StartingAreas[0].Locations, l => l.CellId == 0x860301ADu);
+    }
+
     [RequiresDatsFact]
     public void Acviewers_hotel_swank_point_is_not_in_its_cell_which_is_why_it_is_not_curated()
     {

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "DotNet.Standard.Common": {
+        "type": "Direct",
+        "requested": "[2.0.1, )",
+        "resolved": "2.0.1",
+        "contentHash": "zW0m0ytHi43ccbEOTNDa10cDDnT7BAzY1R1Rb1dlhbdkiyglsALjrsyTPSEjbdnTmCOAvAvl4kkbvBLoYhC6dQ=="
+      },
+      "ZLibDotNet": {
+        "type": "Direct",
+        "requested": "[0.1.1, )",
+        "resolved": "0.1.1",
+        "contentHash": "QEti4O7dwRcOb9zbnLuudSrt2IT61OYjq0R7lcJb+EzUm5N6djOVGU/cp+FZIZzJUnaFIntwrpwiuRvhpS7ZHg=="
+      },
+      "Chorizite.DatReaderWriter": {
+        "type": "Transitive",
+        "resolved": "2.1.9",
+        "contentHash": "CoMkErq5bIwaZHzBkPbL3PkDIwJpELfPzC+Bttw6oEo8nL6ADHZ5d5ClWRf/Gh8GgONkgpCrbGcgWG93t+FVRg==",
+        "dependencies": {
+          "DotNet.Standard.Common": "2.0.1",
+          "ZLibDotNet": "0.1.1"
+        }
+      },
+      "lifestone.data": {
+        "type": "Project",
+        "dependencies": {
+          "Chorizite.DatReaderWriter": "[2.1.9, )"
+        }
+      },
+      "lifestone.net": {
+        "type": "Project"
+      }
+    }
+  }
+}

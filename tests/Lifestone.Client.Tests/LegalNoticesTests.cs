@@ -40,7 +40,7 @@ public sealed class LegalNoticesTests
     [Fact]
     public void The_readme_licence_section_lists_the_same_attributions()
     {
-        var readme = File.ReadAllText(RepoFile("README.md"));
+        var readme = File.ReadAllText(RepositoryFiles.PathOf("README.md"));
         var start = readme.IndexOf("## License", StringComparison.Ordinal);
         Assert.True(start >= 0, "README has no '## License' section");
         var section = readme[start..];
@@ -56,20 +56,8 @@ public sealed class LegalNoticesTests
     [Fact]
     public void The_licence_file_is_the_agpl_version_3()
     {
-        var licence = File.ReadAllText(RepoFile("LICENSE"));
+        var licence = File.ReadAllText(RepositoryFiles.PathOf("LICENSE"));
         Assert.Contains("GNU AFFERO GENERAL PUBLIC LICENSE", licence, StringComparison.Ordinal);
         Assert.Contains("Version 3", licence, StringComparison.Ordinal);
-    }
-
-    private static string RepoFile(string name)
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Lifestone.slnx")))
-        {
-            dir = dir.Parent;
-        }
-
-        Assert.NotNull(dir);
-        return Path.Combine(dir!.FullName, name);
     }
 }

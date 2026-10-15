@@ -17,7 +17,7 @@ No third-party code was copied or ported into this track, so no file carries a p
 
 ## Retail functions re-expressed (11.4186 `acclient.c` line numbers)
 
-- **Coordinates:**
+- **Coordinates** (the `LandDefs` functions now live in `src/Lifestone.Data/World/LandDefs.cs`; `AcCoordinates` delegates):
   - `LandDefs::gid_to_lcoord` (209521) and `LandDefs::lcoord_to_gid` (218182)
   - `LandDefs::blockid_to_lcoord` (122260) and `LandDefs::in_bounds` (122254)
   - `LandDefs::get_outside_lcoord` (467411) and `LandDefs::adjust_to_outside` (467434); the `flt_8EDE44 = 24.0 * 8.0` initialiser is at 800518

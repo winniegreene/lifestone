@@ -105,6 +105,8 @@ public sealed class Navigator
             return;
         }
 
+        // With --offline-player the camera is the player's: the player goes to the place (indoor places are placed by the interiors).
+        PlayerController.Current?.Teleport(OfflinePlayerSetup.SpawnOf(_services, location));
         var spot = CameraPlacement.Spot(location, GroundAt);
         var pose = _camera.WalkMode
             ? CameraPlacement.Standing(spot, location.HeadingDegrees, GroundAt, FlyCamera.EyeHeight)

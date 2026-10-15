@@ -173,4 +173,24 @@ public sealed class SurfaceShaderVariantTests(DatSetFixture fixture) : IClassFix
         Assert.Equal(2, cells.Count);
         Assert.All(building.Concat(cells), v => Assert.True(v is { Blend: SurfaceBlend.Opaque, AlphaTest: false, Textured: true, Fog: true }, v.Name));
     }
+    [Fact]
+    public void Creature_mode_variants_have_no_fog_and_no_detail_pass()
+    {
+        var fogged = new SurfaceShaderVariant(SurfaceBlend.Opaque, false, true, SurfaceCull.Back, TextureAddressMode.Wrap, Textured: true, Fog: true);
+        var creature = fogged.WithLighting(SurfaceLighting.CreatureMode);
+        Assert.False(creature.Fog);
+        Assert.Equal(SurfaceDetail.None, creature.Detail);
+        Assert.Equal("opaque.z.back.wrap.tex.nofog.creaturemode", creature.Name);
+        Assert.Equal(SurfaceDetail.None, creature.WithDetail(SurfaceDetail.Building).Detail);
+        Assert.Equal(SurfaceDetail.None, creature.WithDetail(SurfaceDetail.Environment).Detail);
+
+        // Variants that differ only in fog (or in a detail pass) collapse to one: the warm-up compiles each once.
+        Assert.Equal(creature, (fogged with { Fog = false }).WithLighting(SurfaceLighting.CreatureMode));
+        Assert.Equal(creature, fogged.WithDetail(SurfaceDetail.Building).WithLighting(SurfaceLighting.CreatureMode));
+
+        // The other rules only change the rule.
+        Assert.True(fogged.WithLighting(SurfaceLighting.CellObject).Fog);
+        Assert.Equal(SurfaceLighting.EnvCell, fogged.WithLighting(SurfaceLighting.EnvCell).Lighting);
+        Assert.Equal(fogged, fogged.WithLighting(SurfaceLighting.Object));
+    }
 }

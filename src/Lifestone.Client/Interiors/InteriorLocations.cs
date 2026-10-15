@@ -67,16 +67,20 @@ public static class InteriorLocations
         "glenden-wood-dungeon", "Glenden Wood Dungeon", 0x01E3033D, new Vector3(161f, -150f, 0f), -0.983255, -0.182236);
 
     /// <summary>
-    /// The Training Academy, landblock 0x8603 (2,163 cells, the densest of these): where new characters from Holtburg
-    /// start. ACE <c>CharacterPositionExtensions.StartingPosition</c> (Holtburg start area): cell 0x860301AD
-    /// (12.3199, -28.482, 0.005), rotation (x 0, y 0, z -0.9408059, w -0.3389459).
+    /// The Training Academy, landblock 0x8602: where a new character from Holtburg's start area appears. ACE places a new
+    /// character at <c>CharGen.StarterAreas[startArea].Locations[0]</c> (ACE.Server/Factories/PlayerFactory.cs, ACE
+    /// @95ef426d), which the end-of-retail portal dat (CharGen 0x0E000002, start area 0, "Holtburg") gives as cell
+    /// 0x860201AD at (12.3199, -28.482, 0.005), rotation (x 0, y 0, z -0.9408059, w -0.3389459)
+    /// (<c>InteriorLocationsTests</c> checks it against the dat). M1 used 0x860301AD from ACE's older
+    /// <c>CharacterPositionExtensions.StartingPosition</c>: another of the same start area's locations (the same room in
+    /// landblock 0x8603), not the first, which is the one ACE spawns at (m2-plan §1.6 item 26; fixed in M2 step ST12).
     /// </summary>
     public static readonly InteriorLocation TrainingAcademy = new(
         "training-academy",
         InteriorKind.Dungeon,
-        new WorldLocation("Training Academy", new CellPosition(0x860301AD, new Vector3(12.3199f, -28.482f, 0.005f)), true,
+        new WorldLocation("Training Academy", new CellPosition(0x860201AD, new Vector3(12.3199f, -28.482f, 0.005f)), true,
             WorldLocations.HeadingFromQuaternion(-0.3389459, -0.9408059)),
-        "ACE v1.78.4816 ACE.Entity/CharacterPositionExtensions.cs StartingPosition (StarterTown.Holtburg)");
+        "the portal dat's CharGen 0x0E000002 StarterAreas[0].Locations[0], where ACE's PlayerFactory places a new character (ACE @95ef426d)");
 
     /// <summary>
     /// Inside the Holtburg shop with the counter (LandBlockInfo 0xA9B4 building 7, GfxObj 0x01000C17), facing the

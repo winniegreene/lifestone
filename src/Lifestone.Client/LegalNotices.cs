@@ -56,7 +56,7 @@ public static class LegalNotices
     [
         new("ACEmulator (ACE)", "AGPL-3.0", "the bundled server; game rules and algorithms ported from its source"),
         new("ACE-World-16PY-Patches", "AGPL-3.0", "the world database: places, portals and spell visuals"),
-        new("OpenAC", "MIT", "terrain blending code (TexMerge)"),
+        new("OpenAC", "MIT", "terrain blending code (TexMerge); network transport and message codecs"),
         new("Chorizite DatReaderWriter", "MIT", "reading the dat files"),
         new("WorldBuilder", "MIT", "landscape and terrain blending reference"),
         new("ACViewer", "GPL-3.0", "terrain blending, named locations and test oracles"),

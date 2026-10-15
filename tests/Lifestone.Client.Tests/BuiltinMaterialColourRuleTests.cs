@@ -21,7 +21,7 @@ public sealed partial class BuiltinMaterialColourRuleTests
     [Fact]
     public void Every_script_that_creates_a_builtin_3d_material_routes_its_colours_through_BuiltinColor()
     {
-        var scripts = Path.Combine(RepositoryRoot(), "src", "Lifestone.Game", "scripts");
+        var scripts = RepositoryFiles.PathOf("src", "Lifestone.Game", "scripts");
         var offenders = new List<string>();
         var users = 0;
         foreach (var file in Directory.EnumerateFiles(scripts, "*.cs", SearchOption.AllDirectories))
@@ -47,7 +47,7 @@ public sealed partial class BuiltinMaterialColourRuleTests
     public void No_scene_or_resource_file_declares_a_builtin_3d_material()
     {
         // A .tscn / .tres colour cannot be pre-encoded for the blend space selected at run time: create such nodes in code.
-        var game = Path.Combine(RepositoryRoot(), "src", "Lifestone.Game");
+        var game = RepositoryFiles.PathOf("src", "Lifestone.Game");
         var offenders = Directory.EnumerateFiles(game, "*.*", SearchOption.AllDirectories)
             .Where(f => f.EndsWith(".tscn", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".tres", StringComparison.OrdinalIgnoreCase))
             .Where(f => !f.Contains(Path.DirectorySeparatorChar + ".godot" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
@@ -55,18 +55,5 @@ public sealed partial class BuiltinMaterialColourRuleTests
             .Select(f => Path.GetRelativePath(game, f))
             .ToList();
         Assert.True(offenders.Count == 0, "built-in 3D materials declared in scene files (render-contract §2.3): " + string.Join(", ", offenders));
-    }
-
-    private static string RepositoryRoot()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Lifestone.slnx")))
-            {
-                return dir.FullName;
-            }
-        }
-
-        throw new InvalidOperationException("Lifestone.slnx not found above " + AppContext.BaseDirectory);
     }
 }

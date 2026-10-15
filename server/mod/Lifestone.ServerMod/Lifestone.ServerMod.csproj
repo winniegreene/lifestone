@@ -1,0 +1,112 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Lifestone's ACE server mod (docs/milestones/m2-plan.md, server mod SM2; DoD 10): the @lifestone player tools, the
+    load gate (loopback host, Player-level new accounts, the exact ACE build, no hot reload) and the switch that turns
+    off ACE's first-account Admin auto-promotion.
+
+    ACE loads it from server\runtime\ace-mods\Lifestone.ServerMod\ (ModContainer.cs:26-40: the folder's
+    Lifestone.ServerMod.dll and Meta.json, type Lifestone.ServerMod.Mod) through McMaster's plugin loader with shared
+    types preferred. So the ACE assemblies below are compile-time references only (Private=false): a copy next to the
+    mod would load a second ACE.Server, whose IHarmonyMod ACE's own would not recognise ('as IHarmonyMod' gives null,
+    ModContainer.cs:201). No NuGet package is used at all.
+
+    Outside Lifestone.slnx and outside Directory.Build.props' src/tests gate, so every setting is made here. Built by
+    server\build-mod.ps1 (a compile check into cache\) and, from SM4, installed by server\setup-server.ps1.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Lifestone.ServerMod</RootNamespace>
+    <AssemblyName>Lifestone.ServerMod</AssemblyName>
+    <!-- Meta.json's Version must match (ModSourceTests). -->
+    <Version>0.1.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Deterministic>true</Deterministic>
+    <AnalysisLevel>10.0</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NuGetAudit>false</NuGetAudit>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <IsPackable>false</IsPackable>
+    <Authors>Lifestone contributors</Authors>
+    <Product>Lifestone</Product>
+    <!--
+      server\build-mod.ps1 and setup give each build its own intermediates (-p:BaseIntermediateOutputPath=<output>.obj\),
+      so this folder's own bin\ and obj\ (an IDE build's) are no longer the SDK's excluded output folders: keep their
+      generated sources out of the compile all the same.
+    -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!--
+    The ACE build to compile against: -p:AceDir=<folder>\ when given (server\build-mod.ps1 and setup pass it), otherwise
+    the server\runtime\ace\ of the outermost enclosing Lifestone checkout that has one. A git worktree created inside a
+    checkout therefore builds against the main checkout's ACE, the only one that runs.
+  -->
+  <PropertyGroup>
+    <_LsCheckout0>$([MSBuild]::GetDirectoryNameOfFileAbove('$(MSBuildProjectDirectory)', 'Lifestone.slnx'))</_LsCheckout0>
+    <_LsCheckout1 Condition="'$(_LsCheckout0)' != ''">$([MSBuild]::GetDirectoryNameOfFileAbove('$([System.IO.Path]::GetDirectoryName('$(_LsCheckout0)'))', 'Lifestone.slnx'))</_LsCheckout1>
+    <_LsCheckout2 Condition="'$(_LsCheckout1)' != ''">$([MSBuild]::GetDirectoryNameOfFileAbove('$([System.IO.Path]::GetDirectoryName('$(_LsCheckout1)'))', 'Lifestone.slnx'))</_LsCheckout2>
+    <!-- AceDir is usually a global property (given on the command line), which no project property can change. -->
+    <_LsAceDir>$(AceDir)</_LsAceDir>
+    <_LsAceDir Condition="'$(_LsAceDir)' == '' and '$(_LsCheckout2)' != '' and Exists('$(_LsCheckout2)\server\runtime\ace\ACE.Server.dll')">$(_LsCheckout2)\server\runtime\ace\</_LsAceDir>
+    <_LsAceDir Condition="'$(_LsAceDir)' == '' and '$(_LsCheckout1)' != '' and Exists('$(_LsCheckout1)\server\runtime\ace\ACE.Server.dll')">$(_LsCheckout1)\server\runtime\ace\</_LsAceDir>
+    <_LsAceDir Condition="'$(_LsAceDir)' == '' and '$(_LsCheckout0)' != ''">$(_LsCheckout0)\server\runtime\ace\</_LsAceDir>
+    <_LsAceDir Condition="'$(_LsAceDir)' != '' and !HasTrailingSlash('$(_LsAceDir)')">$(_LsAceDir)\</_LsAceDir>
+    <LifestoneModBuildKey Condition="'$(LifestoneModBuildKey)' == ''">none</LifestoneModBuildKey>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="ACE.Server" HintPath="$(_LsAceDir)ACE.Server.dll" Private="false" />
+    <Reference Include="ACE.Entity" HintPath="$(_LsAceDir)ACE.Entity.dll" Private="false" />
+    <Reference Include="ACE.Database" HintPath="$(_LsAceDir)ACE.Database.dll" Private="false" />
+    <Reference Include="ACE.Common" HintPath="$(_LsAceDir)ACE.Common.dll" Private="false" />
+    <Reference Include="ACE.DatLoader" HintPath="$(_LsAceDir)ACE.DatLoader.dll" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The wire contract, shared with Lifestone.Client (which compiles the same files by link). -->
+    <Compile Include="..\Shared\**\*.cs" Link="Shared\%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- The loopback gate, owned by Lifestone.Net and written to be linked alone (LoopbackPolicyLinkTests). -->
+    <Compile Include="..\..\..\src\Lifestone.Net\Sockets\LoopbackPolicy.cs" Link="Linked\LoopbackPolicy.cs" />
+    <Compile Include="..\..\..\src\Lifestone.Net\Sockets\LoopbackRequiredException.cs" Link="Linked\LoopbackRequiredException.cs" />
+    <None Update="Meta.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    Before anything resolves the references: the ACE build must exist, its ACE.Server.dll must hash to what its build
+    stamp (lifestone-build.json, written by setup-server.ps1) and -p:AceServerDllSha256 say, and the hash and commit are
+    embedded so the mod can refuse any other ACE.Server.dll at load time (Mod.cs).
+  -->
+  <Target Name="LifestoneCheckAce" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(_LsAceDir)ACE.Server.dll')"
+           Text="Lifestone server mod: no ACE.Server.dll in '$(_LsAceDir)'. Set the backend up once from the main checkout (pwsh -NoProfile -File server\setup-server.ps1; server\README.md), or pass -p:AceDir=&lt;the folder of a built ACE&gt;\." />
+    <GetFileHash Files="$(_LsAceDir)ACE.Server.dll" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_LsAceServerDllSha256" />
+    </GetFileHash>
+    <PropertyGroup>
+      <_LsAceServerDllSha256>$(_LsAceServerDllSha256.ToLowerInvariant())</_LsAceServerDllSha256>
+      <_LsAceBuildStamp Condition="Exists('$(_LsAceDir)lifestone-build.json')">$([System.IO.File]::ReadAllText('$(_LsAceDir)lifestone-build.json'))</_LsAceBuildStamp>
+      <_LsStampedSha256>$([System.Text.RegularExpressions.Regex]::Match('$(_LsAceBuildStamp)', '(?&lt;="aceServerDllSha256"\s*:\s*")[0-9a-f]{64}'))</_LsStampedSha256>
+      <_LsStampedCommit>$([System.Text.RegularExpressions.Regex]::Match('$(_LsAceBuildStamp)', '(?&lt;="commit"\s*:\s*")[0-9a-f]{40}'))</_LsStampedCommit>
+      <AceCommit Condition="'$(AceCommit)' == ''">$(_LsStampedCommit)</AceCommit>
+    </PropertyGroup>
+    <Error Condition="'$(AceServerDllSha256)' != '' and '$(AceServerDllSha256.ToLowerInvariant())' != '$(_LsAceServerDllSha256)'"
+           Text="Lifestone server mod: '$(_LsAceDir)ACE.Server.dll' has SHA-256 $(_LsAceServerDllSha256), not the expected $(AceServerDllSha256)." />
+    <Error Condition="'$(_LsStampedSha256)' != '' and '$(_LsStampedSha256)' != '$(_LsAceServerDllSha256)'"
+           Text="Lifestone server mod: '$(_LsAceDir)ACE.Server.dll' has SHA-256 $(_LsAceServerDllSha256), but its build stamp lifestone-build.json says $(_LsStampedSha256). Rebuild ACE with server\setup-server.ps1 -RebuildAce." />
+    <Error Condition="'$(AceCommit)' == ''"
+           Text="Lifestone server mod: no ACE commit is known for '$(_LsAceDir)': it has no lifestone-build.json (server\setup-server.ps1 writes it); pass -p:AceCommit=&lt;40 hex digits&gt;." />
+    <ItemGroup>
+      <AssemblyMetadata Include="AceServerDllSha256" Value="$(_LsAceServerDllSha256)" />
+      <AssemblyMetadata Include="AceCommit" Value="$(AceCommit)" />
+      <AssemblyMetadata Include="LifestoneModBuildKey" Value="$(LifestoneModBuildKey)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

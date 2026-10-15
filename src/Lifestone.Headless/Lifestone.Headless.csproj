@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The headless session host (M2 state track; DoD 13): the A0 session layer - login, scenarios, recordings - without
+    Godot, run as 'dotnet Lifestone.Headless.dll'. UseAppHost=false, so the build writes no unsigned .exe. Hosts own the
+    I/O (the console, files, the secrets bytes); the session logic itself lives in Lifestone.Client.
+    TargetFramework / Nullable / LangVersion come from ../../Directory.Build.props.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseAppHost>false</UseAppHost>
+    <RootNamespace>Lifestone.Headless</RootNamespace>
+    <AssemblyName>Lifestone.Headless</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lifestone.Data\Lifestone.Data.csproj" />
+    <ProjectReference Include="..\Lifestone.Client\Lifestone.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lifestone.Loopback.Tests" />
+  </ItemGroup>
+
+</Project>

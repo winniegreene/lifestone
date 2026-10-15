@@ -29,9 +29,27 @@ public enum PoseSampling
 /// One queued animation of a <see cref="AnimSequence"/> (retail <c>AnimSequenceNode</c>). Frame bounds are clamped
 /// to the animation like retail <c>AnimSequenceNode::set_animation_id</c>.
 /// </summary>
+/// <remarks>
+/// The sequence reuses the nodes it removed (see <see cref="AnimSequence"/>): a node read from
+/// <see cref="AnimSequence.Nodes"/>, <see cref="AnimSequence.CurrentNode"/> or <see cref="AnimSequence.FirstCyclic"/>
+/// describes that animation only while it is in the sequence.
+/// </remarks>
 public sealed class AnimSequenceNode
 {
-    internal AnimSequenceNode(AnimDataRef data, AnimationData? anim)
+    internal AnimSequenceNode(AnimDataRef data, AnimationData? anim) => Set(data, anim);
+
+    public uint AnimId { get; private set; }
+
+    public AnimationData? Anim { get; private set; }
+
+    public float Framerate { get; private set; }
+
+    public int LowFrame { get; private set; }
+
+    public int HighFrame { get; private set; }
+
+    /// <summary>Retail <c>AnimSequenceNode::set_animation_id</c> with the <c>AnimData</c>'s range and framerate.</summary>
+    internal void Set(AnimDataRef data, AnimationData? anim)
     {
         AnimId = data.AnimId;
         Framerate = data.Framerate;
@@ -65,16 +83,6 @@ public sealed class AnimSequenceNode
             HighFrame = LowFrame;
         }
     }
-
-    public uint AnimId { get; }
-
-    public AnimationData? Anim { get; }
-
-    public float Framerate { get; private set; }
-
-    public int LowFrame { get; private set; }
-
-    public int HighFrame { get; private set; }
 
     /// <summary>Retail <c>get_starting_frame</c>: <c>high + 1 − ε</c> when playing backwards, else <c>low</c>.</summary>
     public double StartingFrame => Framerate < 0f ? HighFrame + 1 - SequenceConstants.Epsilon : LowFrame;
@@ -115,14 +123,18 @@ internal static class SequenceConstants
 /// (retail <c>long double</c>), frame data single precision.
 /// </summary>
 /// <remarks>
-/// Differences from ACE, all following retail: frame numbers are double (ACE float); hook direction filtering uses the
-/// retail rule <c>dir_ == 0 || dir_ == dir</c>; the animation-done hook is queued exactly as
-/// <c>update_internal</c> does (when the list head is not the first cyclic node).
+/// <para>Differences from ACE, all following retail: frame numbers are double (ACE float); hook direction filtering uses
+/// the retail rule <c>dir_ == 0 || dir_ == dir</c>; the animation-done hook is queued exactly as
+/// <c>update_internal</c> does (when the list head is not the first cyclic node).</para>
+/// <para>Allocation-free once warm: a removed node (with its <see cref="AnimSequenceNode"/>) moves to a free list and
+/// is reused by the next <see cref="AppendAnimation"/>, so a motion change that swaps links and cycles allocates nothing
+/// once the sequence has held as many nodes as it holds now.</para>
 /// </remarks>
 public sealed class AnimSequence(IAnimationSource animations)
 {
     private readonly IAnimationSource _animations = animations;
     private readonly LinkedList<AnimSequenceNode> _list = new();
+    private readonly LinkedList<AnimSequenceNode> _free = new();
 
     /// <summary>Receives hooks as they fire (retail <c>hook_obj-&gt;add_anim_hook</c>). Null = hooks are not collected.</summary>
     public Action<AnimHook>? HookSink { get; set; }
@@ -193,7 +205,11 @@ public sealed class AnimSequence(IAnimationSource animations)
     /// <summary>Retail <c>clear_animations</c>.</summary>
     public void ClearAnimations()
     {
-        _list.Clear();
+        while (_list.First is { } node)
+        {
+            Release(node);
+        }
+
         FirstCyclic = null;
         FrameNumber = 0;
         CurrentNode = null;
@@ -202,18 +218,47 @@ public sealed class AnimSequence(IAnimationSource animations)
     /// <summary>Retail <c>append_animation</c>: nodes whose animation is missing are dropped; the new tail becomes the first cyclic node.</summary>
     public void AppendAnimation(AnimDataRef data)
     {
-        var node = new AnimSequenceNode(data, data.AnimId != 0 ? _animations.GetAnimation(data.AnimId) : null);
-        if (node.Anim is null)
+        var anim = data.AnimId != 0 ? _animations.GetAnimation(data.AnimId) : null;
+        if (anim is null)
         {
             return;
         }
 
-        FirstCyclic = _list.AddLast(node);
+        if (_free.Last is { } reused)
+        {
+            _free.Remove(reused);
+            reused.Value.Set(data, anim);
+            _list.AddLast(reused);
+            FirstCyclic = reused;
+        }
+        else
+        {
+            FirstCyclic = _list.AddLast(new AnimSequenceNode(data, anim));
+        }
+
         if (CurrentNode is null)
         {
             CurrentNode = _list.First;
             FrameNumber = CurrentNode!.Value.StartingFrame;
         }
+    }
+
+    /// <summary>
+    /// Retail <c>CPhysicsObj::set_sequence_animation</c> (11.4186 0x0050F6F0, 11.6096 0x005101C0) on the part array's
+    /// sequence: an interrupt clears the whole sequence first (<c>CSequence::clear</c>: animations, physics and the
+    /// placement frame), then <paramref name="animId"/> is appended from <paramref name="startFrame"/> to its last frame
+    /// at <paramref name="framerate"/> (<c>AnimData</c> with <c>low_frame</c> = the start frame, <c>high_frame</c> −1).
+    /// A framerate of 0 holds the start frame. CharGen's preview uses it (<c>gmCG3DView::StartAnimation</c>,
+    /// <c>StopAnimation</c>).
+    /// </summary>
+    public void SetSequenceAnimation(uint animId, bool interrupt, int startFrame, float framerate)
+    {
+        if (interrupt)
+        {
+            Clear();
+        }
+
+        AppendAnimation(new AnimDataRef(animId, startFrame, -1, framerate));
     }
 
     /// <summary>Retail <c>remove_cyclic_anims</c>.</summary>
@@ -229,7 +274,7 @@ public sealed class AnimSequence(IAnimationSource animations)
             }
 
             var next = node.Next;
-            _list.Remove(node);
+            Release(node);
             node = next;
         }
 
@@ -256,7 +301,7 @@ public sealed class AnimSequence(IAnimationSource animations)
                 }
             }
 
-            _list.Remove(prev);
+            Release(prev);
         }
     }
 
@@ -271,7 +316,7 @@ public sealed class AnimSequence(IAnimationSource animations)
                 FrameNumber = CurrentNode.Value.StartingFrame;
             }
 
-            _list.Remove(prev);
+            Release(prev);
         }
     }
 
@@ -378,10 +423,20 @@ public sealed class AnimSequence(IAnimationSource animations)
         var node = _list.First;
         while (node is not null && node != CurrentNode && node != FirstCyclic)
         {
-            _list.Remove(node);
+            Release(node);
             node = _list.First;
         }
     }
+
+    /// <summary>Removes <paramref name="node"/> from the list and keeps it for the next <see cref="AppendAnimation"/>.</summary>
+    private void Release(LinkedListNode<AnimSequenceNode> node)
+    {
+        _list.Remove(node);
+        _free.AddLast(node);
+    }
+
+    /// <summary>The global anim_done_hook: one immutable instance, so finishing an animation allocates nothing.</summary>
+    private static readonly AnimationDoneHook AnimationDone = new(AnimHookDirection.Both);
 
     private void ExecuteHooks(AnimationPartFrame? frame, AnimHookDirection dir)
     {
@@ -390,8 +445,11 @@ public sealed class AnimSequence(IAnimationSource animations)
             return;
         }
 
-        foreach (var hook in frame.Hooks)
+        // An index loop: foreach over the IReadOnlyList boxes an enumerator for every crossed frame with hooks.
+        var hooks = frame.Hooks;
+        for (var i = 0; i < hooks.Count; i++)
         {
+            var hook = hooks[i];
             if (hook.Direction == AnimHookDirection.Both || hook.Direction == dir)
             {
                 HookSink(hook);
@@ -493,7 +551,7 @@ public sealed class AnimSequence(IAnimationSource animations)
             // A non-cyclic animation finished: queue the global anim_done_hook.
             if (HookSink is not null && _list.First != FirstCyclic)
             {
-                HookSink(new AnimationDoneHook(AnimHookDirection.Both));
+                HookSink(AnimationDone);
             }
 
             AdvanceToNextAnimation(quantum, ref node, ref frameNumber, ref offset);

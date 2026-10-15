@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Numerics;
 using Lifestone.Data.Terrain;
+using Lifestone.Data.World;
 
 namespace Lifestone.Client.World;
 
@@ -65,15 +66,11 @@ public readonly record struct MapCoordinates(double NorthSouth, double EastWest)
 /// Conversions between retail cell positions, <c>lcoord</c> cell coordinates, global metres and map coordinates.
 /// </summary>
 /// <remarks>
+/// <para>The cell-id predicates and the <c>lcoord</c> functions (<c>LandDefs::gid_to_lcoord</c>,
+/// <c>lcoord_to_gid</c>, <c>get_outside_lcoord</c>, <c>adjust_to_outside</c>) live in
+/// <see cref="Lifestone.Data.World.LandDefs"/>, so the data layer can use them; the members here delegate, unchanged.</para>
 /// <para>Re-expressed from the retail client (Mag-nus/acclient-AI-RE 11.4186, function names cited; nothing copied):</para>
 /// <list type="bullet">
-/// <item><c>LandDefs::gid_to_lcoord</c> (acclient.c:209521): an outdoor cell id <c>0xXXYY00nn</c> (nn = 1..0x40) is
-/// cell <c>(XX * 8 + (nn - 1) / 8, YY * 8 + (nn - 1) % 8)</c>; valid while both are in [0, 2040).</item>
-/// <item><c>LandDefs::lcoord_to_gid</c> (acclient.c:218182): the inverse,
-/// <c>((y &gt;&gt; 3) | 32 * (x &amp; ~7)) &lt;&lt; 16 | ((y &amp; 7) + 8 * (x &amp; 7) + 1)</c>.</item>
-/// <item><c>LandDefs::get_outside_lcoord</c> (acclient.c:467411) and <c>LandDefs::adjust_to_outside</c>
-/// (acclient.c:467434): the landblock's lcoord plus <c>floor(local / 24.0)</c>; the local origin is then wrapped back
-/// into the new landblock with <c>local - floor(local / 192) * 192</c>, after snapping |x|, |y| below 0.0002 to 0.</item>
 /// <item><c>CPlayerSystem::InqPlayerCoords</c> (acclient.c:398264): map coordinates from the player's outdoor cell,
 /// <c>EW = (lx - 1024) * 0.1 + 0.5</c>, <c>NS = (ly - 1024) * 0.1 + 0.5</c>. Retail therefore reports the centre of
 /// the 24 m cell (0.1 map units), not the exact position: Holtburg's town cell 0xA9B40019 is 42.1N, 33.6E. Indoor
@@ -87,20 +84,20 @@ public readonly record struct MapCoordinates(double NorthSouth, double EastWest)
 /// </remarks>
 public static class AcCoordinates
 {
-    /// <summary>Edge of a landblock in metres (<c>LandDefs::block_length</c>; ACE <c>LandDefs.BlockLength</c> = 192).</summary>
-    public const double LandblockLength = TerrainConstants.LandblockSize;
+    /// <summary>Edge of a landblock in metres (<see cref="LandDefs.BlockLength"/>, 192).</summary>
+    public const double LandblockLength = LandDefs.BlockLength;
 
-    /// <summary>Edge of a landscape cell in metres (<c>LandDefs::square_length</c> = 24).</summary>
-    public const double CellLength = TerrainConstants.CellSize;
+    /// <summary>Edge of a landscape cell in metres (<see cref="LandDefs.CellLength"/>, 24).</summary>
+    public const double CellLength = LandDefs.CellLength;
 
     /// <summary>Cells per landblock side.</summary>
-    public const int CellsPerLandblock = TerrainConstants.CellsPerSide;
+    public const int CellsPerLandblock = LandDefs.CellsPerBlock;
 
-    /// <summary>Landblocks per side: lcoords are valid below 2040 = 255 x 8 (<c>LandDefs::in_bounds</c>).</summary>
-    public const int LandblocksPerSide = 255;
+    /// <summary>Landblocks per side: lcoords are valid below 2040 = 255 x 8 (<see cref="LandDefs.BlocksPerSide"/>).</summary>
+    public const int LandblocksPerSide = LandDefs.BlocksPerSide;
 
-    /// <summary>Cells per side of the whole map (<c>LandDefs::in_bounds</c>: x, y &lt; 2040).</summary>
-    public const int LandCoordsPerSide = LandblocksPerSide * CellsPerLandblock;
+    /// <summary>Cells per side of the whole map (<see cref="LandDefs.LandCoordsPerSide"/>: x, y &lt; 2040).</summary>
+    public const int LandCoordsPerSide = LandDefs.LandCoordsPerSide;
 
     /// <summary>The lcoord retail subtracts before scaling to map units (<c>CPlayerSystem::InqPlayerCoords</c>).</summary>
     public const int MapOriginLandCoord = 1024;
@@ -112,22 +109,19 @@ public static class AcCoordinates
     public const double MapCellCentreOffset = 0.5;
 
     /// <summary>|x| and |y| below this snap to 0 in <c>LandDefs::adjust_to_outside</c> (float 0.0002).</summary>
-    public const float AdjustToOutsideEpsilon = 0.0002f;
+    public const float AdjustToOutsideEpsilon = LandDefs.AdjustToOutsideEpsilon;
 
-    /// <summary>True for an outdoor (land) cell id: low word 0x0001-0x0040.</summary>
-    public static bool IsOutdoorCell(uint cellId) => (cellId & 0xFFFFu) is >= 1 and <= 0x40;
+    /// <inheritdoc cref="LandDefs.IsOutdoorCell"/>
+    public static bool IsOutdoorCell(uint cellId) => LandDefs.IsOutdoorCell(cellId);
 
-    /// <summary>True for an EnvCell id: low word 0x0100-0xFFFD.</summary>
-    public static bool IsEnvCell(uint cellId) => (cellId & 0xFFFFu) is >= 0x100 and <= 0xFFFD;
+    /// <inheritdoc cref="LandDefs.IsEnvCell"/>
+    public static bool IsEnvCell(uint cellId) => LandDefs.IsEnvCell(cellId);
 
-    /// <summary>
-    /// Retail's "valid cell id" test used by <c>get_outside_lcoord</c>: an outdoor cell, an EnvCell or the landblock
-    /// id itself (low word 0xFFFF).
-    /// </summary>
-    public static bool IsValidCellId(uint cellId) => IsOutdoorCell(cellId) || IsEnvCell(cellId) || (cellId & 0xFFFFu) == 0xFFFF;
+    /// <inheritdoc cref="LandDefs.IsValidCellId"/>
+    public static bool IsValidCellId(uint cellId) => LandDefs.IsValidCellId(cellId);
 
-    /// <summary>True when the landblock is on the map (both indices below 255).</summary>
-    public static bool IsOnMap(LandblockCoord landblock) => landblock.X < LandblocksPerSide && landblock.Y < LandblocksPerSide;
+    /// <inheritdoc cref="LandDefs.IsOnMap"/>
+    public static bool IsOnMap(LandblockCoord landblock) => LandDefs.IsOnMap(landblock);
 
     /// <summary>The global position of a landblock's south-west corner (z = 0).</summary>
     public static GlobalPosition LandblockOrigin(LandblockCoord landblock) =>
@@ -190,86 +184,18 @@ public static class AcCoordinates
         return true;
     }
 
-    /// <summary>
-    /// Retail <c>LandDefs::adjust_to_outside</c>: moves a position whose local origin left its landblock to the outdoor
-    /// cell that contains it, wrapping the origin into the new landblock. Returns false (and sets the cell id to 0, as
-    /// retail does) for an invalid cell id or a position off the map.
-    /// </summary>
-    public static bool AdjustToOutside(ref uint cellId, ref Vector3 local)
-    {
-        if (!IsValidCellId(cellId))
-        {
-            cellId = 0;
-            return false;
-        }
+    /// <inheritdoc cref="LandDefs.AdjustToOutside"/>
+    public static bool AdjustToOutside(ref uint cellId, ref Vector3 local) => LandDefs.AdjustToOutside(ref cellId, ref local);
 
-        if (MathF.Abs(local.X) < AdjustToOutsideEpsilon)
-        {
-            local.X = 0f;
-        }
+    /// <inheritdoc cref="LandDefs.TryGetOutsideLandCoord"/>
+    public static bool TryGetOutsideLandCoord(uint cellId, Vector3 local, out int x, out int y) =>
+        LandDefs.TryGetOutsideLandCoord(cellId, local, out x, out y);
 
-        if (MathF.Abs(local.Y) < AdjustToOutsideEpsilon)
-        {
-            local.Y = 0f;
-        }
+    /// <inheritdoc cref="LandDefs.TryGetLandCoord"/>
+    public static bool TryGetLandCoord(uint cellId, out int x, out int y) => LandDefs.TryGetLandCoord(cellId, out x, out y);
 
-        if (!TryGetOutsideLandCoord(cellId, local, out var x, out var y))
-        {
-            cellId = 0;
-            return false;
-        }
-
-        cellId = LandCoordToCellId(x, y);
-        local.X = (float)(local.X - (Math.Floor(local.X / LandblockLength) * LandblockLength));
-        local.Y = (float)(local.Y - (Math.Floor(local.Y / LandblockLength) * LandblockLength));
-        return true;
-    }
-
-    /// <summary>
-    /// Retail <c>LandDefs::get_outside_lcoord</c>: the landblock's lcoord plus <c>floor(local / 24.0)</c> on each axis;
-    /// false for an invalid cell id or an lcoord outside [0, 2040).
-    /// </summary>
-    public static bool TryGetOutsideLandCoord(uint cellId, Vector3 local, out int x, out int y)
-    {
-        x = 0;
-        y = 0;
-        if (!IsValidCellId(cellId))
-        {
-            return false;
-        }
-
-        // blockid_to_lcoord: x = (id >> 21) & 0x7F8, y = 8 * (byte)(id >> 16).
-        x = (int)((cellId >> 21) & 0x7F8) + (int)Math.Floor(local.X / CellLength);
-        y = (8 * (int)((cellId >> 16) & 0xFF)) + (int)Math.Floor(local.Y / CellLength);
-        return x is >= 0 and < LandCoordsPerSide && y is >= 0 and < LandCoordsPerSide;
-    }
-
-    /// <summary>Retail <c>LandDefs::gid_to_lcoord</c>: the lcoord of an outdoor cell id; false for any other id.</summary>
-    public static bool TryGetLandCoord(uint cellId, out int x, out int y)
-    {
-        x = 0;
-        y = 0;
-        if (!IsOutdoorCell(cellId))
-        {
-            return false;
-        }
-
-        var low = (int)(cellId & 0xFFFF);
-        x = (int)((cellId >> 21) & 0x7F8) + ((low - 1) >> 3);
-        y = (8 * (int)((cellId >> 16) & 0xFF)) + ((low - 1) & 7);
-        return x is >= 0 and < LandCoordsPerSide && y is >= 0 and < LandCoordsPerSide;
-    }
-
-    /// <summary>Retail <c>LandDefs::lcoord_to_gid</c>: the outdoor cell id of an lcoord, or 0 outside [0, 2040).</summary>
-    public static uint LandCoordToCellId(int x, int y)
-    {
-        if (x is < 0 or >= LandCoordsPerSide || y is < 0 or >= LandCoordsPerSide)
-        {
-            return 0;
-        }
-
-        return ((uint)((y >> 3) | (32 * (x & ~7))) << 16) | (uint)((y & 7) + (8 * (x & 7)) + 1);
-    }
+    /// <inheritdoc cref="LandDefs.LandCoordToCellId"/>
+    public static uint LandCoordToCellId(int x, int y) => LandDefs.LandCoordToCellId(x, y);
 
     /// <summary>
     /// Retail <c>CPlayerSystem::InqPlayerCoords</c>: map coordinates of an outdoor cell (the cell's centre, in 0.1 map

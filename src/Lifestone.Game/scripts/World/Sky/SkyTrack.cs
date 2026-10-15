@@ -43,7 +43,7 @@ public static class SkyTrack
     }
 
     /// <summary>Adds everything under <paramref name="main"/>. Call after the camera is placed.</summary>
-    public static SkyController Attach(Main main, GameServices services, WorldRoot world, FlyCamera camera)
+    public static SkyController Attach(Main main, GameServices services, WorldRoot world, FlyCamera camera, bool playMode = false)
     {
         ArgumentNullException.ThrowIfNull(main);
         var options = SkyOptions.Parse(OS.GetCmdlineUserArgs());
@@ -62,7 +62,8 @@ public static class SkyTrack
         var automated = services.Options.IsAutomated || options.GoldenDirectory is not null || options.SkyChecks;
         var layer = new CanvasLayer { Name = "SkyUi", Layer = UiLayer };
         main.AddChild(layer);
-        if (options.Ui ?? !automated)
+        // Play mode (M2 G6, D41): M1's time and teleport panels (and their T key) are not made; F1 and F3 stay.
+        if (!playMode && (options.Ui ?? !automated))
         {
             layer.AddChild(TimePanel.Create(sky));
             var teleport = TeleportPanel.Create(navigator, camera, layer);
@@ -74,7 +75,7 @@ public static class SkyTrack
         }
 
         // Navigation fix: the About panel (F1, AGPL legal notices) beside the panels, and the --teleport-tour harness.
-        NavigationUi.AttachExtras(main, services, world, camera, navigator, showUi: options.Ui ?? !automated);
+        NavigationUi.AttachExtras(main, services, world, camera, navigator, showUi: !playMode && (options.Ui ?? !automated), keyOnly: playMode);
 
         if (options.SkyChecks)
         {

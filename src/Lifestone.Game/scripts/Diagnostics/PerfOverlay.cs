@@ -109,6 +109,21 @@ public partial class PerfOverlay : Label
             ci,
             $"main queue {main.Pending}   budget {services.MainThread.Budget.TotalMilliseconds:0.0} ms   last {services.LastDrainMs:0.00} ms   " +
             $"overruns {main.OverrunCount}   slowest item {main.MaxItemMilliseconds:0.00} ms")).Append(NewLine);
+        if (Lifestone.Game.PortalSpace.FrameBudgetShare.Current is { Shares.Shares.Count: > 0 } budget)
+        {
+            sb.Append("budget shares: ").Append(budget.Shares.Describe()).Append(NewLine); // M2 G1: the frame-budget table (docs/game-core.md §1.2)
+        }
+
+        if (Lifestone.Game.Player.PlayerController.Current is { } player)
+        {
+            sb.Append(player.Describe()).Append(NewLine); // M2 G5: the player and physics rows
+        }
+
+        if (Lifestone.Game.RetailUi.RetailUiLayer.Current is { } retailUi)
+        {
+            sb.Append(retailUi.Describe()).Append(NewLine); // M2 G2: the retail UI line (docs/retail-ui.md §17)
+        }
+
         sb.Append(string.Create(ci, $"workers {services.Workers.MaxConcurrency}: running {services.Workers.Running}   waiting {services.Workers.Waiting}"));
         return sb.ToString();
     }

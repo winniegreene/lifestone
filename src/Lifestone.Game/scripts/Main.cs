@@ -1,10 +1,12 @@
 using Godot;
+using Lifestone.Client.Play;
 using Lifestone.Client.Streaming;
 using Lifestone.Client.World;
 using Lifestone.Game.Core;
 using Lifestone.Game.Diagnostics;
 using Lifestone.Game.Player;
 using Lifestone.Game.Render;
+using Lifestone.Game.Sessions;
 using Lifestone.Game.World;
 
 namespace Lifestone.Game;
@@ -56,6 +58,24 @@ public partial class Main : Node3D
         }
 
         // --- end spell viewer ---
+        if (Lifestone.Client.Options.CommandLineArgument.ParseAll(OS.GetCmdlineUserArgs()).Any(a => a.Name == "--record-audio"))
+        {
+            // --record-audio: the audio service starts it in this _Ready (PortalSpace/PortalSpaceSetup.cs). A run that returns before
+            // that, has no audio service or was given a refused path says so here, once.
+            var recordOptions = Lifestone.Client.Audio.AudioOptions.Parse(OS.GetCmdlineUserArgs());
+            Callable.From(() =>
+            {
+                if (Audio.AudioService.Current is not { IsRecording: true })
+                {
+                    Log.Error(
+                        "audio",
+                        "--record-audio: nothing is recorded (a refused path, or a run without the audio service: a check suite, --retail-ui-only or a failed start)",
+                        ("path", recordOptions.RecordPath ?? "refused"),
+                        ("problems", string.Join("; ", recordOptions.Errors.Where(e => e.StartsWith("--record-audio", StringComparison.Ordinal)))));
+                }
+            }).CallDeferred();
+        }
+
         _services = GameServices.Instance;
         var options = _services.Options;
         Log.Info(
@@ -77,12 +97,46 @@ public partial class Main : Node3D
             case GameCheckSuite.InteriorEngine:
                 AddChild(new World.Interiors.InteriorEngineChecks { Name = "InteriorEngineChecks" });
                 return;
+            case GameCheckSuite.PortalSpace:
+                // M2 portal view (W2-pre(a), extended by the portal track): lighting, lens, sky follow and the world arbiter,
+                // on the engine alone: no world, no dats.
+                AddChild(new PortalSpace.PortalSpaceChecks { Name = "PortalSpaceChecks" });
+                return;
+            case GameCheckSuite.RetailUi:
+                // M2 retail UI renderer (G2 U2): the tile layer, the hole, the cursor, the key table, the fonts and the real screens
+                // through the whole layer; the dat-based checks skip without the dats.
+                AddChild(new RetailUi.RetailUiChecks { Name = "RetailUiChecks" });
+                return;
         }
 
         // --- end check mode (the sky and blend suites need the environment below) ---
         if (_services.Dats is null)
         {
             ShowFatal(_services.StartupError ?? "The retail dats are not available.");
+            return;
+        }
+
+        // --- M2 G6 play mode (--play): the live session, signed in to the bundled ACE on 127.0.0.1 (scripts/Session/SessionHost.cs). Without a session
+        // (no backend, a refused gate) the run says why and ends; it never falls back to the explore scene it was not asked for. ---
+        SessionHost? sessionHost = null;
+        var playChecks = options.Checks is GameCheckSuite.Play;
+        var loginCheck = options.Play.LoginCheck;
+        var play = playChecks || ((options.Session.Play || loginCheck != LoginCheckKind.None) && options.Checks is GameCheckSuite.None);
+        if (play)
+        {
+            sessionHost = playChecks ? SessionHost.InstallStandIn(this, _services, PlayChecks.Visit, PlayChecks.ReplayVisit) : SessionHost.Install(this, _services);
+            if (sessionHost.Session is null)
+            {
+                ShowPlayFailure(sessionHost.StartFailure ?? "the session could not be started");
+                return;
+            }
+        }
+
+        // --- M2 retail UI alone: --retail-ui-only builds no world and no sky behind the UI (RetailUi/RetailUiSetup.cs) ---
+        if (options.Checks is GameCheckSuite.None && RetailUi.RetailUiSetup.RequestedAlone(_services))
+        {
+            RetailUi.RetailUiSetup.AttachOnly(this, _services);
+            Log.Info("main", "ready (retail ui only)");
             return;
         }
 
@@ -138,17 +192,70 @@ public partial class Main : Node3D
         PlaceAtStart(start);
 
         // --- interiors track: EnvCells, portal visibility, indoor lighting, indoor focus (docs/interiors.md) ---
-        Lifestone.Game.World.Interiors.InteriorsSetup.Install(this, _world, _camera, _services, start);
+        var interiors = Lifestone.Game.World.Interiors.InteriorsSetup.Install(this, _world, _camera, _services, start);
+
+        // --- M2 G5: --offline-player puts your own character in explore mode (Player/OfflinePlayerSetup.cs); nothing of it exists without the option ---
+        PlayerController? player = null;
+        if (play && OfflinePlayerSetup.Requested())
+        {
+            Log.Warn("main", "--offline-player is ignored with --play: the player is the one the server creates");
+        }
+        else if (OfflinePlayerSetup.Requested())
+        {
+            player = OfflinePlayerSetup.Install(this, _services, _world, interiors, start, _camera);
+        }
 
         GetNode<PositionHud>("Hud/PositionHud").Initialize(_camera);
         _perf = GetNode<PerfOverlay>("Hud/PerfOverlay");
         _perf.Initialize(_world);
+        if (Diagnostics.CleanHud.Requested())
+        {
+            Diagnostics.CleanHud.Attach(this); // --clean-hud: no diagnostic text over the world, for videos
+        }
 
         // --- M1 sky track: time of day, sky objects, time/teleport panels, golden viewpoints (World/Sky/SkyTrack.cs) ---
-        var skyController = World.Sky.SkyTrack.Attach(this, _services, _world, _camera);
+        var skyController = World.Sky.SkyTrack.Attach(this, _services, _world, _camera, playMode: play);
+
+        // --- M2 retail UI over the explore scene (canvas layer 10; off unless --retail-ui is given; RetailUi/RetailUiSetup.cs) ---
+        var retailUi = RetailUi.RetailUiSetup.AttachExplore(this, _services, _camera);
+        if (retailUi is not null)
+        {
+            player?.Input?.UseRetailUi(retailUi); // with the retail UI on, the player's keys go through its router
+        }
 
         // --- hero video tooling: --cinematic=FILE films a shot list's world shots (Cinematic/CinematicSetup.cs, docs/hero-video.md) ---
         Cinematic.CinematicSetup.Attach(this, _services, _world, _camera, skyController);
+
+        // --- M2 G6 play mode: the explore scene with a server behind it (Session/PlayMode.cs); made before the portal view, which asks it for the destination's cell ---
+        PlayMode? playMode = sessionHost is null ? null : PlayMode.Install(this, _services, sessionHost, _world, interiors, _camera, retailUi, autoEnter: loginCheck == LoginCheckKind.None); // a login check enters by its own script
+
+        // --- M2 portal view: the portal track's wave-2 stage fills this seam (PortalSpace/PortalSpaceSetup.cs) ---
+        var portal = PortalSpace.PortalSpaceSetup.Install(this, _services, _world, _camera, skyController, playMode is null ? null : () => playMode.DestinationCell);
+        playMode?.AttachPortal(portal);
+        if (retailUi is not null && portal is not null)
+        {
+            // The in-game shell's SmartBox viewport draws the tunnel (G4 g1): the shell's hole is the whole window, and the world shows through it otherwise.
+            retailUi.RegisterViewportSource(PortalSpace.PortalTunnelViewportSource.ViewportId, new PortalSpace.PortalTunnelViewportSource(portal.View));
+            // The tunnel shows from its first frame while the shell is built and painted: the black backdrop that holds the world yields to it (M2 W3 DoD 5).
+            retailUi.TunnelShowing = () => portal.View.Shown;
+            // G4 g6: portal space is busy for its whole sequence, so the retail UI's busy count follows it (ClientUISystem::IncrementBusyCount / DecrementBusyCount).
+            portal.Presenter.BusyChanged += busy => { if (busy) { retailUi.Manager.Busy.Increment(); } else { retailUi.Manager.Busy.Decrement(); } };
+        }
+
+        // --- M2 G5: --offline-player-checks and --offline-player-frames drive the offline player (Player/PlayerRunnersSetup.cs) ---
+        PlayerRunnersSetup.Attach(this, _services, _world, player);
+
+        // --- M2 G6: --play-checks drives play mode on the scripted stand-in session (Session/PlayChecks.cs) ---
+        if (playChecks && playMode is not null)
+        {
+            PlayChecks.Install(this, _services, sessionHost!, playMode, portal, retailUi, _world, interiors, _camera, options.Play.PlayFramesDirectory);
+        }
+
+        // --- M2 G6 W12: --login-check=enter drives the whole first login against the live ACE (Session/LoginCheckRunner.cs) ---
+        if (loginCheck != LoginCheckKind.None && playMode is not null)
+        {
+            LoginCheckRunner.Install(this, _services, sessionHost!, playMode, portal, retailUi, loginCheck);
+        }
 
         if (options.FlyPath is { } path)
         {
@@ -277,6 +384,29 @@ public partial class Main : Node3D
 
         node.Environment = environment;
         ByteSpaceBlending.Attach(node); // render-fidelity fix: the byte-space decode in the tonemap pass (render-contract §2.3)
+    }
+
+    /// <summary>
+    /// Play mode could not start (no backend, a refused gate; <see cref="SessionHost.StartFailure"/> names the remedy): the message on the window and, in an
+    /// unattended run (an automated one, or one with <c>--quit-after</c>), exit code 2 as the headless host's "the run could not start".
+    /// </summary>
+    private void ShowPlayFailure(string message)
+    {
+        Log.Error("main", "play mode cannot start: " + message);
+        var label = new Label
+        {
+            Text = $"Lifestone cannot log in:\n{message}\n\nStart the backend and the game together with tools/play.ps1 (it stops what it started when you quit).",
+            Position = new Vector2(24, 24),
+        };
+        label.AddThemeColorOverride("font_color", Colors.OrangeRed);
+        var layer = new CanvasLayer();
+        layer.AddChild(label);
+        AddChild(layer);
+        if (_services.Options.IsAutomated || _services.Options.QuitAfterSeconds is not null)
+        {
+            _done = true;
+            GetTree().Quit(2);
+        }
     }
 
     private void ShowFatal(string message)

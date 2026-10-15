@@ -24,6 +24,11 @@ public sealed class OptionRegistryTests
         [
             new OptionSpec("--show", null, "Shows and quits.", OptionRole.EndsRun),
         ], OptionScenes.SpellViewer),
+        new OptionGroup("Delta", "registered ahead of its options", [], OptionScenes.Main),
+        new OptionGroup("Epsilon", "the headless host",
+        [
+            new OptionSpec("--scenario", "NAME", "A scenario."),
+        ], OptionScenes.Headless),
     ]);
 
     [Theory]
@@ -92,9 +97,13 @@ public sealed class OptionRegistryTests
     public void Unknown_means_registered_by_no_feature()
     {
         var registry = Sample();
-        var args = CommandLineArgument.ParseAll(["--size=3", "--check-a", "--sise=3", "-x"]);
+        var args = CommandLineArgument.ParseAll(["--size=3", "--check-a", "--sise=3", "--Sise", "-x"]);
         Assert.Equal(
-            ["unknown argument '--sise=3' (--help lists every option)", "unknown argument '-x' (--help lists every option)"],
+            [
+                "unknown argument '--sise=(value hidden)' (--help lists every option)",
+                "unknown argument '--Sise' (--help lists every option)",
+                "unknown argument #5, which is not an --option (hidden; --help lists every option)",
+            ],
             registry.Problems(args, OptionScenes.Main));
         Assert.True(registry.IsKnown("--out"));
         Assert.Equal("Beta", registry.FeatureOf("--out"));
@@ -120,7 +129,7 @@ public sealed class OptionRegistryTests
         Assert.Equal(
             [
                 "'--show' is an option of the Gamma (the spell viewer), not read in this run's terrain preview; ignored",
-                "'--out=x' is an option of the Beta (one scene), not read in this run's terrain preview; ignored",
+                "'--out=(value hidden)' is an option of the Beta (one scene), not read in this run's terrain preview; ignored",
             ],
             registry.Problems(args, OptionScenes.TerrainPreview));
         Assert.Empty(registry.Problems(args, OptionScenes.All));
@@ -161,6 +170,62 @@ public sealed class OptionRegistryTests
         Assert.Contains("read in no scene", nowhere.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("--pasword=hunter2", "unknown argument '--pasword=(value hidden)' (--help lists every option)")]
+    [InlineData("--token=\"hunter2\"", "unknown argument '--token=(value hidden)' (--help lists every option)")]
+    [InlineData("--size-x=hunter2", "unknown argument '--size-x=(value hidden)' (--help lists every option)")]
+    [InlineData("hunter2", "unknown argument #1, which is not an --option (hidden; --help lists every option)")]
+    [InlineData("-phunter2", "unknown argument #1, which is not an --option (hidden; --help lists every option)")]
+    public void An_unknown_argument_s_value_is_never_echoed(string raw, string expected)
+    {
+        var problem = Assert.Single(Sample().Problems(CommandLineArgument.ParseAll([raw]), OptionScenes.Main));
+        Assert.DoesNotContain("hunter2", problem, StringComparison.Ordinal);
+        Assert.Equal(expected, problem);
+    }
+
+    [Fact]
+    public void A_known_option_of_another_scene_is_named_without_its_value()
+    {
+        var problems = Sample().Problems(CommandLineArgument.ParseAll(["--out=C:/private/folder", "--scenario=login"]), OptionScenes.SpellViewer);
+        Assert.Equal(
+            [
+                "'--out=(value hidden)' is an option of the Beta (one scene), not read in this run's spell viewer; ignored",
+                "'--scenario=(value hidden)' is an option of the Epsilon (the headless host), not read in this run's spell viewer; ignored",
+            ],
+            problems);
+    }
+
+    [Fact]
+    public void Groups_without_options_are_left_out_of_help()
+    {
+        var registry = Sample();
+        Assert.Contains(registry.Groups, g => g.Feature == "Delta");
+        Assert.DoesNotContain("Delta", registry.FormatHelp("Preamble line."), StringComparison.Ordinal);
+        Assert.DoesNotContain("Delta", registry.FormatHelp(null, OptionScenes.Main), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Help_for_one_scene_lists_only_the_options_it_reads()
+    {
+        var registry = Sample();
+        var main = registry.FormatHelp("Main only.", OptionScenes.Main);
+        Assert.StartsWith("Main only.", main, StringComparison.Ordinal);
+        Assert.Contains("  --size=N", main, StringComparison.Ordinal);
+        Assert.Contains("  --out[=DIR]", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("Gamma", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("--show", main, StringComparison.Ordinal);
+        Assert.DoesNotContain("--scenario", main, StringComparison.Ordinal);
+
+        var headless = registry.FormatHelp(null, OptionScenes.Headless);
+        Assert.StartsWith("Epsilon (the headless host)", headless, StringComparison.Ordinal);
+        Assert.DoesNotContain("--size", headless, StringComparison.Ordinal);
+
+        // A group whose options another scene also reads shows only those (Beta's --shared in the terrain preview).
+        var preview = registry.FormatHelp(null, OptionScenes.TerrainPreview);
+        Assert.Contains("  --shared", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("--check-a", preview, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Help_lists_every_group_and_option_with_its_usage()
     {
@@ -168,6 +233,7 @@ public sealed class OptionRegistryTests
         Assert.StartsWith("Preamble line.", help, StringComparison.Ordinal);
         Assert.Contains("Alpha (everywhere)", help, StringComparison.Ordinal);
         Assert.Contains("Beta (one scene)", help, StringComparison.Ordinal);
+        Assert.Contains("Epsilon (the headless host)", help, StringComparison.Ordinal);
         Assert.Contains("  --size=N", help, StringComparison.Ordinal);
         Assert.Contains("  --out[=DIR]", help, StringComparison.Ordinal);
         Assert.Contains("  --help", help, StringComparison.Ordinal);

@@ -88,7 +88,7 @@ public sealed class InteriorsLayer : ILandblockLayer
         }
 
         var data = LoadInteriors(coord);
-        var all = InteriorCellSets.NeedsAllCells(data.Cells, data.BuildingCellIds, _controller.ViewerCellIdForWorkers);
+        var all = NeedsAllCells(data, _controller.ViewerCellIdForWorkers, _controller.PlayerCellIdForWorkers);
         var prepared = new PreparedInteriors(data, all);
         try
         {
@@ -102,6 +102,15 @@ public sealed class InteriorsLayer : ILandblockLayer
 
         return Task.FromResult<object?>(prepared);
     }
+
+    /// <summary>
+    /// Any thread: whether the landblock is meshed whole: the viewer's cell, or the player's (portal space's destination,
+    /// which the viewer reaches later; <see cref="InteriorController.SetPlayerCell"/>), needs cells its buildings'
+    /// doorways do not show (<see cref="InteriorCellSets.NeedsAllCells"/>).
+    /// </summary>
+    private static bool NeedsAllCells(LandblockInteriors data, uint viewerCellId, uint playerCellId) =>
+        InteriorCellSets.NeedsAllCells(data.Cells, data.BuildingCellIds, viewerCellId)
+        || (playerCellId != 0 && playerCellId != viewerCellId && InteriorCellSets.NeedsAllCells(data.Cells, data.BuildingCellIds, playerCellId));
 
     /// <summary>Any thread: every EnvCell of a landblock as data, its buildings' doorways and retail's landblock stab list.</summary>
     private LandblockInteriors LoadInteriors(LandblockCoord coord)

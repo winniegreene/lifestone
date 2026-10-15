@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text.RegularExpressions;
+using Lifestone.Client.Tests;
 using Lifestone.Data.Terrain;
 using Lifestone.Data.Terrain.Blending;
 using Lifestone.Data.Tests.Terrain;
@@ -173,17 +174,7 @@ public sealed class TerrainShaderModelTests(DatSetFixture fixture) : IClassFixtu
             $"{what}: reference {expected} vs shader model {actual}");
     }
 
-    private static string ShaderPath()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Lifestone.slnx")))
-        {
-            dir = dir.Parent;
-        }
-
-        Assert.NotNull(dir);
-        return Path.Combine(dir!.FullName, "src", "Lifestone.Game", "shaders", "terrain", "terrain.gdshader");
-    }
+    private static string ShaderPath() => RepositoryFiles.PathOf("src", "Lifestone.Game", "shaders", "terrain", "terrain.gdshader");
 
     private static TerrainImage RandomImage(Random rng, int size)
     {

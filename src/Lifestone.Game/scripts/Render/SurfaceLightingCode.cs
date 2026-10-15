@@ -33,6 +33,27 @@ namespace Lifestone.Game.Render;
 /// instance uniforms are not used: they reserve a block of the global shader-uniform buffer for every instance whose
 /// material declares one, hidden or not (about 4,000 instances with the default buffer size, shared with every other
 /// track), and a dense dungeon has more cells than that.</para>
+/// <para><b>Creature mode</b> (<see cref="SurfaceLighting.CreatureMode"/>, <see cref="CreatureAmbient"/> and the other
+/// <c>ac_cm_*</c> globals): <c>CreatureMode::Render</c> (11.4186 0x004529D0, 11.6096 0x00452A10) draws its objects with the
+/// sun, the static lights and the dynamic lights all switched off, lit only by the scene's ambient
+/// (<c>CreatureMode::CreatureMode</c>, 11.4186 0x00454390, 11.6096 0x00454430) and the distant light
+/// <c>CreatureMode::AddLight</c> (0x004555B0, 0x00455650) added. D3D's fixed function adds the light's diffuse
+/// (colour x intensity) scaled by max(0, N.L) to the ambient and the emissive, clamped per vertex, like the world's sun
+/// (<c>SurfaceShaders</c>); the difference is only where the inputs come from: globals of their own, so the world's
+/// time of day, indoor ambient and fog can never leak into a creature-mode view (global shader uniforms are shared by
+/// every viewport, so a separate <c>World3D</c> does not isolate lighting; <c>--portal-space-checks</c> pins this). Fog
+/// is never applied.</para>
+/// <para><b>Moving objects</b> (<see cref="SurfaceLighting.DynamicObject"/>, <see cref="SurfaceLighting.DynamicCellObject"/>; M2 W2-pre(c)):
+/// the player and the server's objects are MultiMesh instances, and what the statics bake into their vertices or their mesh
+/// arrives per instance in <c>INSTANCE_CUSTOM</c>: x the cell's slot in <see cref="CellStates"/> (0 = none), y one plus the
+/// row of the object's light set in <see cref="ObjectLights"/> (0 = none), z a luminosity override (0 keeps the Surface's),
+/// w the translucency (0 = opaque; scales the alpha of blended surfaces. An opaque surface has no blend to scale, so while an instance's
+/// translucency is strictly between 0 and 1 it is drawn with the blended twin of its mesh, <c>RenderResources.FadeTwin</c>, D45 and D63; the batches in
+/// <c>PlayerView</c> and <c>ServerObjectsLayer</c> hand an instance over). All four are 0 for a plain instance. Outdoors the rule is
+/// <see cref="SurfaceLighting.Object"/>'s (sun and ambient). In a cell it is <see cref="SurfaceLighting.CellObject"/>'s, except that
+/// the object moves, so the up-to-eight lights of <c>Render::minimize_object_lighting</c> are summed per vertex in the shader
+/// from the light set (two RGBA32F texels per light: position in Godot world space and reach; colour times intensity)
+/// with the formula <c>CellObjectLighting.Light</c> uses on the CPU for statics.</para>
 /// </remarks>
 public static class SurfaceLightingCode
 {
@@ -71,30 +92,85 @@ public static class SurfaceLightingCode
     /// </summary>
     public const float DoorwaySeamPixels = 1.5f;
 
+    /// <summary>
+    /// Global sampler2D: the light sets of moving objects, one row per object, <see cref="ObjectLightRowWidth"/> RGBA32F texels
+    /// wide: for light i, texel 2i = (position in Godot world space, reach in metres; 0 ends the list) and texel 2i + 1 =
+    /// (colour times intensity, 0).
+    /// </summary>
+    public const string ObjectLights = "ac_object_lights";
+
+    /// <summary>Width of the light-set table: two texels for each of the eight lights.</summary>
+    public const int ObjectLightRowWidth = ObjectLightSets.TexelsPerLight * ObjectLightSets.MaxLights;
+
+    /// <summary>True for the lighting rules of moving objects, whose per-instance values come from <c>INSTANCE_CUSTOM</c>.</summary>
+    public static bool IsDynamic(SurfaceLighting lighting) => lighting is SurfaceLighting.DynamicObject or SurfaceLighting.DynamicCellObject;
+
+    /// <summary>vec3 global: creature mode's ambient light (<c>CreatureMode::CreatureMode</c>: 0.3 white), raw colour units.</summary>
+    public const string CreatureAmbient = "ac_cm_ambient";
+
+    /// <summary>
+    /// vec3 global: the unit vector <i>towards</i> creature mode's distant light, Godot world axes (the same sense as
+    /// <c>ac_sun_dir</c>: N.L is positive for a surface facing the light). Set through <c>CreatureModeLighting</c>.
+    /// </summary>
+    public const string CreatureLightDirection = "ac_cm_light_dir";
+
+    /// <summary>
+    /// vec3 global: the distant light's diffuse colour times its intensity (<c>CreatureMode::AddLight</c>: white x 2.0 for
+    /// the portal tunnel, so it saturates what it faces), raw colour units.
+    /// </summary>
+    public const string CreatureLightColor = "ac_cm_light_color";
+
+    /// <summary>True for the lighting rules that draw EnvCells and what stands in them (they use the cell-state machinery).</summary>
+    public static bool IsCellRule(SurfaceLighting lighting) =>
+        lighting is SurfaceLighting.EnvCell or SurfaceLighting.CellObject or SurfaceLighting.DynamicCellObject;
+
+    /// <summary>The global declarations the creature-mode variant needs (declared in <c>project.godot [shader_globals]</c>).</summary>
+    public static string CreatureModeDeclarations =>
+        "global uniform vec3 ac_cm_ambient;\n" +
+        "global uniform vec3 ac_cm_light_dir;\n" +
+        "global uniform vec3 ac_cm_light_color;\n";
+
+    /// <summary>
+    /// The <c>vertex()</c> line that sets <c>v_light</c> for creature mode: emissive + the creature scene's ambient + its
+    /// distant light, clamped per vertex. <c>n_dot_l</c> is already computed against <see cref="CreatureLightDirection"/>
+    /// (<see cref="SurfaceShaders.LightDirectionName"/>). No sun, no world ambient, no fog.
+    /// </summary>
+    public static string CreatureModeVertexLight =>
+        "\t// Creature mode: no sun, no world ambient, no fog (CreatureMode::Render); emissive + its own ambient + its distant light.\n" +
+        "\tv_light = clamp(vec3(luminosity) + ac_cm_ambient * diffuse + ac_cm_light_color * diffuse * n_dot_l, 0.0, 1.0);\n";
+
     /// <summary>The extra global declarations and helpers the cell variants need (globals declared in <c>project.godot [shader_globals]</c>).</summary>
-    public static string ShaderDeclarations
+    public static string ShaderDeclarations => Declarations(lighting: SurfaceLighting.CellObject);
+
+    /// <summary>The global declarations and helpers of the cell variant <paramref name="lighting"/>.</summary>
+    public static string Declarations(SurfaceLighting lighting)
     {
-        get
+        var sb = new StringBuilder();
+        sb.AppendLine("global uniform vec3 ac_indoor_ambient;");
+        sb.AppendLine("global uniform bool ac_indoor_ambient_on;");
+        sb.AppendLine("global uniform sampler2D ac_doorway_planes;");
+        sb.AppendLine("global uniform sampler2D ac_cell_states;");
+        if (lighting == SurfaceLighting.DynamicCellObject)
         {
-            var sb = new StringBuilder();
-            sb.AppendLine("global uniform vec3 ac_indoor_ambient;");
-            sb.AppendLine("global uniform bool ac_indoor_ambient_on;");
-            sb.AppendLine("global uniform sampler2D ac_doorway_planes;");
-            sb.AppendLine("global uniform sampler2D ac_cell_states;");
-            sb.AppendLine(World.Objects.CellObjectLodShader.Declaration); // objects track (M1 wave 3)
-            sb.AppendLine("varying flat ivec2 v_ac_doorways; // doorway rows clipping this cell (-1 = none; a valid row is always in .x)");
-            sb.AppendLine();
-            sb.AppendLine("// Smallest signed distance (world units, positive inside) of p to the cone planes of doorway row `row`.");
-            sb.AppendLine("float ac_cone_distance(int row, vec3 p) {");
-            sb.AppendLine("\tfloat m = 1e30;");
-            sb.AppendLine($"\tfor (int i = 1; i <= {DoorwayRows.MaxConePlanes}; i++) {{");
-            sb.AppendLine("\t\tvec4 pl = texelFetch(ac_doorway_planes, ivec2(i, row), 0);");
-            sb.AppendLine("\t\tm = min(m, dot(pl.xyz, p) + pl.w);");
-            sb.AppendLine("\t}");
-            sb.AppendLine("\treturn m;");
-            sb.AppendLine("}");
-            return sb.ToString();
+            sb.AppendLine($"global uniform sampler2D {ObjectLights};"); // moving objects' light sets
         }
+        else
+        {
+            sb.AppendLine(World.Objects.CellObjectLodShader.Declaration); // objects track (M1 wave 3)
+        }
+
+        sb.AppendLine("varying flat ivec2 v_ac_doorways; // doorway rows clipping this cell (-1 = none; a valid row is always in .x)");
+        sb.AppendLine();
+        sb.AppendLine("// Smallest signed distance (world units, positive inside) of p to the cone planes of doorway row `row`.");
+        sb.AppendLine("float ac_cone_distance(int row, vec3 p) {");
+        sb.AppendLine("\tfloat m = 1e30;");
+        sb.AppendLine($"\tfor (int i = 1; i <= {DoorwayRows.MaxConePlanes}; i++) {{");
+        sb.AppendLine("\t\tvec4 pl = texelFetch(ac_doorway_planes, ivec2(i, row), 0);");
+        sb.AppendLine("\t\tm = min(m, dot(pl.xyz, p) + pl.w);");
+        sb.AppendLine("\t}");
+        sb.AppendLine("\treturn m;");
+        sb.AppendLine("}");
+        return sb.ToString();
     }
 
     /// <summary>
@@ -153,13 +229,70 @@ public static class SurfaceLightingCode
 
     }
 
+    /// <summary>
+    /// The <c>vertex()</c> lines of a moving object outdoors (<see cref="SurfaceLighting.DynamicObject"/>) that set <c>v_light</c>:
+    /// <see cref="SurfaceLighting.Object"/>'s rule with the instance's luminosity override (<c>INSTANCE_CUSTOM.z</c>, 0 keeps the
+    /// Surface's). <c>n_dot_l</c> is already computed.
+    /// </summary>
+    public static string DynamicObjectVertexLight =>
+        "\t// Moving object outdoors: the sun and the world ambient; INSTANCE_CUSTOM.z overrides the Surface's luminosity (0 = keep).\n" +
+        "\tfloat ac_lum = INSTANCE_CUSTOM.z > 0.0 ? INSTANCE_CUSTOM.z : luminosity;\n" +
+        "\tv_light = clamp(vec3(ac_lum) + ac_ambient * diffuse + ac_sun_color * diffuse * n_dot_l, 0.0, 1.0);\n";
+
+    /// <summary>
+    /// The <c>vertex()</c> lines that sum the hardware point lights of a moving object's light set (INSTANCE_CUSTOM.y is one plus
+    /// its row of <see cref="ObjectLights"/>, 0 = none) into <c>ac_lights</c>, per vertex in Godot world space:
+    /// <c>min(1, sum of colour x intensity x max(0, N.L) / d)</c> over the lights within reach, as <c>CellObjectLighting.Light</c> does for
+    /// statics (D3D9 point lights with attenuation (0, 1, 0)). A zero normal (CUSTOM0.x) gets no diffuse term.
+    /// </summary>
+    public static string ObjectLightSum
+    {
+        get
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("\t// The object's light set (Render::minimize_object_lighting: at most 8 lights), summed per vertex.");
+            sb.AppendLine("\tvec3 ac_lights = vec3(0.0);");
+            sb.AppendLine("\tint ac_light_row = int(INSTANCE_CUSTOM.y + 0.5) - 1;");
+            sb.AppendLine("\tif (ac_light_row >= 0 && CUSTOM0.x < 0.5) {");
+            sb.AppendLine("\t\tvec3 ac_p = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;");
+            sb.AppendLine("\t\tvec3 ac_n = normalize(MODEL_NORMAL_MATRIX * NORMAL);");
+            sb.AppendLine(FormattableString.Invariant($"\t\tfor (int i = 0; i < {ObjectLightSets.MaxLights}; i++) {{"));
+            sb.AppendLine(FormattableString.Invariant($"\t\t\tvec4 ac_at = texelFetch({ObjectLights}, ivec2(i * {ObjectLightSets.TexelsPerLight}, ac_light_row), 0);"));
+            sb.AppendLine("\t\t\tif (ac_at.w <= 0.0) {");
+            sb.AppendLine("\t\t\t\tbreak;");
+            sb.AppendLine("\t\t\t}");
+            sb.AppendLine("\t\t\tvec3 ac_to = ac_at.xyz - ac_p;");
+            sb.AppendLine("\t\t\tfloat ac_d = length(ac_to);");
+            sb.AppendLine("\t\t\tif (ac_d > ac_at.w || ac_d < 1e-6) {");
+            sb.AppendLine("\t\t\t\tcontinue;");
+            sb.AppendLine("\t\t\t}");
+            sb.AppendLine("\t\t\tfloat ac_cos = dot(ac_n, ac_to / ac_d);");
+            sb.AppendLine("\t\t\tif (ac_cos > 0.0) {");
+            sb.AppendLine(FormattableString.Invariant($"\t\t\t\tac_lights += texelFetch({ObjectLights}, ivec2(i * {ObjectLightSets.TexelsPerLight} + 1, ac_light_row), 0).rgb * (ac_cos / ac_d);"));
+            sb.AppendLine("\t\t\t}");
+            sb.AppendLine("\t\t}");
+            sb.AppendLine("\t\tac_lights = clamp(ac_lights, 0.0, 1.0);");
+            sb.AppendLine("\t}");
+            return sb.ToString();
+        }
+    }
+
     /// <summary>The <c>vertex()</c> lines that set <c>v_light</c>, the cell state and the position for <paramref name="lighting"/>.</summary>
-    /// <exception cref="ArgumentOutOfRangeException"><see cref="SurfaceLighting.Object"/> (the caller emits the default rule) or an unknown value.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="SurfaceLighting.Object"/>, <see cref="SurfaceLighting.DynamicObject"/> and <see cref="SurfaceLighting.CreatureMode"/> (the caller emits their own rules) or an unknown value.</exception>
     public static string VertexLight(SurfaceLighting lighting)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("\t// The cell's draw state: CUSTOM1.a = its slot in ac_cell_states (0 = none; docs/interiors.md §3.4).");
-        sb.AppendLine("\tint ac_slot = int(CUSTOM1.a + 0.5);");
+        if (lighting == SurfaceLighting.DynamicCellObject)
+        {
+            sb.AppendLine("\t// The cell's draw state: INSTANCE_CUSTOM.x = its slot in ac_cell_states (0 = none; docs/interiors.md §3.4).");
+            sb.AppendLine("\tint ac_slot = int(INSTANCE_CUSTOM.x + 0.5);");
+        }
+        else
+        {
+            sb.AppendLine("\t// The cell's draw state: CUSTOM1.a = its slot in ac_cell_states (0 = none; docs/interiors.md §3.4).");
+            sb.AppendLine("\tint ac_slot = int(CUSTOM1.a + 0.5);");
+        }
+
         sb.AppendLine("\tvec4 ac_state = vec4(0.0);");
         sb.AppendLine("\tif (ac_slot > 0) {");
         sb.AppendLine("\t\tint ac_width = textureSize(ac_cell_states, 0).x;");
@@ -194,6 +327,12 @@ public static class SurfaceLightingCode
                 sb.AppendLine("\t// Object inside a cell: no sun (PView::DrawCells); CUSTOM1.rgb = its hardware static lights' clamped sum");
                 sb.AppendLine("\t// (minimize_object_lighting, computed per part on the CPU; 0 where no light reaches).");
                 sb.AppendLine("\tv_light = clamp(vec3(luminosity) + world_ambient * diffuse + CUSTOM1.rgb, 0.0, 1.0);");
+                break;
+            case SurfaceLighting.DynamicCellObject:
+                sb.Append(ObjectLightSum);
+                sb.AppendLine("\t// Moving object in a cell: no sun (PView::DrawCells); world ambient + its light set; INSTANCE_CUSTOM.z overrides the luminosity.");
+                sb.AppendLine("\tfloat ac_lum = INSTANCE_CUSTOM.z > 0.0 ? INSTANCE_CUSTOM.z : luminosity;");
+                sb.AppendLine("\tv_light = clamp(vec3(ac_lum) + world_ambient * diffuse + ac_lights, 0.0, 1.0);");
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(lighting), lighting, "Only the cell lighting rules are generated here.");

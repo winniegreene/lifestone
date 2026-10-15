@@ -48,9 +48,10 @@ public partial class PositionHud : Label
         var cell = camera.ViewerCell;
         var lines = new List<string>(6);
         lines.AddRange(PositionReadout.Describe(camera.WorldPosition, cell?.CellId ?? 0u, cell?.SeenOutside));
-        lines.Add(string.Create(
-            CultureInfo.InvariantCulture,
-            $"Heading {camera.Heading:0.0}°  pitch {camera.Pitch:0.0}°   {(camera.WalkMode ? "WALK" : "FLY")} {(camera.WalkMode ? FlyCamera.WalkSpeed : camera.BaseSpeed):0} m/s"));
+        var mode = camera.Driven
+            ? "PLAYER CAMERA (the camera's position)"
+            : string.Create(CultureInfo.InvariantCulture, $"{(camera.WalkMode ? "WALK" : "FLY")} {(camera.WalkMode ? FlyCamera.WalkSpeed : camera.BaseSpeed):0} m/s");
+        lines.Add(string.Create(CultureInfo.InvariantCulture, $"Heading {camera.Heading:0.0}°  pitch {camera.Pitch:0.0}°   {mode}"));
 
         var services = GameServices.Instance;
         if (services.Dats is not null)

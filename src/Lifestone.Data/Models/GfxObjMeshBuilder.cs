@@ -106,7 +106,8 @@ public static class GfxObjMeshBuilder
         var polygons = gfxObj.Flags.HasFlag(GfxObjFlags.HasDrawing)
             ? gfxObj.Polygons
             : new Dictionary<ushort, Polygon>();
-        var built = BuildPolygons(gfxObjId, gfxObj.Surfaces.Select(s => s.DataId).ToArray(), vertices, polygons);
+        var surfaceIds = gfxObj.Surfaces.Select(s => s.DataId).ToArray();
+        var built = BuildPolygons(gfxObjId, surfaceIds, vertices, polygons);
 
         return new GfxObjMesh(
             gfxObjId,
@@ -118,7 +119,8 @@ public static class GfxObjMeshBuilder
             gfxObj.Flags.HasFlag(GfxObjFlags.HasDrawing) ? RootSphere(gfxObj.DrawingBSP?.Root) : null,
             gfxObj.Flags.HasFlag(GfxObjFlags.HasPhysics) ? RootSphere(gfxObj.PhysicsBSP?.Root) : null,
             gfxObj.Flags.HasFlag(GfxObjFlags.HasDIDDegrade) ? gfxObj.DIDDegrade : 0u,
-            built.Stats);
+            built.Stats,
+            surfaceIds);
     }
 
     /// <summary>

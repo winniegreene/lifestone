@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests of the server mod's shared wire contract (server/mod/Shared, compiled into Lifestone.Client, so referencing the
+    client gives one copy of each type and no CS0436 duplicates) and of the mod's sources and install. The mod project
+    itself stays outside Lifestone.slnx; its live tests belong in Lifestone.Loopback.Tests/ServerMod.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Lifestone.ServerMod.Tests</RootNamespace>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same packages and versions as Lifestone.Data.Tests (the .NET SDK 10.0.401 'xunit' template); nothing new. -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lifestone.Client\Lifestone.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- tests/Shared (tests/Shared/README.md): the Data-level helpers and the Client-level ones. -->
+    <Compile Include="..\Shared\**\*.cs" Exclude="..\Shared\Client\**;..\Shared\Loopback\**" LinkBase="Shared" />
+    <Compile Include="..\Shared\Client\**\*.cs" LinkBase="Shared\Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The server mod's decisions that need nothing from ACE (server/mod/Lifestone.ServerMod/Core: the command's guards
+      and dispatch, the one-answer gate, the places list, the xp count), compiled here by link so their tests run them;
+      the mod compiles the same files itself. server/mod/Shared is never linked here: it comes through Lifestone.Client.
+    -->
+    <Compile Include="..\..\server\mod\Lifestone.ServerMod\Core\**\*.cs" LinkBase="ServerModCore" />
+  </ItemGroup>
+
+</Project>

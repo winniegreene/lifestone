@@ -11,6 +11,18 @@ Code: `src/Lifestone.Data/World/Scenery/`. Tests: `tests/Lifestone.Data.Tests/Sc
 | The user's `acclient.exe` 11.6096 | MD5 116d9a66… | reference only | Read-only byte inspection (never executed) of the x87 code of the functions above, located with `symbol_transplant_11.6096.tsv` from the same Mag-nus repository, to confirm operand order and float/double rounding points. Findings are cited by address in code comments; no bytes are in the repo. |
 | eriknihlen/OpenAC | `1ee5a08` | MIT | Reference only (its four deviations are fixed, see below). No code taken. |
 
+## Files
+
+Ported files (each carries a `Ported from` header naming its sources), all from ACEmulator/ACE @95ef426d (AGPL-3.0),
+paths under `Source/ACE.Server/Physics/`:
+
+| Lifestone file | ACE source |
+|---|---|
+| `src/Lifestone.Data/World/Scenery/SceneryGenerator.cs` | `Common/Landblock.cs` (get_land_scenes, init_buildings), `Common/ObjectDesc.cs` (Displace, RotateObj, ObjAlign, ScaleObj, CheckSlope) |
+| `src/Lifestone.Data/World/Scenery/SceneryRandom.cs` | `Common/Landblock.cs` (get_land_scenes), `Common/ObjectDesc.cs` |
+| `src/Lifestone.Data/World/Scenery/SceneryRoad.cs` | `Common/Landblock.cs` (OnRoad, GetRoad) |
+| `src/Lifestone.Data/World/Scenery/TerrainSampler.cs` | `Common/LandblockStruct.cs` (ConstructVertices, ConstructPolygons, AddPolygon), `Common/LandCell.cs` (find_terrain_poly), `Polygon.cs` (make_plane, point_in_poly2D), `Extensions/PlaneExtensions.cs` (set_height) |
+
 ## Retail facts established for this track
 
 - **The hash scale is exactly 2^-32.** The binary holds the float constant 0x2F800000 at VA 0x7C6F10, used by 14 `fmul dword ptr` instructions; no double 2.3283064e-10 exists in the image. ACE uses the double literal (1.6e-8 smaller).

@@ -59,12 +59,27 @@ public static class AcToGodot
     /// <summary>
     /// Orientation of a camera (or any node looking down its -Z) that faces compass heading
     /// <paramref name="headingDegrees"/> (AC: 0 = north = +Y, 90 = east = +X, clockwise) and pitch
-    /// <paramref name="pitchDegrees"/> (positive looks up). AC north is Godot -Z, a node's default forward, so the
-    /// heading is a turn of -heading about Godot +Y (clockwise seen from above), then the pitch about the local +X.
+    /// <paramref name="pitchDegrees"/> (positive looks up), then rolled by <paramref name="rollDegrees"/> about its view
+    /// axis. AC north is Godot -Z, a node's default forward, so the heading is a turn of -heading about Godot +Y
+    /// (clockwise seen from above), then the pitch about the local +X, then the roll about the local view axis.
     /// </summary>
-    public static Quaternion CameraRotation(double headingDegrees, double pitchDegrees) =>
-        new Quaternion(Vector3.Up, (float)(-headingDegrees * Math.PI / 180.0)) *
-        new Quaternion(Vector3.Right, (float)(pitchDegrees * Math.PI / 180.0));
+    /// <remarks>
+    /// <para><b>Roll.</b> A right-handed rotation about the view axis by <paramref name="rollDegrees"/>, in AC's frame
+    /// (right-handed, Z up) as in Godot's: looking along the view axis, a positive roll turns the camera clockwise (its
+    /// up vector leans towards its right, so the picture turns anticlockwise). The portal tunnel's camera rolls about AC
+    /// +Y (<c>CreatureMode::SetCameraDirection_Degrees</c> with the angle as y; 11.4186 0x00453760, 11.6096 0x004537A0).
+    /// TODO(portal): retail's sign for that roll is unverified; it cannot be seen in play (the targets are uniform over
+    /// [0°, 360°]), only in a frame captured at a fixed seed.</para>
+    /// <para>In Godot a right-handed turn by r about AC +Y (Godot -Z) is a turn by -r about Godot +Z, which is what the
+    /// last factor applies; with a zero roll the result is the heading-and-pitch rotation exactly.</para>
+    /// </remarks>
+    public static Quaternion CameraRotation(double headingDegrees, double pitchDegrees, double rollDegrees = 0.0)
+    {
+        var heading = new Quaternion(Vector3.Up, (float)(-headingDegrees * Math.PI / 180.0));
+        var pitch = new Quaternion(Vector3.Right, (float)(pitchDegrees * Math.PI / 180.0));
+        var facing = heading * pitch;
+        return rollDegrees == 0.0 ? facing : facing * new Quaternion(Vector3.Back, (float)(-rollDegrees * Math.PI / 180.0));
+    }
 
     /// <summary>Converts an array of AC positions.</summary>
     public static Vector3[] Positions(ReadOnlySpan<AcVector3> ac)

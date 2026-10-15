@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Godot;
 using Lifestone.Client.Caching;
+using Lifestone.Client.Effects;
 using Lifestone.Client.Rendering;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Textures;
@@ -79,6 +80,12 @@ public sealed class RenderResources
     /// </summary>
     public bool DetailEnabled { get; init; } = true;
 
+    /// <summary>
+    /// Every variant the dats' Surfaces can map to under the world's lighting (<see cref="SurfaceShaderVariant.Reachable"/>), set by <see cref="WarmUp"/> (empty
+    /// before it): the other warm-ups re-light it for their own rules instead of enumerating the dats again.
+    /// </summary>
+    public IReadOnlyCollection<SurfaceShaderVariant> ReachableVariants { get; private set; } = [];
+
     /// <summary>The detail textures once <see cref="WarmUp"/> has loaded them (null before, or with <c>--detail=off</c>).</summary>
     public DetailTextures? Detail => Materials.Detail;
 
@@ -108,7 +115,7 @@ public sealed class RenderResources
 
             if (!material.IsTextured)
             {
-                var solid = SurfaceShaderVariant.For(material, passingTexelsBlend: false, request.Addressing, request.Cull) with { Lighting = request.Lighting };
+                var solid = SurfaceShaderVariant.For(material, passingTexelsBlend: false, request.Addressing, request.Cull).WithLighting(request.Lighting);
                 return new PreparedSurface(request, material, new MaterialKey(material.Id, null, solid), null, null);
             }
 
@@ -137,7 +144,7 @@ public sealed class RenderResources
                 textureKey = fresh.Key;
             }
 
-            var variant = SurfaceShaderVariant.For(material, info.PassingTexelsBlend || ExactCutouts, request.Addressing, request.Cull) with { Lighting = request.Lighting };
+            var variant = SurfaceShaderVariant.For(material, info.PassingTexelsBlend || ExactCutouts, request.Addressing, request.Cull).WithLighting(request.Lighting);
 
             // Render-fidelity fix: retail's detail pass. DrawEnvCell makes the environment detail current for every cell
             // mesh; buildings ask for theirs (docs/render-contract.md §2.4).
@@ -166,6 +173,7 @@ public sealed class RenderResources
         var timer = Stopwatch.StartNew();
         var ids = dats.GetAllPortalIds<DatReaderWriter.DBObjs.Surface>();
         var variants = SurfaceShaderVariant.Reachable(ids.Select(Loader.GetSurface).OfType<SurfaceMaterial>(), ExactCutouts);
+        ReachableVariants = variants;
         var enumerateMs = timer.Elapsed.TotalMilliseconds;
         timer.Restart();
 
@@ -176,7 +184,12 @@ public sealed class RenderResources
             Materials.Detail = DetailTextures.Load(dats, Loader);
         }
 
+        // M2 portal view: creature mode's variants too (the tunnel and the figures drawn in its views). Fog and detail do not
+        // exist there, so the variants that differ only in them collapse.
         Shaders.WarmUp(variants.Concat(variants.Select(v => WithDetail(v, SurfaceDetail.Building)).Where(v => v.Detail != SurfaceDetail.None)));
+        var creatureTimer = Stopwatch.StartNew();
+        var creatureCompiled = Shaders.WarmUp(variants.Select(v => v.WithLighting(SurfaceLighting.CreatureMode)).Distinct());
+        Log.Debug("render", "creature-mode surface variants warmed up", ("variants", creatureCompiled), ("ms", creatureTimer.Elapsed.TotalMilliseconds));
         WarmUpUploadPath(ids);
         return (ids.Count, variants.Count, enumerateMs, timer.Elapsed.TotalMilliseconds);
     }
@@ -221,6 +234,23 @@ public sealed class RenderResources
         }
     }
 
+    /// <summary>The suffix of the key a mesh's blended twin is held under (<see cref="FadeTwin"/>): the mesh's own key plus this.</summary>
+    public const string FadeKeySuffix = ":fade";
+
+    /// <summary>
+    /// The blended twin of a prepared surface (the materialise fade, D45 and D63): the same surface and texture, its variant turned by
+    /// <see cref="PartTranslucencyRules.WithPartMaterial"/> into the one retail draws a part with a translucency material (<c>D3DPolyRender::SetSurface</c>): SRCALPHA/INVSRCALPHA,
+    /// no alpha test, no depth write; a surface that already blends without a test keeps its variant. The twin carries no decoded texture of its own: acquire the original
+    /// first, so the texture is resident. Pure; any thread.
+    /// </summary>
+    public static PreparedSurface FadeTwin(PreparedSurface surface)
+    {
+        ArgumentNullException.ThrowIfNull(surface);
+        return surface.Key is { } key
+            ? new PreparedSurface(surface.Request, surface.Material, key with { Variant = PartTranslucencyRules.WithPartMaterial(key.Variant) }, null, surface.Error)
+            : surface;
+    }
+
     /// <summary>Main thread: the shared material of a prepared surface (one reference; release the handle on detach).</summary>
     public MaterialHandle<ShaderMaterial> AcquireMaterial(PreparedSurface prepared) => Materials.Acquire(prepared, Loader, DxtPolicy);
 
@@ -233,8 +263,13 @@ public sealed class RenderResources
     /// <paramref name="surfaces"/> (one per prepared sub-mesh); if it is cached but idle, its materials are acquired
     /// from <paramref name="surfaces"/> and bound again. Release it with <see cref="ReleaseMesh"/>.
     /// </summary>
-    /// <remarks>The key must identify the geometry and its surfaces (palette and texture changes belong in it once ObjDesc
-    /// overrides exist, M2).</remarks>
+    /// <remarks>
+    /// The key must identify the geometry and its surfaces. Appearance and lighting are part of it (M2): the actors' keys
+    /// (<c>ActorMeshLibrary.Key</c>) are <c>gfxobj:0x…:Object</c> for the world's lighting, the lighting rule's name appended for any
+    /// other (<c>:CreatureMode</c>, <c>:DynamicObject</c>, <c>:DynamicCellObject</c>: a material carries its lighting rule), and the
+    /// part's ObjDesc dress (<c>PartAppearance.VariantKey</c>: its texture swaps and its modified palette) after that, so two
+    /// characters dressed alike share meshes and one dressed differently never does.
+    /// </remarks>
     public ArrayMesh AcquireMesh(string key, PreparedMesh prepared, IReadOnlyList<PreparedSurface> surfaces)
     {
         ArgumentNullException.ThrowIfNull(prepared);

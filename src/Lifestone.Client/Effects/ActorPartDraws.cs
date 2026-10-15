@@ -26,7 +26,7 @@ public readonly record struct PartDraw(int PartIndex, uint GfxObjId, AcFrame Fra
 /// <para><b>LOD.</b> <see cref="DrawFrameRules.SelectLevel"/> per part with the retail distances
 /// (<c>CPhysicsPart::UpdateViewerDistance</c>; beyond <see cref="DegradeSelector.ObjectDegradeDistance"/> horizontally the
 /// object's distance and heading, <c>CPhysicsObj::UpdateViewerDistance</c>). The player's own character always draws
-/// level 0 with mode 1.</para>
+/// level 0 with mode 1. <see cref="DegradesDisabled"/> gives every part that treatment (creature mode).</para>
 /// </remarks>
 public sealed class ActorPartDraws
 {
@@ -77,6 +77,14 @@ public sealed class ActorPartDraws
     /// </summary>
     public float DegradeBias { get; set; } = DegradeSelector.SteadyStateBias;
 
+    /// <summary>
+    /// Retail <c>Render::degrades_disabled</c>: every part draws its nearest level (level 0) in <see cref="DegradeMode.Normal"/>,
+    /// whatever the distance, and no viewer relation is computed. <c>CreatureMode::Render</c> (11.4186 0x004529D0, 11.6096
+    /// 0x00452A10) sets it while it draws, so creature-mode actors (the portal tunnel, the character-creation figure, the
+    /// paperdoll) never degrade; <c>PortalSpaceScene.DegradesDisabled</c> records that. Off in the world.
+    /// </summary>
+    public bool DegradesDisabled { get; set; }
+
     /// <summary>Every distinct GfxObj any part can draw at any level (for preloading meshes).</summary>
     public IEnumerable<uint> AllGfxObjIds => _chains.SelectMany(c => c.GfxObjIds).Where(id => id != 0).Distinct();
 
@@ -90,7 +98,7 @@ public sealed class ActorPartDraws
         var scale = objectScale ?? actor.Scale;
         var posed = actor.Motion?.Pose is not null;
         var frames = actor.PartFrames;
-        var objectRelation = DrawFrameRules.UsesObjectRelation(viewer, actor.Frame.Origin, DegradeSelector.ObjectDegradeDistance(DegradeBias))
+        var objectRelation = !DegradesDisabled && DrawFrameRules.UsesObjectRelation(viewer, actor.Frame.Origin, DegradeSelector.ObjectDegradeDistance(DegradeBias))
             ? DrawFrameRules.Relate(viewer, actor.Frame.Origin)
             : (ViewerRelation?)null;
         for (var i = 0; i < _draws.Length; i++)
@@ -101,6 +109,12 @@ public sealed class ActorPartDraws
             if (hidden || !part.IsGfxObj)
             {
                 _draws[i] = new PartDraw(i, 0, frame, partScale, DegradeMode.Normal);
+                continue;
+            }
+
+            if (DegradesDisabled)
+            {
+                _draws[i] = new PartDraw(i, _chains[i].NearestGfxObjId, frame, partScale, DegradeMode.Normal);
                 continue;
             }
 

@@ -82,7 +82,7 @@ foreach (var actor in new[] { sim.Caster, sim.Target }.Concat(sim.Projectiles.Se
     //    Orientation, Scale, Translucency. Draw the GfxObj (MultiMesh per GfxObj) with alpha = 1 − translucency
     //    (not drawn at 1.0); blend mode comes from the GfxObj's surfaces (Additive → ONE/ONE, …, rendering.md §6);
     //    apply the GfxObj's degrade billboard mode (DegradeInfo modes 2–5, CPhysicsPart::calc_draw_frame).
-    // 4. events: actor.Effects.DrainEvents() → sounds (Sound/SoundTable/SoundTweaked hooks) etc.
+    // 4. events: actor.Effects.DrainEvents(into) (a caller-owned List<EffectEvent>) → sounds (Sound/SoundTable/SoundTweaked hooks) etc.
 }
 // sim.Events is a readable log (chant, motions, scripts, launches, hits) for a HUD.
 ```

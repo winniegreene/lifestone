@@ -1,0 +1,407 @@
+{
+  "format": "lifestone-layout/1",
+  "id": "0x7F000010",
+  "width": 800,
+  "height": 600,
+  "elements": [
+    {
+      "id": "0x7F000100",
+      "type": 3,
+      "x": 250,
+      "y": 60,
+      "width": 300,
+      "height": 356,
+      "zLevel": 20,
+      "properties": {
+        "UICore_Element_activatable": true
+      },
+      "children": [
+        {
+          "id": "0x7F000101",
+          "base": {
+            "layout": "0x21000042",
+            "element": "0x100002AF"
+          },
+          "x": 0,
+          "y": 0,
+          "width": 300,
+          "height": 356,
+          "edges": {
+            "right": "OwnSide",
+            "bottom": "OwnSide"
+          }
+        },
+        {
+          "id": "0x7F000103",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002CA"
+          },
+          "x": 12,
+          "y": 6,
+          "width": 150,
+          "height": 18,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": "Lifestone tools"
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000104",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002CA"
+          },
+          "x": 12,
+          "y": 28,
+          "width": 276,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": "Places (click one to teleport)"
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000105",
+          "base": {
+            "layout": "0x21000042",
+            "element": "0x100002B7"
+          },
+          "x": 11,
+          "y": 46,
+          "width": 278,
+          "height": 20
+        },
+        {
+          "id": "0x7F000106",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002CA"
+          },
+          "x": 14,
+          "y": 48,
+          "width": 272,
+          "height": 16,
+          "properties": {
+            "UICore_Text_editable": true,
+            "UICore_Text_max_chars": 40,
+            "UICore_Text_one_line": true,
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000110",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 12,
+          "y": 72,
+          "width": 250,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000111",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 12,
+          "y": 88,
+          "width": 250,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000112",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 12,
+          "y": 104,
+          "width": 250,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000113",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 12,
+          "y": 120,
+          "width": 250,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000114",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 12,
+          "y": 136,
+          "width": 250,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000115",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 12,
+          "y": 152,
+          "width": 250,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000116",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 12,
+          "y": 168,
+          "width": 250,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000117",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 12,
+          "y": 184,
+          "width": 250,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000118",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 266,
+          "y": 72,
+          "width": 22,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": "Up"
+            },
+            "UICore_Text_horizontal_justification": 1
+          }
+        },
+        {
+          "id": "0x7F000119",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 266,
+          "y": 184,
+          "width": 22,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": "Dn"
+            },
+            "UICore_Text_horizontal_justification": 1
+          }
+        },
+        {
+          "id": "0x7F000120",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002CA"
+          },
+          "x": 12,
+          "y": 202,
+          "width": 276,
+          "height": 18,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000121",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C4"
+          },
+          "x": 12,
+          "y": 226,
+          "width": 100,
+          "height": 18,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": "Where am I"
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000122",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002CA"
+          },
+          "x": 12,
+          "y": 242,
+          "width": 276,
+          "height": 40,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000123",
+          "base": {
+            "layout": "0x21000042",
+            "element": "0x100002B7"
+          },
+          "x": 11,
+          "y": 286,
+          "width": 100,
+          "height": 20
+        },
+        {
+          "id": "0x7F000124",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002CA"
+          },
+          "x": 14,
+          "y": 288,
+          "width": 94,
+          "height": 16,
+          "properties": {
+            "UICore_Text_editable": true,
+            "UICore_Text_max_chars": 12,
+            "UICore_Text_one_line": true,
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000125",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C5"
+          },
+          "x": 118,
+          "y": 288,
+          "width": 80,
+          "height": 18,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": "Add XP"
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000126",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002CA"
+          },
+          "x": 12,
+          "y": 312,
+          "width": 276,
+          "height": 38,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": ""
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
+          "id": "0x7F000127",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C3"
+          },
+          "x": 200,
+          "y": 6,
+          "width": 88,
+          "height": 16,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": "Hide panel"
+            },
+            "UICore_Text_horizontal_justification": 3
+          }
+        },
+        {
+          "id": "0x7F000102",
+          "type": 2,
+          "x": 0,
+          "y": 0,
+          "width": 196,
+          "height": 28
+        }
+      ]
+    }
+  ]
+}

@@ -26,7 +26,11 @@
 *.ttf binary
 *.otf binary
 *.wav binary
+*.mp3 binary
 *.ogg binary
+*.flac binary
+*.lsrec binary
+*.bin binary
 *.mp4 binary
 *.avi binary
 *.mkv binary

@@ -1,0 +1,16 @@
+# The Lifestone server mod and its shared wire contract (server/mod/Shared, which Lifestone.Client also compiles by a
+# compile link; an .editorconfig applies by the source file's path, so these rules hold in both builds).
+#
+# ACE runs the mod's command on its world thread, which takes the machine's culture (ACE sets en-US on its main thread
+# only), and the client runs in the player's culture. Wire text must not change with either: numbers are written and
+# read invariantly, and words are compared ordinally. These analyzers make a culture-sensitive call a build error.
+
+[*.cs]
+# CA1304: specify CultureInfo
+dotnet_diagnostic.CA1304.severity = error
+# CA1305: specify IFormatProvider
+dotnet_diagnostic.CA1305.severity = error
+# CA1310: specify StringComparison for correctness
+dotnet_diagnostic.CA1310.severity = error
+# CA1311: specify a culture or use an invariant version
+dotnet_diagnostic.CA1311.severity = error

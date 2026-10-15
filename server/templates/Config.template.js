@@ -21,8 +21,9 @@
     "Accounts": {
       "OverrideCharacterPermissions": true,
       "DefaultAccessLevel": 0,
-      // Single-player: the client's first login creates the account. ACE promotes the first account it
-      // creates to Admin when the auth DB has no admin yet.
+      // Single-player: the client's first login creates the account, as a Player (DefaultAccessLevel 0). ACE's own
+      // rule would make it an Admin when the auth DB has no Admin yet; setup's sentinel Admin account and the
+      // Lifestone server mod (server/mod, which refuses to load unless DefaultAccessLevel is 0) keep that from happening.
       "AllowAutoAccountCreation": true,
       "PasswordHashWorkFactor": 8,
       "ForceWorkFactorMigration": true
