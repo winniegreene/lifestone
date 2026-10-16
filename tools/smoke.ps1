@@ -42,6 +42,13 @@
                                portal space plays and sends LoginComplete once per arrival, a server teleport (the scripted one, a tools place, a portal Use)
                                moves the world, the physics and the camera, a boot and a silent server end on the disconnected screen whose button
                                reconnects, a log off through Shift+Escape takes it all away; one [playcheck] PASS|FAIL line each and a final line)
+      record-audio             --play-checks --record-audio=<OutDir>\record-audio\record-audio.wav (M3 1.3 s3, no backend; the audio check): the play checks on the stand-in
+                               server (portal sounds, the F750, the footstep and gesture hooks, the UI's sounds, ambient sound when the run reaches the outdoors) with the game's own
+                               sound recorded from the Master bus; automated and therefore muted (M2 D8: no --volume; the recording is taken before the bus's level, so it holds the full
+                               mix and nothing reaches the speakers). The run quits normally, the game reads the file back (Lifestone.Client.Audio.WaveLevels) and logs
+                               "audio recording levels file= seconds= peak_dbfs= rms_dbfs= active_windows= sources=<server:n,hooks:n,footsteps:n,footsteps_sounded:n,ui:n,ambient:n,server_handed:n,hooks_handed:n; each n or n/a; server and hooks are voices started, the *_handed counts are calls handed to the sound player> windows= muted=true". The step passes on the play
+                               checks' own verdict, a recording that exists, is non-silent (peak above -60 dBFS and at least one active 50 ms window) and was taken with the Master bus
+                               muted, and the sounded counts in sources= are judged: server>=1 and hooks>=1 (a recording of portal sounds alone fails; footsteps stay unjudged, TODO(footstep-sound-table)). Detail: "peak_dbfs=<x> rms_dbfs=<x> active_windows=<n>/<n> seconds=<x> muted=true sources=<..>"
       shell-frames             --play-checks --play-frames=<OutDir>\shell-frames\<W>x<H> at 800x600 (UI scale 1; with -AllSizes also 1920x1080 at scale 1 and 2560x1440 at scale 2), each through
                                tools\godot.ps1 -Resolution: the play checks on the stand-in server save the shell's ten review frames (portal space in the
                                SmartBox, the arrival, the spew box and chat, a NotInM2 message, an object selected with the vivid indicator, character information,
@@ -69,6 +76,12 @@
                                (Where am I, Add XP 2,500, a Places teleport), logs off, deletes, restores and deletes it, enters 'Lifestone Smoke', purges it and checks the list is as it began;
                                verdict "[logincheck] throwaway done ok=true throwaway=purged name_errors=2 xp=added where_m=<x> place=teleported deletes=2 restores=1 list=same leftover=<yes|no>
                                enter_to_walk_max_ms=<x> teleport_frame_max_ms=<x>" (the two frame figures judged against 50)
+      login-buff               --account=test --login-check=buff (M3 2.1 s3; docs/session.md section 30; needs the local backend with BSD Mage built; runs ONLY with -Backend require,
+                               SKIP under auto and start: it changes the character, buffs and burned components): the game enters BSD Mage, re-seats the wand (ACE sends a server sound on a wield, none on a
+                               cast), runs the buff scenario in its own session (the gear, magic mode, the cycle of the 24 buff lines, the forced re-buff pass, non-combat) and logs off; about 60 s of cycle at the
+                               live mana rate, a few minutes with the login and the gear (the Godot run gets 900 s); verdict "[logincheck] buff done ok=true gear=wielded worn=<n> cast=<ok|fizzled|failed|n/a> buffs=24/24 rebuffed=yes forced=<yes|no>
+                               min_remaining_s=<s> levels=<..> cycle_s=<s> cast_scripts=<n> cast_sounds=<n> cast_windows=<n> cast_frame_max_ms=<x|n/a> sounds_server=<n>" (ok judges the gear, the 24 lines,
+                               the re-buff and sounds_server>=1; the cast_* fields and cast= are report-only; the step prints the line)
       spell-showcase           --scene=spellviewer --showcase (four entries; must end with exceptions=0)
       golden-viewpoints        --golden-viewpoints (every viewpoint captured)
       fly-path                 --fly-path=holtburg:arwic:<FlySpeed> (DoD 8: no frame over 50 ms; exit 2 if one is)
@@ -192,9 +205,9 @@ $DotnetRoot = Find-LifestoneDotnetRoot -DotnetRoot $DotnetRoot
 $dotnetExe = Join-Path $DotnetRoot 'dotnet.exe'
 
 $allSteps = @('build', 'test', 'cli-help', 'cli-bad-argument', 'terrain-golden', 'engine-checks', 'interior-engine-checks',
-    'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
+    'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'login-buff', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
 # The steps that need the local backend (gated by -Backend).
-$backendSteps = @('login-check', 'login', 'login-throwaway')
+$backendSteps = @('login-check', 'login', 'login-throwaway', 'login-buff')
 # The default test run leaves out the loopback tests (they need the backend) and the soak tier (merge gates only).
 $testFilter = 'Category!=Loopback&Tier!=Soak'
 # 'pwsh -File' passes '-Only a,b' as one string: split on commas either way.
@@ -285,6 +298,25 @@ function Invoke-Godot {
     $arguments += "-GameArgs:$GameArgs"
     $code = Invoke-Logged -FileName $pwshExe -Arguments $arguments -LogPath $log -TimeoutSeconds ($TimeoutSeconds + 60)
     return @{ Code = $code; Log = $log; Text = (Get-Content -LiteralPath $log -Raw) }
+}
+
+function Test-RecordedSources([string] $Sources) {
+    <# The record-audio step's judge of the sounded counts in the levels line's sources= value (M3 2.1 s3, 1.3 review R7): server>=1 and hooks>=1, so a recording of portal sounds alone fails.
+       The stand-in's play checks send an F750 and play the cast and walk hooks. Footsteps stay unjudged (TODO(footstep-sound-table): the human sound table has no footstep variant); the handed
+       counts, the UI and the ambient count are reported. Returns @{ Ok; Detail } naming the count that failed. #>
+    $counts = @{}
+    foreach ($pair in ($Sources -split ',')) {
+        $kv = $pair -split ':', 2
+        if ($kv.Count -eq 2) { $counts[$kv[0]] = $kv[1] }
+    }
+    $failed = @()
+    foreach ($name in 'server', 'hooks') {
+        $n = 0
+        if (-not $counts.ContainsKey($name)) { $failed += "$name is missing from sources= (a sounded count was expected)" }
+        elseif (-not [int]::TryParse($counts[$name], [ref] $n)) { $failed += "$name=$($counts[$name]) (a sounded count was expected)" }
+        elseif ($n -lt 1) { $failed += "$name=$n (>= 1 expected)" }
+    }
+    return @{ Ok = ($failed.Count -eq 0); Detail = ($failed -join '; ') }
 }
 
 function Get-ErrorCount([string] $text) {
@@ -740,6 +772,11 @@ try {
             Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it creates and purges a character on the test account; runs only with -Backend require (this is -Backend $Backend)" -Skipped
             continue
         }
+        if ($step -eq 'login-buff' -and $Backend -ne 'require') {
+            # It changes BSD Mage (buffs on, components burned) and runs for about 22 minutes: only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
+            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it buffs BSD Mage on the test account (a cycle at the live mana rate, about 60 s, a few minutes in all); runs only with -Backend require (this is -Backend $Backend)" -Skipped
+            continue
+        }
         if ($backendSteps -contains $step -and -not (Test-BackendGate $step $timer)) { continue }
         switch ($step) {
             'build' {
@@ -865,6 +902,41 @@ try {
                 $max = if ($run.Text -match 'all play checks hold[^\r\n]*max_frame_ms_after_arrival=([\d.]+)') { " max_frame_ms=$($Matches[1])" } else { '' }
                 Add-Result $step ($run.Code -eq 0 -and $run.Text -match 'all play checks hold') $run.Code $timer.Elapsed.TotalSeconds "pass=$pass fail=$fail$max" $run.Log (Get-ErrorCount $run.Text)
             }
+            'record-audio' {
+                # The audio check (M3 1.3 s3; TODO(record-audio-check) closed): the play checks with the game's own sound recorded. No --volume: an automated run is muted (M2 D8),
+                # and the recording is taken before the Master bus's level, so it holds the full mix and nothing reaches the speakers; the levels line's muted=true is the proof.
+                $recordDir = Join-Path $OutDir 'record-audio'
+                $wav = Join-Path $recordDir 'record-audio.wav'
+                $rel = [IO.Path]::GetRelativePath($repoRoot, $wav).Replace('\', '/')
+                $run = Invoke-Godot $step "--play-checks --record-audio=$rel" 420 '' $defaultSize
+                $pass = ([regex]::Matches($run.Text, '\[playcheck\] PASS')).Count
+                $fail = ([regex]::Matches($run.Text, '\[playcheck\] FAIL')).Count
+                $holds = $run.Text -match 'all play checks hold'
+                $levelsPattern = 'audio recording levels file=(?<file>\S+) seconds=(?<seconds>[\d.]+) peak_dbfs=(?<peak>-?[\d.]+) rms_dbfs=(?<rms>-?[\d.]+) active_windows=(?<active>\d+) sources=(?<sources>\S+) windows=(?<windows>\d+)(?<muted> muted=(?:true|false))?'
+                $hasLevels = $run.Text -match $levelsPattern
+                if ($hasLevels) {
+                    $levels = @{}
+                    foreach ($name in 'seconds', 'peak', 'rms', 'active', 'sources', 'windows', 'muted') { $levels[$name] = $Matches[$name] }
+                    $peak = [double]::Parse($levels.peak, [Globalization.CultureInfo]::InvariantCulture)
+                    $active = [int]$levels.active
+                    $nonSilent = $peak -gt -60.0 -and $active -ge 1
+                    $muted = $levels.muted -eq ' muted=true'
+                    $sourcesJudge = Test-RecordedSources $levels.sources
+                    $sourcesOk = $sourcesJudge.Ok
+                    $detail = "peak_dbfs=$($levels.peak) rms_dbfs=$($levels.rms) active_windows=$($levels.active)/$($levels.windows) seconds=$($levels.seconds) muted=$($muted.ToString().ToLowerInvariant()) sources=$($levels.sources) (server>=1 and hooks>=1 judged); play checks pass=$pass fail=$fail"
+                    if (-not $nonSilent) { $detail += '; FAIL: the recording is silent (judge: peak above -60 dBFS and at least one active window)' }
+                    if (-not $muted) { $detail += '; FAIL: the run was not muted (M2 D8)' }
+                    if (-not $sourcesOk) { $detail += "; FAIL: sounded counts: $($sourcesJudge.Detail)" }
+                }
+                else {
+                    $nonSilent = $false; $muted = $false; $sourcesOk = $false
+                    $detail = "no 'audio recording levels' line (the recording was not written or not read back); play checks pass=$pass fail=$fail"
+                }
+                $fileOk = Test-Path -LiteralPath $wav
+                if (-not $fileOk) { $detail += "; FAIL: $rel does not exist" }
+                if (-not $holds) { $detail += '; FAIL: the play checks did not all hold' }
+                Add-Result $step ($run.Code -eq 0 -and $holds -and $hasLevels -and $nonSilent -and $muted -and $sourcesOk -and $fileOk) $run.Code $timer.Elapsed.TotalSeconds $detail $run.Log (Get-ErrorCount $run.Text)
+            }
             'shell-frames' {
                 # The shell's review frames at two window sizes on the stand-in session (no backend). A frames run is not a timing run (the verdict says frame_time=reported).
                 $verdictPattern = 'shell frames done size=(?<size>\d+x\d+) scale=(?<scale>\d+) captured=(?<captured>\d+) failures=(?<failures>\d+) frame_time=reported'
@@ -908,6 +980,15 @@ try {
                     if ($run.Text -match "\[logincheck\] throwaway done [^\r\n]*$key=(\d+\.\d+)") { if ([double]$Matches[1] -gt 50.0) { $framesOk = $false } } else { $framesOk = $false }
                 }
                 Add-Result $step ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] throwaway done ok=true ' -and $run.Text -match $fields -and $framesOk) $run.Code $timer.Elapsed.TotalSeconds $verdict $run.Log (Get-ErrorCount $run.Text)
+            }
+            'login-buff' {
+                # --login-check=buff (docs/session.md section 30): the game enters BSD Mage on the test account, re-seats the wand, runs the buff scenario in its own session (gear, magic mode, the cycle of the
+                # profile's 24 buff lines, the forced re-buff pass) and logs off. The test account only; the game reads its password from secrets.json itself. 900 s: a whole cycle at the live mana rate took
+                # 56 s of session time on the real server (BuffLoopLiveTests, M3 2.1 fix B; ACE's Mana Conversion makes a cast cost far less than the ceiling), so the login, the gear and the cycle fit in a few
+                # minutes; 900 s leaves room for a slow wait for regeneration. The runner's own limit (BuffLegRunner.WholeCheckSeconds) must stay under it so the leg logs off before it reports a failure.
+                $run = Invoke-Godot $step '--account=test --login-check=buff' 900 '' $defaultSize
+                $verdict = if ($run.Text -match '\[logincheck\] (buff done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
+                Add-Result $step ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] buff done ok=true ') $run.Code $timer.Elapsed.TotalSeconds $verdict $run.Log (Get-ErrorCount $run.Text)
             }
             'login' {
                 # The player's own entry point (tools\play.ps1) on the test account (-Offscreen makes it the test account and refuses any other). The backend is the

@@ -49,6 +49,7 @@ public static partial class OptionCatalog
         RetailUi(),
         Avatars(),
         Play(),
+        Buff(), // the buff cycle's four options (M3 2.1 s0b; OptionCatalog.Buff.cs)
     ]);
 
     /// <summary>The first lines of <c>--help</c>.</summary>

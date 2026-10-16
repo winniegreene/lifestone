@@ -65,6 +65,7 @@ public sealed class GameSession : IGameSessionView, IDisposable
 
     private readonly GameThreadBinding _thread = new();
     private readonly ILogSink _log;
+    private readonly TimeProvider _time;
     private readonly EventBus _bus;
     private readonly GameStateReducer _reducer;
     private readonly ActionApi _actions;
@@ -79,6 +80,7 @@ public sealed class GameSession : IGameSessionView, IDisposable
     private GameSession(Action<IInboundMessageHandler> standIn, TimeProvider time, ILogSink log)
     {
         _log = log;
+        _time = time;
         _standIn = standIn;
         Clock = new SessionClock(time);
         _bus = new EventBus(log, _thread, time);
@@ -91,6 +93,7 @@ public sealed class GameSession : IGameSessionView, IDisposable
     private GameSession(LiveSessionSetup setup, TimeProvider time, ILogSink log)
     {
         _log = log;
+        _time = time;
         Clock = new SessionClock(time);
         _bus = new EventBus(log, _thread, time);
         State = new GameState();
@@ -157,6 +160,71 @@ public sealed class GameSession : IGameSessionView, IDisposable
     /// <c>corrections=</c> (m2-plan §4.14).
     /// </summary>
     public long Corrections => _reducer.Counters.ForceBlips;
+
+    /// <summary>
+    /// Gives the Action API the retail SpellTable from <paramref name="dats"/> (decoded on a worker from this call, <see cref="SpellTableHost"/>; a cast before it is done is of unknown kind), so a cast completes by its spell's kind. A session without it (unit tests,
+    /// a host without dats) treats every cast as of unknown kind (<c>TODO(m3-cast-spell-table-host)</c>).
+    /// </summary>
+    /// <param name="dats">The opened dats.</param>
+    public void UseSpellsFrom(Lifestone.Data.Dat.DatSet dats)
+    {
+        var host = SpellTableHost.Start(dats, _log, _time);
+        _spellHost = host;
+        _actions.SpellLookup = host.Find;
+        _actions.ProjectileSetupLookup = host.ProjectileSetup;
+        UseStatTablesFrom(dats);
+    }
+
+    /// <summary>
+    /// Loads the portal tables the panels and the enchantment rules read, from <paramref name="dats"/> (all small: a few milliseconds, on the calling thread, which is the host's start-up call and not the SpellTable's worker): the XpTable for
+    /// <see cref="XpTable"/>, the SkillTable for <see cref="SkillTable"/> and the quality filter's secondary-attribute table into <see cref="EnchantmentRules.Attribute2ndFilter"/> (a process-wide setting the vitals' maximums read, set once
+    /// here: every host that opens the dats reaches it through <see cref="UseSpellsFrom"/>, the shell, the headless runner and the session bootstrap). A table that does not load is logged (<c>TODO(m3-stat-tables)</c>) and stays null.
+    /// <see cref="UseSpellsFrom"/> calls this.
+    /// </summary>
+    /// <param name="dats">The opened dats.</param>
+    public void UseStatTablesFrom(Lifestone.Data.Dat.DatSet dats)
+    {
+        ArgumentNullException.ThrowIfNull(dats);
+        try
+        {
+            _xpTable = Lifestone.Data.CharacterCreation.XpTableData.Load(dats);
+            _skillTable = Lifestone.Data.CharacterCreation.SkillTableData.Load(dats);
+            EnchantmentRules.Attribute2ndFilter = Lifestone.Data.Dat.QualityFilterData.LoadEnchantable(dats);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or KeyNotFoundException)
+        {
+            _log.Warn(SessionLog.Category, "TODO(m3-stat-tables): the XpTable or the SkillTable did not load; the skills page has no list or prices: " + ex.Message);
+        }
+    }
+
+    /// <summary>Gives the session its XpTable and SkillTable directly (tests and hosts that hold them already).</summary>
+    /// <param name="xpTable">The XpTable.</param>
+    /// <param name="skillTable">The SkillTable.</param>
+    public void UseStatTables(Lifestone.Data.CharacterCreation.XpTableData? xpTable, Lifestone.Data.CharacterCreation.SkillTableData? skillTable)
+    {
+        _xpTable = xpTable;
+        _skillTable = skillTable;
+    }
+
+    private Lifestone.Data.CharacterCreation.XpTableData? _xpTable;
+    private Lifestone.Data.CharacterCreation.SkillTableData? _skillTable;
+
+    /// <inheritdoc/>
+    public Lifestone.Data.Magic.SpellInfo? Spell(uint id) => _actions.FindSpell(id);
+
+    /// <inheritdoc/>
+    public Lifestone.Data.CharacterCreation.XpTableData? XpTable => _xpTable;
+
+    /// <inheritdoc/>
+    public Lifestone.Data.CharacterCreation.SkillTableData? SkillTable => _skillTable;
+
+    /// <summary>Completes when the SpellTable's worker has finished (<see cref="UseSpellsFrom"/>; a completed task without it). Until then a cast's kind is Unknown (M3 1.2 fix R5).</summary>
+    public Task SpellTableLoaded => _spellHost?.Loaded ?? Task.CompletedTask;
+
+    /// <summary>True once the SpellTable is decoded and published (false while loading, after a failed load, and without <see cref="UseSpellsFrom"/>).</summary>
+    public bool SpellTableReady => _spellHost?.Ready ?? false;
+
+    private SpellTableHost? _spellHost;
 
     /// <summary>The reducer (tests and the replayer).</summary>
     internal GameStateReducer Reducer => _reducer;
@@ -345,6 +413,9 @@ public sealed class GameSession : IGameSessionView, IDisposable
         }
 
         _disposed = true;
+
+        // The SpellTable's worker reads the dats: the host disposes the dats after the session, so the read ends first (it takes milliseconds; bounded, never a hang).
+        _spellHost?.Loaded.Wait(TimeSpan.FromSeconds(10));
         _actions.Dispose();
         var net = _net;
         _net = null;
@@ -415,6 +486,10 @@ public sealed class GameSession : IGameSessionView, IDisposable
         try
         {
             _standIn!(_reducer);
+            if (_reducer.LocalResponder?.World is { } world)
+            {
+                world.Log = _log; // the stand-in logs the placeholders it answers with
+            }
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {

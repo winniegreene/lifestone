@@ -19,7 +19,7 @@ public static class ShellFramesPlan
         "01-shell-portal-space", // the SmartBox's viewport shows the tunnel, the shell around it
         "02-shell-arrival", // the shell over the world on arrival: vitals, chat, radar, spew box
         "03-shell-spew-and-chat", // the spew box and the main chat with lines, the vitals after a server update
-        "04-shell-toolbar-and-message", // a NotInM2 message over the shell (the toolbar's inventory button)
+        "04-shell-toolbar-and-message", // a NotInM3 message over the shell (the toolbar's map button, a page no slice builds)
         "05-shell-selection-and-vivid-indicator", // an object selected: its name, its health, the vivid target indicator
         "06-character-information", // the character information panel
         "07-options-side-by-side-vitals", // the options panel, the character's side-by-side vitals option chosen

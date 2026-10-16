@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
+using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Recording;
+using Lifestone.Client.Session.StandIn;
 
 namespace Lifestone.Client.Tests.Session;
 
@@ -47,8 +49,50 @@ internal static class RealRecordings
     /// <summary>The recordings found, oldest first by name (names start with the UTC time).</summary>
     public static IReadOnlyList<string> Find() => Scan().Recordings;
 
+    /// <summary>The recordings found, as the loader takes them (the host's listing: name and a way to open).</summary>
+    public static IReadOnlyList<RecordingSource> Sources() =>
+        [.. Find().Select(path => new RecordingSource(Path.GetFileName(path), () => File.OpenRead(path)))];
+
     /// <summary>The <c>.lsrec</c> files left out because they end before their header does.</summary>
     public static IReadOnlyList<string> Incomplete() => Scan().Incomplete;
+
+    /// <summary>
+    /// The qualities as the first PlayerDescription of the recording at <paramref name="path"/> set them, copied the moment the reducer publishes
+    /// <see cref="QualityChange.Description"/>: the recording's logoff clears the replayed state's qualities, so the state after the replay holds none.
+    /// Null when the recording holds no PlayerDescription.
+    /// </summary>
+    public static PlayerQualities? QualitiesAtDescription(string path)
+    {
+        var replayer = new SessionReplayer();
+        PlayerQualities? copy = null;
+        replayer.Events.Subscribe((in QualitiesChanged e) =>
+        {
+            if (e.Change == QualityChange.Description && copy is null)
+            {
+                copy = Snapshot(replayer.State.Self.Qualities);
+            }
+        });
+        using var stream = File.OpenRead(path);
+        replayer.Replay(stream);
+        return copy;
+    }
+
+    private static PlayerQualities Snapshot(PlayerQualities source)
+    {
+        var copy = new PlayerQualities { IsKnown = source.IsKnown };
+        foreach (var (k, v) in source.Ints) { copy.Ints[k] = v; }
+        foreach (var (k, v) in source.Int64s) { copy.Int64s[k] = v; }
+        foreach (var (k, v) in source.Bools) { copy.Bools[k] = v; }
+        foreach (var (k, v) in source.Floats) { copy.Floats[k] = v; }
+        foreach (var (k, v) in source.Strings) { copy.Strings[k] = v; }
+        foreach (var (k, v) in source.DataIds) { copy.DataIds[k] = v; }
+        foreach (var (k, v) in source.InstanceIds) { copy.InstanceIds[k] = v; }
+        foreach (var (k, v) in source.Attributes) { copy.Attributes[k] = v; }
+        foreach (var (k, v) in source.Vitals) { copy.Vitals[k] = v; }
+        foreach (var (k, v) in source.Skills) { copy.Skills[k] = v; }
+        copy.SetActiveEnchantments(source.ActiveEnchantments);
+        return copy;
+    }
 
     private static (List<string> Recordings, List<string> Incomplete) Scan()
     {

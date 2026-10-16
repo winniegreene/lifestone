@@ -20,6 +20,8 @@ namespace Lifestone.ServerTools;
 [JsonSerializable(typeof(XpData))]
 [JsonSerializable(typeof(QuestData))]
 [JsonSerializable(typeof(CharPurgeData))]
+[JsonSerializable(typeof(SpellLearnData))]
+[JsonSerializable(typeof(ItemData))]
 [JsonSerializable(typeof(NetData))]
 [JsonSerializable(typeof(PlacesData))]
 internal sealed partial class ToolsWireJsonContext : JsonSerializerContext

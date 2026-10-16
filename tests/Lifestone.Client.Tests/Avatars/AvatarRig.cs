@@ -47,6 +47,12 @@ internal static class AvatarRig
     public const uint HiddenScript = 0x33FF0001;
     public const uint UnHideScript = 0x33FF0002;
 
+    /// <summary>The script the table plays for <c>PlayScript.LevelUp</c> (M3 1.3 s0): one SoundTable hook (<see cref="LevelUpHookSoundType"/>) at time 0.</summary>
+    public const uint LevelUpScript = 0x33FF0003;
+
+    /// <summary>The sound type the <see cref="LevelUpScript"/>'s hook asks for.</summary>
+    public const uint LevelUpHookSoundType = 90;
+
     /// <summary>Holtburg's landblock, outdoor cell 0x19.</summary>
     public const uint HoltburgCell = 0xA9B40019;
 
@@ -266,6 +272,7 @@ internal static class AvatarRig
             {
                 [PlayScript.Hidden] = new DatReaderWriter.Types.PhysicsScriptTableData { Scripts = { new ScriptAndModData { Mod = 1f, ScriptId = HiddenScript } } },
                 [PlayScript.UnHide] = new DatReaderWriter.Types.PhysicsScriptTableData { Scripts = { new ScriptAndModData { Mod = 1f, ScriptId = UnHideScript } } },
+                [PlayScript.LevelUp] = new DatReaderWriter.Types.PhysicsScriptTableData { Scripts = { new ScriptAndModData { Mod = 1f, ScriptId = LevelUpScript } } },
             },
         });
 
@@ -274,6 +281,7 @@ internal static class AvatarRig
             {
                 HiddenScript => materialise ? FadeScript(scriptId, RetailHiddenFade) : EmptyScript(scriptId),
                 UnHideScript => materialise ? FadeScript(scriptId, RetailUnHideFade) : EmptyScript(scriptId),
+                LevelUpScript => SoundTableScript(scriptId, LevelUpHookSoundType),
                 _ => null,
             };
 
@@ -293,6 +301,19 @@ internal static class AvatarRig
             BitConverter.TryWriteBytes(raw.AsSpan(24), fade.Start);
             BitConverter.TryWriteBytes(raw.AsSpan(28), fade.End);
             BitConverter.TryWriteBytes(raw.AsSpan(32), fade.Time);
+            return Lifestone.Data.Effects.PhysicsScriptData.Decode(id, raw);
+        }
+
+        /// <summary>A script of one SoundTable hook at time 0 (type 2, direction Both, the sound type).</summary>
+        private static Data.Effects.PhysicsScriptData SoundTableScript(uint id, uint soundType)
+        {
+            var raw = new byte[8 + 8 + 4 + 4 + 4];
+            BitConverter.TryWriteBytes(raw.AsSpan(0), id);
+            BitConverter.TryWriteBytes(raw.AsSpan(4), 1u);
+            BitConverter.TryWriteBytes(raw.AsSpan(8), 0.0);
+            BitConverter.TryWriteBytes(raw.AsSpan(16), (uint)AnimHookType.SoundTable);
+            BitConverter.TryWriteBytes(raw.AsSpan(20), (int)AnimHookDirection.Both);
+            BitConverter.TryWriteBytes(raw.AsSpan(24), soundType);
             return Lifestone.Data.Effects.PhysicsScriptData.Decode(id, raw);
         }
 

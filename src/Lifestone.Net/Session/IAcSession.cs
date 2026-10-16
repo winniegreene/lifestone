@@ -145,6 +145,87 @@ public interface IAcSession : IDisposable
     /// (<see cref="Dispatch.IInboundMessageHandler.OnUpdateHealth"/>).</summary>
     OutboundTicket SendQueryHealth(uint guid);
 
+    /// <summary>
+    /// Sends GameAction 0x0045 RaiseAttribute {u32 attribute, u32 xp} (in world only), retail <c>CM_Train::Event_TrainAttribute</c>
+    /// (11.4186 0x006A7F30, 11.6096 0x006A8E90); ACE answers with the private attribute update 0x02E3.
+    /// </summary>
+    /// <param name="attribute">The attribute id (<c>PropertyAttribute</c>, 1 to 6).</param>
+    /// <param name="xp">The experience to spend: an unsigned 32-bit value (ACE reads a UInt32; the XP to level 126, 4,286,609,098, is above <see cref="int.MaxValue"/>).</param>
+    OutboundTicket SendRaiseAttribute(uint attribute, uint xp);
+
+    /// <summary>
+    /// Sends GameAction 0x0044 RaiseVital {u32 vital, u32 xp} (in world only), retail <c>CM_Train::Event_TrainAttribute2nd</c>
+    /// (11.4186 0x006A8040, 11.6096 0x006A8FA0); ACE answers with the private vital update 0x02E7.
+    /// </summary>
+    /// <param name="vital">The vital's maximum id (<c>PropertyAttribute2nd</c>: 1 health, 3 stamina, 5 mana).</param>
+    /// <param name="xp">The experience to spend (unsigned 32-bit).</param>
+    OutboundTicket SendRaiseVital(uint vital, uint xp);
+
+    /// <summary>
+    /// Sends GameAction 0x0046 RaiseSkill {u32 skill, u32 xp} (in world only), retail <c>CM_Train::Event_TrainSkill</c>
+    /// (11.4186 0x006A8150, 11.6096 0x006A90B0); ACE answers with the private skill update 0x02DD.
+    /// </summary>
+    /// <param name="skill">The skill id (<c>Skill</c>).</param>
+    /// <param name="xp">The experience to spend (unsigned 32-bit).</param>
+    OutboundTicket SendRaiseSkill(uint skill, uint xp);
+
+    /// <summary>
+    /// Sends GameAction 0x0047 TrainSkill {u32 skill, i32 credits} (in world only), retail <c>CM_Train::Event_TrainSkillAdvancementClass</c>
+    /// (11.4186 0x006A8260, 11.6096 0x006A91C0); ACE answers with the private skill update 0x02DD and the credits in 0x02CD.
+    /// </summary>
+    /// <param name="skill">The skill id (<c>Skill</c>).</param>
+    /// <param name="credits">The skill credits to spend: signed 32-bit (ACE reads an Int32).</param>
+    OutboundTicket SendTrainSkill(uint skill, int credits);
+
+    /// <summary>
+    /// Sends GameAction 0x0048 CastUntargetedSpell {u32 spell} (in world only), retail <c>CM_Magic::Event_CastUntargetedSpell</c>
+    /// (11.4186 0x006A3150, 11.6096 0x006A3F70); ACE answers with the enchantment, projectile, effect and fizzle messages of the cast.
+    /// </summary>
+    /// <param name="spellId">The spell id (<c>SpellTable</c>).</param>
+    OutboundTicket SendCastUntargetedSpell(uint spellId);
+
+    /// <summary>
+    /// Sends GameAction 0x004A CastTargetedSpell {u32 target, u32 spell} (in world only), retail <c>CM_Magic::Event_CastTargetedSpell</c>
+    /// (11.4186 0x006A3040, 11.6096 0x006A3E60); the target comes first, as ACE reads it.
+    /// </summary>
+    /// <param name="target">The target's guid.</param>
+    /// <param name="spellId">The spell id (<c>SpellTable</c>).</param>
+    OutboundTicket SendCastTargetedSpell(uint target, uint spellId);
+
+    /// <summary>
+    /// Sends GameAction 0x0053 ChangeCombatMode {u32 mode} (in world only), retail <c>CM_Combat::Event_ChangeCombatMode</c>
+    /// (11.4186 0x006A9A70, 11.6096 0x006AA9D0); ACE answers with the private int update 0x02CD for property 40.
+    /// </summary>
+    /// <param name="mode">The mode (1 non-combat, 2 melee, 4 missile, 8 magic).</param>
+    OutboundTicket SendChangeCombatMode(uint mode);
+
+    /// <summary>
+    /// Sends GameAction 0x001A GetAndWieldItem {u32 item, u32 equip mask} (in world only), retail <c>CM_Inventory::Event_GetAndWieldItem</c>
+    /// (11.4186 0x006AB9F0, 11.6096 0x006AC950); ACE answers with the wield messages (GE 0x0023 and the container updates).
+    /// </summary>
+    /// <param name="item">The item's guid.</param>
+    /// <param name="equipMask">The <c>EquipMask</c> location to wield it at.</param>
+    OutboundTicket SendGetAndWieldItem(uint item, uint equipMask);
+
+    /// <summary>
+    /// Sends GameAction 0x0019 PutItemInContainer {u32 item, u32 container, u32 placement} (in world only), retail
+    /// <c>CM_Inventory::Event_PutItemInContainer</c> (11.4186 0x006ABD20, 11.6096 0x006ACC80); ACE answers with the container messages.
+    /// </summary>
+    /// <param name="item">The item's guid.</param>
+    /// <param name="container">The container's guid (the player's own guid is the main pack).</param>
+    /// <param name="placement">The slot in the container (ACE reads an Int32; 0 is the first slot).</param>
+    OutboundTicket SendPutItemInContainer(uint item, uint container, uint placement);
+
+    /// <summary>
+    /// Sends GameAction 0x0054 StackableMerge {u32 merge from, u32 merge to, i32 amount} (in world only), retail
+    /// <c>CM_Inventory::Event_StackableMerge</c> (11.4186 0x006ABE70, 11.6096 0x006ACDD0); ACE answers with the target's 0197
+    /// SetStackSize (and the source's 0197, or its 0024 removal when the whole source goes), or a 00A0 failure.
+    /// </summary>
+    /// <param name="mergeFrom">The source stack's guid.</param>
+    /// <param name="mergeTo">The target stack's guid (the same weenie class).</param>
+    /// <param name="amount">How many units to move from the source to the target (ACE refuses 0 or less).</param>
+    OutboundTicket SendStackableMerge(uint mergeFrom, uint mergeTo, int amount);
+
     /// <summary>Sends GameAction 0x0015 Talk (in world only). The text is the message's last field, so any Windows-1252
     /// character may be sent.</summary>
     /// <exception cref="ArgumentException">A character Windows-1252 lacks, or a text over 65,535 bytes; nothing is sent.</exception>

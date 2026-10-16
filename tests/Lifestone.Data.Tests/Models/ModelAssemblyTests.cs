@@ -2,7 +2,9 @@ using System.Numerics;
 using DatReaderWriter.DBObjs;
 using DatReaderWriter.Enums;
 using DatReaderWriter.Types;
+using Lifestone.Data.Dat;
 using Lifestone.Data.Geometry;
+using Lifestone.Data.Magic;
 using Lifestone.Data.Models;
 using Xunit.Abstractions;
 
@@ -129,6 +131,50 @@ public sealed class ModelAssemblyTests(DatSetFixture fixture, ITestOutputHelper 
         Assert.Equal(PlacementIds.Default, brazier.ResolvePlacement(0x7A)!.PlacementId);
     }
 
+    /// <summary>
+    /// Skips (with the reason, and where it looked) when the dats or <c>ace-world-spell-visuals.json</c> are missing: the
+    /// JSON is embedded in Lifestone.Data and committed under <c>src/Lifestone.Data/Magic/Data/</c>, so it is absent only
+    /// from a trimmed build.
+    /// </summary>
+    private sealed class ProjectileLightsFactAttribute : FactAttribute
+    {
+        public ProjectileLightsFactAttribute()
+        {
+            if (!DatSet.Exists())
+            {
+                Skip = $"Retail dats not found in '{DatSet.ResolveDirectory()}'.";
+            }
+            else if (AceWorldExtract.TryLoadEmbedded() is null && AceWorldExtract.FindSourceFile() is null)
+            {
+                Skip = $"{AceWorldExtract.FileName} is neither embedded in Lifestone.Data nor found under src/Lifestone.Data/Magic/Data/ above '{AppContext.BaseDirectory}'.";
+            }
+        }
+    }
+
+    // DoD 14 / spec 5.6: which projectile Setups of the spell-visuals extract carry a light. The extract names 9 distinct
+    // Setups (11 projectile weenies), not the 10 the spec says; every one carries exactly one light (a point light).
+    // Light values are not pinned here (the decoded numbers are re-read from the dats by the other tests).
+    [ProjectileLightsFact]
+    public void Every_projectile_setup_of_the_spell_visuals_extract_carries_one_point_light()
+    {
+        var extract = AceWorldExtract.Load();
+        uint[] expectedSetups = [0x020003F0, 0x020003F3, 0x020003F4, 0x020003F6, 0x020003FA, 0x020003FC, 0x0200040D, 0x02000881, 0x02001A28];
+        Assert.Equal(expectedSetups, extract.Projectiles.Select(p => p.SetupId).Distinct().Order());
+
+        foreach (var group in extract.Projectiles.GroupBy(p => p.SetupId).OrderBy(g => g.Key))
+        {
+            var assembly = ModelAssembly.Load(fixture.Dats, group.Key);
+            Assert.NotNull(assembly);
+            output.WriteLine(
+                $"projectile Setup 0x{group.Key:X8} ({string.Join(", ", group.Select(p => p.SpellName).Distinct())}; wcid {string.Join("/", group.Select(p => p.Wcid).Distinct())}): " +
+                $"{assembly.Lights.Count} light(s){(assembly.Lights.Count > 0 ? $", type {assembly.Lights[0].Type}" : string.Empty)}");
+            var light = Assert.Single(assembly.Lights); // lit: one light each
+            Assert.Equal(0, light.Type); // a point light
+        }
+
+        // The Flame Bolt / Streak / Arc family shares 0x0200040D, so Flame Bolt's projectile is lit.
+        Assert.Contains(extract.Projectiles, p => p.SpellName == "Flame Bolt I" && p.SetupId == 0x0200040D);
+    }
     [RequiresDatsFact]
     public void Bare_gfxobj_becomes_a_simple_setup()
     {

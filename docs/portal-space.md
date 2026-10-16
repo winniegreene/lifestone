@@ -189,6 +189,11 @@ camera).
   DatReaderWriter's model of the same bytes is right only while the grandchild count it calls `Unknown` is 0.
 - **The portal-space waves** are PCM, mono, 11,025 Hz, 16-bit: the hum 0x0A000316 (3.01 s), `UI_EnterPortal`
   0x0A000246 (1.11 s) and `UI_ExitPortal` 0x0A000245 (1.12 s), all at volume 1 in the UI table 0x2000004B.
+- **A SoundTweaked hook's wire order** is the wave id, the probability, the priority, then the volume
+  (`SoundTweakedHook::UnPack`, 11.6096 0x00528380, 11.4186 0x00527780; Pack 0x00528330). `AnimHookDecoder` read the
+  priority before the probability (the order ACE names the fields), so every real tweaked hook, whose priority is 0, had
+  probability 0 and never sounded; fixed in M3 1.3 fix B (`SoundTweakedHookDecodeTests`). The portal hum's hook
+  (probability 1, priority 1) happened to decode the same either way.
 
 ### 7.2 The rules (`RetailSoundRules`, `RetailSoundPlayer`)
 
@@ -206,12 +211,16 @@ volume:
 
 Then, for every sound: the attenuation and the pan from the origin, and a voice from the pool.
 
+The retail UI's sounds are the two UI entry points (`PlayFromCenter`, `PlayWaveFromCenter`); the UI counts them in `RetailUiSoundStats`.
+
 - **Variant**: ⌊(n − 1) · RollDice(0, 1)⌋ on retail's `Random`; the last of several variants never plays.
 - **Probability**: `rand() · 0.000030518509 < p` on the C runtime's `rand()`; the scale is the float nearest 1/32767
   (2⁻¹⁵·(1 + 2⁻¹⁵)), so p = 1 always plays and p = 0.5 plays for `rand()` 0 to 16383.
-- **Attenuation**, whole decibels: gain = volume within 5 m, 25·volume/d² from 5 m; capped at 1; times the effects
+- **Attenuation** (`SoundManager::GetAttenuation`, 11.6096 0x00550C30), whole decibels: gain = volume within 5 m, 25·volume/d² from 5 m; capped at 1; times the effects
   slider; dB = ⌈log₂(gain) · 6.0206⌉; not played below −50 dB (`VOL_MIN`) or at gain ≤ 0. Examples: 0.5 → −6, 0.3 →
-  −10 (the hum), 0.25 → −12 (also 1.0 at 10 m), 0.01 → −40, 0.003 → −50 (still plays), 0.0028 → dropped.
+  −10 (the hum), 0.25 → −12 (also 1.0 at 10 m), 0.01 → −40, 0.003 → −50 (still plays), 0.0028 → dropped. Past 5 m a sound is therefore silent beyond about 94 m at volume 1 and about
+  9.4 m at volume 0.01. The distance is `Position::distance(object position, player_position_)` in metres
+  (`SoundManager::PlaySoundInternal(SoundBufRef*, Position*, float, int)`, 0x00550D80).
 - **Pan**: from 5 m, sin(bearing) · −15 truncated toward 0, the bearing in degrees taken modulo 360 into
   (−360, 180]; 0 nearer and in mono. Retail's float π/180 is a hair small, so the pan never reaches ±15: it stops at ±14.
   The **bearing** is the compass heading from the source to the listener minus the listener's heading: retail's
@@ -219,6 +228,7 @@ Then, for every sound: the attenuation and the pan from the origin, and a voice 
   listener − source (`Position::get_offset`). Equivalently, it is the listener-to-source bearing + 180°. A source 10 m
   east of a listener facing north gives 270 (−90), pan +14, the left channel lowered: heard on the right.
   `SoundOrigin.Between(listener, source)` computes the distance and the bearing; callers should not derive them by hand.
+  The avatars' sound origin (`AvatarSet`'s `SoundOriginOf`) once measured the listener-to-source bearing (the listener's heading from the source's position) and so mirrored every positioned sound; it now calls `SoundOrigin.Between` (M3 1.3 s1). Retail's own sign is the one `Between` has (source-to-listener heading minus the listener's heading: `SoundManager::PlaySoundInternal(SoundBufRef*, Position*, float, int)` 11.6096 0x00550D80 over `Position::heading` 0x005AA5D0), so this is a fix to match retail, not a glitch fix: no flag. Pinned by `AvatarSoundOriginTests` (east of a north-facing listener: bearing 270, pan +14; west: 90, pan -14; heading follows; a landblock seam).
 - **Voices**: 16, round-robin from a cursor; the first empty, priority-0 or finished voice is taken, else one with a
   lower stored priority is stopped, else the sound is dropped. Every voice stores the cached buffer's priority, which
   is always 0, so in practice the 17th sound replaces the oldest.
@@ -234,18 +244,29 @@ exception; each player has its own seeded `Random` and `rand()` (retail shares o
 
 ### 7.3 Hooks, listener and output
 
-`SoundHookRouter` (an `IEffectEventSink`) routes an object's SoundTweaked, Sound and SoundTable hooks to the three
-hook entry points, with the object's sound table (0: its SoundTable hooks are silent); every other hook is ignored.
+`SoundHookRouter` (an `IEffectEventSink`) routes an object's SoundTweaked, Sound and SoundTable hooks, and the sound the server asks an object to play (`ServerSoundTableHook`, F750), to the hook entry points; every other hook is ignored. `OnEffectEvent(event, origin, soundTableId)` carries the emitting object's sound table (0x20xxxxxx, or 0): a SoundTable hook plays from the table of the object that fired it (`SoundTableHook::Execute`, 11.6096 0x005276B0), and from an object without one it is silent (counted, `NoTable`). The router has no table of its own any more (the old `SoundTableId` property is folded into the parameter; the portal tunnel's call of the static `Route` passes 0). The server's sound plays `PlayFromTable(table, type, origin, volume)` with the message's volume (`SmartBox::HandleSoundEvent` 11.6096 0x00452000, then `SoundManager::PlaySoundA(SoundType, obj, float)` 0x00551700).
 The **listener is the camera** (retail `SmartBox::set_viewer` → `SoundManager::SetPlayerPosition`); while creature
 mode updates the tunnel, it is the tunnel camera, so the hum is 2.85 m away: centred, at −10 dB. The caller puts the
 listener into each `SoundOrigin` (distance, bearing) with `SoundOrigin.Between(listenerFrame, sourceFrame)`, which
 uses retail's source-to-listener heading (§7.2); a sound does not follow its object after it starts.
+
+The router's public read-only counters are what was handed to the sound player, independent of the volume (M2 D8 keeps automated runs silent): `HooksPlayed` (animation and script sound hooks), `Footsteps` (the SoundTable hooks of type Footstep1 55 and Footstep2 56, a subset of `HooksPlayed`), `ServerSounds` (F750), `NoTable`, `Routed`, `Ignored`. Play mode owns one router (`PlayMode.HookSounds`) over `AudioService.Sound`, shared by the avatars (`AvatarSet.EffectEvents`) and the living statics (`LivingStaticsSystem.EffectEvents`). The avatars' listener is the player's body, not the camera (`TODO(avatars-listener-camera)`, docs/avatars.md section 17); the living statics use the camera.
 
 `IAudioOutput` is the sound card: `Play(VoicePlay)` starts a wave on a voice (stopping what it played),
 `Stop(voice)`, `IsPlaying(voice)`. `VoicePlay.AttenuationDb` applies to both channels; `VoicePlay.Pan` lowers the right
 channel by |pan| dB when negative and the left by pan dB when positive (DirectSound's pan, ×100 in hundredths of a
 decibel). `RetailSoundRules.ChannelGains(pan, dB)` gives both linear gains. `AudioSettings` is Lifestone's master
 volume and mute, applied by the host to its master bus after the rules (`MasterDecibels`, −80 dB when muted).
+
+### 7.4 Ambient sound (M3 1.3 s2b)
+
+The region's `SoundInfo` (37 `AmbientSTBDesc` tables of sounds with a type, volume, base chance and min and max rate; a base chance of 0 is a constant sound) is `RegionSoundData`. `AmbientSoundPlayer` re-expresses retail's outdoor rule: each of the 3 x 3 landblocks' 64 cells' south-west vertex adds weight (1 inside 20 m, 400 over the squared distance to 120 m, else 0) to the table its terrain type and scene slot name; an intermittent sound plays with chance base chance / total weight x its weight, placed in a compass sector at a quadratic-biased distance, then again after a draw between its min and max rate; a constant sound plays from the centre at volume / total weight x its weight every min-rate seconds; outdoors only (`Ambient::*` 11.6096 0x00551430-0x005526xx, `LScape::add_ambient_sounds` 0x00506270, `CLandBlock::add_ambient_sounds` 0x00531050).
+
+**Cadence and gate.** The scan (`InitSounds`, `add_ambient_sounds`, `UpdatePlayQueue`) runs when the listener's cell, the outdoors flag or the terrain revision changes, as `CellManager::ChangePosition` does in its new-cell branch (11.6096 0x00455AD0, 11.4186 0x004559B0); `Ambient::UseTime` runs every frame, and a draw plays through `Ambient::PlaySoundA` (11.6096 0x005519B0; 0x00550D90 in 11.4186). The ambient is gated on the world being drawn and the player being in the world (an object, `SelfTravel` not `NotInWorld`): before the gate a play-checks run made 47 draws before the player had an object, after it none (the summary line's `draws_before_world=0`). The terrain under the 3 x 3 scan is read on a pool thread (`BackgroundAmbientTerrain`), never in the frame.
+
+Lifestone's differences: the 3 x 3 scan, the effects slider and bus (no ambient slider: `TODO(ambient-slider)`), EnvCells are indoors (`TODO(ambient-seen-outside)`), ConstantSound's PlayNow and GetSoundPos taken from the base class (`TODO(ambient-constant-defaults)`). All three TODOs (with `TODO(ambient-slider)`) are logged once at install.
+
+The public counter is `AmbientSoundNode.Current?.Player` (`Draws`, `Played`, `Skipped`); the node logs `ambient sound summary ambient_draws= ambient_played= ambient_skipped=` at exit. GM 0xEA60 AdminEnvirons, which sets the fog and ambient override and plays UI sounds, is in docs/session.md section 15 (the fog: `TODO(m3-environs-fog)`).
 
 ## 8. Online: the session bridge
 
@@ -365,8 +386,12 @@ Built (`scripts/Audio/AudioService.cs`, `WaveStreams.cs`; `PcmStreams` and `Audi
   killed process (godot.ps1's `-TimeoutSeconds`) writes nothing. A bus's effects run before its level and mute, so a silent
   automated run records the full mix and nothing reaches the speakers. The `audio recording started` line gives the start's
   wall-clock time (`unix_ms`) for lining the sound up with a screen capture; that holds with a real audio driver only (the
-  Dummy driver of `-Offscreen` sleeps a fixed time after each mix and drifts). No check covers the recording yet
-  (`TODO(record-audio-check)`: a portal-space check that records a muted wave and asserts a non-silent file).
+  Dummy driver of `-Offscreen` sleeps a fixed time after each mix and drifts). The audio check reads the file back after the write (`Lifestone.Client.Audio.WaveLevels`: duration, peak and RMS in dBFS, the 50 ms windows above -60 dBFS) and logs `audio recording levels file= seconds= peak_dbfs= rms_dbfs= active_windows= sources=<server:n,hooks:n,footsteps:n,footsteps_sounded:n,ui:n,ambient:n,server_handed:n,hooks_handed:n|n/a> windows= muted=<true|false>`; smoke's `record-audio` step (the play checks with `--record-audio`, muted as every automated run, D8) passes on the play checks' own verdict and a non-silent recording (peak above -60 dBFS, at least one active window, `muted=true`); the per-source counts are printed, not judged (`TODO(record-audio-check)` closed). `sources` has eight fields: `server`, `hooks` and `ui` and `ambient` are what sounded (a voice started), `footsteps` is the player's own footstep hooks handed to the sound player, `footsteps_sounded` the subset that chose a wave, and `server_handed` and `hooks_handed` what was handed whether or not a wave was chosen (docs/session.md sections 27 and 29): the human sound table has no wave for footsteps 55/56. Portal sounds alone would pass this step (1.3 review R7): item 2.1's gate judges the `sources=` counts.
+- `AudioService.ReadSources` reads the per-source counters; while a recording runs the service remembers the counters' owners each frame, because play mode, the retail UI layer and the ambient node leave their statics before the shutdown guard writes the file.
+- `AudioService.IsSilent` is true while Master is muted or at volume 0; `AudioService.Install(parent, services, args, seed, portalView)` is the one install path: `PortalSpaceSetup` calls it with `portalView: true`, and a run without a portal view (`--retail-ui-only`, `--retail-ui-frames`) calls it with false; it reads `--volume`, `--mute` and `--record-audio` and installs the shutdown guard. The audio options' bad-argument warnings are logged under category `audio`. `AudioService._Process` runs only while recording (`SetProcess` in `_Ready`, `StartRecording` and `FinishRecording`).
+- Play mode (M3 1.3 s1) hands the avatars' and the living statics' hooks to the retail sound player through the router of section 7.3; the player's sound table is prefetched on workers when its body is made (`PlayMode.PrefetchPlayerSounds`: every wave of every type in the table, then `AudioService.Prefetch` on the main thread), so the arrival's first step and server sound do not wait behind the world's streaming. A run with no audio service logs once that the hooks are dropped and counts them in `AvatarSet.Stats.EffectEventsDropped`.
+- The arrival's prefetch is spread over frames (`PlayMode.WavesPerFrame` = 6, `ServerObjectParticles.ModelsPerFrame` = 4, on frames whose adapter pump took under 2 ms).
+- The ambient sound of section 7.4 is played by `AmbientSoundNode` through the same sink on the effects bus; its public counter and summary line are described there.
 - `AudioService.Sound` is the `RetailSoundPlayer` over the dats (seed from a clock live, fixed 1 in automated runs): the
   `ISoundSink` the director, and later the retail UI, play through. `AudioService.Current` and `GameServices.Audio` hold the
   service; `Prefetch` builds the portal whooshes and the hum before they are needed (a stream first asked for while the world
@@ -514,6 +539,7 @@ takes a secret.
     exist; otherwise `CPlayerSystem::AttemptSendLoginCompleteNotification` (11.4186 0x00562F20, 11.6096 0x00563CC0)
     sends it later, once the player description has arrived and the contents exist. Lifestone sends on the cue
     (§14); the state track's `IActionApi.LoginComplete` is the place for the rule.
+    **Resolved by M3 1.2 s5:** the rule lives in `LoginCompleteTracker.WaitReason` (Client/Session/Actions/Trackers), with a 3 s cap from the call; the director's cue is unchanged and remains the trigger.
 16. **The zoom's lens** (§4.6): Godot's `Camera3D.fov` is capped at 179° and f = 0.001 is about 179.885°, so the zoom is an exact Frustum projection
     (D31): height 0.2/f above f = 0.4 and 0.5 below it, near plane f/4 below 0.4, no cap, centred on `GameViewRect` (D40; §6).
 

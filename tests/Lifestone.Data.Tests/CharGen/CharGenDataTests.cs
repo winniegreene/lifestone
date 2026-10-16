@@ -5,7 +5,7 @@ using Lifestone.Data.Dat;
 namespace Lifestone.Data.Tests.CharacterCreation;
 
 /// <summary>The CharGen and SkillTable projections (m2-plan.md R8).</summary>
-public sealed class CharGenDataTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
+public sealed class CharGenDataTests(DatSetFixture fixture, Xunit.Abstractions.ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     private DatSet Dats => fixture.Dats;
 
@@ -99,6 +99,46 @@ public sealed class CharGenDataTests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Equal((4, 6), (data.GetSkillTrainedCost(14, 0, skills), data.GetSkillSpecializedCost(14, 0, skills))); // no heritage
         Assert.Equal((10, 20), (data.GetSkillTrainedCost(6, 1, skills), data.GetSkillSpecializedCost(6, 1, skills)));
         Assert.Equal((-1, -1), (data.GetSkillTrainedCost(1, 1, skills), data.GetSkillSpecializedCost(1, 1, skills))); // not in the table
+    }
+
+    [RequiresDatsFact]
+    public void Aluvian_mage_skill_costs_and_the_52_credit_plan_of_D14()
+    {
+        var data = CharGenData.Load(Dats);
+        var skills = SkillTableData.Load(Dats);
+        var aluvian = data.Heritages.Single(h => h.Name == "Aluvian").Id;
+        Assert.Equal(1u, aluvian);
+
+        // (skill id, name, trained cost, specialised cost) as ACCharGenData::GetSkillTrainedCost/GetSkillSpecializedCost give them.
+        (uint Id, string Name, int Trained, int Specialised)[] expected =
+        [
+            (6, "Melee Defense", 10, 20),
+            (14, "Arcane Lore", 0, 2), // the heritage's own entry; the SkillTable says 4/6
+            (16, "Mana Conversion", 6, 12),
+            (31, "Creature Enchantment", 8, 16),
+            (32, "Item Enchantment", 8, 16),
+            (33, "Life Magic", 12, 20),
+            (34, "War Magic", 16, 28),
+        ];
+        foreach (var (id, name, trained, specialised) in expected)
+        {
+            output.WriteLine($"skill {id} {name}: trained {data.GetSkillTrainedCost(id, aluvian, skills)}, specialised {data.GetSkillSpecializedCost(id, aluvian, skills)}");
+            Assert.True(skills.TryGetSkill(id, out var skill));
+            Assert.Equal(name, skill.Name);
+            Assert.Equal((trained, specialised), (data.GetSkillTrainedCost(id, aluvian, skills), data.GetSkillSpecializedCost(id, aluvian, skills)));
+        }
+
+        // D14 (spec 5.3) expected War Magic + Melee Defense specialised = 32 + 20 = 52 credits. The dat says 28 + 20 = 48:
+        // it does NOT equal the heritage's 52 credits (4 are left over), so the four magic skills cannot be trained from
+        // the remaining credits at creation either way; s3 trains them with the level credits.
+        var specialisedBoth = data.GetSkillSpecializedCost(34, aluvian, skills) + data.GetSkillSpecializedCost(6, aluvian, skills);
+        output.WriteLine($"War Magic + Melee Defense specialised = {specialisedBoth}; heritage skill credits = {data.GetHeritage(aluvian).SkillCredits}");
+        Assert.Equal(48, specialisedBoth);
+        Assert.NotEqual((int)data.GetHeritage(aluvian).SkillCredits, specialisedBoth);
+        Assert.Equal(52u, data.GetHeritage(aluvian).SkillCredits);
+
+        // The four later trainings (Creature, Item, Life Magic and Mana Conversion) cost 8 + 8 + 12 + 6.
+        Assert.Equal(34, new uint[] { 31, 32, 33, 16 }.Sum(id => data.GetSkillTrainedCost(id, aluvian, skills)));
     }
 
     [RequiresDatsFact]

@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Numerics;
+using Lifestone.Client.Audio;
 using Lifestone.Client.Effects;
 using Lifestone.Client.Objects;
 using Lifestone.Data.Animation;
 using Lifestone.Data.Effects;
 using Lifestone.Data.Terrain;
 using Lifestone.Data.Tests;
+using Lifestone.Data.World;
 using Xunit.Abstractions;
 
 namespace Lifestone.Client.Tests.Objects;
@@ -168,6 +170,70 @@ public sealed class LivingStaticsTests(ObjectsFixture fixture, ITestOutputHelper
         Assert.Equal(set.Statics.Count, set.Stats.Stepped);
         Assert.All(set.Statics, s => Assert.True(s.UpdateTime >= 1.0));
         _ = Stopwatch.Frequency;
+    }
+
+    [RequiresDatsFact]
+    public void A_statics_sound_hooks_reach_the_sink_with_its_sound_table_and_its_origin_from_the_listener()
+    {
+        var (set, _) = Holtburg(10.0);
+        var torch = set.Statics.First(s => s.Object.ModelId == StandingTorch);
+        var sink = new RecordingSink();
+        var sounds = new LivingStaticSounds { Sink = sink };
+        set.Sounds = sounds;
+        var always = (ParticleEmitter _) => true;
+
+        // A listener 10 m due east of the torch, facing north: the torch is on its left (west).
+        var torchCell = new CellFrame(torch.Object.CellId, torch.Frame);
+        var listener = new CellFrame(torch.Object.CellId, new AcFrame(torch.Frame.Origin + new Vector3(10f, 0f, 0f), Quaternion.Identity));
+        sounds.SetListener(listener);
+        torch.Effects.QueueAnimHook(new SoundTableHook(AnimHookDirection.Both, 0x1F));
+        torch.Effects.QueueAnimHook(new SoundHook(AnimHookDirection.Both, 0x0A000001));
+        torch.Animate(10.05, always, sounds);
+
+        Assert.Equal(2, sink.Events.Count);
+        Assert.IsType<SoundTableHook>(sink.Events[0].Hook);
+        Assert.IsType<SoundHook>(sink.Events[1].Hook);
+        Assert.All(sink.Tables, t => Assert.Equal(torch.Model.Assembly?.DefaultSoundTableId ?? 0, t));
+        Assert.Equal(SoundOrigin.Between(listener, torchCell), sink.Origins[0]);
+        Assert.True(RetailSoundRules.PanIndex(sink.Origins[0].Distance, sink.Origins[0].BearingDegrees, mono: false) < 0, "a source to the listener's west pans left");
+        Assert.Equal(2, sounds.Delivered);
+        Assert.Equal(0, torch.EventsDropped);
+        Assert.Empty(torch.Effects.PendingEvents);
+    }
+
+    [RequiresDatsFact]
+    public void A_statics_events_are_dropped_and_counted_with_no_sink_or_no_listener()
+    {
+        var (set, _) = Holtburg(10.0);
+        var torch = set.Statics.First(s => s.Object.ModelId == StandingTorch);
+        var always = (ParticleEmitter _) => true;
+        var sink = new RecordingSink();
+        var sounds = new LivingStaticSounds { Sink = sink }; // a sink but no listener yet
+
+        torch.Effects.QueueAnimHook(new SoundHook(AnimHookDirection.Both, 0x0A000001));
+        torch.Animate(10.05, always, sounds);
+        torch.Effects.QueueAnimHook(new SoundHook(AnimHookDirection.Both, 0x0A000001));
+        torch.Animate(10.10, always, null); // no sounds at all: M1's behaviour
+
+        Assert.Empty(sink.Events);
+        Assert.Equal(2, torch.EventsDropped);
+        Assert.Empty(torch.Effects.PendingEvents); // nothing accumulates
+    }
+
+    private sealed class RecordingSink : IEffectEventSink
+    {
+        public List<EffectEvent> Events { get; } = [];
+
+        public List<SoundOrigin> Origins { get; } = [];
+
+        public List<uint> Tables { get; } = [];
+
+        public void OnEffectEvent(in EffectEvent effectEvent, in SoundOrigin origin, uint soundTableId)
+        {
+            Events.Add(effectEvent);
+            Origins.Add(origin);
+            Tables.Add(soundTableId);
+        }
     }
 
     private static float Angle(Quaternion a, Quaternion b) =>

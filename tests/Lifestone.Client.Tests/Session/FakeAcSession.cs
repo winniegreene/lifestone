@@ -20,6 +20,16 @@ internal enum FakeSendKind
     Jump,
     Use,
     QueryHealth,
+    RaiseAttribute,
+    RaiseVital,
+    RaiseSkill,
+    TrainSkill,
+    CastUntargetedSpell,
+    CastTargetedSpell,
+    ChangeCombatMode,
+    GetAndWieldItem,
+    PutItemInContainer,
+    StackableMerge,
     Talk,
     Tell,
     LogOff,
@@ -39,7 +49,8 @@ internal readonly record struct FakeSend(
     ObjSeqs? Sequences = null,
     bool Contact = false,
     float Extent = 0,
-    Vector3 Velocity = default);
+    Vector3 Velocity = default,
+    uint Amount = 0);
 
 /// <summary>
 /// An <see cref="IAcSession"/> for the action tests (step ST9): it records every send in order and sends nothing. The
@@ -144,6 +155,38 @@ internal sealed class FakeAcSession : IAcSession
 
     /// <inheritdoc/>
     public OutboundTicket SendQueryHealth(uint guid) => Send(new FakeSend(FakeSendKind.QueryHealth, guid));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRaiseAttribute(uint attribute, uint xp) => Send(new FakeSend(FakeSendKind.RaiseAttribute, attribute, Amount: xp));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRaiseVital(uint vital, uint xp) => Send(new FakeSend(FakeSendKind.RaiseVital, vital, Amount: xp));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRaiseSkill(uint skill, uint xp) => Send(new FakeSend(FakeSendKind.RaiseSkill, skill, Amount: xp));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTrainSkill(uint skill, int credits) => Send(new FakeSend(FakeSendKind.TrainSkill, skill, Index: credits));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendCastUntargetedSpell(uint spellId) => Send(new FakeSend(FakeSendKind.CastUntargetedSpell, spellId));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendCastTargetedSpell(uint target, uint spellId) => Send(new FakeSend(FakeSendKind.CastTargetedSpell, target, Index: (int)spellId));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendChangeCombatMode(uint mode) => Send(new FakeSend(FakeSendKind.ChangeCombatMode, Amount: mode));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => Send(new FakeSend(FakeSendKind.GetAndWieldItem, item, Amount: equipMask));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendPutItemInContainer(uint item, uint container, uint placement) =>
+        Send(new FakeSend(FakeSendKind.PutItemInContainer, item, Index: (int)placement, Target: container.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendStackableMerge(uint mergeFrom, uint mergeTo, int amount) =>
+        Send(new FakeSend(FakeSendKind.StackableMerge, mergeFrom, Index: amount, Target: mergeTo.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)));
 
     /// <inheritdoc/>
     public OutboundTicket SendTalk(ReadOnlySpan<char> text)

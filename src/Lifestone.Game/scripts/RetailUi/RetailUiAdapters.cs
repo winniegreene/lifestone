@@ -9,56 +9,65 @@ namespace Lifestone.Game.RetailUi;
 
 /// <summary>
 /// The retail UI's sounds through the portal track's sound player (<see cref="ISoundSink"/>, the audio service's
-/// <c>RetailSoundPlayer</c>): a sound entry of a media machine is <c>SoundManager::PlaySoundFromCenter</c> (11.4186 0x00550950 /
-/// 0x005509E0, 11.6096 0x00551560 / 0x005515F0). The sink is looked up when a sound plays, because the audio service is installed
-/// after the retail UI in the main scene; with no audio service the UI is silent.
+/// <c>RetailSoundPlayer</c>, whose interface calls play on the UI bus): a sound entry of a media machine is
+/// <c>SoundManager::PlaySoundFromCenter</c> (11.4186 0x00550950 / 0x005509E0, 11.6096 0x00551560 / 0x005515F0). The sink is looked up when
+/// a sound plays, because the audio service may be installed after the retail UI in the main scene; with no audio service the sound is
+/// dropped, counted and logged once (<c>TODO(ui-sound-sink)</c>). Every request is counted in <see cref="Stats"/> (M3 1.3 s2a).
 /// </summary>
 /// <param name="sink">Finds the sink at play time, or null while there is none.</param>
 /// <param name="log">Where the one-time <c>TODO(ui-sound-sink)</c> goes when a sound is asked for and there is no sink, or null for no log.</param>
-public sealed class UiSoundAdapter(Func<ISoundSink?> sink, ILogSink? log = null) : IUiSoundSink
+/// <param name="isMuted">True while the master level is silent (D8), or null when that is unknown; only counted, it never changes what is handed to the player.</param>
+public sealed class UiSoundAdapter(Func<ISoundSink?> sink, ILogSink? log = null, Func<bool>? isMuted = null) : IUiSoundSink
 {
     private bool _loggedNoSink;
 
+    /// <summary>What became of every request (requested, played, dropped, silenced, muted).</summary>
+    public RetailUiSoundStats Stats { get; } = new();
+
     /// <summary>How many sounds were asked for while there was no sink (each one is dropped).</summary>
-    public int Dropped { get; private set; }
+    public int Dropped => Stats.Dropped;
 
     /// <inheritdoc/>
     public void PlayFromCenter(uint soundTableId, uint soundType)
     {
-        if (Find() is { } found)
+        if (sink() is not { } found)
         {
-            found.PlayFromCenter(soundTableId, soundType);
+            Drop(0, soundTableId, soundType);
+            return;
         }
-        else
-        {
-            Drop($"table 0x{soundTableId:X8} type 0x{soundType:X}");
-        }
+
+        var before = Started(found);
+        found.PlayFromCenter(soundTableId, soundType);
+        Stats.RecordPlayed(Started(found) == before && before >= 0, isMuted?.Invoke() ?? false);
     }
 
     /// <inheritdoc/>
     public void PlayWaveFromCenter(uint waveId, float volume)
     {
-        if (Find() is { } found)
+        if (sink() is not { } found)
         {
-            found.PlayWaveFromCenter(waveId, volume);
+            Drop(waveId, 0, 0);
+            return;
         }
-        else
-        {
-            Drop($"wave 0x{waveId:X8}");
-        }
+
+        var before = Started(found);
+        found.PlayWaveFromCenter(waveId, volume);
+        Stats.RecordPlayed(Started(found) == before && before >= 0, isMuted?.Invoke() ?? false);
     }
 
-    private ISoundSink? Find() => sink();
+    /// <summary>The voices the sound player has started so far, or -1 for a sink that does not say (its sounds are then never counted as silenced).</summary>
+    private static int Started(ISoundSink found) => found is RetailSoundPlayer player ? player.Played : -1;
 
-    private void Drop(string what)
+    private void Drop(uint wave, uint table, uint type)
     {
-        Dropped++;
+        Stats.RecordDropped();
         if (_loggedNoSink)
         {
             return;
         }
 
         _loggedNoSink = true;
+        var what = wave != 0 ? $"wave 0x{wave:X8}" : $"table 0x{table:X8} type 0x{type:X}";
         log?.Warn("retailui", $"TODO(ui-sound-sink): a UI sound was asked for ({what}) and there is no sound player to play it, so it is dropped (the audio service is not installed, or this run has none); logged once");
     }
 }

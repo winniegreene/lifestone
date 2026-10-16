@@ -26,6 +26,8 @@ public sealed class ToolRoutingTests
         { "quest erase SentryTaskComplete", "Quest", true },
         { "quest has SentryTaskComplete", "Quest", true },
         { "char purge \"Lifestone Throwaway\" #c1", "CharPurge", true },
+        { "spell learn 1,2,3 #s1", "SpellLearn", true },
+        { "item 1628 2 #i1", "Item", true },
     };
 
     /// <summary>Requests that do not parse, with the error each gets.</summary>
@@ -40,6 +42,10 @@ public sealed class ToolRoutingTests
         { "char", ToolErrors.BadArgs },
         { "char purge", ToolErrors.BadArgs },
         { "char delete Ann", ToolErrors.BadArgs },
+        { "spell learn", ToolErrors.BadArgs },
+        { "spell learn 1, 2", ToolErrors.BadArgs },
+        { "item", ToolErrors.BadArgs },
+        { "item 1628 0", ToolErrors.BadArgs },
     };
 
     /// <summary>Every request above, good and bad, for the one-answer sweep.</summary>
@@ -79,12 +85,12 @@ public sealed class ToolRoutingTests
         // The samples above cover every concrete ToolRequest type, so the theory above reaches every one of them.
         var sampled = EveryVerb.Select(row => ToolRequestParser.Parse((string)row[0]).Request!.GetType()).ToHashSet();
         var all = typeof(ToolRequest).Assembly.GetTypes().Where(t => t.IsSubclassOf(typeof(ToolRequest)) && !t.IsAbstract).ToHashSet();
-        Assert.Equal(9, all.Count);
+        Assert.Equal(11, all.Count);
         Assert.Equal(all.OrderBy(t => t.Name, StringComparer.Ordinal), sampled.OrderBy(t => t.Name, StringComparer.Ordinal));
 
         // Status reports every verb form as carried out.
         Assert.Equal(ToolsWire.Verbs, ToolRouting.Implemented);
-        Assert.Equal(11, ToolRouting.Implemented.Count);
+        Assert.Equal(13, ToolRouting.Implemented.Count);
     }
 
     [Theory]
@@ -195,6 +201,10 @@ public sealed class ToolRoutingTests
 
         // The purge acts on the account's characters on behalf of a player in the world: the caller must be in it.
         Assert.Equal(ToolScope.Player, ToolRouting.ScopeOf(new CharPurgeRequest("Lifestone Throwaway")));
+
+        // The spellbook and the pack are the calling player's own: both need the player in the world.
+        Assert.Equal(ToolScope.Player, ToolRouting.ScopeOf(new SpellLearnRequest([1])));
+        Assert.Equal(ToolScope.Player, ToolRouting.ScopeOf(new ItemRequest(1628)));
     }
 
     private static (List<string> Calls, Recorder Verbs, int PlayerAsks) Route(ToolRequestParse parse, bool hasSession = true, bool isLoopback = true, bool inWorld = true)
@@ -247,6 +257,10 @@ public sealed class ToolRoutingTests
         public void Quest(string player, QuestRequest request) => Record("Quest " + player, request);
 
         public void CharPurge(string player, CharPurgeRequest request) => Record("CharPurge " + player, request);
+
+        public void SpellLearn(string player, SpellLearnRequest request) => Record("SpellLearn " + player, request);
+
+        public void Item(string player, ItemRequest request) => Record("Item " + player, request);
 
         public void Unhandled(ToolRequest request) => Record("Unhandled " + request.Verb, request);
 

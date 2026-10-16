@@ -286,7 +286,14 @@ internal static class AnimHookDecoder
             case AnimHookType.Transparent:
                 return new TransparentHook(dir, r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
             case AnimHookType.SoundTweaked:
-                return new SoundTweakedHook(dir, r.ReadUInt32(), r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
+                {
+                    // SoundTweakedHook::UnPack (11.6096 0x00528380, 11.4186 0x00527780; Pack 11.6096 0x00528330) reads the id, then the PROBABILITY, then the PRIORITY, then the volume.
+                    // ACE names the two floats the other way round; reading them in that order gave every tweaked hook a probability of 0 (M3 1.3 fix B, round 2).
+                    var soundId = r.ReadUInt32();
+                    var probability = r.ReadSingle();
+                    var priority = r.ReadSingle();
+                    return new SoundTweakedHook(dir, soundId, priority, probability, r.ReadSingle());
+                }
             case AnimHookType.SetOmega:
                 return new SetOmegaHook(dir, r.ReadVector3());
             case AnimHookType.TextureVelocity:

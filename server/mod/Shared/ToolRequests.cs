@@ -48,6 +48,15 @@ public static class ToolVerbs
 
     /// <summary>The <c>char</c> form that removes a character already marked for deletion from the server's database.</summary>
     public const string CharPurge = "purge";
+
+    /// <summary>Acts on the player's own spellbook (<see cref="SpellLearnData"/>).</summary>
+    public const string Spell = "spell";
+
+    /// <summary>The <c>spell</c> form that teaches the player spells by id (ACE's Player.LearnSpellWithNetworking).</summary>
+    public const string SpellLearn = "learn";
+
+    /// <summary>Creates an item in the player's own pack (<see cref="ItemData"/>).</summary>
+    public const string Item = "item";
 }
 
 /// <summary>
@@ -169,6 +178,52 @@ public sealed record CharPurgeRequest(string Name, string? Id = null) : ToolRequ
 {
     /// <inheritdoc/>
     public override string Verb => ToolVerbs.Char;
+}
+
+/// <summary>
+/// <c>@lifestone spell learn &lt;id&gt;[,&lt;id&gt;...]</c>: teaches the calling player's own character spells by id, as ACE's
+/// <c>@addspell</c> does (Player.LearnSpellWithNetworking). The reply has one typed outcome per id (<see cref="SpellOutcomes"/>).
+/// </summary>
+/// <param name="SpellIds">
+/// The spell ids, in request order: 1 to <see cref="ToolRequestParser.MaxSpellIds"/> whole numbers (0 to 4,294,967,295), written
+/// comma-separated with no spaces. An id may repeat; the second is then answered as already known. An id that is not in ACE's spell table is
+/// answered as unknown and nothing is learned for it.
+/// </param>
+/// <param name="Id">The correlation id, or null.</param>
+public sealed record SpellLearnRequest(IReadOnlyList<uint> SpellIds, string? Id = null) : ToolRequest(Id)
+{
+    /// <inheritdoc/>
+    public override string Verb => ToolVerbs.Spell;
+
+    /// <summary>Equal when the ids are equal in order (a record's default would compare the list by reference).</summary>
+    public bool Equals(SpellLearnRequest? other) => other is not null && Id == other.Id && SpellIds.SequenceEqual(other.SpellIds);
+
+    /// <inheritdoc/>
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Id);
+        foreach (var id in SpellIds)
+        {
+            hash.Add(id);
+        }
+
+        return hash.ToHashCode();
+    }
+}
+
+/// <summary>
+/// <c>@lifestone item &lt;wcid&gt; [&lt;stack&gt;]</c>: creates an item in the calling player's own pack, as ACE's <c>@ci</c> does (AdminCommands.HandleCI:
+/// the weenie, one new world object, its stack size, TryCreateInInventoryWithNetworking). Like <c>@ci</c>, a stack above the item's
+/// maximum is clamped to it, and a stack for an item that does not stack is ignored (one item is created); the reply says what was created.
+/// </summary>
+/// <param name="Wcid">The weenie class id: a whole number from 0 to 4,294,967,295 (the world database decides whether it exists).</param>
+/// <param name="Stack">The stack size asked for: 1 to <see cref="ToolRequestParser.MaxItemStack"/> (@ci's own limit), or null for the weenie's own.</param>
+/// <param name="Id">The correlation id, or null.</param>
+public sealed record ItemRequest(uint Wcid, int? Stack = null, string? Id = null) : ToolRequest(Id)
+{
+    /// <inheritdoc/>
+    public override string Verb => ToolVerbs.Item;
 }
 
 /// <summary>

@@ -131,6 +131,106 @@ internal sealed partial class SessionMachine
         return SendAction(connection, writer);
     }
 
+    public OutboundTicket SendRaiseAttribute(uint attribute, uint xp)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendRaiseAttribute");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        StatActionCodecs.WriteRaiseAttribute(writer, connection.NextActionSequence, attribute, xp);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendRaiseVital(uint vital, uint xp)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendRaiseVital");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        StatActionCodecs.WriteRaiseVital(writer, connection.NextActionSequence, vital, xp);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendRaiseSkill(uint skill, uint xp)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendRaiseSkill");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        StatActionCodecs.WriteRaiseSkill(writer, connection.NextActionSequence, skill, xp);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendTrainSkill(uint skill, int credits)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendTrainSkill");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        StatActionCodecs.WriteTrainSkill(writer, connection.NextActionSequence, skill, credits);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendCastUntargetedSpell(uint spellId)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendCastUntargetedSpell");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        MagicActionCodecs.WriteCastUntargetedSpell(writer, connection.NextActionSequence, spellId);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendCastTargetedSpell(uint target, uint spellId)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendCastTargetedSpell");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        MagicActionCodecs.WriteCastTargetedSpell(writer, connection.NextActionSequence, target, spellId);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendChangeCombatMode(uint mode)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendChangeCombatMode");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        MagicActionCodecs.WriteChangeCombatMode(writer, connection.NextActionSequence, mode);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendGetAndWieldItem");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        InventoryActionCodecs.WriteGetAndWieldItem(writer, connection.NextActionSequence, item, equipMask);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendPutItemInContainer(uint item, uint container, uint placement)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendPutItemInContainer");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        InventoryActionCodecs.WritePutItemInContainer(writer, connection.NextActionSequence, item, container, placement);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendStackableMerge(uint mergeFrom, uint mergeTo, int amount)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendStackableMerge");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        InventoryActionCodecs.WriteStackableMerge(writer, connection.NextActionSequence, mergeFrom, mergeTo, amount);
+        return SendAction(connection, writer);
+    }
+
     public OutboundTicket SendTalk(ReadOnlySpan<char> text)
     {
         EnterGameThread(capture: false);

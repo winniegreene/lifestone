@@ -179,6 +179,41 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
     /// <summary>The effects: scripts, particles, hooks.</summary>
     public EffectObject Effects { get; }
 
+    /// <summary>
+    /// The object's sound table (STable, 0x20xxxxxx), or 0: the CreateObject's, else the Setup's default (retail <c>InitDefaults</c> then <c>set_description</c>). The sound type of a server sound
+    /// (F750) is looked up in it (<see cref="QueueServerSound"/>).
+    /// </summary>
+    public uint SoundTableId { get; private set; }
+
+    private readonly List<EffectEvent> _serverSounds = [];
+
+    /// <summary>Server sounds (F750) waiting for the set's next delivery.</summary>
+    internal int PendingServerSounds => _serverSounds.Count;
+
+    /// <summary>
+    /// F750 Sound on this object (<c>SmartBox::HandleSoundEvent</c>, 11.6096 0x00452000, then <c>CPhysicsObj::play_sound</c>): queues a sound-table event of <paramref name="soundType"/> at
+    /// <paramref name="volume"/>, which the set hands to its effect sink with the object's other hook events (<see cref="ServerSoundTableHook"/>). One small allocation per message, none per frame.
+    /// </summary>
+    internal void QueueServerSound(uint soundType, float volume) =>
+        _serverSounds.Add(new EffectEvent(Effects.CurrentTime, new ServerSoundTableHook(SoundTableId, soundType, volume)));
+
+    /// <summary>Appends the queued server sounds to <paramref name="into"/>, oldest first, and clears them.</summary>
+    internal int DrainServerSounds(List<EffectEvent> into)
+    {
+        var count = _serverSounds.Count;
+        into.AddRange(_serverSounds);
+        _serverSounds.Clear();
+        return count;
+    }
+
+    /// <summary>Forgets the queued server sounds (no sink to hear them); returns how many.</summary>
+    internal int DiscardServerSounds()
+    {
+        var count = _serverSounds.Count;
+        _serverSounds.Clear();
+        return count;
+    }
+
     /// <summary>The objects this one holds.</summary>
     public IReadOnlyList<AvatarBody> Children => _children;
 
@@ -334,6 +369,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
 
         SetMotionTable(create.MotionTableId, withInterpreter, problems);
         Effects.PhysicsScriptTableId = create.PhysicsScriptTableId;
+        SoundTableId = create.SoundTableId != 0 ? create.SoundTableId : Setup.DefaultSoundTableId;
         if (create.Movement is { } movement)
         {
             MovementIsAutonomous = create.MovementAutonomous;

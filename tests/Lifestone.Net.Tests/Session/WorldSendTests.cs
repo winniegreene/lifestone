@@ -147,6 +147,109 @@ public sealed class WorldSendTests
     }
 
     [Fact]
+    public void The_stat_sends_reach_the_server_as_the_four_ACE_layouts_on_the_weenie_queue()
+    {
+        using var rig = new SessionRig();
+        rig.ToWorld();
+
+        var tickets = new[]
+        {
+            rig.Session.SendRaiseAttribute(5, 4_286_609_098),
+            rig.Session.SendRaiseVital(1, 250),
+            rig.Session.SendRaiseSkill(34, 1000),
+            rig.Session.SendTrainSkill(31, 4),
+        };
+        rig.RunFor(TimeSpan.FromMilliseconds(200));
+
+        var actions = rig.Tap.Messages.Where(m => m.Direction == MessageDirection.Outbound && BitConverter.ToUInt32(m.Body) == MessageOpcodes.GameAction).ToList();
+        Assert.Equal(4, actions.Count);
+        Assert.All(actions, a => Assert.Equal(MessageQueue.Weenie, a.Queue));
+        Assert.All(actions, a => Assert.Equal(20, a.Body.Length));
+        Assert.Equal(new uint[] { 1, 2, 3, 4 }, actions.Select(a => BitConverter.ToUInt32(a.Body, 4)));
+        Assert.Equal(new uint[] { 0x0045, 0x0044, 0x0046, 0x0047 }, actions.Select(a => BitConverter.ToUInt32(a.Body, 8)));
+        Assert.Equal(
+            new[] { (5u, 4_286_609_098u), (1u, 250u), (34u, 1000u), (31u, 4u) },
+            actions.Select(a => (BitConverter.ToUInt32(a.Body, 12), BitConverter.ToUInt32(a.Body, 16))));
+        Assert.Equal(tickets.Select(t => t.MessageSequence), actions.Select(a => a.Sequence));
+    }
+
+    [Fact]
+    public void The_magic_combat_and_inventory_sends_reach_the_server_as_the_ACE_layouts_on_the_weenie_queue()
+    {
+        using var rig = new SessionRig();
+        rig.ToWorld();
+
+        var tickets = new[]
+        {
+            rig.Session.SendCastUntargetedSpell(0x0B4F),
+            rig.Session.SendCastTargetedSpell(0x80000123, 0x0B50),
+            rig.Session.SendChangeCombatMode(8),
+            rig.Session.SendGetAndWieldItem(0x80000200, 0x01000000),
+            rig.Session.SendPutItemInContainer(0x80000200, 0x50000001, 3),
+            rig.Session.SendStackableMerge(0x80000300, 0x80000200, 12),
+        };
+        rig.RunFor(TimeSpan.FromMilliseconds(200));
+
+        var actions = rig.Tap.Messages.Where(m => m.Direction == MessageDirection.Outbound && BitConverter.ToUInt32(m.Body) == MessageOpcodes.GameAction).ToList();
+        Assert.Equal(6, actions.Count);
+        Assert.All(actions, a => Assert.Equal(MessageQueue.Weenie, a.Queue));
+        Assert.Equal(new[] { 16, 20, 16, 20, 24, 24 }, actions.Select(a => a.Body.Length));
+        Assert.Equal(new uint[] { 1, 2, 3, 4, 5, 6 }, actions.Select(a => BitConverter.ToUInt32(a.Body, 4)));
+        Assert.Equal(new uint[] { 0x0048, 0x004A, 0x0053, 0x001A, 0x0019, 0x0054 }, actions.Select(a => BitConverter.ToUInt32(a.Body, 8)));
+        Assert.Equal(0x0B4Fu, BitConverter.ToUInt32(actions[0].Body, 12));
+        Assert.Equal((0x80000123u, 0x0B50u), (BitConverter.ToUInt32(actions[1].Body, 12), BitConverter.ToUInt32(actions[1].Body, 16)));
+        Assert.Equal(8u, BitConverter.ToUInt32(actions[2].Body, 12));
+        Assert.Equal((0x80000200u, 0x01000000u), (BitConverter.ToUInt32(actions[3].Body, 12), BitConverter.ToUInt32(actions[3].Body, 16)));
+        Assert.Equal(
+            (0x80000200u, 0x50000001u, 3u),
+            (BitConverter.ToUInt32(actions[4].Body, 12), BitConverter.ToUInt32(actions[4].Body, 16), BitConverter.ToUInt32(actions[4].Body, 20)));
+        Assert.Equal(
+            (0x80000300u, 0x80000200u, 12u),
+            (BitConverter.ToUInt32(actions[5].Body, 12), BitConverter.ToUInt32(actions[5].Body, 16), BitConverter.ToUInt32(actions[5].Body, 20)));
+        Assert.Equal(tickets.Select(t => t.MessageSequence), actions.Select(a => a.Sequence));
+    }
+
+    [Fact]
+    public void The_magic_combat_and_inventory_sends_refuse_a_session_outside_the_world()
+    {
+        using var rig = new SessionRig();
+        rig.ToCharacterSelect();
+        var sent = rig.Tap.Outbound.Count();
+
+        Action[] sends =
+        [
+            () => rig.Session.SendCastUntargetedSpell(1),
+            () => rig.Session.SendCastTargetedSpell(1, 1),
+            () => rig.Session.SendChangeCombatMode(2),
+            () => rig.Session.SendGetAndWieldItem(1, 1),
+            () => rig.Session.SendPutItemInContainer(1, 1, 0),
+            () => rig.Session.SendStackableMerge(1, 2, 1),
+        ];
+
+        Assert.All(sends, s => Assert.Contains("InWorld", Assert.Throws<InvalidOperationException>(s).Message, StringComparison.Ordinal));
+        Assert.Equal(sent, rig.Tap.Outbound.Count());
+    }
+
+    [Fact]
+    public void The_stat_sends_refuse_a_session_outside_the_world()
+    {
+        using var rig = new SessionRig();
+        rig.ToCharacterSelect();
+        var sent = rig.Tap.Outbound.Count();
+
+        Action[] sends =
+        [
+            () => rig.Session.SendRaiseAttribute(5, 1),
+            () => rig.Session.SendRaiseVital(1, 1),
+            () => rig.Session.SendRaiseSkill(34, 1),
+            () => rig.Session.SendTrainSkill(31, 1),
+        ];
+
+        Assert.All(sends, s => Assert.Contains("InWorld", Assert.Throws<InvalidOperationException>(s).Message, StringComparison.Ordinal));
+        Assert.Equal(sent, rig.Tap.Outbound.Count());
+    }
+
+    [Fact]
     public void The_world_sends_refuse_a_session_outside_the_world()
     {
         using var rig = new SessionRig();

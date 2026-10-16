@@ -47,6 +47,9 @@ public sealed class WaveStreams
     /// <summary>Streams built (not served from the cache) since creation.</summary>
     public int Built { get; private set; }
 
+    /// <summary>Worker builds that arrived on the main thread (<c>Complete</c>), failures included: the audio work of the frame they land in (M3 1.3 fix B, review 1.3-R1 attribution).</summary>
+    public int Arrived { get; private set; }
+
     /// <summary>Streams in the cache.</summary>
     public int Count => _cache.Count;
 
@@ -182,6 +185,7 @@ public sealed class WaveStreams
 
     private void Complete((uint Wave, int Pan) key, AudioStream? stream)
     {
+        Arrived++;
         var bytes = stream switch
         {
             AudioStreamWav wav => wav.Data.Length,

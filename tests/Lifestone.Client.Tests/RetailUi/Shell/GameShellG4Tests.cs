@@ -15,7 +15,7 @@ using Lifestone.Data.Ui;
 namespace Lifestone.Client.Tests.RetailUi.Shell;
 
 /// <summary>
-/// The toolbar, the panel host and the indicators of the in-game shell (docs/retail-ui.md section 21.5): every gameplay button answers with the NeedsGameplay message that names its panel, the host is hidden at
+/// The toolbar, the panel host and the indicators of the in-game shell (docs/retail-ui.md section 21.5): every gameplay button with no controller answers with the NotInM3 message that names its panel, the host is hidden at
 /// login (<c>gmPanelUI::PostInit</c>), g6's two pages call their hook, and the link indicator follows the time since the last server packet.
 /// </summary>
 public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
@@ -75,21 +75,30 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
 
     [RequiresLocalDatsTheory]
     [MemberData(nameof(GameplayPanelButtons))]
-    public void A_gameplay_panel_button_opens_the_NeedsGameplay_message_naming_its_panel(uint buttonId, string panel)
+    public void A_panel_button_with_no_controller_opens_the_NotInM3_message_naming_its_panel(uint buttonId, string panel)
     {
         using var rig = new LoginRig(fixture, liveGame: true);
         var screen = EnterGame(rig);
         var button = Assert.IsAssignableFrom<UiButton>(screen.Root!.GetChildRecursive(buttonId));
         Assert.True(rig.Click(button));
         rig.Frame();
-        Assert.Equal(NotInM2.Prefix + panel, TextOf(OnlyDialog(rig)));
+        var page = GamePanelHost.Pages.First(p => p.Name == panel);
+        if (screen.PanelControllers!.RegisteredPages.Contains(page.PanelId))
+        {
+            // M3 2.2: a slice built this page, so its button opens it (the page's own tests judge the content) instead of the message.
+            Assert.Equal(page.PanelId, screen.PanelHost!.CurrentPanel);
+            Assert.Empty(rig.Manager.Dialogs.OpenDialogs);
+            return;
+        }
+
+        Assert.Equal(NotInM3.Prefix + panel, TextOf(OnlyDialog(rig)));
         Assert.False(screen.PanelHost!.IsOpen); // the page never shows: the message says it is not built
         Assert.Contains(rig.Log.Lines, l => l.Contains("placeholder", StringComparison.Ordinal) && l.Contains(panel, StringComparison.Ordinal));
     }
 
     [RequiresLocalDatsTheory]
     [MemberData(nameof(ActionButtons))]
-    public void A_combat_use_or_examine_button_opens_the_NeedsGameplay_message(uint buttonId, string feature)
+    public void A_combat_or_examine_button_opens_the_NotInM3_message(uint buttonId, string feature)
     {
         using var rig = new LoginRig(fixture, liveGame: true);
         var screen = EnterGame(rig);
@@ -105,15 +114,15 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
         }
 
         rig.Frame();
-        Assert.Equal(NotInM2.Prefix + feature, TextOf(OnlyDialog(rig)));
+        Assert.Equal(NotInM3.Prefix + feature, TextOf(OnlyDialog(rig)));
     }
 
     /// <summary>
     /// The retail panel keys, fed through <see cref="UiInputRouter"/> with the real key map (dod-3-4-8): for each gameplay page whose toggle action has a plain
-    /// keyboard binding, pressing the key opens the same "Not in Lifestone M2" message that names the panel as the toolbar button does, and closing it leaves the shell as it was.
+    /// keyboard binding, pressing the key opens the same "Not in Lifestone M3" message that names the panel as the toolbar button does, and closing it leaves the shell as it was.
     /// </summary>
     [RequiresLocalDatsFact]
-    public void Every_panel_key_of_the_real_key_map_opens_the_NeedsGameplay_message_naming_its_panel()
+    public void Every_panel_key_of_the_real_key_map_opens_the_NotInM3_message_naming_its_panel()
     {
         using var rig = new LoginRig(fixture, liveGame: true);
         var screen = EnterGame(rig);
@@ -124,7 +133,7 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.True(rig.Manager.Input.RegisterInputMap(Lifestone.Client.Play.EndSessionKey.InputMap, endKey, 0));
         var maps = rig.Manager.Input.InputMaps.Select(m => m.InputMapId).ToHashSet(); // a binding counts when its map has a registrant
         var tried = new List<string>();
-        foreach (var page in GamePanelHost.Pages.Where(static p => p.Kind == PanelPageKind.NeedsGameplay))
+        foreach (var page in GamePanelHost.Pages.Where(p => screen.PanelHost!.KindOf(p.PanelId) == PanelPageKind.NotInM3))
         {
             var action = Assert.IsAssignableFrom<UiElement>(screen.PanelHost!.ElementFor(page.PanelId)).VisibilityToggleAction;
             var key = bindings.Bindings.Where(b => b.ActionId == action && maps.Contains(b.InputMapId) && b.Control.DeviceIndex == RetailKeyBindings.KeyboardDevice && b.MetaMode == 0).Select(b => (int)(b.Control.Key >> 16)).FirstOrDefault();
@@ -136,7 +145,7 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
             Assert.True(rig.Manager.Input.KeyDown(key), $"{page.Name}: key 0x{key:X2} is not taken");
             rig.Manager.Input.KeyUp(key);
             rig.Frame();
-            Assert.Equal(NotInM2.Prefix + page.Name, TextOf(OnlyDialog(rig)));
+            Assert.Equal(NotInM3.Prefix + page.Name, TextOf(OnlyDialog(rig)));
             Assert.False(screen.PanelHost!.IsOpen);
             Assert.True(rig.Click(Assert.IsAssignableFrom<UiElement>(OnlyDialog(rig).GetChildRecursive(UiMessageDialog.OkButton))));
             rig.Run(0.3);
@@ -144,7 +153,7 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
             tried.Add($"{page.Name} (key 0x{key:X2})");
         }
 
-        Assert.True(tried.Count >= 2, "too few gameplay pages have a plain key in the real key map (the inventory and the map have one): " + string.Join(", ", tried));
+        Assert.True(tried.Count >= 1, "too few gameplay pages left to the message have a plain key in the real key map (the map has one): " + string.Join(", ", tried));
     }
 
     [RequiresLocalDatsFact]
@@ -158,7 +167,7 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
 
         button.BroadcastElementMessage(UiMessageIds.ButtonClick);
         rig.Frame();
-        Assert.Empty(rig.Manager.Dialogs.OpenDialogs); // no NeedsGameplay message any more
+        Assert.Empty(rig.Manager.Dialogs.OpenDialogs); // no NotInM3 message any more
         Assert.Equal(before, rig.Session.ActionLog.Total); // nothing selected: nothing happens
         Assert.Equal(1, toolbar.UseClicks);
 
@@ -176,7 +185,7 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
     {
         using var rig = new LoginRig(fixture, liveGame: true);
         var screen = EnterGame(rig);
-        var button = Assert.IsAssignableFrom<UiButton>(screen.Root!.GetChildRecursive(0x100001B1));
+        var button = Assert.IsAssignableFrom<UiButton>(screen.Root!.GetChildRecursive(0x1000019A)); // the map: still a page left to the message
         Assert.True(rig.Click(button));
         rig.Frame();
         var dialog = OnlyDialog(rig);
@@ -185,7 +194,7 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Empty(rig.Manager.Dialogs.OpenDialogs);
         Assert.True(rig.Click(button));
         rig.Frame();
-        Assert.Contains("Inventory", TextOf(OnlyDialog(rig)), StringComparison.Ordinal);
+        Assert.Contains("Map", TextOf(OnlyDialog(rig)), StringComparison.Ordinal);
     }
 
     [RequiresLocalDatsFact]
@@ -201,7 +210,16 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
         rig.Manager.Input.MouseButton(UiMouseButton.Left, down: true);
         rig.Manager.Input.MouseButton(UiMouseButton.Left, down: false);
         rig.Frame();
-        Assert.Equal(NotInM2.Prefix + "Spellbook and components", TextOf(OnlyDialog(rig)));
+        if (screen.PanelControllers!.RegisteredPages.Contains(13u))
+        {
+            // b3 built the spell page: the press opens it once and it stays (no message, no loop).
+            Assert.Empty(rig.Manager.Dialogs.OpenDialogs);
+            Assert.True(screen.PanelHost!.ElementFor(13)!.Visible);
+            Assert.Equal(13u, screen.PanelHost.CurrentPanel);
+            return;
+        }
+
+        Assert.Equal(NotInM3.Prefix + "Spellbook and components", TextOf(OnlyDialog(rig)));
         Assert.False(screen.PanelHost!.ElementFor(13)!.Visible);
     }
 

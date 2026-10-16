@@ -21,12 +21,21 @@ internal sealed class RecordingViewHost : ICg3DViewHost
     /// <summary>Every attachment made, in order.</summary>
     public List<(uint ViewportId, Cg3DViewModel Model)> Attached { get; } = [];
 
+    /// <summary>Every figure attached (the paperdoll's), in order.</summary>
+    public List<(uint ViewportId, ICreatureView Figure)> AttachedFigures { get; } = [];
+
     /// <summary>Attachments taken away again.</summary>
     public int Detached { get; private set; }
 
     public IDisposable Attach(uint viewportElementId, Cg3DViewModel model)
     {
         Attached.Add((viewportElementId, model));
+        return new Attachment(this);
+    }
+
+    public IDisposable? AttachFigure(uint viewportElementId, ICreatureView figure)
+    {
+        AttachedFigures.Add((viewportElementId, figure));
         return new Attachment(this);
     }
 

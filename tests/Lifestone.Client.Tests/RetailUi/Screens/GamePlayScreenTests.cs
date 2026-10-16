@@ -70,9 +70,16 @@ public sealed class GamePlayScreenTests(DatSetFixture fixture) : IClassFixture<D
         }
 
         Assert.True(screen.IsBuilt);
-        Assert.True(screen.BuildFrames > 3, $"the shell was built in {screen.BuildFrames} frames");
+        // The build budget is a wall-clock one (BuildBudgetMilliseconds), so how many frames it takes depends on the machine's speed and load: it is staged when it took more than one frame,
+        // not a fixed count (gameplay-staged-notice-flake: "> 3" failed on a fast moment).
+        Assert.True(screen.BuildFrames >= 2, $"the shell was built in {screen.BuildFrames} frames");
         Assert.False(rig.Screens.Notices.ExpectWindows);
         Assert.Equal(0, rig.Screens.Notices.HeldCount);
+        // The spew box turns a notice it was handed into a row in the next frame's Frame message (gmSpewBoxUI::Update). On a fast moment the wiring that registers the box finishes in the same
+        // frame as the rest of the build, so the notice is still pending when IsBuilt turns true: one more frame, as the shell has in play, makes the check independent of the machine's speed
+        // (gameplay-staged-notice-flake, the cause: a wall-clock budget decided whether that frame had already run).
+        rig.Frame();
+        rig.Frame();
         Assert.True(screen.Chat?.Spew?.Contains("In Portal Space - Please Wait..."), "the held notice reaches the spew box");
         Assert.True(screen.Root is { IsShown: true });
         Assert.NotNull(screen.SmartBox);

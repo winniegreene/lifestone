@@ -38,6 +38,13 @@ public enum LoginCheckKind
     /// account's list is as it began (<see cref="Lifestone.Client.Session.Scenarios.ThrowawayLegScenario"/>).
     /// </summary>
     Throwaway,
+
+    /// <summary>
+    /// <c>--login-check=buff</c> (M3 2.1 s3; docs/session.md section 30): a separate check, never part of <see cref="All"/>. Enters the mage (BSD Mage), re-seats its wand, runs the buff scenario
+    /// (the gear, the magic combat mode, the cycle, the forced re-buff pass, non-combat) in the game's session with the game's own cast visuals, logs off and judges what it measured
+    /// (<see cref="Lifestone.Client.Session.Scenarios.BuffLegVerdict"/>).
+    /// </summary>
+    Buff,
 }
 
 /// <summary>
@@ -57,6 +64,30 @@ public sealed record PlayOptions
     /// is not a timing run: the frame-time judgement is reported, not judged.
     /// </summary>
     public string? PlayFramesDirectory { get; init; }
+
+    /// <summary>The default of <c>--play-screenshot-after</c>, in seconds.</summary>
+    public const double DefaultScreenshotAfterSeconds = 5;
+
+    /// <summary>The PNG <c>--play-screenshot</c> saves once the player is placed (play mode), or null.</summary>
+    public string? ScreenshotPath { get; init; }
+
+    /// <summary>The seconds <c>--play-screenshot</c> waits after the player is placed (<see cref="DefaultScreenshotAfterSeconds"/>).</summary>
+    public double ScreenshotAfterSeconds { get; init; } = DefaultScreenshotAfterSeconds;
+
+    /// <summary>True when <c>--play-screenshot-after</c> was given.</summary>
+    public bool ScreenshotAfterGiven { get; init; }
+
+    /// <summary>
+    /// The PNG the buff leg saves mid-cast (M3 2.1 s3): <c>--play-screenshot=PATH</c> with <c>--login-check=buff</c> and no <c>--play-screenshot-after</c> moves the path here, so play mode's own capture
+    /// (a fixed wait after the player is placed, then quit) does not fire; null otherwise.
+    /// </summary>
+    public string? BuffShotPath { get; init; }
+
+    /// <summary>
+    /// The folder <c>--play-panel-shots=DIR</c> saves one frame of each registered panel page to (M3 2.2 s0; <see cref="PanelFramesPlan"/>), or null: in a plain <c>--play</c> run, after the arrival settles, each page is
+    /// opened in turn, saved at the window's size and closed, and the run quits like <c>--play-screenshot</c>. Relative paths are taken from the repository root.
+    /// </summary>
+    public string? PanelShotsDirectory { get; init; }
 
     /// <summary>True for <c>--retail-picking</c>: retail's picking rules where Lifestone fixes them (<see cref="RayPicking.Pick"/>; docs/avatars.md §18). Default false.</summary>
     public bool RetailPicking { get; init; }
@@ -93,6 +124,50 @@ public sealed record PlayOptions
             if (argument.Name == "--play-frames")
             {
                 options = options with { PlayFramesDirectory = argument.Value.Length == 0 ? DefaultFramesDirectory : argument.Value };
+                continue;
+            }
+
+            if (argument.Name == "--play-panel-shots")
+            {
+                if (argument.Value.Length == 0)
+                {
+                    errors.Add("--play-panel-shots: needs a folder (--name=VALUE)");
+                }
+                else
+                {
+                    options = options with { PanelShotsDirectory = argument.Value };
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--play-screenshot")
+            {
+                if (argument.Value.Length == 0)
+                {
+                    errors.Add("--play-screenshot: needs a file path (--name=VALUE)");
+                }
+                else
+                {
+                    options = options with { ScreenshotPath = argument.Value };
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--play-screenshot-after")
+            {
+                var known = errors.Count;
+                var seconds = OptionValues.Double(argument, errors, DefaultScreenshotAfterSeconds);
+                if (errors.Count == known && seconds is >= 0 and <= 600)
+                {
+                    options = options with { ScreenshotAfterSeconds = seconds, ScreenshotAfterGiven = true };
+                }
+                else if (errors.Count == known)
+                {
+                    errors.Add($"--play-screenshot-after: '{argument.Value}' is not 0 to 600");
+                }
+
                 continue;
             }
 
@@ -135,9 +210,15 @@ public sealed record PlayOptions
                         ("academy-exit", LoginCheckKind.AcademyExit),
                         ("holtburg-laps", LoginCheckKind.HoltburgLaps),
                         ("throwaway", LoginCheckKind.Throwaway),
+                        ("buff", LoginCheckKind.Buff),
                         ("all", LoginCheckKind.All)),
                 };
             }
+        }
+
+        if (options is { LoginCheck: LoginCheckKind.Buff, ScreenshotPath: { } shot, ScreenshotAfterGiven: false })
+        {
+            options = options with { ScreenshotPath = null, BuffShotPath = shot }; // the buff leg takes its own frame, mid-cast
         }
 
         return options with { Errors = errors };

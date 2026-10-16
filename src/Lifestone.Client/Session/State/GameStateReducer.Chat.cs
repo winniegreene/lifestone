@@ -155,9 +155,11 @@ internal sealed partial class GameStateReducer
             q.Skills[skill.Id] = skill;
         }
 
-        q.Enchantments = message.Enchantments;
+        q.SetDescriptionEnchantments(message.Enchantments, _clock.Now); // M3 1.2 s5: one pass, stamped with the description's arrival (it was built, then rebuilt stamped by the spellbook step)
         q.SetServerOptions(message.Options1, message.Options2);
         q.IsKnown = true;
+        ApplyDescriptionSpellbook(message);
+        ApplyDescriptionInventory(message);
         LogVitalRecords(message, q);
         Changed();
         Publish(new QualitiesChanged(QualityChange.Description, 0));
@@ -215,7 +217,7 @@ internal sealed partial class GameStateReducer
         switch (message.Kind)
         {
             case PrivateUpdateKind.PropertyInt:
-                q.Ints[message.Key] = unchecked((int)message.Value);
+                ApplyPrivateInt(q, message); // GameStateReducer.Combat.cs: stores the int and raises CombatModeChanged (M3 1.2 s3)
                 change = QualityChange.Int;
                 break;
             case PrivateUpdateKind.PropertyInt64:

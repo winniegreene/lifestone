@@ -797,6 +797,7 @@ public partial class RetailUiChecks : Node
             return;
         }
 
+        var statsBefore = layer.SoundStats.Played;
         var wanted = new HashSet<(uint, uint)>(exit.Desc.States.Values.SelectMany(state => state.Media).Concat(exit.Desc.Media).OfType<UiSoundMedia>().Where(m => m.Sound != 0).Select(m => (m.File, m.Sound)));
         recorder.Centred.Clear();
         ClickElement(layer, exit);
@@ -810,8 +811,16 @@ public partial class RetailUiChecks : Node
             "a click on a button asks the sound player for the sound-table entry its layout names (not silent, nothing else)",
             wanted.Count > 0 && heard.Length > 0 && heard.All(wanted.Contains),
             $"the layout names {wanted.Count} sound entr(ies) [{string.Join(", ", wanted.Select(w => $"0x{w.Item1:X8}/0x{w.Item2:X}"))}]; the sound player heard [{string.Join(", ", heard.Select(w => $"0x{w.Table:X8}/0x{w.Type:X}"))}]");
+
+        // The counter (M3 1.3 s2a): exactly the sounds the recording player was handed are counted as played, none dropped. sounds_ui is report-only for smoke.
+        var counted = layer.SoundStats.Played - statsBefore;
+        Check(
+            "a click is counted: the UI's sound counter reads exactly the sounds the sound player was handed (sounds_ui >= 1, none dropped)",
+            counted >= 1 && counted == recorder.Centred.Count && layer.SoundStats.Dropped == 0 && layer.SoundStats.Requested == layer.SoundStats.Played,
+            $"sounds_ui={layer.SoundStats.Played} (this click {counted}; the player heard {recorder.Centred.Count}); {layer.SoundStats}");
         layer.QueueFree();
         await FramesAsync(2);
+        await CheckUiSoundsThroughAudioServiceAsync(services);
 
         var log = new LinesLog();
         var adapter = new UiSoundAdapter(() => null, log);
@@ -819,8 +828,78 @@ public partial class RetailUiChecks : Node
         adapter.PlayWaveFromCenter(0x0A000001, 1f);
         Check(
             "with no sound player the UI's sounds are dropped and TODO(ui-sound-sink) is logged once",
-            adapter.Dropped == 2 && log.Lines.Count(l => l.Contains("TODO(ui-sound-sink)", StringComparison.Ordinal)) == 1,
-            $"{adapter.Dropped} dropped, {log.Lines.Count} log line(s)");
+            adapter.Dropped == 2 && adapter.Stats is { Requested: 2, Played: 0, Dropped: 2 } && log.Lines.Count(l => l.Contains("TODO(ui-sound-sink)", StringComparison.Ordinal)) == 1,
+            $"{adapter.Stats}, {log.Lines.Count} log line(s)");
+    }
+
+    /// <summary>
+    /// The UI's sounds through the real audio service on a muted master bus (M2 D8, M3 1.3 s2a): a click on a button reaches the retail sound player, which starts
+    /// a voice on the UI bus, and the UI's counter counts it although nothing is audible; the service's own streams arrive (the Dummy driver off-screen).
+    /// </summary>
+    private async Task CheckUiSoundsThroughAudioServiceAsync(GameServices services)
+    {
+        const string name = "a click through the real audio service on a muted master bus is counted and starts a voice (D8: counted whatever the volume)";
+        var window = new Vector2I(800, 600);
+        var audio = Lifestone.Game.Audio.AudioService.Create(services, Lifestone.Client.Audio.AudioSettings.Mute, 1);
+        AddChild(audio);
+        var guard = Lifestone.Game.Audio.AudioService.ShutdownGuard.For(audio);
+        AddChild(guard);
+        try
+        {
+            using var stage = NewStage(window);
+            var layer = RetailUiLayer.Create(
+                services,
+                new RetailUiOptions { Mode = RetailUiMode.StandIn, StartMode = UiModes.CharacterManagement },
+                window,
+                () => audio.Sound,
+                fixedStep: 1.0 / 60.0,
+                soundMuted: () => audio.IsSilent);
+            stage.View.AddChild(layer);
+            layer.SetProcess(false);
+            await FramesAsync(1);
+            for (var i = 0; i < 4; i++)
+            {
+                layer.Step(i / 60.0);
+            }
+
+            layer.Flush(timeoutSeconds: 20);
+            var exit = (layer.Flow!.Flow.CurrentScreen as CharacterManagementScreen)?.Root?.GetChildRecursive(CharacterManagementScreen.ExitButtonId);
+            if (exit is null)
+            {
+                Check(name, false, "no character management screen or no Exit button");
+                layer.QueueFree();
+                await FramesAsync(2);
+                return;
+            }
+
+            var (playedBefore, voicesBefore) = (layer.SoundStats.Played, audio.Sound.Played);
+            ClickElement(layer, exit);
+            for (var i = 0; i < 12; i++)
+            {
+                layer.Step((10 + i) / 60.0);
+            }
+
+            for (var i = 0; i < 200 && audio.Played + audio.Silenced < audio.Starts; i++)
+            {
+                await FramesAsync(1); // the wave's stream is built on a worker and arrives on the main thread
+            }
+
+            var stats = layer.SoundStats;
+            var counted = stats.Played - playedBefore;
+            var voices = audio.Sound.Played - voicesBefore;
+            Check(
+                name,
+                audio.IsSilent && counted >= 1 && voices == counted && stats.Dropped == 0 && stats.Silenced == 0 && stats.Muted == stats.Played && audio.Starts >= 1 && audio.Played == audio.Starts,
+                $"sounds_ui={stats.Played} (this click {counted}; the retail player started {voices} voice(s)); {stats}; audio service starts {audio.Starts}, streams played {audio.Played}, silenced {audio.Silenced}; master silent {audio.IsSilent}");
+            layer.QueueFree();
+            await FramesAsync(2);
+        }
+        finally
+        {
+            audio.StopAllAndWait();
+            guard.QueueFree();
+            audio.QueueFree();
+        }
     }
 
     // ---------------------------------------------------------------------------------------------------------------

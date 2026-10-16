@@ -109,7 +109,7 @@ public sealed class PlayerQualities
             return false;
         }
 
-        uint FromAttribute(uint id) => Attributes.TryGetValue(id, out var a) ? EnchantmentRules.EnchantAttribute(Enchantments, id, a.Start + a.Ranks) : 0;
+        uint FromAttribute(uint id) => Attributes.TryGetValue(id, out var a) ? EnchantmentRules.EnchantAttribute(_effective, id, a.Start + a.Ranks) : 0;
         var bonus = maxId switch
         {
             1 => (FromAttribute(EnduranceAttributeId) + 1) / 2,
@@ -118,20 +118,127 @@ public sealed class PlayerQualities
         };
         var gear = maxId == 1 && Ints.TryGetValue(GearMaxHealthProperty, out var g) ? g : 0; // CACQualities::InqAttribute2nd adds PropertyInt 0x17B to the health maximum
         current = vital.Current;
-        max = EnchantmentRules.EnchantSecondaryAttribute(Enchantments, maxId, unchecked((uint)(vital.Start + vital.Ranks + bonus + gear)));
+        max = EnchantmentRules.EnchantSecondaryAttribute(_effective, maxId, unchecked((uint)(vital.Start + vital.Ranks + bonus + gear)));
         return true;
     }
 
     /// <summary>PropertyInt 379 (<c>0x17B</c>), added to the health maximum by <c>CACQualities::InqAttribute2nd</c>.</summary>
     public const uint GearMaxHealthProperty = 379;
 
+    private ImmutableArray<ActiveEnchantment> _active = [];
+    private ImmutableArray<EnchantmentDesc> _enchantments = [];
+    private ImmutableArray<EnchantmentDesc> _effective = [];
+
     /// <summary>
-    /// The enchantments the PlayerDescription's registry held, in wire order (multiplicative, additive, cooldown, then the vitae); empty until the description arrives. The vitals' maximums apply them
-    /// (<see cref="TryGetVitalLevels"/>). TODO(g4-enchantment-updates): the messages that change the registry after the description (UpdateEnchantment 0x02C2, UpdateMultipleEnchantments, RemoveEnchantment,
-    /// RemoveMultipleEnchantments, DispelEnchantment, PurgeEnchantments, PurgeBadEnchantments: <c>ClientMagicSystem::Handle_Magic__*</c>, 11.6096 0x005686D0 to 0x005698C0) are not decoded by net yet,
-    /// so a buff cast or ended in the world shows in the maximums at the next description only.
+    /// The enchantments of the player's registry as the server sent them (the records of the PlayerDescription and of every 02C2 and 02C4 since), in the registry's order: multiplicative, additive,
+    /// cooldown, then the vitae; empty until the description arrives. The vitals' maximums apply them (<see cref="TryGetVitalLevels"/>), and every message that changes the registry (GameEvent 0x02C1 to
+    /// 0x02C8 and 0x0312, <c>ClientMagicSystem::Handle_Magic__*</c>, 11.6096 0x005686D0 to 0x005698C0) is applied by the reducer at once (<c>GameStateReducer.Enchantments.cs</c>, which publishes
+    /// <see cref="EnchantmentChanged"/>). Each record's start time is as sent, relative to when its message arrived: <see cref="ActiveEnchantments"/> holds the arrival time and answers the remaining time.
+    /// Setting it (the description) stamps every entry with arrival time 0 until <c>GameStateReducer</c> stamps the description's own time.
     /// </summary>
-    public ImmutableArray<EnchantmentDesc> Enchantments { get; internal set; } = [];
+    public ImmutableArray<EnchantmentDesc> Enchantments
+    {
+        get => _enchantments;
+        internal set => SetActiveEnchantments(value.IsDefaultOrEmpty ? [] : [.. value.Select(e => new ActiveEnchantment(e, 0.0))]);
+    }
+
+    /// <summary>
+    /// The registry's enchantments with the time each arrived (<see cref="ActiveEnchantment"/>: the remaining seconds, the expiry on the session clock or the server clock, whether it is overdue), in
+    /// the same order as <see cref="Enchantments"/>. No timer removes an entry: the server's 02C3 does (retail's client never times one out); an entry kept past its expiry is reported as
+    /// <c>TODO(m3-enchant-overdue)</c> (<see cref="CountOverdueEnchantments"/>).
+    /// </summary>
+    public ImmutableArray<ActiveEnchantment> ActiveEnchantments => _active;
+
+    /// <summary>The enchantment with this spell and layer (as retail's layered id names it).</summary>
+    /// <param name="spellId">The spell id.</param>
+    /// <param name="layer">The layer.</param>
+    /// <param name="enchantment">The entry.</param>
+    public bool TryGetEnchantment(ushort spellId, ushort layer, out ActiveEnchantment enchantment)
+    {
+        foreach (var candidate in _active)
+        {
+            if (candidate.SpellId == spellId && candidate.Layer == layer)
+            {
+                enchantment = candidate;
+                return true;
+            }
+        }
+
+        enchantment = default;
+        return false;
+    }
+
+    /// <summary>The vitae (the death penalty's single enchantment), when the character has one.</summary>
+    /// <param name="vitae">The entry.</param>
+    public bool TryGetVitae(out ActiveEnchantment vitae)
+    {
+        foreach (var candidate in _active)
+        {
+            if (candidate.Enchantment.Bucket == EnchantmentBucket.Vitae)
+            {
+                vitae = candidate;
+                return true;
+            }
+        }
+
+        vitae = default;
+        return false;
+    }
+
+    /// <summary>How many entries are past their expiry by more than <paramref name="graceSeconds"/> at <paramref name="nowSeconds"/> with no removal received (<c>TODO(m3-enchant-overdue)</c>; report-only).</summary>
+    /// <param name="nowSeconds">Session-clock seconds.</param>
+    /// <param name="graceSeconds">The allowance past the expiry.</param>
+    public int CountOverdueEnchantments(double nowSeconds, double graceSeconds = EnchantmentRules.OverdueGraceSeconds)
+    {
+        var count = 0;
+        foreach (var entry in _active)
+        {
+            if (entry.IsOverdue(nowSeconds, graceSeconds))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// The reducer replaces the registry. The rule's input (<see cref="EnchantmentRules"/>) is the registry with every start time moved to the session clock, so the duel's "started later" compares enchantments
+    /// that arrived at different times (retail adds its clock to the start when it unpacks an enchantment).
+    /// </summary>
+    internal void SetActiveEnchantments(ImmutableArray<ActiveEnchantment> active)
+    {
+        _active = active.IsDefaultOrEmpty ? [] : active;
+        _enchantments = _active.IsEmpty ? [] : [.. _active.Select(e => e.Enchantment)];
+        _effective = _active.IsEmpty ? [] : [.. _active.Select(e => e.Enchantment with { StartTime = e.StartSeconds })];
+    }
+
+    /// <summary>
+    /// The description's registry in one pass (M3 1.2 s5; the arrival's frame allocated the registry's three arrays twice, once with arrival time 0 and again stamped): each entry stamped with
+    /// <paramref name="receivedSeconds"/>, the arrays pre-sized, and the incoming array kept as <see cref="Enchantments"/> (its content is exactly what the setter rebuilt). The same state as setting
+    /// <see cref="Enchantments"/> and then stamping every entry.
+    /// </summary>
+    internal void SetDescriptionEnchantments(ImmutableArray<EnchantmentDesc> registry, double receivedSeconds)
+    {
+        if (registry.IsDefaultOrEmpty)
+        {
+            SetActiveEnchantments([]);
+            return;
+        }
+
+        var active = ImmutableArray.CreateBuilder<ActiveEnchantment>(registry.Length);
+        var effective = ImmutableArray.CreateBuilder<EnchantmentDesc>(registry.Length);
+        foreach (var entry in registry)
+        {
+            var stamped = new ActiveEnchantment(entry, receivedSeconds);
+            active.Add(stamped);
+            effective.Add(entry with { StartTime = stamped.StartSeconds });
+        }
+
+        _active = active.MoveToImmutable();
+        _enchantments = registry;
+        _effective = effective.MoveToImmutable();
+    }
 
     internal Dictionary<uint, int> Ints { get; } = [];
 
@@ -152,6 +259,33 @@ public sealed class PlayerQualities
     internal Dictionary<uint, VitalDesc> Vitals { get; } = [];
 
     internal Dictionary<uint, SkillDesc> Skills { get; } = [];
+
+    /// <summary>PropertyInt 25 (ACE's <c>PropertyInt.Level</c>).</summary>
+    public const uint LevelProperty = 25;
+
+    /// <summary>PropertyInt 24 (ACE's <c>PropertyInt.AvailableSkillCredits</c>).</summary>
+    public const uint AvailableSkillCreditsProperty = 24;
+
+    /// <summary>PropertyInt64 1 (ACE's <c>PropertyInt64.TotalExperience</c>).</summary>
+    public const uint TotalExperienceProperty = 1;
+
+    /// <summary>PropertyInt64 2 (ACE's <c>PropertyInt64.AvailableExperience</c>).</summary>
+    public const uint AvailableExperienceProperty = 2;
+
+    /// <summary>
+    /// The character's level (PropertyInt 25): read from the PlayerDescription and kept current by PrivateUpdatePropertyInt 0x02CD. 0 until
+    /// the description arrives, or when the server did not send it (M3 s1b; spec 5.3).
+    /// </summary>
+    public int Level => Ints.TryGetValue(LevelProperty, out var v) ? v : 0;
+
+    /// <summary>The skill credits the character can still spend (PropertyInt 24); 0 until known. Kept current by 0x02CD.</summary>
+    public int AvailableSkillCredits => Ints.TryGetValue(AvailableSkillCreditsProperty, out var v) ? v : 0;
+
+    /// <summary>The experience the character can still spend (PropertyInt64 2); 0 until known. Kept current by PrivateUpdatePropertyInt64 0x02CF.</summary>
+    public long AvailableExperience => Int64s.TryGetValue(AvailableExperienceProperty, out var v) ? v : 0;
+
+    /// <summary>The experience the character has earned in all (PropertyInt64 1; a level 126 character has 4,286,609,098 or more, which an int cannot hold); 0 until known. Kept current by 0x02CF.</summary>
+    public long TotalExperience => Int64s.TryGetValue(TotalExperienceProperty, out var v) ? v : 0;
 
     /// <summary>An integer property (PropertyInt).</summary>
     public bool TryGetInt(uint key, out int value) => Ints.TryGetValue(key, out value);
@@ -216,4 +350,7 @@ public sealed class PlayerQualities
         Skills.Clear();
         Enchantments = [];
     }
+
+    /// <summary>The player's combat mode (<c>PropertyInt</c> 40, <see cref="CombatModes"/>: 1 non-combat, 2 melee, 4 missile, 8 magic); 0 until the server has sent one. Kept current by 0x02CD, which also raises <see cref="CombatModeChanged"/>.</summary>
+    public int CombatMode => Ints.TryGetValue(CombatModes.Property, out var v) ? v : 0;
 }

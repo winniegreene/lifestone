@@ -365,6 +365,77 @@ internal sealed partial class SessionMachine
 
         public void OnPrivateUpdate(in InboundContext context, in PrivateUpdateMsg message) => Sink.OnPrivateUpdate(context, message);
 
+        // M3 1.2 s0 messages.
+
+        public void OnInventoryRemoveObject(in InboundContext context, in InventoryRemoveObjectMsg message) => Sink.OnInventoryRemoveObject(context, message);
+
+        public void OnSetStackSize(in InboundContext context, in SetStackSizeMsg message) => Sink.OnSetStackSize(context, message);
+
+        public void OnPlayerKilled(in InboundContext context, in PlayerKilledMsg message) => Sink.OnPlayerKilled(context, message);
+
+        public void OnPublicUpdatePropertyInt(in InboundContext context, in PublicUpdatePropertyIntMsg message) => Sink.OnPublicUpdatePropertyInt(context, message);
+
+        public void OnPublicUpdateInstanceId(in InboundContext context, in PublicUpdateInstanceIdMsg message) => Sink.OnPublicUpdateInstanceId(context, message);
+
+        public void OnAdminEnvirons(in InboundContext context, in AdminEnvironsMsg message) => Sink.OnAdminEnvirons(context, message);
+
+        public void OnInventoryPutObjInContainer(in InboundContext context, in GameEventHeader header, in InventoryPutObjInContainerEvent message) =>
+            Sink.OnInventoryPutObjInContainer(context, header, message);
+
+        public void OnWieldObject(in InboundContext context, in GameEventHeader header, in WieldObjectEvent message) =>
+            Sink.OnWieldObject(context, header, message);
+
+        public void OnInventoryPutObjectIn3D(in InboundContext context, in GameEventHeader header, in InventoryPutObjectIn3DEvent message) =>
+            Sink.OnInventoryPutObjectIn3D(context, header, message);
+
+        public void OnInventoryServerSaysFailed(in InboundContext context, in GameEventHeader header, in InventoryServerSaysFailedEvent message) =>
+            Sink.OnInventoryServerSaysFailed(context, header, message);
+
+        public void OnVictimNotification(in InboundContext context, in GameEventHeader header, in VictimNotificationEvent message) =>
+            Sink.OnVictimNotification(context, header, message);
+
+        public void OnKillerNotification(in InboundContext context, in GameEventHeader header, in KillerNotificationEvent message) =>
+            Sink.OnKillerNotification(context, header, message);
+
+        public void OnAttackerNotification(in InboundContext context, in GameEventHeader header, in AttackerNotificationEvent message) =>
+            Sink.OnAttackerNotification(context, header, message);
+
+        public void OnDefenderNotification(in InboundContext context, in GameEventHeader header, in DefenderNotificationEvent message) =>
+            Sink.OnDefenderNotification(context, header, message);
+
+        public void OnEvasionAttackerNotification(in InboundContext context, in GameEventHeader header, in EvasionAttackerNotificationEvent message) =>
+            Sink.OnEvasionAttackerNotification(context, header, message);
+
+        public void OnEvasionDefenderNotification(in InboundContext context, in GameEventHeader header, in EvasionDefenderNotificationEvent message) =>
+            Sink.OnEvasionDefenderNotification(context, header, message);
+
+        public void OnMagicUpdateSpell(in InboundContext context, in GameEventHeader header, in MagicUpdateSpellEvent message) =>
+            Sink.OnMagicUpdateSpell(context, header, message);
+
+        public void OnMagicUpdateEnchantment(in InboundContext context, in GameEventHeader header, in MagicUpdateEnchantmentEvent message) =>
+            Sink.OnMagicUpdateEnchantment(context, header, message);
+
+        public void OnMagicRemoveEnchantment(in InboundContext context, in GameEventHeader header, in MagicRemoveEnchantmentEvent message) =>
+            Sink.OnMagicRemoveEnchantment(context, header, message);
+
+        public void OnMagicUpdateMultipleEnchantments(in InboundContext context, in GameEventHeader header, in MagicUpdateMultipleEnchantmentsEvent message) =>
+            Sink.OnMagicUpdateMultipleEnchantments(context, header, message);
+
+        public void OnMagicRemoveMultipleEnchantments(in InboundContext context, in GameEventHeader header, in MagicRemoveMultipleEnchantmentsEvent message) =>
+            Sink.OnMagicRemoveMultipleEnchantments(context, header, message);
+
+        public void OnMagicPurgeEnchantments(in InboundContext context, in GameEventHeader header, in MagicPurgeEnchantmentsEvent message) =>
+            Sink.OnMagicPurgeEnchantments(context, header, message);
+
+        public void OnMagicDispelEnchantment(in InboundContext context, in GameEventHeader header, in MagicDispelEnchantmentEvent message) =>
+            Sink.OnMagicDispelEnchantment(context, header, message);
+
+        public void OnMagicDispelMultipleEnchantments(in InboundContext context, in GameEventHeader header, in MagicDispelMultipleEnchantmentsEvent message) =>
+            Sink.OnMagicDispelMultipleEnchantments(context, header, message);
+
+        public void OnMagicPurgeBadEnchantments(in InboundContext context, in GameEventHeader header, in MagicPurgeBadEnchantmentsEvent message) =>
+            Sink.OnMagicPurgeBadEnchantments(context, header, message);
+
         // Everything else.
 
         public void OnUnknown(in InboundContext context, uint opcode, ReadOnlySpan<byte> body) => Sink.OnUnknown(context, opcode, body);

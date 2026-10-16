@@ -61,8 +61,8 @@ internal sealed record CharPurgeDecision(ToolError? Refusal, AccountCharacter? T
 /// </remarks>
 internal static class CharPurgeRules
 {
-    /// <summary>The graduated test characters, which stay as the baseline and are never purged (m2-log-in §7 decision 13).</summary>
-    public static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback"];
+    /// <summary>The graduated test characters, which stay as the baseline and are never purged (m2-log-in §7 decision 13; "BSD Mage", the M3 mage, from m3-plan D11).</summary>
+    public static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage"];
 
     /// <summary>The refusals that need no database read: a graduated name, then the caller's own character; null when neither applies.</summary>
     public static ToolError? EarlyRefusal(CharPurgeRequest request, string callerName)

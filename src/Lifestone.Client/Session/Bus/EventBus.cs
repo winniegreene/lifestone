@@ -97,6 +97,21 @@ internal sealed class EventBus : IEventBus
     /// <summary>True while some raw subscriber listens; the session's tap does nothing without one.</summary>
     internal bool HasRawSubscribers => _raw.Length > 0;
 
+    /// <summary>How many typed handlers listen now, over every event type (a test reads it: a screen that ends leaves the count where it began, review 2.2-R2).</summary>
+    internal int HandlerCount
+    {
+        get
+        {
+            var count = 0;
+            foreach (var channel in _channels)
+            {
+                count += channel?.HandlerCount ?? 0;
+            }
+
+            return count;
+        }
+    }
+
     /// <summary>Events queued by publishes during a dispatch and not yet dispatched.</summary>
     internal int PendingCount => _fifoCount;
 
@@ -312,6 +327,9 @@ internal sealed class EventBus : IEventBus
         /// <summary>Events of this type published so far.</summary>
         public long Published { get; set; }
 
+        /// <summary>How many typed handlers listen on this channel.</summary>
+        public abstract int HandlerCount { get; }
+
         /// <summary>Dispatches the oldest pending event of this channel.</summary>
         public abstract void DispatchNext();
     }
@@ -326,6 +344,8 @@ internal sealed class EventBus : IEventBus
 
         /// <summary>The handlers, replaced (never changed in place) by subscribing and unsubscribing.</summary>
         public Subscription<T>[] Handlers { get; set; } = [];
+
+        public override int HandlerCount => Handlers.Length;
 
         public void Enqueue(in T e)
         {

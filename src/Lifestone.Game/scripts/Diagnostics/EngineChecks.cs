@@ -1,11 +1,17 @@
 using System.Collections;
 using Godot;
+using Lifestone.Client.Audio;
 using Lifestone.Client.Rendering;
 using Lifestone.Client.Scheduling;
 using Lifestone.Client.Streaming;
 using Lifestone.Client.World;
+using Lifestone.Data.Animation;
+using Lifestone.Data.Audio;
+using Lifestone.Data.Effects;
 using Lifestone.Data.Geometry;
 using Lifestone.Data.Terrain;
+using Lifestone.Data.World;
+using Lifestone.Game.Audio;
 using Lifestone.Game.Core;
 using Lifestone.Game.Render;
 using Lifestone.Game.World;
@@ -61,6 +67,7 @@ public partial class EngineChecks : Node
         {
             CheckZeroNormalReadback();
             CheckZeroNormalFlagReadback();
+            CheckAmbientSound();
             await CheckStepwiseAttachAsync();
             if (DisplayServer.GetName() == "headless")
             {
@@ -169,6 +176,71 @@ public partial class EngineChecks : Node
             $"idle={idle} attached-before-move={attachedBeforeMove} abandoned-mid-attach={streamer.Stats.AbandonedMidAttach} attaches={layer.Attaches} " +
             $"detaches={layer.Detaches} detach-without-attach={layer.DetachWithoutAttach} steps-after-detach={layer.StepsAfterDetach} " +
             $"sequences started/stopped={layer.SequencesStarted}/{layer.SequencesStopped} prepared/disposed={layer.PreparedCount}/{layer.Disposed} double-disposed={layer.DoubleDisposed}");
+    }
+
+    /// <summary>
+    /// M3 1.3 s2b: the outdoor ambient sound hears a draw. A minute of frames at Holtburg through the real region tables, terrain and
+    /// sound tables onto a counting output (nothing reaches the sound card): the draws must read at least 1 outdoors and 0 indoors.
+    /// The counters print as <c>ambient_draws=</c>, <c>ambient_played=</c>, <c>ambient_skipped=</c> and <c>ambient_heard=</c> (report-only for smoke).
+    /// </summary>
+    private void CheckAmbientSound()
+    {
+        const string name = "ambient sound draws";
+        if (GameServices.Instance.Dats is not { } dats)
+        {
+            Record(name, Outcome.Skipped, "no dats");
+            return;
+        }
+
+        try
+        {
+            var region = RegionSoundData.FromRegion(dats.Region);
+            var terrain = new AmbientTerrainCache(dats, background: false); // the check has no frames to wait over: its reads run inside Get
+            var coord = LandblockCoord.Holtburg;
+            var cell = ((uint)coord.X << 24) | ((uint)coord.Y << 16) | 0x0021u;
+            var listener = new CellFrame(cell, new AcFrame(new AcVector3(96f, 96f, 70f), System.Numerics.Quaternion.Identity));
+
+            AmbientSoundPlayer Make(CountingOutput output) => new(
+                region,
+                dats.TerrainRegion.LandHeightTable,
+                terrain,
+                new RetailSoundPlayer(output, new DatAudioSource(dats), new RetailRandom(1), new MsvcCrtRandom(1)),
+                new RetailRandom(2));
+
+            var heard = new CountingOutput();
+            var outdoor = Make(heard);
+            var indoorOutput = new CountingOutput();
+            var indoor = Make(indoorOutput);
+            for (var frame = 0; frame < 3600; frame++)
+            {
+                var now = frame / 60.0;
+                outdoor.Update(listener, outdoors: true, now);
+                indoor.Update(listener, outdoors: false, now);
+            }
+
+            var ok = outdoor.Draws >= 1 && outdoor.Draws == outdoor.Played + outdoor.Skipped && indoor.Draws == 0 && indoorOutput.Plays == 0;
+            Record(
+                name,
+                ok ? Outcome.Pass : Outcome.Fail,
+                $"ambient_draws={outdoor.Draws} ambient_scans={outdoor.Scans} ambient_played={outdoor.Played} ambient_skipped={outdoor.Skipped} ambient_heard={heard.Plays} sounds={outdoor.ActiveSounds} tables={region.Tables.Count} indoor_draws={indoor.Draws} (a minute of frames at Holtburg; the sink's own roll and attenuation decide what is heard)");
+        }
+        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException)
+        {
+            Record(name, Outcome.Fail, ex.Message);
+        }
+    }
+
+    private sealed class CountingOutput : IAudioOutput
+    {
+        public int Plays { get; private set; }
+
+        public void Play(in VoicePlay play) => Plays++;
+
+        public void Stop(int voice)
+        {
+        }
+
+        public bool IsPlaying(int voice) => false;
     }
 
     private void CheckZeroNormalReadback()

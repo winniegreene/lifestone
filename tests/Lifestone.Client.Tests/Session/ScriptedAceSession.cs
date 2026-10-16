@@ -160,11 +160,17 @@ internal sealed class ScriptedAceSession : IAcSession
         _time = time;
     }
 
+    /// <summary>Every guid the client asked to enter, in order.</summary>
+    public List<uint> EnterRequests { get; } = [];
+
     /// <summary>The account's characters as the server lists them.</summary>
     public List<AceCharacter> Characters { get; } = [new(Amy, "Amy"), new(Bo, "Bo", 1), new(0x50000003, "Cy")];
 
     /// <summary>The access level the mod reports.</summary>
     public string Access { get; set; } = "Player";
+
+    /// <summary>The verbs the mod's status reports (the whole list by default; remove one to play a stale mod).</summary>
+    public IReadOnlyList<string> StatusVerbs { get; set; } = ToolsWire.Verbs;
 
     /// <summary>False to answer every tool request with ACE's "Unknown command: lifestone" (no mod).</summary>
     public bool ModLoaded { get; set; } = true;
@@ -344,6 +350,7 @@ internal sealed class ScriptedAceSession : IAcSession
         }
 
         var name = Characters.First(c => c.Guid == guid).Name;
+        EnterRequests.Add(guid);
         var ticket = Outbound(MessageOpcodes.CharacterEnterWorldRequest, 0, w => w.Write(guid));
         Phase = SessionPhase.EnteringWorld;
         PhaseChange(SessionPhase.CharacterSelect, SessionPhase.EnteringWorld);
@@ -494,6 +501,78 @@ internal sealed class ScriptedAceSession : IAcSession
         return ticket;
     }
 
+    /// <summary>The stat actions sent, as (GameAction type, id, amount); the scripted server does not answer them (the stat trackers are tested with <see cref="FakeAcSession"/> and the stand-in).</summary>
+    public List<(uint Type, uint Id, uint Amount)> StatSends { get; } = [];
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRaiseAttribute(uint attribute, uint xp) => StatAction(GameActionTypes.RaiseAttribute, attribute, xp);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRaiseVital(uint vital, uint xp) => StatAction(GameActionTypes.RaiseVital, vital, xp);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRaiseSkill(uint skill, uint xp) => StatAction(GameActionTypes.RaiseSkill, skill, xp);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTrainSkill(uint skill, int credits) => StatAction(GameActionTypes.TrainSkill, skill, unchecked((uint)credits));
+
+    /// <summary>Every magic, combat-mode and inventory action sent (M3 1.2 s4a): the game action type and its fields in wire order; no behaviour answers them.</summary>
+    public List<(uint Type, uint First, uint Second, uint Third)> WorldActionSends { get; } = [];
+
+    /// <inheritdoc/>
+    public OutboundTicket SendCastUntargetedSpell(uint spellId) => WorldAction(GameActionTypes.CastUntargetedSpell, spellId, 0, 0, 1);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendCastTargetedSpell(uint target, uint spellId) => WorldAction(GameActionTypes.CastTargetedSpell, target, spellId, 0, 2);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendChangeCombatMode(uint mode) => WorldAction(GameActionTypes.ChangeCombatMode, mode, 0, 0, 1);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => WorldAction(GameActionTypes.GetAndWieldItem, item, equipMask, 0, 2);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendPutItemInContainer(uint item, uint container, uint placement) => WorldAction(GameActionTypes.PutItemInContainer, item, container, placement, 3);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendStackableMerge(uint mergeFrom, uint mergeTo, int amount) => WorldAction(GameActionTypes.StackableMerge, mergeFrom, mergeTo, unchecked((uint)amount), 3);
+
+    private OutboundTicket WorldAction(uint type, uint first, uint second, uint third, int fields)
+    {
+        WorldActionSends.Add((type, first, second, third));
+        return Action(type, w =>
+        {
+            w.Write(first);
+            if (fields > 1)
+            {
+                w.Write(second);
+            }
+
+            if (fields > 2)
+            {
+                w.Write(third);
+            }
+        });
+    }
+
+    private OutboundTicket StatAction(uint type, uint id, uint amount)
+    {
+        StatSends.Add((type, id, amount));
+        var ticket = Action(type, w =>
+        {
+            w.Write(id);
+            w.Write(amount);
+        });
+        StatHook?.Invoke(type, id, amount);
+        return ticket;
+    }
+
+    /// <summary>Called after each stat action is accepted (type, id, amount); the hook answers by <see cref="Inject"/>ing the private updates (<see cref="ScriptedMage"/>). Null: no answer.</summary>
+    public Action<uint, uint, uint>? StatHook { get; set; }
+
+    /// <summary>Answers a mod request the scripted server does not do itself (<c>xp</c>, <c>spell learn</c>): returns the reply text, or null for the default refusal (<see cref="ScriptedMage"/>).</summary>
+    public Func<ToolRequest, string?>? ToolHook { get; set; }
+
     /// <inheritdoc/>
     public OutboundTicket SendTalk(ReadOnlySpan<char> text)
     {
@@ -524,7 +603,7 @@ internal sealed class ScriptedAceSession : IAcSession
         switch (request)
         {
             case StatusRequest:
-                var status = new StatusData(1, "0.1.0", new string('a', 40), new string('b', 64), "127.0.0.1", 9000, false, Access, "lifestone-test", "Amy", "Open", ToolsWire.Verbs);
+                var status = new StatusData(1, "0.1.0", new string('a', 40), new string('b', 64), "127.0.0.1", 9000, false, Access, "lifestone-test", "Amy", "Open", StatusVerbs);
                 reply = ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Status, status), status.Describe());
                 break;
             case WhereRequest:
@@ -555,6 +634,12 @@ internal sealed class ScriptedAceSession : IAcSession
                 Message(AceWireWriters.UpdatePosition(PlayerGuid!.Value, _where, true, new AceUpdatePositionSequences(1, _positionStamp, _teleportStamp, _forceStamp)));
                 return ticket;
             default:
+                if (ToolHook?.Invoke(request) is { } custom)
+                {
+                    reply = custom;
+                    break;
+                }
+
                 var unsupported = new ToolError(ToolErrors.All[0], "the scripted server does not do that");
                 reply = ToolsWire.Reply(ToolReply.Failure(request.Id, ToolVerbs.Status, unsupported), unsupported.Message);
                 break;

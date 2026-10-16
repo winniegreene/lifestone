@@ -106,6 +106,10 @@ internal sealed class ActionHarness
         R.EnterWorld();
     }
 
+    /// <summary>The player's PlayerDescription (an empty one unless <paramref name="description"/> is given): LoginComplete waits for it (M3 1.2 s5).</summary>
+    public void Describe(PlayerDescriptionMsg? description = null) =>
+        R.Reducer.OnPlayerDescription(R.Context, Header, description ?? new PlayerDescriptionMsg());
+
     /// <summary>ACE's SetState that clears Hidden on the player (the player becomes <see cref="SelfTravel.Present"/>).</summary>
     public void Unhide(ushort stateStamp = 2) =>
         R.Reducer.OnSetState(R.Context, new SetStateMsg(Amy, PhysicsState.Gravity | PhysicsState.EdgeSlide, 1, stateStamp));

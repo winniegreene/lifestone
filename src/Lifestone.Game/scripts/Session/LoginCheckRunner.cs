@@ -1,5 +1,6 @@
 using System.Globalization;
 using Godot;
+using Lifestone.Client.Audio;
 using Lifestone.Client.Avatars;
 using Lifestone.Client.Play;
 using Lifestone.Client.PortalSpace;
@@ -13,10 +14,13 @@ using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Tools;
 using Lifestone.Data.Physics;
 using Lifestone.Data.World;
+using Lifestone.Game.Audio;
 using Lifestone.Game.Core;
 using Lifestone.Game.Diagnostics;
 using Lifestone.Game.PortalSpace;
+using Lifestone.Game.Render.Particles;
 using Lifestone.Game.RetailUi;
+using Lifestone.Game.World.Objects;
 
 namespace Lifestone.Game.Sessions;
 
@@ -28,6 +32,10 @@ namespace Lifestone.Game.Sessions;
 /// count and the frame times between Enter and the first moment the player could walk.
 /// </summary>
 /// <remarks>
+/// <para>M3 1.3 s3: the line ends with the report-only <c> sounds_server= sounds_hooks= sounds_ui= ambient=</c> (<see cref="LoginCheckScenario.SoundFields"/>): the counters per leg (<see cref="SoundLegTally"/>, fix B: <c>sounds_server</c> in the Academy arrival, <c>ambient</c> in the Holtburg laps, <c>sounds_hooks</c> and <c>sounds_ui</c> since the Enter;
+/// <c>sounds_server</c> and <c>sounds_hooks</c> are voices started, the <c>*_handed</c> fields are calls handed to the sound player), each <c>n/a</c> when the run has no such counter, never 0
+/// (M3 2.1 s3: <c>sounds_hooks</c> over the walking legs is judged, at least 1 (<see cref="LoginCheckScenario.JudgeWalkingSounds"/>); the Academy arrival's <c>sounds_server</c> stays a report, D27 judges it in the buff leg,
+/// <see cref="BuffLegRunner"/>; <c>sounds_ui</c> is judged in <c>--retail-ui-checks</c> only).</para>
 /// <para>g7: the line ends with <c>shell=ok|missing vitals=&lt;h&gt;/&lt;s&gt;/&lt;m&gt; (read from the shell's meters) spew_portal=yes|no vitals_window=stacked|side</c> (<see cref="LoginCheckShell"/>, <see cref="ShellWatch"/>): all four are judged (docs/session.md section 27).</para>
 /// <para>The verdict line is <c>[logincheck] done ok=&lt;true|false&gt; enter_to_walk_max_ms=&lt;x&gt; teleports=&lt;n&gt; academy_objects=&lt;n&gt; logoff=&lt;ok|failed&gt; materialised=&lt;true|false|n/a&gt; objects_drawn=&lt;n|n/a&gt;</c>
 /// (fields the run did not reach are <c>n/a</c>; <c>academy_objects</c> is the census of the world content the server placed, <see cref="Lifestone.Client.Avatars.WorldContentCensus"/>;
@@ -144,6 +152,11 @@ public sealed partial class LoginCheckRunner : Node
     private double _worstPartsMs;
     private readonly PipelineCompilationWatch _pipelines = new();
     private readonly GcFrameWatch _gcWatch = new();
+    private readonly SoundLegTally _soundLegs = new();
+    private int _lastAudioStarts;
+    private int _lastAudioArrived;
+    private int _lastLivingMeshes;
+    private FrameAudioWork _frameAudio;
     private PipelineCompilations _windowCompiled;
     private bool _rigAtPresent;
     private bool _rigGoneAtEnd;
@@ -206,6 +219,12 @@ public sealed partial class LoginCheckRunner : Node
         if (kind == LoginCheckKind.Throwaway)
         {
             ThrowawayLegRunner.Install(main, host, mode, ui); // a separate check with its own script and verdict (never part of 'all')
+            return;
+        }
+
+        if (kind == LoginCheckKind.Buff)
+        {
+            BuffLegRunner.Install(main, services, host, mode, ui); // a kind of its own (docs/session.md section 30): BSD Mage's buff cycle, never part of 'all'
             return;
         }
 
@@ -299,6 +318,8 @@ public sealed partial class LoginCheckRunner : Node
             return;
         }
 
+        TakeAudioWork();
+        StepSounds();
         TrackLegFrames(delta, session, compiled);
 
         if (!double.IsNaN(_scenario.EnterAt) && double.IsNaN(_scenario.SettledAt) && _listFrame >= 0 && _frame >= _listFrame + ListSettleFrames)
@@ -356,6 +377,7 @@ public sealed partial class LoginCheckRunner : Node
                         ("rig", _mode.Rig is not null),
                         ("adapter_pending", _mode.Adapter?.Pending ?? -1),
                         .. partsBefore.Fields(),
+                        .. _frameAudio.Fields(),
                         .. gc.Fields(),
                         ("physics_ms_previous_frame", Performance.GetMonitor(Performance.Monitor.TimePhysicsProcess) * 1000.0),
                         .. compiled.Fields(),
@@ -510,6 +532,49 @@ public sealed partial class LoginCheckRunner : Node
             _recoveryLogOff = session.Actions.LogOff(ActionSource.Host);
             _recoveryLogOffAt = _runSeconds;
         }
+    }
+
+    /// <summary>
+    /// The audio and particle work that landed in one frame (M3 1.3 fix B, review 1.3-R1 attribution), written on the slow-frame lines beside <see cref="FrameParts"/> so the
+    /// arrival spike is attributed to a stage: voices started (<see cref="AudioService.Starts"/>), wave streams that arrived on the main thread
+    /// (<see cref="WaveStreams.Arrived"/>) and living-static particle meshes finished (<see cref="ParticleMeshLibrary.MeshCount"/>).
+    /// </summary>
+    /// <remarks>
+    /// <c>TODO(server-particle-meshes-counter)</c>: the mesh count covers the living statics' library only. The server objects' library (<c>ServerObjectParticles</c>, where the
+    /// script tables' meshes finish in the CreateObject burst) is private and exposes no counter; <c>particle_meshes_server</c> is always <c>n/a</c> until it does.
+    /// </remarks>
+    private readonly record struct FrameAudioWork(int VoicesStarted, int StreamsArrived, int LivingMeshesFinished)
+    {
+        /// <summary>The log fields; the values are of the frame the line's <c>ms</c> measures (read each frame, so the delta since the previous read).</summary>
+        public (string, object?)[] Fields() =>
+        [
+            ("audio_voices_started_frame", VoicesStarted),
+            ("audio_streams_arrived_frame", StreamsArrived),
+            ("particle_meshes_finished_frame_living_statics", LivingMeshesFinished),
+            ("particle_meshes_server", "n/a (TODO(server-particle-meshes-counter))"),
+        ];
+    }
+
+    /// <summary>Reads the audio and particle counters and keeps the growth since the previous frame (a counter that went back counts as no work).</summary>
+    private void TakeAudioWork()
+    {
+        var starts = AudioService.Current?.Starts ?? 0;
+        var arrived = AudioService.Current?.Streams.Arrived ?? 0;
+        var meshes = LivingStaticsSystem.Instance?.Particles?.MeshCount ?? 0;
+        _frameAudio = new FrameAudioWork(Math.Max(0, starts - _lastAudioStarts), Math.Max(0, arrived - _lastAudioArrived), Math.Max(0, meshes - _lastLivingMeshes));
+        (_lastAudioStarts, _lastAudioArrived, _lastLivingMeshes) = (starts, arrived, meshes);
+    }
+
+    /// <summary>
+    /// Adds this frame's sound counters to the leg the frame belongs to (<see cref="SoundLegTally"/>): the Academy arrival from the Enter to the settle, then each movement leg,
+    /// and nothing before the Enter, so what played on the character list is not counted (M3 1.3 fix B, review 1.3-R2).
+    /// </summary>
+    private void StepSounds()
+    {
+        var leg = double.IsNaN(_scenario.EnterAt)
+            ? null
+            : double.IsNaN(_scenario.SettledAt) ? LoginCheckScenario.SoundArrivalLeg : _scenario.CurrentLeg?.Name ?? LoginCheckScenario.SoundBetweenLegs;
+        _soundLegs.Step(leg, AudioService.ReadSources(_mode.HookSounds, _ui?.SoundStats, AmbientSoundNode.Current?.Player));
     }
 
     /// <summary>
@@ -920,6 +985,33 @@ public sealed partial class LoginCheckRunner : Node
         {
             problems.Add($"DoD 15: {_teleportSlowFrames} frame(s) over {FrameLimitMilliseconds:0} ms around the legs' server teleports, the longest {_teleportFrameMaxMs:0.0} ms (each is logged above with what the frame held)");
         }
+
+        JudgeWalkingSounds(problems);
+    }
+
+    /// <summary>
+    /// The walking legs' sound judge (M3 2.1 s3; DoD 13): the hook voices the legs that walked started, each leg's own tally summed (the arrival's and the frames between legs are not counted),
+    /// judged at least 1 by <see cref="LoginCheckScenario.JudgeWalkingSounds"/>. <c>sounds_server</c> of the Academy arrival stays a report (D27).
+    /// </summary>
+    private void JudgeWalkingSounds(List<string> problems)
+    {
+        int? hooks = null;
+        foreach (var leg in _scenario.Legs)
+        {
+            if (_soundLegs.Of(leg.Name).Hooks is { } sounded)
+            {
+                hooks = (hooks ?? 0) + sounded;
+            }
+        }
+
+        if (LoginCheckScenario.JudgeWalkingSounds(hooks, _scenario.Legs.Count) is { } problem)
+        {
+            problems.Add(problem);
+        }
+        else if (_scenario.Legs.Count > 0)
+        {
+            Log.Info(LogCategory, "walking legs' sounds judged", ("sounds_hooks_walking", hooks ?? -1));
+        }
     }
 
     /// <summary>What only the engine sees, sampled every frame: the tunnel, the player's body, the layer's objects, the particles and the adapter's counters.</summary>
@@ -1327,7 +1419,7 @@ public sealed partial class LoginCheckRunner : Node
         var inv = CultureInfo.InvariantCulture;
         var line = string.Create(
             CultureInfo.InvariantCulture,
-            $"done ok={(held ? "true" : "false")} enter_to_walk_max_ms={(reachedWalk ? _maxFrameMs.ToString("0.0", CultureInfo.InvariantCulture) : "n/a")} holtburg_min_fps={(double.IsNaN(_holtburgMinFps) ? "n/a" : _holtburgMinFps.ToString("0.0", inv))} corrections={(_scenario.Corrections is { } corrections ? corrections.ToString(inv) : "n/a")} where_max_m={(_scenario.WhereMaxMetres is { } whereMax ? whereMax.ToString("0.00", inv) : "n/a")} exit={exit} quest={_scenario.ExitQuestVerdict} legs={legsText} teleports={(_scenario.EnteredGuid != 0 && reachedAcademy ? _scenario.Teleports.ToString(CultureInfo.InvariantCulture) : "n/a")} leg_teleports={(legsWalked ? _scenario.LegTeleports.ToString(inv) : "n/a")} teleport_frame_max_ms={(_teleportWindowFrames > 0 ? _teleportFrameMaxMs.ToString("0.0", inv) : "n/a")} academy_objects={(reachedAcademy ? _scenario.AcademyObjects.ToString(CultureInfo.InvariantCulture) : "n/a")} logoff={(_scenario.LogOffOk ? "ok" : "failed")} materialised={(_rigAtPresent ? (_hiddenCreates >= 1 && _unhides >= 1 && _playerPartsMax >= 1 && _playerParticleObjectsMax >= 1 ? "true" : "false") : "n/a")} fade_ms={(_rigAtPresent && !double.IsNaN(_fadeMs) ? _fadeMs.ToString("0", inv) : "n/a")} objects_drawn={(reachedAcademy ? _objectsDrawnMax.ToString(CultureInfo.InvariantCulture) : "n/a")} academy_undrawn={(_academyCensus is null ? "n/a" : _academyCensus.Missing.Count.ToString(inv))} holtburg_objects_drawn_max={(holtburgRan ? _holtburgObjectsDrawnMax.ToString(inv) : "n/a")} holtburg_npcs={(holtburgRan ? _holtburgNpcsDrawnMax.ToString(inv) + "/" + _holtburgNpcsPlacedMax.ToString(inv) : "n/a")} holtburg_max_frame_ms={(holtburgRan ? _holtburgMaxFrameMs.ToString("0.0", inv) : "n/a")} tunnel_seconds={(_portal is null ? "n/a" : _arrivalTunnelSeconds.ToString("0.0", inv))} portal_seconds={(_portal is null ? "n/a" : _arrivalSequenceSeconds.ToString("0.0", inv))} tunnel_covered_frames={(_portal is null ? "n/a" : _tunnelCoveredFrames.ToString(inv))} logoff_tunnel={(_portal is null ? "n/a" : LogOffTunnelVerdict)} portal_sounds={(_portal is null ? "n/a" : PortalSoundsVerdict)} sound_enter={_enterCues} sound_exit={_exitCues} sound_hum={_humEvents} logoff_by={_scenario.LogOffVia}{LoginCheckShell.Fields(_shell.ShellUp, _ui is not null ? _shell.VitalsOnScreen : _scenario.Vitals, _shell.SpewPortal, _shell.ShownWindow)}");
+            $"done ok={(held ? "true" : "false")} enter_to_walk_max_ms={(reachedWalk ? _maxFrameMs.ToString("0.0", CultureInfo.InvariantCulture) : "n/a")} holtburg_min_fps={(double.IsNaN(_holtburgMinFps) ? "n/a" : _holtburgMinFps.ToString("0.0", inv))} corrections={(_scenario.Corrections is { } corrections ? corrections.ToString(inv) : "n/a")} where_max_m={(_scenario.WhereMaxMetres is { } whereMax ? whereMax.ToString("0.00", inv) : "n/a")} exit={exit} quest={_scenario.ExitQuestVerdict} legs={legsText} teleports={(_scenario.EnteredGuid != 0 && reachedAcademy ? _scenario.Teleports.ToString(CultureInfo.InvariantCulture) : "n/a")} leg_teleports={(legsWalked ? _scenario.LegTeleports.ToString(inv) : "n/a")} teleport_frame_max_ms={(_teleportWindowFrames > 0 ? _teleportFrameMaxMs.ToString("0.0", inv) : "n/a")} academy_objects={(reachedAcademy ? _scenario.AcademyObjects.ToString(CultureInfo.InvariantCulture) : "n/a")} logoff={(_scenario.LogOffOk ? "ok" : "failed")} materialised={(_rigAtPresent ? (_hiddenCreates >= 1 && _unhides >= 1 && _playerPartsMax >= 1 && _playerParticleObjectsMax >= 1 ? "true" : "false") : "n/a")} fade_ms={(_rigAtPresent && !double.IsNaN(_fadeMs) ? _fadeMs.ToString("0", inv) : "n/a")} objects_drawn={(reachedAcademy ? _objectsDrawnMax.ToString(CultureInfo.InvariantCulture) : "n/a")} academy_undrawn={(_academyCensus is null ? "n/a" : _academyCensus.Missing.Count.ToString(inv))} holtburg_objects_drawn_max={(holtburgRan ? _holtburgObjectsDrawnMax.ToString(inv) : "n/a")} holtburg_npcs={(holtburgRan ? _holtburgNpcsDrawnMax.ToString(inv) + "/" + _holtburgNpcsPlacedMax.ToString(inv) : "n/a")} holtburg_max_frame_ms={(holtburgRan ? _holtburgMaxFrameMs.ToString("0.0", inv) : "n/a")} tunnel_seconds={(_portal is null ? "n/a" : _arrivalTunnelSeconds.ToString("0.0", inv))} portal_seconds={(_portal is null ? "n/a" : _arrivalSequenceSeconds.ToString("0.0", inv))} tunnel_covered_frames={(_portal is null ? "n/a" : _tunnelCoveredFrames.ToString(inv))} logoff_tunnel={(_portal is null ? "n/a" : LogOffTunnelVerdict)} portal_sounds={(_portal is null ? "n/a" : PortalSoundsVerdict)} sound_enter={_enterCues} sound_exit={_exitCues} sound_hum={_humEvents} logoff_by={_scenario.LogOffVia}{LoginCheckShell.Fields(_shell.ShellUp, _ui is not null ? _shell.VitalsOnScreen : _scenario.Vitals, _shell.SpewPortal, _shell.ShownWindow)}{_scenario.ReportFields}{LoginCheckScenario.SoundFields(_soundLegs.Report(LoginCheckScenario.SoundArrivalLeg, RouteLibrary.HoltburgLapsName))}");
         WriteMovementAudits();
         foreach (var leg in _scenario.Legs)
         {
@@ -1335,6 +1427,14 @@ public sealed partial class LoginCheckRunner : Node
         }
 
         Log.Info(LogCategory, line);
+        var soundLegs = new List<(string, object?)>();
+        foreach (var name in _scenario.Legs.Select(l => l.Name).Prepend(LoginCheckScenario.SoundArrivalLeg).Append(LoginCheckScenario.SoundBetweenLegs))
+        {
+            var c = _soundLegs.Of(name);
+            soundLegs.Add((name, $"server_sounded={SoundSourceCounts.Value(c.Server)} hooks_sounded={SoundSourceCounts.Value(c.Hooks)} ui={SoundSourceCounts.Value(c.Ui)} ambient={SoundSourceCounts.Value(c.Ambient)} server_handed={SoundSourceCounts.Value(c.ServerHanded)} hooks_handed={SoundSourceCounts.Value(c.HooksHanded)} player_footsteps_handed={SoundSourceCounts.Value(c.Footsteps)} player_footsteps_sounded={SoundSourceCounts.Value(c.FootstepsSounded)}"));
+        }
+
+        Log.Info(LogCategory, "sound counters per leg (report-only)", soundLegs.ToArray());
         Log.Info(
             LogCategory,
             "detail",

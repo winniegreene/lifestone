@@ -17,6 +17,7 @@ namespace Lifestone.Game.RetailUi;
 /// mode's light: one distant light of intensity 2 and the 0.3 ambient (<see cref="Cg3DViewModel.LightDirection"/>).
 /// </summary>
 /// <remarks>
+/// <para><b>One binder, two pages.</b> It draws any <see cref="ICreatureView"/>: character creation's <see cref="Cg3DViewModel"/> and the paperdoll's figure (M3 2.2 b4, viewport 0x100001D5), so both share the code.</para>
 /// <para><b>What it draws.</b> Each frame the model's version is compared with the one last drawn; when it changed (a choice, the camera, the heading, a
 /// step of the pose) every part is posed again from <see cref="CreaturePreview.Draws"/> through <see cref="AcToGodot"/>, and a part whose GfxObj or whose
 /// dress (<see cref="Lifestone.Data.Appearance.PartAppearance.VariantKey"/>: its texture swaps and its modified palette) changed gets the mesh of that
@@ -38,7 +39,7 @@ public sealed partial class CharGenViewportBinder : Node, IUiViewportSource
     public const float Near = 0.1f;
 
     private readonly GameServices _services;
-    private readonly Cg3DViewModel _model;
+    private readonly ICreatureView _model;
     private readonly string _label;
     private CreatureModeView _view = null!;
     private ActorMeshLibrary _meshes = null!;
@@ -53,8 +54,8 @@ public sealed partial class CharGenViewportBinder : Node, IUiViewportSource
     private int _redraws;
     private bool _lightLogged;
 
-    /// <summary>A binder for <paramref name="model"/>; <paramref name="label"/> names it in logs (the page it serves).</summary>
-    public CharGenViewportBinder(GameServices services, Cg3DViewModel model, string label)
+    /// <summary>A binder for <paramref name="model"/> (character creation's <see cref="Cg3DViewModel"/>, the paperdoll's <c>PaperDollFigure</c>); <paramref name="label"/> names it in logs (the page it serves).</summary>
+    public CharGenViewportBinder(GameServices services, ICreatureView model, string label)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(model);

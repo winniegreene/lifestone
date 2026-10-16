@@ -276,7 +276,7 @@ public sealed class RetailSoundPlayerTests(DatSetFixture fixture) : IClassFixtur
             tunnel.DrainEvents(events);
             foreach (var e in events)
             {
-                router.OnEffectEvent(e, PortalSpaceScene.TunnelHumOrigin);
+                router.OnEffectEvent(e, PortalSpaceScene.TunnelHumOrigin, 0);
             }
         }
 

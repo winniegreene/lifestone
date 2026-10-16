@@ -1,8 +1,11 @@
 using Godot;
 using Lifestone.Client.Audio;
+using Lifestone.Client.RetailUi.Core;
 using Lifestone.Data.Audio;
 using Lifestone.Data.Effects;
 using Lifestone.Game.Core;
+using Lifestone.Game.RetailUi;
+using Lifestone.Game.Sessions;
 
 namespace Lifestone.Game.Audio;
 
@@ -44,12 +47,18 @@ public partial class AudioService : Node, IAudioOutput
     private ulong _busyUntilMsec;
     private AudioEffectRecord? _record;
     private string? _recordPath;
+    private SoundHookRouter? _routerSeen;
+    private RetailUiSoundStats? _uiStatsSeen;
+    private AmbientSoundPlayer? _ambientSeen;
 
     /// <summary>The installed service, or null (check suites, the spell viewer, a missing dat).</summary>
     public static AudioService? Current { get; private set; }
 
     /// <summary>The master bus's settings in force.</summary>
     public AudioSettings Settings { get; private set; } = AudioSettings.Default;
+
+    /// <summary>True while the master level is silent (muted, or a volume of 0): M2 D8's automated default. Sounds still run through the retail rules then, so counters count them.</summary>
+    public bool IsSilent => Settings.Gain <= 0f;
 
     /// <summary>The retail rules over this output: the <see cref="ISoundSink"/> the portal space and the retail UI play through.</summary>
     public RetailSoundPlayer Sound { get; private set; } = null!;
@@ -102,6 +111,65 @@ public partial class AudioService : Node, IAudioOutput
         }
 
         return service;
+    }
+
+    /// <summary>
+    /// Installs the audio service under <paramref name="parent"/>: the one install path, used by the portal view (<c>PortalSpaceSetup</c>) and by the runs that
+    /// have no portal view (<c>--retail-ui-only</c> and <c>--retail-ui-frames</c>, whose UI sounds the UI layer plays through the service): <c>--volume</c> / <c>--mute</c> as
+    /// <see cref="AudioOptions.Resolve"/> reads them (silent when automated, D8), the shutdown guard after the service, and
+    /// <c>--record-audio</c> started. Returns the service already installed when there is one, or null (logged as an error) when it could not
+    /// be built; the run is then silent.
+    /// </summary>
+    /// <param name="parent">The node to add the service to (the main scene).</param>
+    /// <param name="services">The game services (dats, options).</param>
+    /// <param name="args">The user arguments (<c>OS.GetCmdlineUserArgs()</c>).</param>
+    /// <param name="seed">The seed of the variant and probability rolls.</param>
+    /// <param name="portalView">True when the portal view installs it (only the log line differs).</param>
+    public static AudioService? Install(Node parent, GameServices services, IEnumerable<string> args, int seed, bool portalView = false)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(args);
+        if (Current is { } installed)
+        {
+            return installed;
+        }
+
+        var options = AudioOptions.Parse(args);
+        foreach (var problem in options.Errors)
+        {
+            Log.Warn("audio", "bad argument", ("problem", problem));
+        }
+
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var settings = options.Resolve(services.Options.IsAutomated);
+        AudioService? audio = null;
+        try
+        {
+            audio = Create(services, settings, seed);
+            parent.AddChild(audio);
+            parent.AddChild(ShutdownGuard.For(audio)); // after the service: it exits first and stops the voices cleanly
+            Log.Info(
+                "audio",
+                portalView ? "audio service installed" : "audio service installed (no portal view in this run)",
+                ("voices", VoiceCount),
+                ("master_db", settings.MasterDecibels),
+                ("muted", settings.Muted),
+                ("device", AudioServer.GetOutputDevice()),
+                ("ms", timer.Elapsed.TotalMilliseconds));
+            if (options.RecordPath is not null)
+            {
+                audio.StartRecording(options.RecordPath);
+            }
+
+            return audio;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log.Error("audio", "the audio service could not be built; the game is silent", ("problem", ex.Message), ("type", ex.GetType().Name));
+            audio?.QueueFree();
+            return null;
+        }
     }
 
     /// <summary>Sets Master's level from <paramref name="settings"/>: muted and at −80 dB when silent, else the linear volume in decibels.</summary>
@@ -193,6 +261,10 @@ public partial class AudioService : Node, IAudioOutput
     /// <summary>The voice's player (checks).</summary>
     public AudioStreamPlayer PlayerOf(int voice) => _players[CheckVoice(voice)];
 
+    /// <inheritdoc/>
+    public override void _Ready() => SetProcess(_record is not null); // M3 1.3 fix B (R10): _Process only samples the counter owners while recording
+
+    /// <inheritdoc/>
     public override void _EnterTree()
     {
         Current = this;
@@ -254,6 +326,7 @@ public partial class AudioService : Node, IAudioOutput
         _record = new AudioEffectRecord { Format = AudioStreamWav.FormatEnum.Format16Bits };
         AudioServer.AddBusEffect(MasterBus, _record);
         _record.SetRecordingActive(true);
+        SetProcess(true);
         Log.Info("audio", "audio recording started", ("path", path), ("unix_ms", (long)(Time.GetUnixTimeFromSystem() * 1000.0)), ("mix_rate", AudioServer.GetMixRate()));
     }
 
@@ -270,6 +343,7 @@ public partial class AudioService : Node, IAudioOutput
 
         var record = _record;
         _record = null;
+        SetProcess(false);
         try
         {
             record.SetRecordingActive(false);
@@ -286,6 +360,7 @@ public partial class AudioService : Node, IAudioOutput
             if (error == Error.Ok)
             {
                 Log.Info("audio", "audio recording written", ("path", _recordPath), ("seconds", recording.GetLength()), ("unix_ms", (long)(Time.GetUnixTimeFromSystem() * 1000.0)));
+                LogLevels(_recordPath);
             }
             else
             {
@@ -295,6 +370,69 @@ public partial class AudioService : Node, IAudioOutput
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log.Error("audio", "audio recording could not be written", ("path", _recordPath), ("problem", ex.Message), ("type", ex.GetType().Name));
+        }
+    }
+
+    /// <summary>
+    /// While a recording runs, remembers the sound counters' owners (play mode's hook router, the retail UI's sound stats, the ambient player): they
+    /// leave their statics when their nodes leave the tree, which is before <see cref="ShutdownGuard"/> writes the recording, and the levels line
+    /// (<see cref="LogLevels"/>) reports the counters at the end of the run. A few static reads a frame, no allocation.
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        if (_record is null)
+        {
+            return;
+        }
+
+        _routerSeen = PlayMode.Current?.HookSounds ?? _routerSeen;
+        _uiStatsSeen = RetailUiLayer.Current?.SoundStats ?? _uiStatsSeen;
+        _ambientSeen = AmbientSoundNode.Current?.Player ?? _ambientSeen;
+    }
+
+    /// <summary>
+    /// The sound counters per source (M3 1.3 s3, fixed in fix B): the hook router's server sounds and hooks as voices the hand-off started ("sounded"; n/a when
+    /// the router's sink cannot say), its handed-over totals and the player's own footsteps (handed, and sounded: the human table has no wave for them), the
+    /// retail UI's played sounds and the ambient draws that played. A source that does not exist in the run (null) is <c>n/a</c>, never 0.
+    /// </summary>
+    public static SoundSourceCounts ReadSources(SoundHookRouter? router, RetailUiSoundStats? ui, AmbientSoundPlayer? ambient) =>
+        new(
+            router is { CountsSounded: true } ? router.ServerSounded : null,
+            router is { CountsSounded: true } ? router.HooksSounded : null,
+            router?.PlayerFootsteps,
+            ui?.Played,
+            ambient?.Played,
+            router?.ServerSounds,
+            router?.HooksPlayed,
+            router is { CountsSounded: true } ? router.PlayerFootstepsSounded : null);
+
+    /// <summary>
+    /// Reads back the recording just written and logs the audio check's line (<see cref="WaveLevels.LevelsLine"/>): the file, its length, peak and RMS in
+    /// dBFS, the active 50 ms windows and the per-source counters; a silent recording is a loud warning (the smoke step judges it). A read failure is an
+    /// error in the log. <c>muted=true</c> is the proof that an automated run recorded without the Master bus reaching the speakers (M2 D8).
+    /// </summary>
+    private void LogLevels(string fullPath)
+    {
+        try
+        {
+            var levels = WaveLevels.Analyze(System.IO.File.ReadAllBytes(fullPath));
+            var relative = System.IO.Path.GetRelativePath(Diagnostics.ScreenshotWriter.RepositoryRoot, fullPath).Replace('\\', '/');
+            var sources = ReadSources(_routerSeen, _uiStatsSeen, _ambientSeen).Describe();
+            Log.Info("audio", WaveLevels.LevelsLine(relative, levels, sources, IsSilent));
+            Log.Info("audio", "sound player outcomes (report-only; every source but the ambient player shares this player)", ("requested", Sound.Requested), ("played", Sound.Played), ("silent_probability_or_attenuation", Sound.Silent), ("dropped", Sound.Dropped), ("disabled", Sound.Disabled), ("missing", Sound.Missing));
+            if (_routerSeen is { Diagnostics: { } diagnostics })
+            {
+                Log.Info("audio", "hook sound diagnostics (report-only)", ("by_kind", diagnostics.Summary()), ("distance_sounded_over_refused", diagnostics.Distances()), ("refused_samples", diagnostics.Samples()), ("effect_volume", Sound.Levels.EffectVolume));
+            }
+
+            if (!levels.NonSilent)
+            {
+                Log.Warn("audio", "audio recording is silent (peak not above -60 dBFS or no active 50 ms window)", ("path", relative), ("peak_dbfs", levels.PeakDbfs), ("active_windows", levels.ActiveWindows));
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log.Error("audio", "audio recording could not be read back", ("path", fullPath), ("problem", ex.Message), ("type", ex.GetType().Name));
         }
     }
 

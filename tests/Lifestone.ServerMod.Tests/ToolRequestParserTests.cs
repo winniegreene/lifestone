@@ -23,6 +23,17 @@ public sealed class ToolRequestParserTests
         new XpRequest(1),
         new XpRequest(1000, "x"),
         new XpRequest(ToolRequestParser.MaxXp, "max"),
+        new XpRequest(4_286_609_098, "lvl126"),
+        new XpRequest(int.MaxValue + 1L),
+        new SpellLearnRequest([1]),
+        new SpellLearnRequest([1, 2, 3], "s1"),
+        new SpellLearnRequest([0, 4_294_967_295, 5]),
+        new SpellLearnRequest([7, 7], "dup"),
+        new SpellLearnRequest(Enumerable.Range(1, ToolRequestParser.MaxSpellIds).Select(i => (uint)i).ToArray(), "max"),
+        new ItemRequest(1628),
+        new ItemRequest(1628, 1, "i1"),
+        new ItemRequest(0, ToolRequestParser.MaxItemStack),
+        new ItemRequest(4_294_967_295, 25, "i2"),
         new PlacePoiRequest("Holtburg"),
         new PlacePoiRequest("Bandit Castle", "a2"),
         new PlacePoiRequest("Al-Arqas", "a3"),
@@ -81,6 +92,11 @@ public sealed class ToolRequestParserTests
     [InlineData("quest-has", "@lifestone quest has BurFlagged(Gem) #h")]
     [InlineData("char-purge", "@lifestone char purge \"Lifestone Throwaway\" #p1")]
     [InlineData("char-purge-one-word", "@lifestone char purge \"Ann\"")]
+    [InlineData("xp-126", "@lifestone xp 4286609098 #l")]
+    [InlineData("spell", "@lifestone spell learn 1,2,3 #s1")]
+    [InlineData("spell-one", "@lifestone spell learn 5189")]
+    [InlineData("item", "@lifestone item 1628")]
+    [InlineData("item-stack", "@lifestone item 273 25 #i1")]
     public void Requests_have_one_canonical_text(string which, string expected)
     {
         ToolRequest request = which switch
@@ -93,6 +109,11 @@ public sealed class ToolRequestParserTests
             "quest-has" => new QuestRequest(QuestAction.Has, "BurFlagged(Gem)", "h"),
             "char-purge" => new CharPurgeRequest("Lifestone Throwaway", "p1"),
             "char-purge-one-word" => new CharPurgeRequest("Ann"),
+            "xp-126" => new XpRequest(4_286_609_098, "l"),
+            "spell" => new SpellLearnRequest([1, 2, 3], "s1"),
+            "spell-one" => new SpellLearnRequest([5189]),
+            "item" => new ItemRequest(1628),
+            "item-stack" => new ItemRequest(273, 25, "i1"),
             "loc" => new PlaceLocRequest(new ToolLocation(0xA9B40019, 84.5f, 7.1f, 94.005f)),
             _ => new PlaceLocRequest(new ToolLocation(0xA9B40019, 84.5f, 7.1f, 94.005f, 0.5f, 0.5f, 0.5f, 0.5f), "z"),
         };
@@ -105,6 +126,9 @@ public sealed class ToolRequestParserTests
     [InlineData("nEt", "net")]
     [InlineData("PLACES", "places")]
     [InlineData("XP 5", "xp")]
+    [InlineData("SPELL LEARN 1,2", "spell")]
+    [InlineData("Spell Learn 7", "spell")]
+    [InlineData("ITEM 1628 2", "item")]
     [InlineData("PLACE POI Holtburg", "place")]
     [InlineData("Place Loc 0xa9b40019 84.5 7.1 94", "place")]
     [InlineData("place loc A9B40019 84.5 7.1 94", "place")]
@@ -290,6 +314,38 @@ public sealed class ToolRequestParserTests
     [InlineData("char purge \"An@n\"", ToolErrors.BadArgs)]
     [InlineData("char purge \"AnnAnnAnnAnnAnnAnnAnnAnnAnnAnnAnnAnn\"", ToolErrors.BadArgs)]
     [InlineData("char purge *", ToolErrors.BadArgs)]
+    // spell learn: the form and the id list.
+    [InlineData("spell", ToolErrors.BadArgs)]
+    [InlineData("spell learn", ToolErrors.BadArgs)]
+    [InlineData("spell forget 1", ToolErrors.BadArgs)]
+    [InlineData("spell \"learn\" 1", ToolErrors.BadArgs)]
+    [InlineData("spell learn \"1\"", ToolErrors.BadArgs)]
+    [InlineData("spell learn 1 2", ToolErrors.BadArgs)]
+    [InlineData("spell learn 1, 2", ToolErrors.BadArgs)]
+    [InlineData("spell learn 1,,2", ToolErrors.BadArgs)]
+    [InlineData("spell learn ,1", ToolErrors.BadArgs)]
+    [InlineData("spell learn 1,", ToolErrors.BadArgs)]
+    [InlineData("spell learn -1", ToolErrors.BadArgs)]
+    [InlineData("spell learn +1", ToolErrors.BadArgs)]
+    [InlineData("spell learn 1.5", ToolErrors.BadArgs)]
+    [InlineData("spell learn 0x10", ToolErrors.BadArgs)]
+    [InlineData("spell learn abc", ToolErrors.BadArgs)]
+    [InlineData("spell learn 4294967296", ToolErrors.BadArgs)]
+    [InlineData("spell learn 99999999999", ToolErrors.BadArgs)]
+    // item: the class id and the stack.
+    [InlineData("item", ToolErrors.BadArgs)]
+    [InlineData("item abc", ToolErrors.BadArgs)]
+    [InlineData("item -1", ToolErrors.BadArgs)]
+    [InlineData("item 1.5", ToolErrors.BadArgs)]
+    [InlineData("item 4294967296", ToolErrors.BadArgs)]
+    [InlineData("item \"1628\"", ToolErrors.BadArgs)]
+    [InlineData("item 1628 0", ToolErrors.BadArgs)]
+    [InlineData("item 1628 -1", ToolErrors.BadArgs)]
+    [InlineData("item 1628 65536", ToolErrors.BadArgs)]
+    [InlineData("item 1628 1.5", ToolErrors.BadArgs)]
+    [InlineData("item 1628 \"5\"", ToolErrors.BadArgs)]
+    [InlineData("item 1628 5 5", ToolErrors.BadArgs)]
+    [InlineData("item 1628,1629", ToolErrors.BadArgs)]
     // Ids.
     [InlineData("status #", ToolErrors.BadArgs)]
     [InlineData("status #a_1", ToolErrors.BadArgs)]
@@ -350,6 +406,12 @@ public sealed class ToolRequestParserTests
         new XpRequest(0),
         new XpRequest(-5),
         new XpRequest(ToolRequestParser.MaxXp + 1),
+        new SpellLearnRequest([]),
+        new SpellLearnRequest(Enumerable.Range(1, ToolRequestParser.MaxSpellIds + 1).Select(i => (uint)i).ToArray()),
+        new ItemRequest(1628, 0),
+        new ItemRequest(1628, -1),
+        new ItemRequest(1628, ToolRequestParser.MaxItemStack + 1),
+        new SpellLearnRequest([1], "bad_id"),
         new PlacePoiRequest(string.Empty),
         new PlacePoiRequest("Holt\"burg"),
         new PlacePoiRequest("Holtbürg"),
@@ -392,7 +454,7 @@ public sealed class ToolRequestParserTests
             Assert.Contains(verb, ToolsWire.Usage, StringComparison.Ordinal);
         }
 
-        Assert.Equal(["status", "where", "net", "places", "xp", "place poi", "place loc", "quest stamp", "quest erase", "quest has", "char purge"], ToolsWire.Verbs);
+        Assert.Equal(["status", "where", "net", "places", "xp", "place poi", "place loc", "quest stamp", "quest erase", "quest has", "char purge", "spell learn", "item"], ToolsWire.Verbs);
     }
 
     [Fact]

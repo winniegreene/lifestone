@@ -162,6 +162,43 @@ public sealed class EnchantmentRulesTests
         Assert.Equal(55u, EnchantmentRules.EnchantAttribute([], 2, 55));
     }
 
+    // ------------------------------------------------------------------ the quality filter (M3 2.2 a1, TODO(g4-quality-filter))
+
+    // A quality filter file as QualityFilter::UnPack reads it: the file id, the eight base counts (all zero), the three attribute counts, then the id lists.
+    private static Lifestone.Data.Dat.QualityFilterData Filter(uint[] attribute2nds)
+    {
+        var words = new List<uint> { 0x0E010001, 0, 0, 0, 0, 0, 0, 0, 0, 0, (uint)attribute2nds.Length, 0 };
+        words.AddRange(attribute2nds);
+        var bytes = new byte[words.Count * 4];
+        for (var i = 0; i < words.Count; i++)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(i * 4), words[i]);
+        }
+
+        return Lifestone.Data.Dat.QualityFilterData.Decode(bytes, 0x0E010001);
+    }
+
+    [Fact]
+    public void A_secondary_attribute_the_quality_filter_does_not_keep_is_not_enchanted()
+    {
+        ImmutableArray<EnchantmentDesc> enchantments = [Add(7, 100, AdditiveSecondary, 1, 22f), Add(8, 100, AdditiveSecondary, 3, 22f)];
+        var filter = Filter([1, 5]); // the maximum health and mana only
+        Assert.Equal(50u, EnchantmentRules.EnchantSecondaryAttributeFiltered(enchantments, 1, 28, filter));
+        Assert.Equal(28u, EnchantmentRules.EnchantSecondaryAttributeFiltered(enchantments, 3, 28, filter)); // EnchantAttribute2nd does nothing: the value stays
+        Assert.Equal(50u, EnchantmentRules.EnchantSecondaryAttributeFiltered(enchantments, 3, 28, null)); // no filter installed: every vital counts
+        Assert.Equal(50u, Max(enchantments, 3, 28)); // the static filter is not installed in this test
+    }
+
+    [Fact]
+    public void The_filter_file_must_be_consumed_exactly()
+    {
+        var bytes = new byte[13 * 4 + 2];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes, 0x0E010001);
+        Assert.Throws<InvalidDataException>(() => Lifestone.Data.Dat.QualityFilterData.Decode(bytes, 0x0E010001));
+        Assert.Throws<InvalidDataException>(() => Lifestone.Data.Dat.QualityFilterData.Decode(bytes.AsSpan(0, 12), 0x0E010001));
+        Assert.Throws<InvalidDataException>(() => Lifestone.Data.Dat.QualityFilterData.Decode(bytes.AsSpan(0, 12 * 4), 0x0E010002));
+    }
+
     // ------------------------------------------------------------------ through the qualities
 
     private static PlayerQualities FreshCharacter(ImmutableArray<EnchantmentDesc> enchantments, uint health = 28, uint stamina = 55, uint mana = 55)
@@ -176,6 +213,25 @@ public sealed class EnchantmentRulesTests
         q.Vitals[3] = new VitalDesc(3, 0, 0, 0, stamina);
         q.Vitals[5] = new VitalDesc(5, 0, 0, 0, mana);
         return q;
+    }
+
+    [Fact]
+    public void Stat_values_read_the_base_and_the_enchanted_value_and_the_vitaes_share()
+    {
+        // Endurance and Self 55 (base), Self +45, and a vitae of 0.5: the health base is (55+1)/2 = 28, mana 55; the mana maximum is (55+45) halved by the vitae.
+        ImmutableArray<EnchantmentDesc> enchantments = [Add(8, 100, AdditiveAttribute, 6, 45f), Make(666, 1, 666, 0, EnchantmentRules.Multiplicative, 0, 0.5f, EnchantmentBucket.Vitae)];
+        var q = FreshCharacter(enchantments, 50, 100, 100);
+        var stats = new StatValues(q);
+        Assert.True(stats.TryAttribute(6, out var baseSelf, out var currentSelf));
+        Assert.Equal((55u, 100u), (baseSelf, currentSelf));
+        Assert.True(stats.TryAttribute(1, out var baseStrength, out var currentStrength));
+        Assert.Equal((55u, 55u), (baseStrength, currentStrength));
+        Assert.True(stats.TryVital(5, out var cur, out var baseMax, out var max, out var vitae));
+        Assert.Equal(100u, cur);
+        Assert.Equal(55u, baseMax); // no vital ranks: the formula over the base Self
+        Assert.Equal(50u, max); // the vitae halves the enchanted formula (100 -> 50)
+        Assert.Equal(-27, vitae); // the vitae alone takes 27.5 off the base 55, rounded half up: 28 - 55
+        Assert.False(new StatValues(q).TryAttribute(9, out _, out _));
     }
 
     [Fact]

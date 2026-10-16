@@ -39,6 +39,20 @@ public interface IGameSessionView
     LinkStats Link { get; }
 
     /// <summary>
+    /// The spell <paramref name="id"/> as the SpellTable holds it (name, icon, school, power, duration, ...), for the panels that name spells (M3 2.2: the effects pages and the spellbook). Read-only and allocation-free
+    /// (a dictionary lookup). <b>Null</b> while the SpellTable has not loaded (it decodes on a worker from <c>GameSession.UseSpellsFrom</c>: <c>GameSession.SpellTableReady</c>), for a session without dats (the
+    /// default here), and for an id the table lacks: a panel shows its placeholder and asks again the next time it redraws.
+    /// </summary>
+    /// <param name="id">The spell id.</param>
+    Lifestone.Data.Magic.SpellInfo? Spell(uint id) => null;
+
+    /// <summary>The XpTable (dat 0x0E000018: the experience a rank of an attribute, a vital or a skill costs), or null until the host gave the session its dats (<c>GameSession.UseSpellsFrom</c>). The skills and attributes pages price their raise buttons by it.</summary>
+    Lifestone.Data.CharacterCreation.XpTableData? XpTable => null;
+
+    /// <summary>The SkillTable (dat 0x0E000004: the skills, their names, formulae, credit costs and icons), or null until the host gave the session its dats (<c>GameSession.UseSpellsFrom</c>).</summary>
+    Lifestone.Data.CharacterCreation.SkillTableData? SkillTable => null;
+
+    /// <summary>
     /// Seconds since the last datagram arrived from the server, on <see cref="Clock"/>, or null before any did (no network link: the offline stand-in, a replay). What retail's
     /// link status reads as the time since it last heard from the server (<c>LinkStatusHolder::GetConnectionStatus</c>, 11.6096 0x004116E0).
     /// </summary>

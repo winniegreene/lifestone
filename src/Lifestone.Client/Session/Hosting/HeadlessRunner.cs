@@ -155,7 +155,7 @@ public sealed class HeadlessRunner : IDisposable
         Stream? recording)
     {
         ArgumentNullException.ThrowIfNull(dats);
-        return StartWith(
+        var runner = StartWith(
             options,
             scenario,
             secretsJson,
@@ -168,6 +168,8 @@ public sealed class HeadlessRunner : IDisposable
             recording,
             socketFactory: null,
             networkFactory: null);
+        runner.Session.UseSpellsFrom(dats); // the cast tracker's SpellTable (read at the first cast)
+        return runner;
     }
 
     /// <summary><see cref="Start"/> with the dat-backed parts as functions and the network session injectable (tests).</summary>

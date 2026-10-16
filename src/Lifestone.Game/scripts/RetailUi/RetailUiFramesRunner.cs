@@ -182,6 +182,9 @@ public partial class RetailUiFramesRunner : Node
             Fail($"{_captured} of {RetailUiFramesPlan.FrameNames.Count} frames were taken");
         }
 
+        // Report-only (M3 1.3 s2a): the UI's sounds, handed to the sound player whatever the master volume (D8). A dropped one means this run had no audio service.
+        var sounds = _layer.SoundStats;
+        Log.Info(Category, "ui sounds", ("sounds_ui", sounds.Played), ("requested", sounds.Requested), ("dropped", sounds.Dropped), ("silenced", sounds.Silenced), ("muted", sounds.Muted));
         Log.Info(Category, RetailUiFramesPlan.Verdict(_requested.X, _requested.Y, _layer.Scale, _captured, _failures, missing.Length));
         Log.FlushToGodot();
         GetTree().Quit(_failures == 0 && !_aborted ? 0 : 1);

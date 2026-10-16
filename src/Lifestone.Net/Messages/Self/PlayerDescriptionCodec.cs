@@ -613,7 +613,7 @@ internal static class PlayerDescriptionCodec
     }
 
     /// <summary>The size of an enchantment without its spell set id.</summary>
-    private const int EnchantmentSize = 60;
+    internal const int EnchantmentSize = 60;
 
     private static bool TryReadEnchantmentList(ref WireReader reader, EnchantmentBucket bucket, ImmutableArray<EnchantmentDesc>.Builder builder)
     {
@@ -635,7 +635,7 @@ internal static class PlayerDescriptionCodec
         return true;
     }
 
-    private static bool TryReadEnchantment(ref WireReader reader, EnchantmentBucket bucket, out EnchantmentDesc enchantment)
+    internal static bool TryReadEnchantment(ref WireReader reader, EnchantmentBucket bucket, out EnchantmentDesc enchantment)
     {
         enchantment = default;
         if (!reader.TryReadU16(out var spellId)

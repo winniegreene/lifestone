@@ -40,6 +40,9 @@ internal sealed class ActionApi : IActionApi, IDisposable
     /// <summary>The refusal and cancellation of automation actions under the kill switch.</summary>
     internal const string KillSwitchRefusal = "the kill switch is on";
 
+    /// <summary>How long after an action ended without its UseDone a UseDone is still taken for that action's (session-clock seconds; M3 1.2 fix R1).</summary>
+    internal const double OwedUseDoneWindowSeconds = 5;
+
     private readonly GameStateReducer _reducer;
     private readonly EventBus _bus;
     private readonly ActionLog _actionLog;
@@ -48,6 +51,12 @@ internal sealed class ActionApi : IActionApi, IDisposable
     private readonly bool[] _laneWaiting = new bool[ActionPolicy.LaneCount];
     private readonly List<ActionTracker> _queued = [];
     private readonly List<ActionTracker> _inFlight = [];
+
+    // Trackers whose action is complete but whose lane is still busy (a cast until its UseDone); see ActionTracker.HoldsLane.
+    private readonly List<ActionTracker> _laneHolds = [];
+
+    // The session-clock times until which a UseDone still owed by an action that ended without one (a cast or use that timed out, a hold let go at its timeout) is dropped, not given to the next action (M3 1.2 fix R1).
+    private readonly List<double> _owedUseDones = [];
     private readonly Action<ActionHandle, Exception> _onHandlerError;
     private readonly MovementChannel _movement;
     private readonly bool _serverIsLoopback;
@@ -103,6 +112,12 @@ internal sealed class ActionApi : IActionApi, IDisposable
         bus.Subscribe<UseDone>(OnUseDone);
         bus.Subscribe<HealthUpdated>(OnHealth);
         bus.Subscribe<ChatReceived>(OnChat);
+        bus.Subscribe<QualitiesChanged>(OnQualities);
+        bus.Subscribe<InventoryChanged>(OnInventory);
+        bus.Subscribe<InventoryFailed>(OnInventoryFailed);
+        bus.Subscribe<CombatModeChanged>(OnCombatMode);
+        bus.Subscribe<EnchantmentChanged>(OnEnchantment);
+        bus.Subscribe<ObjectCreated>(OnObjectCreated);
         bus.Subscribe<ToolsUnavailable>(OnToolsUnavailable);
         reducer.ToolReplyRouted = OnToolReply;
     }
@@ -176,6 +191,25 @@ internal sealed class ActionApi : IActionApi, IDisposable
 
     /// <summary>The session clock.</summary>
     internal SessionClock Clock => _reducer.Clock;
+
+    /// <summary>
+    /// The SpellTable (0x0E00000E) the cast tracker classifies a spell by (a projectile spell, a self enchantment, anything else); the host sets it from the dats
+    /// (<c>SpellTableData.Load</c>). Null: a cast's kind is unknown and the tracker accepts either the enchantment or a projectile (<c>TODO(m3-cast-spell-table-host)</c>).
+    /// </summary>
+    internal Lifestone.Data.Magic.SpellTableData? SpellTable { get; set; }
+
+    /// <summary>A lookup that takes the place of <see cref="SpellTable"/> (tests, and hosts that hold the spells another way).</summary>
+    internal Func<uint, Lifestone.Data.Magic.SpellInfo?>? SpellLookup { get; set; }
+
+    /// <summary>
+    /// The Setup of the projectile a war spell launches (the ACE world extract; <c>SpellTableHost.ProjectileSetup</c>), or null for a spell it has none for: the cast tracker takes only a projectile wearing that Setup
+    /// for the cast's (<c>TODO(m3-cast-projectile-attribution)</c>). Null lookup: the Setup is not checked.
+    /// </summary>
+    internal Func<uint, uint?>? ProjectileSetupLookup { get; set; }
+
+    /// <summary>The spell <paramref name="id"/> as the host's table holds it, or null (no table, or no such spell).</summary>
+    internal Lifestone.Data.Magic.SpellInfo? FindSpell(uint id) =>
+        SpellLookup is { } lookup ? lookup(id) : SpellTable is { } table && table.Spells.TryGetValue(id, out var info) ? info : null;
 
     /// <summary>The frame time of the current (or last) <see cref="Update"/>: the host's frame clock.</summary>
     internal double FrameTime { get; private set; }
@@ -282,6 +316,112 @@ internal sealed class ActionApi : IActionApi, IDisposable
     }
 
     /// <inheritdoc/>
+    public ActionHandle RaiseAttribute(uint attribute, uint xpToSpend, ActionSource source)
+    {
+        CheckThread("IActionApi.RaiseAttribute");
+        var handle = NewHandle(ActionKind.RaiseAttribute, source, "RaiseAttribute attribute=" + attribute + " xp=" + xpToSpend);
+        var problem = attribute is < 1 or > 6 ? "attribute " + attribute + " is not a primary attribute (1 to 6)" : xpToSpend == 0 ? "no experience to spend" : null;
+        return Accept(new RaiseAttributeTracker(handle, attribute, xpToSpend), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle RaiseVital(uint vital, uint xpToSpend, ActionSource source)
+    {
+        CheckThread("IActionApi.RaiseVital");
+        var handle = NewHandle(ActionKind.RaiseVital, source, "RaiseVital vital=" + vital + " xp=" + xpToSpend);
+        var problem = vital is not (1 or 3 or 5) ? "vital " + vital + " is not a vital's maximum id (1, 3 or 5)" : xpToSpend == 0 ? "no experience to spend" : null;
+        return Accept(new RaiseVitalTracker(handle, vital, xpToSpend), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle RaiseSkill(uint skill, uint xpToSpend, ActionSource source)
+    {
+        CheckThread("IActionApi.RaiseSkill");
+        var handle = NewHandle(ActionKind.RaiseSkill, source, "RaiseSkill skill=" + skill + " xp=" + xpToSpend);
+        var problem = skill == 0 ? "no skill to raise" : xpToSpend == 0 ? "no experience to spend" : null;
+        return Accept(new RaiseSkillTracker(handle, skill, xpToSpend), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle TrainSkill(uint skill, int creditsToSpend, ActionSource source)
+    {
+        CheckThread("IActionApi.TrainSkill");
+        var handle = NewHandle(ActionKind.TrainSkill, source, "TrainSkill skill=" + skill + " credits=" + creditsToSpend);
+        var problem = skill == 0 ? "no skill to train" : creditsToSpend < 0 ? "a negative number of credits" : null;
+        return Accept(new TrainSkillTracker(handle, skill, creditsToSpend), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle Cast(uint spellId, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Cast");
+        var handle = NewHandle(ActionKind.CastSpell, source, "Cast spell=" + spellId);
+        return Accept(new CastTracker(handle, spellId, 0), spellId == 0 ? Refused("no spell to cast") : null);
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle Cast(uint spellId, uint target, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Cast");
+        var handle = NewHandle(ActionKind.CastSpell, source, "Cast spell=" + spellId + " target=" + ActionText.Hex(target));
+        var problem = spellId == 0 ? "no spell to cast" : target == 0 ? "no target to cast at" : null;
+        return Accept(new CastTracker(handle, spellId, target), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle Cast(uint spellId, int target, ActionSource source = ActionSource.Host) =>
+        target != 0 ? Cast(spellId, unchecked((uint)target), source) : Cast(spellId, 0u, source); // M3 1.2 review R7: only 0 is "no target"; 0x80000000 and up are guids
+
+    /// <inheritdoc/>
+    public ActionHandle SetCombatMode(CombatMode mode, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.SetCombatMode");
+        var handle = NewHandle(ActionKind.SetCombatMode, source, "SetCombatMode mode=" + (uint)mode);
+        var defined = mode is CombatMode.NonCombat or CombatMode.Melee or CombatMode.Missile or CombatMode.Magic;
+        return Accept(new SetCombatModeTracker(handle, mode), defined ? null : Refused("combat mode " + (uint)mode + " is not one of 1, 2, 4 or 8"));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle Wield(uint item, EquipMask location, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Wield");
+        var handle = NewHandle(ActionKind.Wield, source, "Wield item=" + ActionText.Hex(item) + " location=" + ActionText.Hex((uint)location));
+        var problem = item == 0 ? "no item to wield" : location == EquipMask.None ? "no location to wield it at" : null;
+        return Accept(new WieldTracker(handle, item, location), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle Unwield(uint item, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Unwield");
+        var handle = NewHandle(ActionKind.Unwield, source, "Unwield item=" + ActionText.Hex(item));
+        return Accept(new UnwieldTracker(handle, item), item == 0 ? Refused("no item to unwield") : null);
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle MoveToPack(uint item, uint container = 0, uint placement = 0, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.MoveToPack");
+        var handle = NewHandle(
+            ActionKind.MoveToPack,
+            source,
+            "MoveToPack item=" + ActionText.Hex(item) + " container=" + ActionText.Hex(container) + " placement=" + placement);
+        return Accept(new MoveToTracker(handle, item, container, placement), item == 0 ? Refused("no item to move") : null);
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle MergeStack(uint from, uint to, int amount, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.MergeStack");
+        var handle = NewHandle(
+            ActionKind.MergeStack,
+            source,
+            "MergeStack from=" + ActionText.Hex(from) + " to=" + ActionText.Hex(to) + " amount=" + amount);
+        var problem = from == 0 || to == 0 ? "no stack to merge" : amount <= 0 ? "the amount must be at least 1 (ACE refuses 0 or less)" : null;
+        return Accept(new MergeStackTracker(handle, from, to, amount), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
     public ActionHandle LogOff(ActionSource source)
     {
         CheckThread("IActionApi.LogOff");
@@ -336,6 +476,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
             var now = Clock.Now;
             ResolveObserved();
             ExpireTimeouts(now);
+            Tools.Update(); // the gear spawn's next merge, queued here so this tick's dispatch sends it
             Dispatch(now);
             ResolveObserved();
             CompletePending();
@@ -355,6 +496,8 @@ internal sealed class ActionApi : IActionApi, IDisposable
         var cancelled = new ActionOutcome(ActionOutcomeKind.Cancelled, 0, reason);
         CancelIn(_queued, TrackerState.Queued, cancelled);
         CancelIn(_inFlight, TrackerState.InFlight, cancelled);
+        _laneHolds.Clear();
+        _owedUseDones.Clear();
 
         // Settled but not completed yet (outside an update this is empty): they complete with what they settled on.
         for (var i = 0; i < _completing.Count; i++)
@@ -649,6 +792,11 @@ internal sealed class ActionApi : IActionApi, IDisposable
             if (tracker.Resolution is { } outcome)
             {
                 tracker.State = TrackerState.Done;
+                if (tracker.HoldsLane)
+                {
+                    _laneHolds.Add(tracker);
+                }
+
                 _completing.Add((tracker, tracker.Finish(outcome)));
             }
         }
@@ -659,10 +807,32 @@ internal sealed class ActionApi : IActionApi, IDisposable
     /// <summary>Step 2: trackers in flight past their timeout end as timed out.</summary>
     private void ExpireTimeouts(double now)
     {
+        // A held lane is let go at the tracker's timeout, counted from the send, when the server never ended the action.
+        // ACE's UseDone for it may still arrive: it is owed, and dropped within OwedUseDoneWindowSeconds, not taken by the next action.
+        // An index loop, not RemoveAll with a lambda: this runs every tick and a closure over now and this would allocate each time (the retail-ui idle-frame check).
+        for (var i = _laneHolds.Count - 1; i >= 0; i--)
+        {
+            var hold = _laneHolds[i];
+            if (hold.Handle.SentAt is not { } heldSince || now - heldSince >= hold.TimeoutSeconds)
+            {
+                if (hold.HoldsLane)
+                {
+                    OweUseDone(now);
+                }
+
+                _laneHolds.RemoveAt(i);
+            }
+        }
+
         foreach (var tracker in _inFlight)
         {
             if (tracker.State == TrackerState.InFlight && tracker.Handle.SentAt is { } sent && now - sent >= tracker.TimeoutSeconds)
             {
+                if (tracker.ConsumesUseDone)
+                {
+                    OweUseDone(now);
+                }
+
                 tracker.State = TrackerState.Done;
                 _completing.Add((tracker, new ActionOutcome(
                     ActionOutcomeKind.TimedOut,
@@ -701,8 +871,15 @@ internal sealed class ActionApi : IActionApi, IDisposable
                 continue;
             }
 
-            if (tracker.Lane == ActionLane.Session && SessionActionInFlight())
+            if ((tracker.Lane is ActionLane.Session or ActionLane.Stats or ActionLane.Magic or ActionLane.Inventory) && LaneActionInFlight(tracker.Lane))
             {
+                _laneWaiting[lane] = true;
+                continue;
+            }
+
+            if (tracker.ConsumesUseDone && UseDoneAmbiguous(tracker))
+            {
+                // A Use and a Cast are never out together: ACE's UseDone names no request (M3 1.2 fix R1).
                 _laneWaiting[lane] = true;
                 continue;
             }
@@ -711,6 +888,11 @@ internal sealed class ActionApi : IActionApi, IDisposable
             {
                 tracker.State = TrackerState.Done;
                 _completing.Add((tracker, Refused(refusal)));
+                continue;
+            }
+
+            if (tracker.WaitReason(this) is not null)
+            {
                 continue;
             }
 
@@ -763,14 +945,54 @@ internal sealed class ActionApi : IActionApi, IDisposable
             }
         }
 
+        _laneHolds.Clear();
+        _owedUseDones.Clear();
         Send(quit, now);
     }
 
-    private bool SessionActionInFlight()
+    /// <summary>
+    /// True when an action that ends with ACE's UseDone, of another lane than <paramref name="candidate"/>'s, is in flight or holds its lane. The UseDone carries no request id, so the Use lane and a Cast wait for each other
+    /// (several Uses may be out together: ACE answers them in order). M3 1.2 fix R1; chosen over "the first sent takes it" because a cast's own UseDone comes seconds after its effect, and a Use sent in that window could not
+    /// be told from the cast's end.
+    /// </summary>
+    private bool UseDoneAmbiguous(ActionTracker candidate)
     {
+        foreach (var hold in _laneHolds)
+        {
+            if (hold.ConsumesUseDone && hold.HoldsLane && hold.Lane != candidate.Lane)
+            {
+                return true;
+            }
+        }
+
         foreach (var tracker in _inFlight)
         {
-            if (tracker.State == TrackerState.InFlight && tracker.Lane == ActionLane.Session)
+            if (tracker.State == TrackerState.InFlight && tracker.ConsumesUseDone && tracker.Lane != candidate.Lane)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Notes that ACE's UseDone for an action that ended without one may still come, and is to be dropped when it does.</summary>
+    private void OweUseDone(double now) => _owedUseDones.Add(now + OwedUseDoneWindowSeconds);
+
+    /// <summary>True when an action of a serialised lane (Session, Stats, Magic, Inventory) is in flight, or its lane is held (a cast not yet ended by the server).</summary>
+    private bool LaneActionInFlight(ActionLane lane)
+    {
+        foreach (var hold in _laneHolds)
+        {
+            if (hold.Lane == lane && hold.HoldsLane)
+            {
+                return true;
+            }
+        }
+
+        foreach (var tracker in _inFlight)
+        {
+            if (tracker.State == TrackerState.InFlight && tracker.Lane == lane)
             {
                 return true;
             }
@@ -875,6 +1097,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
     {
         _queued.RemoveAll(static t => t.State != TrackerState.Queued);
         _inFlight.RemoveAll(static t => t.State != TrackerState.InFlight);
+        _laneHolds.RemoveAll(static t => !t.HoldsLane);
     }
 
     private void OnPhase(in SessionPhaseChanged e)
@@ -965,10 +1188,38 @@ internal sealed class ActionApi : IActionApi, IDisposable
 
     private void OnUseDone(in UseDone e)
     {
+        // A UseDone owed by a cast or use that already ended (timed out, or its hold let go) is the late one: dropped, so it does not fail the action after it.
+        var now = Clock.Now;
+        for (var i = _owedUseDones.Count - 1; i >= 0; i--)
+        {
+            if (_owedUseDones[i] <= now)
+            {
+                _owedUseDones.RemoveAt(i);
+            }
+        }
+
+        if (_owedUseDones.Count > 0)
+        {
+            _owedUseDones.RemoveAt(0);
+            Log.Info(SessionLog.Category, "a late UseDone 0x01C7 (code " + e.WeenieError + ") belongs to an action that already ended; dropped (M3 1.2 fix R1)");
+            return;
+        }
+
+        // A cast whose lane is held (its outcome is in) takes the server's end of the cast before any action in flight does.
+        for (var i = 0; i < _laneHolds.Count; i++)
+        {
+            if (_laneHolds[i].OnUseDone(in e))
+            {
+                return;
+            }
+        }
+
         for (var i = 0; i < _inFlight.Count; i++)
         {
             var tracker = _inFlight[i];
-            if (tracker.State == TrackerState.InFlight && tracker.Resolution is null && tracker.OnUseDone(in e))
+
+            // A cast that settled in this tick but has not been handed to the hold yet (its effect and ACE's UseDone arrived together) still takes the UseDone.
+            if (tracker.State == TrackerState.InFlight && (tracker.Resolution is null || tracker.HoldsLane) && tracker.OnUseDone(in e))
             {
                 return;
             }
@@ -983,6 +1234,72 @@ internal sealed class ActionApi : IActionApi, IDisposable
             if (tracker.State == TrackerState.InFlight && tracker.Resolution is null && tracker.OnHealth(in e))
             {
                 return;
+            }
+        }
+    }
+
+    private void OnQualities(in QualitiesChanged e)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnQuality(in e, this);
+            }
+        }
+    }
+
+    private void OnInventory(in InventoryChanged e)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnInventory(in e, this);
+            }
+        }
+    }
+
+    private void OnInventoryFailed(in InventoryFailed e)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnInventoryFailed(in e);
+            }
+        }
+    }
+
+    private void OnCombatMode(in CombatModeChanged e)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnCombatMode(in e);
+            }
+        }
+    }
+
+    private void OnEnchantment(in EnchantmentChanged e)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnEnchantment(in e);
+            }
+        }
+    }
+
+    private void OnObjectCreated(in ObjectCreated e)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnObjectCreated(in e, this);
             }
         }
     }

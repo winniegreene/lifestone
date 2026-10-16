@@ -6,9 +6,11 @@ using Lifestone.Client.Play;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Credentials;
+using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Recording;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Data.Checkout;
+using Lifestone.Data.Magic;
 using Lifestone.Game.Core;
 using Lifestone.Game.PortalSpace;
 using Lifestone.Game.RetailUi;
@@ -49,6 +51,8 @@ public sealed partial class SessionHost : Node
     private bool _budgetTaken;
     private bool _quitStarted;
     private long _tickFailures;
+    private Task<CastPlannerBundle>? _castPlannerWork;
+    private StandInVisit[] _castPlannerVisits = [];
 
     /// <summary>The installed host, or null.</summary>
     public static SessionHost? Instance { get; private set; }
@@ -110,9 +114,88 @@ public sealed partial class SessionHost : Node
             },
             TimeProvider.System,
             GodotLogSink.Instance);
+        if (services.Dats is { } dats)
+        {
+            host._session.UseSpellsFrom(dats); // the cast tracker's SpellTable (read at the first cast)
+            host.StartCastPlanner(dats, visit, replay);
+        }
+
         Log.Info(LogCategory, "play-mode checks: the session is the scripted stand-in, not a server");
         parent.AddChild(host);
         return host;
+    }
+
+    /// <summary>The stand-in's cast planner, its SpellTable and how long the worker took (M3 2.1 s2b).</summary>
+    private sealed record CastPlannerBundle(SpellTableData Table, StandInCastPlanner Planner, int Planned, double Milliseconds);
+
+    /// <summary>
+    /// M3 2.1 s2b: gives the stand-in its cast (<see cref="StandInVisit.CastPlanner"/>, so an offline cast plays its words, gestures and effect scripts outside the checks too). The dat reads (the SpellTable, the SpellComponentTable and the
+    /// player's motion table under <see cref="StandInCastPlanner.FromDats"/>, then the plan of every profile spell the stand-in can cast: the animations' lengths) run on a worker thread at below-normal priority, so none runs on the
+    /// game thread in the frames after Enter; the game thread only stores the finished planner, in <see cref="_Process"/>, on the frame after the worker is done. A cast before then, or of a spell outside the profile, is planned on the
+    /// thread that casts it (the planner caches it): <c>TODO(m3-standin-cast-plan-lazy)</c>, named in the log line.
+    /// </summary>
+    private void StartCastPlanner(Lifestone.Data.Dat.DatSet dats, StandInVisit visit, StandInVisit? replay)
+    {
+        _castPlannerVisits = replay is null ? [visit] : [visit, replay];
+        var source = new TaskCompletionSource<CastPlannerBundle>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _castPlannerWork = source.Task;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var started = Stopwatch.GetTimestamp();
+                var table = visit.SpellTable ?? SpellTableData.Load(dats);
+                var planner = StandInCastPlanner.FromDats(dats);
+                var planned = 0;
+                foreach (var id in ArenaProfile.SpellsToLearn)
+                {
+                    // Only what the stand-in can cast without a fizzle (its fixed skill): the others would never be planned.
+                    if (table.Spells.TryGetValue(id, out var info) && info.Power <= StandInCastPlanner.CastablePower)
+                    {
+                        planner.Plan(info);
+                        planned++;
+                    }
+                }
+
+                source.SetResult(new CastPlannerBundle(table, planner, planned, Stopwatch.GetElapsedTime(started).TotalMilliseconds));
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                source.SetException(ex);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "StandInCastPlanner",
+            Priority = ThreadPriority.BelowNormal,
+        };
+        thread.Start();
+    }
+
+    /// <summary>Stores the worker's planner into the visits (game thread, once).</summary>
+    private void TakeCastPlanner()
+    {
+        var work = _castPlannerWork;
+        if (work is null || !work.IsCompleted)
+        {
+            return;
+        }
+
+        _castPlannerWork = null;
+        if (work.IsFaulted)
+        {
+            Log.Error(LogCategory, "TODO(m3-standin-cast-plan): the stand-in's cast planner could not be made, so an offline cast plays without gestures", ("problem", work.Exception?.GetBaseException().Message));
+            return;
+        }
+
+        var bundle = work.Result;
+        foreach (var visit in _castPlannerVisits)
+        {
+            visit.SpellTable ??= bundle.Table;
+            visit.CastPlanner ??= bundle.Planner.Plan;
+        }
+
+        Log.Info(LogCategory, "the stand-in's cast planner is ready (planned on a worker)", ("profile_spells_planned", bundle.Planned), ("worker_ms", bundle.Milliseconds), ("TODO", "m3-standin-cast-plan-lazy: a spell outside the profile is planned when it is cast"));
     }
 
     /// <summary>
@@ -181,6 +264,11 @@ public sealed partial class SessionHost : Node
             // The frame-budget share node is installed later in Main._Ready, so the share is taken on the first frame.
             _budgetTaken = true;
             FrameBudgetShare.Take(FrameBudgetShare.SessionShareName, Options.BudgetMs);
+        }
+
+        if (_castPlannerWork is not null)
+        {
+            TakeCastPlanner();
         }
 
         try

@@ -30,11 +30,9 @@ public sealed class QualitiesWeenieRecordingTests(ITestOutputHelper output)
         var seen = 0;
         foreach (var path in RealRecordings.Find())
         {
-            var replayer = new SessionReplayer();
-            using var stream = File.OpenRead(path);
-            replayer.Replay(stream);
-            var qualities = replayer.State.Self.Qualities;
-            if (!qualities.IsKnown)
+            // The qualities as the PlayerDescription set them: the recording's logoff clears the replayed state afterwards.
+            var qualities = RealRecordings.QualitiesAtDescription(path);
+            if (qualities is not { IsKnown: true })
             {
                 continue;
             }
@@ -78,11 +76,9 @@ public sealed class QualitiesWeenieRecordingTests(ITestOutputHelper output)
         var pinned = 0;
         foreach (var path in RealRecordings.Find())
         {
-            var replayer = new SessionReplayer();
-            using var stream = File.OpenRead(path);
-            replayer.Replay(stream);
-            var qualities = replayer.State.Self.Qualities;
-            if (!qualities.IsKnown
+            // The qualities as the PlayerDescription set them: the recording's logoff clears the replayed state afterwards.
+            var qualities = RealRecordings.QualitiesAtDescription(path);
+            if (qualities is not { IsKnown: true }
                 || !qualities.TryGetSkill(QualitiesWeenie.RunSkillId, out var run)
                 || !qualities.TryGetAttribute(Endurance, out var endurance)
                 || !qualities.TryGetAttribute(Quickness, out var quickness))
@@ -116,11 +112,9 @@ public sealed class QualitiesWeenieRecordingTests(ITestOutputHelper output)
         var checkedCount = 0;
         foreach (var path in RealRecordings.Find())
         {
-            var replayer = new SessionReplayer();
-            using var stream = File.OpenRead(path);
-            replayer.Replay(stream);
-            var qualities = replayer.State.Self.Qualities;
-            if (!qualities.IsKnown || !qualities.TryGetInt(25, out var level) || level != 1)
+            // The qualities as the PlayerDescription set them: the recording's logoff clears the replayed state afterwards.
+            var qualities = RealRecordings.QualitiesAtDescription(path);
+            if (qualities is not { IsKnown: true } || !qualities.TryGetInt(25, out var level) || level != 1)
             {
                 continue;
             }

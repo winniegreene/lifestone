@@ -87,6 +87,12 @@ internal abstract class ActionTracker
     internal virtual string? Refusal(ActionApi api) => null;
 
     /// <summary>
+    /// Why the action, which the precondition accepted, must still wait in its lane (its turn has come but what it needs has not): null when it may go. Asked at each dispatch after <see cref="Refusal"/>, so a change
+    /// of state that makes it impossible still ends it, and before the lane's rate limit takes a token. Used by LoginComplete's wait for the player's contents.
+    /// </summary>
+    internal virtual string? WaitReason(ActionApi api) => null;
+
+    /// <summary>
     /// Sends the action. Returns the outcome when it completes at once (<see cref="ActionOutcomeKind.Sent"/> or
     /// <see cref="ActionOutcomeKind.Local"/>), or null to wait for the confirmation. Net's exceptions are mapped by the
     /// caller (a refused send, a closed session, a net loud stub).
@@ -156,7 +162,55 @@ internal abstract class ActionTracker
     {
     }
 
-    /// <summary>UseDone arrived; true when this tracker took it (the oldest Use in flight does).</summary>
+    /// <summary>
+    /// A quality of the player changed (the reducer applied a PrivateUpdate; a stale one, dropped by the sequence rule, is not published).
+    /// Called for every tracker in flight; the state already holds the new value.
+    /// </summary>
+    internal virtual void OnQuality(in QualitiesChanged e, ActionApi api)
+    {
+    }
+
+    /// <summary>
+    /// True while the tracker's lane must stay busy although the action is complete (a cast: ACE is busy until its UseDone, so the next cast would be refused).
+    /// Asked after the tracker settled; the hold ends when this turns false, or at the tracker's timeout counted from the send.
+    /// </summary>
+    internal virtual bool HoldsLane => false;
+
+    /// <summary>
+    /// True for an action that ends with ACE's UseDone 0x01C7 (a Use, a Cast). The UseDone carries no request id, so two such actions of different lanes are never in flight together
+    /// (<see cref="ActionApi"/> serialises them against each other, M3 1.2 fix R1): the one UseDone in the air then belongs to the one action that is out.
+    /// </summary>
+    internal virtual bool ConsumesUseDone => false;
+
+    /// <summary>A player's inventory changed (0x0022, 0x0023, 0x019A, 0x0024, ...). Called for every tracker in flight.</summary>
+    internal virtual void OnInventory(in InventoryChanged e, ActionApi api)
+    {
+    }
+
+    /// <summary>The server refused an inventory request (GameEvent 0x00A0). Called for every tracker in flight.</summary>
+    internal virtual void OnInventoryFailed(in InventoryFailed e)
+    {
+    }
+
+    /// <summary>The player's combat mode changed (the 0x02CD for property 40). Called for every tracker in flight.</summary>
+    internal virtual void OnCombatMode(in CombatModeChanged e)
+    {
+    }
+
+    /// <summary>An enchantment was added to, or removed from, the player's registry. Called for every tracker in flight.</summary>
+    internal virtual void OnEnchantment(in EnchantmentChanged e)
+    {
+    }
+
+    /// <summary>An object was created (CreateObject). Called for every tracker in flight, after the object is in the table.</summary>
+    internal virtual void OnObjectCreated(in ObjectCreated e, ActionApi api)
+    {
+    }
+
+    /// <summary>
+    /// UseDone arrived; true when this tracker took it (the oldest Use in flight does; a cast whose lane is held takes it first, in flight or not:
+    /// <see cref="Resolve"/> ignores it once the tracker is done).
+    /// </summary>
     internal virtual bool OnUseDone(in UseDone e) => false;
 
     /// <summary>UpdateHealth arrived; true when this tracker took it.</summary>

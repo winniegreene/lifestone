@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Lifestone.Client.Audio;
 using Lifestone.Client.Avatars;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement;
@@ -29,6 +30,25 @@ public static class PlayWarmUp
     private const string LogCategory = "play";
     private const uint ScratchGuid = 0x7FFF0001;
 
+    /// <summary>The human sound table, so the scratch bodies' hooks reach the router.</summary>
+    private const uint WarmSoundTable = 0x20000001;
+
+    /// <summary>A sound sink that plays nothing: the warm-up only pays the router's code.</summary>
+    private sealed class WarmSoundSink : ISoundSink
+    {
+        public void PlayFromCenter(uint soundTableId, uint soundType)
+        {
+        }
+
+        public void PlayWave(uint waveId, float priority, float probability, float volume, SoundOrigin origin)
+        {
+        }
+
+        public void PlayFromTable(uint tableId, uint soundType, SoundOrigin origin, float volume)
+        {
+        }
+    }
+
     private static CellFrame At(in CellFrame from, System.Numerics.Vector3 offset) => new(from.CellId, new AcFrame(from.Origin + offset, from.Orientation));
 
     /// <summary>Runs the warm-up on the main thread; returns the milliseconds it took.</summary>
@@ -41,7 +61,7 @@ public static class PlayWarmUp
         try
         {
             var dats = services.Dats ?? throw new InvalidOperationException("the warm-up needs the dats");
-            var set = new AvatarSet(sources);
+            var set = new AvatarSet(sources) { EffectEvents = new SoundHookRouter(new WarmSoundSink()) }; // M3 1.3 s1: the sound router's and the origin's code is JIT-compiled here too
             var spawn = new CellFrame(0xA9B40019, new AcFrame(new System.Numerics.Vector3(84f, 7.1f, 94f), System.Numerics.Quaternion.Identity));
             var create = new AvatarCreate
             {
@@ -52,6 +72,7 @@ public static class PlayWarmUp
                 MotionTableId = OfflineWalker.HumanMotionTableId,
                 PhysicsState = AvatarStateBits.Gravity | AvatarStateBits.ReportCollisions,
                 Position = spawn,
+                SoundTableId = WarmSoundTable,
             };
             var now = 0.0;
 
@@ -92,6 +113,7 @@ public static class PlayWarmUp
                 IsCreature = true,
                 PhysicsState = create.PhysicsState | AvatarStateBits.Hidden,
                 Position = At(spawn, new System.Numerics.Vector3(3f, 0f, 0f)),
+                SoundTableId = WarmSoundTable,
             };
             if (set.Create(npc, now) == AvatarApply.Applied)
             {
@@ -99,6 +121,10 @@ public static class PlayWarmUp
                     MotionCommandTable.ToWire(MotionCommands.NonCombat),
                     new WireInterpretedMotion(null, MotionCommandTable.ToWire(MotionCommands.WalkForward), null, null, null, null, null));
                 set.SetState(npc.Guid, npc.PhysicsState & ~AvatarStateBits.Hidden);
+
+                // M3 1.3 s0: what the server's F755 and F750 will use (the script's decode, its emitters' infos and the hook code), paid here and not on the frame the message lands in.
+                set.PlayScript(npc.Guid, (uint)DatReaderWriter.Enums.PlayScript.LevelUp, 1f);
+                set.PlaySound(npc.Guid, (uint)DatReaderWriter.Enums.Sound.EnchantUp, 0.75f);
                 set.SetMovement(npc.Guid, isSelf: false, autonomous: false, forward, []);
                 for (var i = 0; i < 6; i++)
                 {

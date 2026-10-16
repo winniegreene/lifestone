@@ -145,6 +145,70 @@ public sealed class LoginCheckScenarioTests
     }
 
     [Fact]
+    public void The_report_fields_read_the_level_from_the_description_and_the_mage_from_the_character_list()
+    {
+        using var run = new Run(
+            new LoginCheckScenario(SkillClasses, "Amy"),
+            server =>
+            {
+                server.Characters.Add(new AceCharacter(0x50000009, "BSD Mage"));
+                server.Description = name => AcePlayerDescription.NewCharacter(name) with { Ints = [(0x19, 126), (0x05, 1234)] };
+            });
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure);
+        Assert.Equal("126", run.Scenario.LevelField); // PlayerQualities.Level (PropertyInt 25)
+        Assert.Equal("present", run.Scenario.MageField);
+        Assert.Equal(" level=126 mage_char=present", run.Scenario.ReportFields);
+    }
+
+    [Fact]
+    public void The_level_is_a_question_mark_when_the_description_has_none_and_the_mage_is_absent_from_a_list_without_it()
+    {
+        using var run = new Run(
+            new LoginCheckScenario(SkillClasses, "Amy"),
+            server => server.Description = name => AcePlayerDescription.NewCharacter(name) with { Ints = [(0x05, 1234)] });
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure);
+        Assert.Equal("?", run.Scenario.LevelField);
+        Assert.Equal("absent", run.Scenario.MageField); // Amy, Bo and Cy: no mage
+        Assert.Equal(" level=? mage_char=absent", run.Scenario.ReportFields);
+    }
+
+    [Fact]
+    public void The_mage_name_is_compared_case_insensitively_and_a_pending_deletion_is_named()
+    {
+        using var pending = new Run(
+            new LoginCheckScenario(SkillClasses, "Amy"),
+            server => server.Characters.Add(new AceCharacter(0x5000000A, "bsd MAGE", 1)));
+        Assert.True(pending.Finish().Ok);
+        Assert.Equal("pending-delete", pending.Scenario.MageField);
+
+        using var lower = new Run(
+            new LoginCheckScenario(SkillClasses, "Amy"),
+            server => server.Characters.Add(new AceCharacter(0x5000000B, "bsd mage")));
+        Assert.True(lower.Finish().Ok);
+        Assert.Equal("present", lower.Scenario.MageField);
+    }
+
+    [Fact]
+    public void The_report_fields_never_fail_the_check_and_stay_not_applicable_before_they_are_read()
+    {
+        // A run that fails at the login stage never read the list or the level: both say n/a and the failure is the login's own.
+        using var run = new Run(new LoginCheckScenario(SkillClasses, "Amy"), logIn: false);
+        Assert.False(run.Finish().Ok);
+        Assert.Equal(" level=n/a mage_char=n/a", run.Scenario.ReportFields);
+
+        // The pure helpers: the read model's 0 is unknown; the list is read by name.
+        Assert.Equal("?", LoginCheckScenario.LevelOf(new PlayerQualities()));
+        Assert.Equal("absent", LoginCheckScenario.MageOf([]));
+        Assert.Equal("present", LoginCheckScenario.MageOf([new CharacterSlot(1, "Amy", 0), new CharacterSlot(2, "BSD Mage", 0)]));
+        Assert.Equal("pending-delete", LoginCheckScenario.MageOf([new CharacterSlot(2, "BSD MAGE", 1)]));
+        Assert.Equal(" level=126 mage_char=present", LoginCheckScenario.Fields("126", "present"));
+    }
+
+    [Fact]
     public void The_play_frames_option_takes_a_folder_or_the_default_and_the_plan_names_eight_frames()
     {
         Assert.Null(Lifestone.Client.Play.PlayOptions.Parse(["--play-checks"]).PlayFramesDirectory);

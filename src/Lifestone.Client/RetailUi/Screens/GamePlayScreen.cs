@@ -89,6 +89,8 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         {
             registry.Register(classId, static (in UiElementInit init) => new UiElement(init));
         }
+
+        GamePanels.RegisterClasses(registry); // the panel slices' own classes (M3 2.2: GamePanels.A1.cs ... B3.cs)
     }
 
     /// <summary>The retail classes of the shell's windows that a Lifestone controller drives over a plain window element (<see cref="RegisterClasses"/>).</summary>
@@ -299,6 +301,14 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
 
         yield return true;
 
+        // M3 2.2: the panel slices' controllers (GamePanels), one staged unit each, after the shell's own controllers they read (the toolbar, the indicators, character information).
+        PanelControllers = new GamePanels(context, PanelHost, this);
+        var panelUnits = PanelControllers.Build();
+        while (panelUnits.MoveNext())
+        {
+            yield return true;
+        }
+
         // g7 lane A: Lifestone's tools panel, a floating window over the shell that F7 toggles (docs/retail-ui.md section 22.1). Its lines go to the shell's chat.
         ToolsUi = new ToolsPanel(context, Root, line => Chat?.Local(line));
         // g7 lane B: the automation inspector, a floating window that Scroll Lock toggles (section 22.2). Like the tools panel its window is made on its first open.
@@ -429,6 +439,9 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
     /// <summary>The panel host (g4): its pages, hidden at login; null when the layout has no root.</summary>
     public GamePanelHost? PanelHost { get; private set; }
 
+    /// <summary>The panel slices' controllers (M3 2.2): the pages with a controller open as pages, the others answer NotInM3; null when the layout has no root.</summary>
+    public GamePanels? PanelControllers { get; private set; }
+
     /// <summary>The toolbar's buttons (g4); null when the layout has no root.</summary>
     public GameToolbar? ToolbarUi { get; private set; }
 
@@ -515,6 +528,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         RadarUi?.Update();
         SelectionUi?.Update();
         ToolsUi?.Update();
+        PanelControllers?.Step(_context.Manager.Now);
     }
 
     /// <summary>Lifestone's tools panel (G7 lane A), toggled by F7; null when the layout has no root.</summary>
@@ -578,6 +592,8 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         Hotkeys?.Detach(_context.Manager.Input);
         ToolsUi?.Dispose();
         Inspector?.Dispose();
+        PanelControllers?.Dispose(); // the panels unsubscribe from the session, which outlives the screen (review 2.2-R2)
+        IndicatorsUi?.Dispose();
         if (Root is not null)
         {
             _context.Manager.DeleteElement(Root); // gmGamePlayUI::~gmGamePlayUI (11.6096 0x004EAF30) forces the display again; the next screen does

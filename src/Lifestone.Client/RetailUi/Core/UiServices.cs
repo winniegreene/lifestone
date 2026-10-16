@@ -128,8 +128,14 @@ public enum UiRetailGlitches
     /// </summary>
     CharGenHeldHeadgear = 128,
 
+    /// <summary>
+    /// Retail's stale effects info box (<c>gmEffectsUI::RebuildList</c>, 11.6096 0x004B8F70): when the registry has nothing in effect at all, the function returns before
+    /// <c>UpdateSelection</c> (0x004B8BB0), so the last spell to end leaves its name and description in the info box and its selection standing. Lifestone clears the selection and the info box when the list empties.
+    /// </summary>
+    EffectsStaleInfo = 256,
+
     /// <summary>Every glitch restored.</summary>
-    All = DialogQueueing | A8PointTest | FocusLossActions | CharGenHeritageTabs | CharGenSummaryHeritage | CharGenAppearanceCamera | CharGenEmptyName | CharGenHeldHeadgear,
+    All = DialogQueueing | A8PointTest | FocusLossActions | CharGenHeritageTabs | CharGenSummaryHeritage | CharGenAppearanceCamera | CharGenEmptyName | CharGenHeldHeadgear | EffectsStaleInfo,
 }
 
 /// <summary>

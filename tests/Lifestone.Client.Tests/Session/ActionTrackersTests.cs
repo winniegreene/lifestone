@@ -170,6 +170,7 @@ public sealed class ActionTrackersTests
         Assert.Contains("not in the world", early.Outcome!.Value.Detail, StringComparison.Ordinal);
 
         h.InWorld();
+        h.Describe(); // LoginComplete waits for the description (M3 1.2 s5)
         var first = h.Api.LoginComplete();
         var second = h.Api.LoginComplete();
         h.Tick();

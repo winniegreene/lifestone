@@ -1,9 +1,13 @@
 using System.Diagnostics;
 using Godot;
+using Lifestone.Client.Audio;
 using Lifestone.Client.Objects;
+using Lifestone.Data.Motion;
 using Lifestone.Data.Terrain;
+using Lifestone.Data.World;
 using Lifestone.Game.Core;
 using Lifestone.Game.Render.Particles;
+using AcFrame = Lifestone.Data.Animation.AcFrame;
 using AcVector3 = System.Numerics.Vector3;
 
 namespace Lifestone.Game.World.Objects;
@@ -87,6 +91,19 @@ public partial class LivingStaticsSystem : Node
     private const double SlowStepMs = 4.0;
 
     private static LivingStaticsSystem? _instance;
+
+    /// <summary>One for every set: the sink is the host's, the listener is set per source each frame.</summary>
+    private static readonly LivingStaticSounds SharedSounds = new();
+
+    /// <summary>
+    /// Where the statics' sound hooks go (M3 1.3 s1: play mode sets the sound router, with the avatars'); null drops them, as M1 did. The
+    /// listener is the camera (retail <c>SmartBox::set_viewer</c> → <c>SoundManager::SetPlayerPosition</c>).
+    /// </summary>
+    public static IEffectEventSink? EffectEvents
+    {
+        get => SharedSounds.Sink;
+        set => SharedSounds.Sink = value;
+    }
 
     private readonly List<Registration> _sources = new();
     private readonly HashSet<uint> _warnedModels = new();
@@ -255,7 +272,7 @@ public partial class LivingStaticsSystem : Node
             return null;
         }
 
-        var set = new LivingStaticSet(plan, _library, _sourceData, _particles, Now, unchecked((int)coord.LandBlockId + (_sources.Count * 104729)));
+        var set = new LivingStaticSet(plan, _library, _sourceData, _particles, Now, unchecked((int)coord.LandBlockId + (_sources.Count * 104729))) { Sounds = SharedSounds };
         foreach (var s in set.Statics)
         {
             // Loud, once per Setup: hooks the step executes but M1 does not draw (docs/objects.md §4).
@@ -354,6 +371,15 @@ public partial class LivingStaticsSystem : Node
             }
 
             var viewer = Local(source, eye);
+            if (camera is null)
+            {
+                SharedSounds.ClearListener();
+            }
+            else
+            {
+                SharedSounds.SetListener(ListenerFrame(source, camera, viewer));
+            }
+
             var all = source.Set.Advance(now, viewer, source.CellVisible, complete ? deadline : start);
             complete &= all;
             if (source.Set.Moved.Count > 0)
@@ -492,6 +518,17 @@ public partial class LivingStaticsSystem : Node
         }
 
         return _slots;
+    }
+
+    /// <summary>
+    /// The camera as the sound listener in a source's landblock space: its position, and its heading from the direction it looks along
+    /// (the compass heading <c>fmod(450 - atan2(y, x), 360)</c>, <c>Frame::get_heading</c>); the cell is the landblock's.
+    /// </summary>
+    private static CellFrame ListenerFrame(Registration source, Camera3D camera, AcVector3 local)
+    {
+        var forward = AcToGodot.ToAc(-camera.GlobalTransform.Basis.Z); // the conversion lives in AcToGodot (M3 1.3 fix B, R5); the heading is then taken in AC space
+        var heading = (float)((450.0 - (Math.Atan2(forward.Y, forward.X) * (180.0 / Math.PI))) % 360.0);
+        return new CellFrame(source.Coord.LandBlockId, new AcFrame(local, PositionFrames.WithHeading(System.Numerics.Quaternion.Identity, heading)));
     }
 
     /// <summary>The camera in a source's landblock-local AC coordinates (its parent is an unrotated node at the landblock's corner).</summary>

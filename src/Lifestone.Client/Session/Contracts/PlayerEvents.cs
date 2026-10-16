@@ -67,4 +67,10 @@ public enum QualityChange
 
     /// <summary>The player changed an option bit for this session (<c>IActionApi.SetSessionOption</c>); <c>Key</c> is the option's bit.</summary>
     Options,
+
+    /// <summary>
+    /// The player's enchantment registry changed (a 0x02C2 to 0x02C8 or 0x0312 applied; <see cref="PlayerQualities.Enchantments"/>): the effective values of the vitals, attributes and skills
+    /// moved with it. Published beside <see cref="EnchantmentChanged"/> on every registry change; <c>Key</c> is 0. A screen that shows effective values refreshes on this alone.
+    /// </summary>
+    Enchantments,
 }

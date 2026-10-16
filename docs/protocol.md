@@ -423,13 +423,19 @@ M2: log in, create or select a character, enter the world at Holtburg, see objec
 | F751 | PlayerTeleport | S→C | must (needed for `@telepoi`) | `GameMessagePlayerTeleport.cs` |
 | F749 / F74A | ParentEvent / PickupEvent | S→C | should | `GameMessageParentEvent.cs`, `GameMessagePickupEvent.cs` |
 | F625 | ObjDescEvent | S→C | should | `GameMessageObjDescEvent.cs` |
-| F7B0 | GameEvent envelope | S→C | must (envelope); decoded: 0x0013 PlayerDescription, 0x02BD Tell, 0x0004 PopupString, 0x028A WeenieError, 0x028B WeenieErrorWithString, 0x02EB CommunicationTransientString, 0x01C7 UseDone, 0x01C0 UpdateHealth; others skip | `GameEvent/GameEventMessage.cs`, `GameEvent/Events/*` (0x0013 PlayerDescription, 0x0029, 0x0021, 0x0196, 0x0314, 0x028A, 0x0295, 0x0004, 0x0147, 0x01EA) |
+| F7B0 | GameEvent envelope | S→C | must (envelope); decoded: 0x0013 PlayerDescription, 0x02BD Tell, 0x0004 PopupString, 0x028A WeenieError, 0x028B WeenieErrorWithString, 0x02EB CommunicationTransientString, 0x01C7 UseDone, 0x01C0 UpdateHealth; M3 1.2 adds 0x0022, 0x0023, 0x00A0 (ACE's InventoryServerSaveFailed; Lifestone's name is InventoryServerSaysFailed, which matches retail's ServerSaysAttemptFailed), 0x019A, 0x01AC, 0x01AD, 0x01B1 to 0x01B4, 0x02C1 to 0x02C8 and 0x0312 (02C4 and 02C5 are never sent by ACE, decoded anyway); others skip | `GameEvent/GameEventMessage.cs`, `GameEvent/Events/*` (0x0013 PlayerDescription, 0x0029, 0x0021, 0x0196, 0x0314, 0x028A, 0x0295, 0x0004, 0x0147, 0x01EA) |
 | F7E0 | ServerMessage (system chat) | S→C | should (`@myloc` test hook) | `GameMessageSystemChat.cs` |
 | 02BB / 02BC / 01E0 / 01E2 | HearSpeech, HearRangedSpeech, EmoteText, SoulEmote | S→C | must (chat) | `GameMessageHearSpeech.cs`, `GameMessageHearRangedSpeech.cs`, `GameMessageEmoteText.cs`, `GameMessageSoulEmote.cs` |
 | 02CD / 02CF / 02DD / 02E3 / 02E7 / 02E9 | PrivateUpdatePropertyInt, …Int64, …Skill, …Attribute, …Vital, …Attribute2ndLevel | S→C | must (D16) | `GameMessagePrivateUpdate*.cs` |
 | (other 02CD–02E9) | the remaining Private updates and the Public updates | S→C | skip | `GameMessagePrivateUpdate*.cs`, `GameMessagePublicUpdate*.cs` |
 | F750 / F755 | Sound / PlayEffect (a PlayScript on an object) | S→C | should (decoded) | `GameMessageSound.cs`, `GameMessageScript.cs` |
-| F754 / EA60 | PlayScript / AdminEnvirons | S→C | skip | `GameMessageAdminEnvirons.cs` |
+| F754 | PlayScript | S→C | skip | — |
+| EA60 | AdminEnvirons (u32 environ id) | S→C | decoded and applied (M3 1.3 s2b: the sound options play from the UI sound table, the fog options are published and logged, the fog is not drawn: `TODO(m3-environs-fog)`; `TODO(m3-admin-environs)` is closed; docs/session.md section 15) | `GameMessageAdminEnvirons.cs` |
+| GM 0x0024 | InventoryRemoveObject (u32 guid) | S→C | decoded, applied (M3 1.2 s2) | `InventoryCodecs` |
+| GM 0x0197 | stack size (u8 seq, guid, stack, value) | S→C | decoded, applied (M3 1.2 s2) | `InventoryCodecs` |
+| GM 0x019E | PlayerKilled (String16L, victim, killer) | S→C | decoded, applied (M3 1.2 s3) | `CombatCodecs` |
+| GM 0x02CE | public int property (u8 seq, guid, property, i32; CurrentWieldedLocation among them) | S→C | decoded, applied (M3 1.2 s2) | `InventoryCodecs` |
+| GM 0x02DA | public instance property (u8 seq, guid, property, u32; Container 2 and Wielder 3) | S→C | decoded, applied (M3 1.2 s2) | `InventoryCodecs` |
 | F7B1 / 0x00A1 | LoginComplete | C→S | must | `GameAction/Actions/GameActionLoginComplete.cs` |
 | F7B1 / 0xF61C | MoveToState | C→S | must | `GameActionMoveToState.cs`, `Motion/MoveToState.cs`, `Motion/RawMotionState.cs`, `Motion/MotionItem.cs` |
 | F7B1 / 0xF753 | AutonomousPosition | C→S | must | `GameActionAutonomousPosition.cs` |
@@ -438,6 +444,11 @@ M2: log in, create or select a character, enter the world at Holtburg, see objec
 | F7B1 / 0x005D | Tell (String16L message, then String16L target, both ASCII) | C→S | should | `GameActionTell.cs` |
 | F7B1 / 0x0036 | Use (u32 GUID) | C→S | should | `GameActionUseItem.cs` |
 | F7B1 / 0x01BF | QueryHealth (u32 GUID) | C→S | should | `GameActionQueryHealth.cs` |
+| F7B1 / 0x0044 | RaiseVital (u32 vital, u32 experience) | C→S | should (M3 1.1) | `GameActionRaiseVital.cs` |
+| F7B1 / 0x0045 | RaiseAttribute (u32 attribute, u32 experience) | C→S | should (M3 1.1) | `GameActionRaiseAttribute.cs` |
+| F7B1 / 0x0046 | RaiseSkill (u32 skill, u32 experience) | C→S | should (M3 1.1) | `GameActionRaiseSkill.cs` |
+| F7B1 / 0x0047 | TrainSkill (u32 skill, i32 credits) | C→S | should (M3 1.1) | `GameActionTrainSkill.cs` |
+| F7B1 / 0x0054 | StackableMerge (u32 mergeFrom, u32 mergeTo, i32 amount); retail sender `CM_Inventory::Event_StackableMerge` (11.4186 0x006ABE70, 11.6096 0x006ACDD0). ACE answers 0x0024 then 0x0197 for a whole source stack, 0x0197 for the source then for the target for a partial merge, or 0x00A0 for the refusals that tell; no F747 and no 0x02CD (docs/session.md section 7). Implemented: the codec, `SendStackableMerge`, the `MergeStack` tracker, the stand-in. Tests: `InventoryActionCodecTests`, `WorldSendTests`, `MergeStackTrackerTests`, `StandInMergeTests` | C→S | should (M3 1.4 fix A) | `GameActionStackableMerge.cs` |
 | F653 | CharacterLogOff | C→S and S→C | must | `CharacterHandler.CharacterLogOff`, `GameMessageCharacterLogOff.cs` |
 | F7B1 / 0x01E9 → GameEvent 0x01EA | PingRequest / PingResponse | C→S / S→C | skip | `GameActionPingRequest.cs`, `GameEventPingResponse.cs` |
 
@@ -624,6 +635,15 @@ No trailing Align. A 4-byte multiple happens by construction (`PositionPack.cs`)
 - For the player's own object, ignore server UpdatePosition except when the **teleport** or **force-position** sequence has advanced; then snap to it. ACE echoes an UpdatePosition back to the player on every accepted position (`Player_Tick.UpdatePlayerPosition`).
   - Retail does not simply ignore the echo: it calls `ConstrainTo` with the echoed position, the start distance and the maximum distance of the player's cell (10 m and 50 m outdoors, 5 m and 20 m in an EnvCell; `CPhysicsObj::GetStartConstraintDistance` 11.4186 0x0050EBC0, 11.6096 0x0050F690, `GetMaxConstraintDistance` 0x0050EC10, 0x0050F6E0), which slows a player that runs ahead of the server's echoes. Lifestone does the same (D23; docs/physics.md §12).
 
+#### M3 1.2 additions (world phase)
+
+- **Enchantments (GE 02C1 to 02C8, 0312).** 02C2 carries one ACE `Enchantment`: 60 bytes, or 64 with the spell set id (ACE's `HasSpellSetID` defaults to 1, so 64). 02C1, 02C3 and 02C7 are u16 spell + u16 layer; 02C6 and 0312 have no payload. 02C4 is a u32 count and the enchantments, 02C5 is u16 pairs (both never sent by ACE, decoded anyway); 02C8 is a u32 count and u16 pairs.
+- **Inventory (GE 0022, 0023, 019A, 00A0).** 0022 is item, container, placement and container type; 0023 is item and equip mask; 019A is item; 00A0 is item and WeenieError.
+- **Combat and death (GE 01AC, 01AD, 01B1 to 01B4).** 01AC, 01AD, 01B3 and 01B4 are one String16L; 01B1 is String16L, u32 damage type, f64 percent, u32 damage, u32 critical, u64 attack conditions; 01B2 is the same with a u32 damage location after the damage, then ACE's Align (a no-op).
+- **The quality stamp.** The per-object quality stamp (`WTimeStamper::UpdateTS`, 0x006B3CB0) applies to 02CE, 02DA and 0197.
+- **Wield order.** ACE's wield (`Player_Inventory.cs:297-306`) sends 02DA Wielder 0 and 02CE CurrentWieldedLocation 0 before GE 0023 names the location; the unwield (400-405) sends the same two zeros before the 0022 into the pack. Membership is therefore taken from 0023 and 0022 only.
+- **Applied by the reducer.** 0022, 0023, 019A, 0024, 0197, 02CE, 02DA and 00A0 (`GameStateReducer.Inventory.cs`; section 15 of docs/session.md). Container, Wielder and WieldedLocation are the properties they set; Burden is read, but the server sends no capacity (`TODO(m3-burden-capacity)`).
+
 ### 5.4 World-phase, client-to-server layouts
 
 These are retail layouts, checked against the 11.4186 decompilation; ACE reads them.
@@ -664,6 +684,7 @@ Running is forward = WalkForward plus current hold key = Run (2). ACE turns that
 
 - **0x0036 Use:** u32 GUID (`CM_Inventory::Event_UseEvent`, 11.4186 0x006AC3B0, 11.6096 0x006AD310).
 - **0x01BF QueryHealth:** u32 GUID (`CM_Combat::Event_QueryHealth`, 11.4186 0x006A9B40, 11.6096 0x006AAAA0).
+- **The four stat actions (M3 1.1; `StatActionCodecs`):** F7B1 {sequence, type} then two 32-bit words, 20 bytes in all. **0x0044 RaiseVital** {u32 vital: the maximum's id 1, 3 or 5, u32 experience} (`CM_Train::Event_TrainAttribute2nd`, 11.4186 0x006A8040, 11.6096 0x006A8FA0); **0x0045 RaiseAttribute** {u32 attribute 1 to 6, u32 experience} (`Event_TrainAttribute`, 0x006A7F30 / 0x006A8E90); **0x0046 RaiseSkill** {u32 skill, u32 experience} (`Event_TrainSkill`, 0x006A8150 / 0x006A90B0); **0x0047 TrainSkill** {u32 skill, **i32** credits} (`Event_TrainSkillAdvancementClass`, 0x006A8260 / 0x006A91C0). The experience is unsigned because level 126 costs 4,286,609,098, which an i32 cannot hold (ACE reads `ReadUInt32` for it and `ReadInt32` for the credits). ACE answers in its own order: 0x02CF available experience first (SpendXP), then the stat's private update (0x02E3 attribute, 0x02E7 vital, 0x02DD skill; a train adds 0x02CD credits and a chat line), and refuses most bad requests silently; docs/session.md section 29 has what each completes on.
 - **0x005D Tell:** String16L message, then String16L target, both ASCII and the target non-empty (`CM_Communication::Event_TalkDirectByName`, 11.4186 0x006A4780, 11.6096 0x006A55A0).
 - Talk: its text is the last field, so it may be Windows-1252.
 

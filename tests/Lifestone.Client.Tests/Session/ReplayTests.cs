@@ -239,6 +239,7 @@ public sealed class ReplayTests(ITestOutputHelper output)
             var bytes = File.ReadAllBytes(path);
             var first = new SessionReplayer().Replay(new MemoryStream(bytes));
             var name = Path.GetFileName(path);
+            output.WriteLine($"{name}: {first.Frames} frames, end {first.End}, trailer digest matches {(first.DigestMatches is { } m ? m.ToString() : "n/a")}");
             Assert.True(first.Malformed == 0, $"{name}: net could not parse {first.Malformed} server message(s): {string.Join(", ", first.MalformedOpcodes.Select(o => "0x" + o.ToString("X4", CultureInfo.InvariantCulture)))}");
             Assert.True(first.HandlerFailures == 0, $"{name}: {first.HandlerFailures} handler failure(s)");
             if (first.End == RecordingEnd.Trailer)

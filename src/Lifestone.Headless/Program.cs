@@ -7,8 +7,10 @@ using Lifestone.Client.Session.Credentials;
 using Lifestone.Client.Session.Hosting;
 using Lifestone.Client.Session.Recording;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Data.CharacterCreation;
 using Lifestone.Data.Checkout;
 using Lifestone.Data.Dat;
+using Lifestone.Data.Magic;
 
 namespace Lifestone.Headless;
 
@@ -60,6 +62,15 @@ internal static class Program
 
     /// <summary>The academy-exit run's limit when <c>--quit-after</c> is not given: the search for the portal, the walk, the portal space and the way home take minutes.</summary>
     internal const double AcademyExitQuitAfterSeconds = 600;
+
+    /// <summary>The default time limit of the mage build (seconds): about forty steps on loopback, the experience grant and the learns among them.</summary>
+    internal const double MageBuildQuitAfterSeconds = 600;
+
+    /// <summary>The default limit of <c>--scenario=gear</c>: the login, a whole kit's requests at the tools lane's 2 a second (about 30 s), the wields and the log off.</summary>
+    internal const double GearQuitAfterSeconds = 300;
+
+    /// <summary>The default limit of <c>--scenario=buff</c>: the gear, then a cycle (about 1,300 s of session time at the live regeneration rate, M3 2.1 s0b), the forced pass and the log off.</summary>
+    internal const double BuffQuitAfterSeconds = 3000;
 
     /// <summary>The account the headless host uses when <c>--account</c> is not given (D10).</summary>
     internal const string DefaultAccount = "test";
@@ -265,7 +276,14 @@ internal static class Program
         var runOptions = new HeadlessRunOptions
         {
             Session = options.Session with { Account = options.Session.Account ?? DefaultAccount },
-            QuitAfterSeconds = options.QuitAfter ?? (options.Scenario == HeadlessScenario.AcademyExit ? AcademyExitQuitAfterSeconds : HeadlessRunOptions.DefaultQuitAfterSeconds),
+            QuitAfterSeconds = options.QuitAfter ?? options.Scenario switch
+            {
+                HeadlessScenario.AcademyExit => AcademyExitQuitAfterSeconds,
+                HeadlessScenario.MageBuild => MageBuildQuitAfterSeconds,
+                HeadlessScenario.Gear => GearQuitAfterSeconds,
+                HeadlessScenario.Buff => BuffQuitAfterSeconds,
+                _ => HeadlessRunOptions.DefaultQuitAfterSeconds,
+            },
             LifestoneVersion = typeof(Program).Assembly.GetName().Version?.ToString(),
             AceCommit = aceCommit,
         };
@@ -299,6 +317,34 @@ internal static class Program
                         options.CreateCharacter,
                         options.CreateCharacter is null ? null : HeadlessCharacter.RetailSkillClasses(dats),
                         portalCell: PortalExit.ExitToHoltburgCell);
+                }
+                else if (options.Scenario == HeadlessScenario.MageBuild)
+                {
+                    if (options.Session.Character is not null || options.CreateCharacter is not null)
+                    {
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=mage-build (the mage is always the template's character)");
+                    }
+
+                    scenario = new MageBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log);
+                }
+                else if (options.Scenario == HeadlessScenario.Gear)
+                {
+                    if (options.Session.Character is not null || options.CreateCharacter is not null)
+                    {
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=gear (the mage is always the template's character)");
+                    }
+
+                    // The kit's taper colours are the account's (ACE customises them from the stored account name, the login name; it is read here, hashed by the kit and never logged or printed).
+                    scenario = new GearScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), log);
+                }
+                else if (options.Scenario == HeadlessScenario.Buff)
+                {
+                    if (options.Session.Character is not null || options.CreateCharacter is not null)
+                    {
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=buff (the mage is always the template's character)");
+                    }
+
+                    scenario = new BuffScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Buff, log);
                 }
                 else if (options.CreateCharacter is { } create)
                 {
@@ -350,6 +396,22 @@ internal static class Program
         }
 
         var shown = Shown(root, recordingPath);
+        if (scenario is MageBuildScenario mage)
+        {
+            // Additive to the frozen headless line: the mage's own verdict fields come first (no name, no account).
+            output.WriteLine("mage-build " + mage.VerdictFields());
+        }
+
+        if (scenario is GearScenario gear)
+        {
+            output.WriteLine("gear " + gear.VerdictFields());
+        }
+
+        if (scenario is BuffScenario buffRun)
+        {
+            output.WriteLine("buff " + buffRun.VerdictFields());
+        }
+
         output.WriteLine(result.SummaryLine(shown));
         if (options.SummaryPath is { } summary)
         {
@@ -357,6 +419,21 @@ internal static class Program
         }
 
         return result.ExitCode;
+    }
+
+    /// <summary>The login name of the account <paramref name="key"/> picks in the secrets file (the password is parsed and zeroed at once; the name is for the gear kit's hash only).</summary>
+    private static string LoginName(ServerRuntimePaths runtime, string? key)
+    {
+        var secrets = File.ReadAllBytes(runtime.SecretsFile);
+        try
+        {
+            using var credentials = PlayAccounts.Parse(secrets, AccountChoice.FromOption(key, AccountChoice.Default));
+            return credentials.Account;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(secrets);
+        }
     }
 
     /// <summary>The ACE commit server/versions.json pins (for the recording header), or null with a WARNING.</summary>

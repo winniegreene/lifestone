@@ -63,6 +63,42 @@ public enum ActionKind
 
     /// <summary>A <see cref="MoveIntents"/> intent (automation driving the player's movement controller).</summary>
     MoveIntent,
+
+    /// <summary><see cref="IActionApi.RaiseAttribute"/> (M3 1.1; appended, so the values above stay stable).</summary>
+    RaiseAttribute,
+
+    /// <summary><see cref="IActionApi.RaiseVital"/>.</summary>
+    RaiseVital,
+
+    /// <summary><see cref="IActionApi.RaiseSkill"/>.</summary>
+    RaiseSkill,
+
+    /// <summary><see cref="IActionApi.TrainSkill"/>.</summary>
+    TrainSkill,
+
+    /// <summary><see cref="PlayerTools.LearnSpells"/> (M3 1.1 s2b; appended).</summary>
+    ToolSpell,
+
+    /// <summary><see cref="PlayerTools.SpawnItem"/>.</summary>
+    ToolItem,
+
+    /// <summary><see cref="IActionApi.Cast(uint, ActionSource)"/> and <see cref="IActionApi.Cast(uint, uint, ActionSource)"/> (M3 1.2 s4a; appended).</summary>
+    CastSpell,
+
+    /// <summary><see cref="IActionApi.SetCombatMode"/>.</summary>
+    SetCombatMode,
+
+    /// <summary><see cref="IActionApi.Wield"/>.</summary>
+    Wield,
+
+    /// <summary><see cref="IActionApi.Unwield"/>.</summary>
+    Unwield,
+
+    /// <summary><see cref="IActionApi.MoveToPack"/>.</summary>
+    MoveToPack,
+
+    /// <summary><see cref="IActionApi.MergeStack"/> (M3 1.4 fix A; appended).</summary>
+    MergeStack,
 }
 
 /// <summary>Where an <see cref="ActionHandle"/> is in its life.</summary>

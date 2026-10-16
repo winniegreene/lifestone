@@ -8,7 +8,7 @@ namespace Lifestone.Client.Session.Tools;
 
 /// <summary>
 /// Turns the server mod's reply data (ToolsWire's <see cref="StatusData"/>, <see cref="WhereData"/>,
-/// <see cref="PlaceData"/>, <see cref="XpData"/>, <see cref="QuestData"/> and <see cref="CharPurgeData"/>) into the session's tool results. Every reader throws
+/// <see cref="PlaceData"/>, <see cref="XpData"/>, <see cref="QuestData"/>, <see cref="CharPurgeData"/>, <see cref="SpellLearnData"/> and <see cref="ItemData"/>) into the session's tool results. Every reader throws
 /// <see cref="ToolDataException"/> for data that does not have its verb's shape, which the tools report as a server
 /// error rather than a result.
 /// </summary>
@@ -55,6 +55,33 @@ internal static class ToolResultReader
         var d = Data<CharPurgeData>(reply);
         return new CharPurgeResult(d.Name ?? string.Empty, d.Characters, d.PlayerBiotas, d.Possessions);
     }
+
+    /// <summary>A <c>spell learn</c> reply's result. An outcome word this client does not know is data of the wrong shape.</summary>
+    internal static SpellLearnResult SpellLearn(ToolReply reply)
+    {
+        var d = Data<SpellLearnData>(reply);
+        var spells = (d.Spells ?? []).Select(s => new SpellLearnEntry(s.Id, SpellOutcome(s.Outcome), s.Name)).ToArray();
+        return new SpellLearnResult(
+            spells,
+            spells.Count(s => s.Outcome == SpellOutcomeKind.Learned),
+            spells.Count(s => s.Outcome == SpellOutcomeKind.Known),
+            spells.Count(s => s.Outcome == SpellOutcomeKind.Unknown));
+    }
+
+    /// <summary>An <c>item</c> reply's result.</summary>
+    internal static ItemResult Item(ToolReply reply)
+    {
+        var d = Data<ItemData>(reply);
+        return new ItemResult(d.Guid, d.Wcid, d.Name ?? string.Empty, d.Stack, d.Requested, d.MaxStack, d.Clamped);
+    }
+
+    private static SpellOutcomeKind SpellOutcome(string? word) => word switch
+    {
+        SpellOutcomes.Learned => SpellOutcomeKind.Learned,
+        SpellOutcomes.Known => SpellOutcomeKind.Known,
+        SpellOutcomes.Unknown => SpellOutcomeKind.Unknown,
+        _ => throw new ToolDataException("the reply names a spell outcome this client does not know"),
+    };
 
     private static T Data<T>(ToolReply reply)
         where T : class

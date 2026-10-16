@@ -1,5 +1,6 @@
 using Lifestone.Client.Session.Tools;
 using Lifestone.Data.World;
+using Lifestone.ServerTools;
 
 namespace Lifestone.Client.Session.Contracts;
 
@@ -120,3 +121,123 @@ public sealed record QuestResult(string Action, string Name, bool HeldBefore, in
 /// <param name="PlayerBiotas">Player biotas removed (1).</param>
 /// <param name="Possessions">Inventory and wielded item biotas removed with the character.</param>
 public sealed record CharPurgeResult(string Name, int Characters, int PlayerBiotas, int Possessions);
+
+/// <summary>What the mod did with one spell of a <c>spell learn</c> request (<see cref="SpellLearnEntry.Outcome"/>).</summary>
+public enum SpellOutcomeKind
+{
+    /// <summary>The character did not know the spell and now does.</summary>
+    Learned,
+
+    /// <summary>The character already knew the spell; nothing changed.</summary>
+    Known,
+
+    /// <summary>The id is not in the server's spell table; nothing was learned. A request holding one is a failure (<see cref="SpellLearnResult.Ok"/> is false).</summary>
+    Unknown,
+}
+
+/// <summary>One spell of a <see cref="SpellLearnResult"/>, in request order.</summary>
+/// <param name="Id">The spell id as requested.</param>
+/// <param name="Outcome">What happened to it.</param>
+/// <param name="Name">The spell's name in the spell table, or null for an unknown id.</param>
+public sealed record SpellLearnEntry(uint Id, SpellOutcomeKind Outcome, string? Name);
+
+/// <summary>
+/// The mod's <c>spell learn</c> reply (<see cref="PlayerTools.LearnSpells"/>): one entry per requested id, in order. The mod carries out every
+/// id it can, so an unknown id does not stop the others; <see cref="Ok"/> is true only when none was unknown, and the handle then ends as a
+/// server error naming the ids (<see cref="PlayerTools.UnknownSpellCode"/>) with this result still set.
+/// </summary>
+/// <param name="Spells">The outcomes, one per requested id, in order.</param>
+/// <param name="Learned">How many were learned just now.</param>
+/// <param name="Known">How many the character already knew.</param>
+/// <param name="Unknown">How many are not in the spell table.</param>
+public sealed record SpellLearnResult(IReadOnlyList<SpellLearnEntry> Spells, int Learned, int Known, int Unknown)
+{
+    /// <summary>True when no requested id was unknown.</summary>
+    public bool Ok => Unknown == 0;
+
+    /// <summary>True when every requested id was already known (a ready spellbook is verified by this).</summary>
+    public bool AllAlreadyKnown => Spells.Count > 0 && Known == Spells.Count;
+
+    /// <summary>The requested ids the spell table does not hold, in request order.</summary>
+    public IReadOnlyList<uint> UnknownIds => Spells.Where(s => s.Outcome == SpellOutcomeKind.Unknown).Select(s => s.Id).ToArray();
+
+    /// <summary>Equal when the entries are equal in order (a record's default would compare the list by reference).</summary>
+    public bool Equals(SpellLearnResult? other) => other is not null && Learned == other.Learned && Known == other.Known && Unknown == other.Unknown && Spells.SequenceEqual(other.Spells);
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(Spells.Count, Learned, Known, Unknown);
+}
+
+/// <summary>
+/// The mod's <c>item</c> reply (<see cref="PlayerTools.SpawnItem"/>): the item ACE created in the player's pack. A stack above the item's maximum is
+/// clamped to it, and a stack asked for an item that does not stack is ignored (one is made); <see cref="Clamped"/> says so and is never an error.
+/// </summary>
+/// <param name="Guid">The new object's id.</param>
+/// <param name="Wcid">The weenie class id.</param>
+/// <param name="Name">The item's name.</param>
+/// <param name="Stack">The stack size it was created with (1 for an item that does not stack).</param>
+/// <param name="Requested">The stack size asked for, or null when none was.</param>
+/// <param name="MaxStack">The item's maximum stack size, or null when it does not stack.</param>
+/// <param name="Clamped">True when <paramref name="Stack"/> is below <paramref name="Requested"/>.</param>
+public sealed record ItemResult(uint Guid, uint Wcid, string Name, int Stack, int? Requested, int? MaxStack, bool Clamped);
+
+/// <summary>How a <see cref="PlayerTools.SpawnItem"/> request ended (<see cref="ItemOutcomes.Of"/>).</summary>
+public enum ItemOutcome
+{
+    /// <summary>Not finished yet.</summary>
+    Pending,
+
+    /// <summary>The item was created (<see cref="ToolHandle{T}.Result"/> is set; read <see cref="ItemResult.Clamped"/>).</summary>
+    Created,
+
+    /// <summary>The server has no weenie of that class id (<c>unknown-wcid</c>).</summary>
+    UnknownWcid,
+
+    /// <summary>The weenie is of a type the server never spawns (<c>not-creatable</c>).</summary>
+    NotCreatable,
+
+    /// <summary>The pack had no room; nothing was created (<c>no-room</c>).</summary>
+    NoRoom,
+
+    /// <summary>Anything else that is not a creation: refused before sending (a stack outside 1 to 65,535, the tools unavailable), a different server error, no answer in time.</summary>
+    Failed,
+}
+
+/// <summary>Reads how a tool request for an item ended.</summary>
+public static class ItemOutcomes
+{
+    /// <summary>The typed ending of <paramref name="handle"/>, from its outcome and the mod's error code.</summary>
+    /// <param name="handle">A handle from <see cref="PlayerTools.SpawnItem"/>.</param>
+    /// <returns>The ending.</returns>
+    public static ItemOutcome Of(ToolHandle<ItemResult> handle)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        if (handle.Outcome is not { } outcome)
+        {
+            return ItemOutcome.Pending;
+        }
+
+        if (outcome.Kind == ActionOutcomeKind.Confirmed)
+        {
+            return handle.Result is null ? ItemOutcome.Failed : ItemOutcome.Created;
+        }
+
+        if (outcome.Kind != ActionOutcomeKind.ServerError)
+        {
+            return ItemOutcome.Failed;
+        }
+
+        var detail = outcome.Detail ?? string.Empty;
+        if (detail.StartsWith(ToolErrors.UnknownWcid + ":", StringComparison.Ordinal))
+        {
+            return ItemOutcome.UnknownWcid;
+        }
+
+        if (detail.StartsWith(ToolErrors.NotCreatable + ":", StringComparison.Ordinal))
+        {
+            return ItemOutcome.NotCreatable;
+        }
+
+        return detail.StartsWith(ToolErrors.NoRoom + ":", StringComparison.Ordinal) ? ItemOutcome.NoRoom : ItemOutcome.Failed;
+    }
+}

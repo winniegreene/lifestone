@@ -175,7 +175,7 @@ Durations are ACE's server timings (link length ÷ 2.0). "—" = none. All rows 
 | 2645 Portal Recall (item) | Shurov Thipaj | MagicPowerUp04 1.01 s → MagicSelfHead 0.38 s | caster AttribUpPurple@0.4 → 0x33000040 | — |
 | 1635 Lifestone Recall (item) | Shurov Thiguz | MagicPowerUp04 1.01 s → MagicSelfHead 0.38 s | caster AttribUpBlue@0.4 → 0x3300002B | — |
 
-A fizzle (ACE: `PlayScript.Fizzle` @0.5 on the caster) resolves to 0x33000103 in the human table.
+A fizzle (ACE: `PlayScript.Fizzle` @0.5 on the caster) resolves to 0x33000103 in the human table. ACE sends the fizzle after the words and the gestures, not instead of them: the pre-check status is read at the end of the chain (M3 2.1 s2a; the stand-in plays it so, `docs/session.md` section 16).
 
 Chain audit (exhaustive test): every caster/target effect of all 6,266 spells resolves through the human table
 (10,944 resolutions with the drudge table; only 7 special-event PlayScripts are absent from the drudge's), all
@@ -222,3 +222,4 @@ Each is either measured or fails loudly; none is silent.
 | Modifier with no MotionData in `StopObjectCompletely` | Retail would loop forever; we throw. |
 | Interpolated poses | `PoseSampling.Interpolated` is a non-retail option (lerp/slerp inside the current node). |
 | Embedded JSON | The extract is loaded from the source tree until `Lifestone.Data.csproj` embeds `Magic/Data/*.json` (requested). |
+| Profile spells (M3 2.1 s2b; a fact, not a deviation) | No profile spell has two scarabs (`CastGesturePlanner.IsAceScarab` counts 1 for every line), the creature-school buffs are all FastCast (a gesture, no wind-up; Adja's Blessing 2215 is one), and no profile spell has a caster effect (CasterEffect is Invalid for all; the target effect plays on the player for a self spell). The play-check's cast is Revitalize Self VI (1182): a wind-up (0x10000078 at 0 s), the gesture (0x4000002D at 1.78 s), the effect at 2.09 s and the target effect on the player. |

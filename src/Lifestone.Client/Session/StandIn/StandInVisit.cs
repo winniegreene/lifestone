@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using System.Numerics;
 using Lifestone.Client.Session.State;
+using Lifestone.Data.CharacterCreation;
+using Lifestone.Data.Magic;
 using Lifestone.Net.Dispatch;
 using Lifestone.Net.Messages;
 using Lifestone.Net.Session;
@@ -27,12 +29,39 @@ public readonly record struct StandInTeleport(double After, uint Cell, Vector3 O
 /// the UnHide script's fade) and clears the bit this many seconds after the player's unhide (D63: the materialise fade of an object, drawn by the same path as the player's).</param>
 public readonly record struct StandInObject(uint Guid, string Name, Vector3 Offset, uint Setup = StandInVisit.HumanSetup, uint MotionTable = StandInVisit.HumanMotionTable, StandInTeleport? PortalTo = null, uint DescriptionFlags = 0, byte BlipColor = 0, double? UnhideAfter = null);
 
+/// <summary>A weenie the stand-in knows for the server mod's <c>item</c> request (a placeholder: the stand-in has no weenie database; <c>TODO(m3-standin-weenies)</c>).</summary>
+/// <param name="Name">The item's name.</param>
+/// <param name="MaxStack">The most one stack holds, or null for an item that does not stack.</param>
+/// <param name="Creatable">False for a weenie the server never spawns into a pack (answered <c>not-creatable</c>).</param>
+public sealed record StandInItemKind(string Name, int? MaxStack, bool Creatable = true)
+{
+    /// <summary>ACE's <c>coinstack</c> (273), the one weenie the stand-in knows by default: Pyreal, stacking to 25,000.</summary>
+    public const uint PyrealWcid = 273;
+
+    /// <summary>What the stand-in knows when the visit names no weenies.</summary>
+    public static IReadOnlyDictionary<uint, StandInItemKind> Default { get; } = new Dictionary<uint, StandInItemKind> { [PyrealWcid] = new("Pyreal", 25_000) };
+}
+
 /// <summary>A line someone nearby says in a scripted visit (a HearSpeech, text type 2).</summary>
 /// <param name="After">Seconds after the player is unhidden.</param>
 /// <param name="Speaker">The speaker's name.</param>
 /// <param name="SpeakerGuid">The speaker's object id.</param>
 /// <param name="Text">What is said.</param>
 public readonly record struct StandInSpeech(double After, string Speaker, uint SpeakerGuid, string Text);
+
+/// <summary>An F755 PlayEffect the stand-in server sends (M3 1.3 s0): ACE's <c>GameMessageScript</c> (a level-up, a buff, a spell effect) for an object.</summary>
+/// <param name="After">Seconds after the visit's unhide (session clock).</param>
+/// <param name="Guid">The object the script plays on; 0 is the player.</param>
+/// <param name="ScriptType">The script type (retail <c>PScriptType</c>), resolved through the object's PhysicsScriptTable.</param>
+/// <param name="Speed">The intensity (retail's <c>mod</c>; ACE sends 1 by default).</param>
+public readonly record struct StandInScript(double After, uint Guid, uint ScriptType, float Speed);
+
+/// <summary>An F750 Sound the stand-in server sends (M3 1.3 s0): ACE's <c>GameMessageSound</c> for an object.</summary>
+/// <param name="After">Seconds after the visit's unhide (session clock).</param>
+/// <param name="Guid">The object the sound plays on; 0 is the player.</param>
+/// <param name="SoundType">The sound type (retail <c>SoundType</c>), looked up in the object's sound table.</param>
+/// <param name="Volume">The volume, 0 to 1.</param>
+public readonly record struct StandInSound(double After, uint Guid, uint SoundType, float Volume);
 
 /// <summary>
 /// A scripted visit of the world, as the server would send it, for the play-mode checks (<c>--play-checks</c>) that run without a server: the player's
@@ -55,6 +84,12 @@ public sealed record StandInVisit
     /// arriving (docs/avatars.md section 10.2).
     /// </summary>
     public const uint HumanScriptTable = 0x34000004;
+
+    /// <summary>
+    /// The human's SoundTable (STable), which ACE puts in a player's PhysicsDesc: the table the sound types of the sounds the server plays on the player (F750) are looked up in. The Setup names none
+    /// (its default sound table is 0), so the stand-in sends this one as the server does.
+    /// </summary>
+    public const uint HumanSoundTable = 0x20000001;
 
     /// <summary>The cell the player is created in: Holtburg's town drop point (an outdoor cell).</summary>
     public uint Cell { get; init; } = 0xA9B40019;
@@ -91,6 +126,49 @@ public sealed record StandInVisit
     /// numbers (placeholders, not any character's); null sends none (the qualities stay unknown).
     /// </summary>
     public StandInPlayerStats? Stats { get; init; } = new();
+
+    /// <summary>
+    /// The XpTable (0x0E000018) the stand-in prices a raise by, as ACE does (<c>Player.CalcAttributeRank</c> and its siblings read the dat's lists): the host loads it from the dats
+    /// (<c>XpTableData.Load</c>; settable because the play checks load it once the dats are open, after the visit exists). Null: a raise is answered with the refusal line plus <c>TODO(m3-standin-xp-table)</c> (the stand-in does not guess a price).
+    /// </summary>
+    public XpTableData? XpTable { get; set; }
+
+    /// <summary>
+    /// The SpellTable (0x0E00000E) the stand-in answers <c>spell learn</c> by (an id the table does not hold is unknown, as the mod answers by ACE's table): the host loads it from the dats
+    /// (<c>SpellTableData.Load</c>; settable like <see cref="XpTable"/>). Null: a fixed placeholder rule (<c>TODO(m3-standin-spell-table)</c>, see <see cref="StandInWorld.PlaceholderMaxSpellId"/>).
+    /// </summary>
+    public SpellTableData? SpellTable { get; set; }
+
+    /// <summary>
+    /// The plan of a spell's cast (M3 2.1 s2a): the words, the wind-up and cast gestures with ACE's timings, the effect's moment (<see cref="StandInCastPlanner.Plan"/>, over the dats' SpellComponentTable and the player's motion table). The host
+    /// sets it once the dats are open (settable like <see cref="XpTable"/>). Null: a cast is its effect and ACE's UseDone with no words, gestures or scripts (<c>TODO(m3-standin-cast-plan)</c>, logged once).
+    /// </summary>
+    public Func<SpellInfo, CastPlan?>? CastPlanner { get; set; }
+
+    /// <summary>
+    /// The Setup of the projectile a war spell launches (the ACE world extract the visuals use; null: not known). The stand-in dresses its projectile placeholder with it, so the cast tracker, which
+    /// takes a projectile only when it wears the spell's Setup (M3 1.2 fix R2), attributes it as it would ACE's; with none the placeholder wears a small human Setup and a host that gave the
+    /// Action API the Setups would refuse it (<c>TODO(m3-standin-projectile-model)</c>).
+    /// </summary>
+    public Func<uint, uint?>? ProjectileSetup { get; set; }
+
+    /// <summary>
+    /// The weenies the stand-in knows for <c>item</c>, by class id. Null: <see cref="StandInItemKind.Default"/> (<c>TODO(m3-standin-weenies)</c>: the stand-in has no weenie database;
+    /// a class id it does not hold answers <c>unknown-wcid</c>).
+    /// </summary>
+    public IReadOnlyDictionary<uint, StandInItemKind>? Items { get; set; }
+
+    /// <summary>
+    /// A real PlayerDescription (and its contained objects) to send in place of <see cref="Stats"/>'s synthetic one (M3 1.2 s5: <see cref="RecordedDescription.TryFind"/> reads it from <c>cache/sessions</c>; the play checks set it when
+    /// a recording exists). Null: <see cref="Stats"/> is sent as before. Settable like <see cref="XpTable"/>: the host loads it before the session starts.
+    /// </summary>
+    public RecordedDescription? Recorded { get; set; }
+
+    /// <summary>The F755 scripts the server plays on objects after the unhide (Smartbox queue). None by default.</summary>
+    public ImmutableArray<StandInScript> Scripts { get; init; } = [];
+
+    /// <summary>The F750 sounds the server plays on objects after the unhide (Smartbox queue). None by default.</summary>
+    public ImmutableArray<StandInSound> Sounds { get; init; } = [];
 
     /// <summary>The vital updates the server sends after the unhide, in time order. None by default.</summary>
     public ImmutableArray<StandInVitalUpdate> VitalUpdates { get; init; } = [];
@@ -150,8 +228,81 @@ public sealed record StandInPlayerStats
     /// <summary>Current mana.</summary>
     public uint Mana { get; init; } = 75;
 
+    /// <summary>The character's level (PropertyInt 25); 0 sends none (the default: the stand-in's description carries no experience of its own).</summary>
+    public int Level { get; init; }
+
+    /// <summary>The experience the character has earned (PropertyInt64 1); with <see cref="AvailableExperience"/> sent only when either is non-zero.</summary>
+    public long TotalExperience { get; init; }
+
+    /// <summary>The experience the character can spend (PropertyInt64 2): a raise at the stand-in spends it (a placeholder amount; the stand-in has no experience of its own).</summary>
+    public long AvailableExperience { get; init; }
+
+    /// <summary>The skill credits the character can spend (PropertyInt 24); sent only when non-zero.</summary>
+    public int AvailableSkillCredits { get; init; }
+
+    /// <summary>The skills the description carries (none by default); a RaiseSkill or TrainSkill at the stand-in works on these.</summary>
+    public ImmutableArray<SkillDesc> Skills { get; init; } = [];
+
     /// <summary>The description's enchantment registry (what a buffed character's PlayerDescription carries; none by default).</summary>
     public ImmutableArray<EnchantmentDesc> Enchantments { get; init; } = [];
+
+    /// <summary>The spells the description carries, each with its power (PlayerDescription's spell table); none by default. When set (<see cref="ProbeSpells"/>), it replaces a replayed recording's spells (<c>TODO(m3-standin-probe-spellbook)</c>, logged once).</summary>
+    public ImmutableDictionary<uint, float> Spells { get; init; } = ImmutableDictionary<uint, float>.Empty;
+
+    /// <summary>The spellbook filter word the description carries (<see cref="ProbeSpellbookFilters"/> for the probe book); null sends none (or leaves a recording's).</summary>
+    public uint? SpellbookFilters { get; init; }
+
+    /// <summary>Enchantments appended to the registry the description carries, whether the stand-in's own (<see cref="Enchantments"/>) or a replayed recording's: <see cref="ProbeEnchantments"/> gives the play checks a harmful one and a vitae.</summary>
+    public ImmutableArray<EnchantmentDesc> ExtraEnchantments { get; init; } = [];
+
+    /// <summary>
+    /// The probe spellbook's rows (M3 2.2 fix B, 2.2-R5): 40 real spell ids of the retail SpellTable, the lowest id of each school and rough level 1 to 8 (the table holds no spell with another level), each with the filter bits it needs
+    /// (the school's bit and the level's bit; <c>IsFilteredOut</c>, 0x0048B190) written here by hand from a dump of the table, so the spellbook check's count is not computed by the page's own rule. Ids 2, 3, 1182 and 4325 are not in it:
+    /// the play checks learn them. Lifestone-authored: a placeholder book, not a character's.
+    /// </summary>
+    public static ImmutableArray<(uint Id, uint FilterBits)> ProbeSpellbook { get; } =
+    [
+        (1, 0x1 | 0x10), (230, 0x1 | 0x20), (231, 0x1 | 0x40), (232, 0x1 | 0x80), (233, 0x1 | 0x100), (234, 0x1 | 0x200), (2054, 0x1 | 0x400), (4292, 0x1 | 0x800), // creature, levels 1 to 8
+        (35, 0x2 | 0x10), (1470, 0x2 | 0x20), (47, 0x2 | 0x40), (157, 0x2 | 0x80), (158, 0x2 | 0x100), (1474, 0x2 | 0x200), (2092, 0x2 | 0x400), (4342, 0x2 | 0x800), // item
+        (5, 0x4 | 0x10), (160, 0x4 | 0x20), (161, 0x4 | 0x40), (162, 0x4 | 0x80), (163, 0x4 | 0x100), (164, 0x4 | 0x200), (2052, 0x4 | 0x400), (3976, 0x4 | 0x800), // life
+        (27, 0x8 | 0x10), (59, 0x8 | 0x20), (60, 0x8 | 0x40), (61, 0x8 | 0x80), (62, 0x8 | 0x100), (57, 0x8 | 0x200), (2120, 0x8 | 0x400), (2912, 0x8 | 0x800), // war
+        (5339, 0x2000 | 0x10), (5340, 0x2000 | 0x20), (5341, 0x2000 | 0x40), (5342, 0x2000 | 0x80), (5343, 0x2000 | 0x100), (5344, 0x2000 | 0x200), (5337, 0x2000 | 0x400), (5338, 0x2000 | 0x800), // void
+    ];
+
+    /// <summary>A spell id the retail SpellTable does not hold (its highest id is 6340): the probe book carries it, and the spellbook lists nothing for it (a spell with no table entry has no name, icon or level to show).</summary>
+    public const uint ProbeUnknownSpell = 60001;
+
+    /// <summary>The probe book's filter word: the default 0x3FFF with the level 8 bit (0x800) cleared, so five of the forty spells (one for each school) are hidden by the filter, and the unknown spell is skipped by the page.</summary>
+    public const uint ProbeSpellbookFilters = 0x3FFF & ~0x800u;
+
+    /// <summary>The probe spellbook as a description's spell table: the 40 rows and <see cref="ProbeUnknownSpell"/>, each with power 2.</summary>
+    public static ImmutableDictionary<uint, float> ProbeSpells()
+    {
+        var book = ImmutableDictionary.CreateBuilder<uint, float>();
+        foreach (var (id, _) in ProbeSpellbook)
+        {
+            book[id] = 2f;
+        }
+
+        book[ProbeUnknownSpell] = 2f;
+        return book.ToImmutable();
+    }
+
+    /// <summary>Spell 230, "Vulnerability Other II" (a harmful spell in the retail table): the harmful enchantment of the probe registry (an additive integer of a property key no check reads, permanent).</summary>
+    public const ushort ProbeHarmfulSpell = 230;
+
+    /// <summary>The vitae the probe registry carries: a 5 percent penalty (multiplier 0.95).</summary>
+    public const float ProbeVitaeValue = 0.95f;
+
+    /// <summary>
+    /// The enchantments the play checks append to a registry (M3 2.2 fix B, 2.2-R6): one harmful enchantment (<see cref="ProbeHarmfulSpell"/>, in its own category, no effect on a stat any check reads) and the vitae (<see cref="ProbeVitaeValue"/>),
+    /// so page 5 and the vitae page have something to show. The vitae multiplies the secondary attributes and the attributes, so the checks derive what they expect from the registry as sent.
+    /// </summary>
+    public static ImmutableArray<EnchantmentDesc> ProbeEnchantments() =>
+    [
+        new EnchantmentDesc(ProbeHarmfulSpell, 1, 1500, 0, 20, 0.0, -1.0, 0x50000001, 0f, 0f, 0.0, 0x8004, 40, -1f, 0, EnchantmentBucket.Additive),
+        new EnchantmentDesc(Contracts.EnchantmentRules.VitaeSpellId, 1, 666, 0, 0, 0.0, -1.0, 0x50000001, 0f, 0f, 0.0, Contracts.EnchantmentRules.Multiplicative, 0, ProbeVitaeValue, 0, EnchantmentBucket.Vitae),
+    ];
 
     /// <summary>
     /// A registry shaped like a buffed live character's (138 enchantments with layered duplicates of the same spell, as the live gate's PlayerDescription): float and integer modifiers of
@@ -241,6 +392,19 @@ public static partial class StandInSessions
         foreach (var line in visit.Speech)
         {
             schedule.At(unhideAt + line.After, sink => sink.OnSpeech(new InboundContext(0, MessageQueue.SmartBox, sink is GameStateReducer r ? r.Clock.Time.GetTimestamp() : 0), new SpeechMsg(line.Text, line.Speaker, line.SpeakerGuid, 2, null)));
+        }
+
+        // M3 1.3 s0: the scripts first, then the sounds, at the same time as ACE queues them (steps due together run in the order scheduled); all on the Smartbox queue.
+        foreach (var effect in visit.Scripts)
+        {
+            var target = effect.Guid == 0 ? guid : effect.Guid;
+            schedule.At(unhideAt + effect.After, sink => sink.OnPlayEffect(WorldContext(sink), new PlayEffectMsg(target, effect.ScriptType, effect.Speed)));
+        }
+
+        foreach (var effect in visit.Sounds)
+        {
+            var target = effect.Guid == 0 ? guid : effect.Guid;
+            schedule.At(unhideAt + effect.After, sink => sink.OnSound(WorldContext(sink), new SoundMsg(target, effect.SoundType, effect.Volume)));
         }
 
         foreach (var update in visit.VitalUpdates)
@@ -349,7 +513,12 @@ public static partial class StandInSessions
         sink.OnSessionEvent(SessionEvent.PhaseChanged(Now(sink), SessionPhase.CharacterSelect, SessionPhase.EnteringWorld));
         sink.OnEnterWorldServerReady(Context(sink));
         sink.OnPlayerCreate(WorldContext(sink), new PlayerCreateMsg(guid));
-        if (visit.Stats is { } stats)
+        if (visit.Recorded is { } recorded)
+        {
+            // The recorded description as the server sent it (it holds no guid: the event's header names this player).
+            sink.OnPlayerDescription(WorldContext(sink), new GameEventHeader(guid, 1, 0x0013), RecordedFor(visit, recorded, sink));
+        }
+        else if (visit.Stats is { } stats)
         {
             sink.OnPlayerDescription(WorldContext(sink), new GameEventHeader(guid, 1, 0x0013), Description(stats));
         }
@@ -357,16 +526,26 @@ public static partial class StandInSessions
         sink.OnSessionEvent(SessionEvent.PhaseChanged(Now(sink), SessionPhase.EnteringWorld, SessionPhase.InWorld));
         var physics = new PhysicsDesc
         {
-            Flags = PhysicsDescFlags.CSetup | PhysicsDescFlags.MTable | PhysicsDescFlags.PeTable | PhysicsDescFlags.Position,
+            Flags = PhysicsDescFlags.CSetup | PhysicsDescFlags.MTable | PhysicsDescFlags.STable | PhysicsDescFlags.PeTable | PhysicsDescFlags.Position,
             State = PhysicsState.Hidden | PhysicsState.IgnoreCollisions | PhysicsState.Gravity | PhysicsState.EdgeSlide,
             Position = new AcPosition(visit.Cell, visit.Origin, Quaternion.Identity),
             SetupId = StandInVisit.HumanSetup,
             MotionTableId = StandInVisit.HumanMotionTable,
+            SoundTableId = StandInVisit.HumanSoundTable,
             PhysicsEffectTableId = StandInVisit.HumanScriptTable,
             Timestamps = Stamps(1, 1),
         };
         var weenie = new WeenieDesc { Header = WeenieHeaderFlags.None, Name = name, WeenieClassId = 1, IconId = 0x06000001, ItemType = 0x10, ObjectDescriptionFlags = 0x8 };
         sink.OnCreateObject(WorldContext(sink), new CreateObjectMsg(guid, ModelData.Empty, physics, weenie), isUpdate: false);
+        if (visit.Recorded is { } contents)
+        {
+            // The objects the description lists, so that every one of them exists (the portal wait of retail's SendLoginCompleteNotification); the recorded player's guid in them becomes this player's.
+            foreach (var item in contents.ItemsFor(guid))
+            {
+                sink.OnCreateObject(WorldContext(sink), item, isUpdate: false);
+            }
+        }
+
         foreach (var obj in visit.Objects)
         {
             var hiddenAtCreation = obj.UnhideAfter is not null;
@@ -398,9 +577,113 @@ public static partial class StandInSessions
         }
     }
 
-    private static PlayerDescriptionMsg Description(StandInPlayerStats s) => new()
+    /// <summary>
+    /// The recorded description as sent. One placeholder, named: when the visit's <see cref="StandInVisit.Stats"/> carry experience (the raise check spends it), the experience the recorded character
+    /// lacks is made up to that (PropertyInt64 1 and 2, only upwards), because a graduated test character has none to spend and the stand-in would, rightly, refuse its raise (<c>TODO(m3-standin-recorded-xp)</c>).
+    /// </summary>
+    private static PlayerDescriptionMsg RecordedFor(StandInVisit visit, RecordedDescription recorded, IAcSessionSink sink)
     {
- Options1 = s.Options1,
+        var description = recorded.Description;
+        if (visit.Stats is not { } stats)
+        {
+            return description;
+        }
+
+        if (stats.TotalExperience != 0 || stats.AvailableExperience != 0)
+        {
+            var int64s = description.Int64Properties.ToBuilder();
+            var recordedTotal = int64s.GetValueOrDefault(Contracts.PlayerQualities.TotalExperienceProperty);
+            var recordedAvailable = int64s.GetValueOrDefault(Contracts.PlayerQualities.AvailableExperienceProperty);
+            int64s[Contracts.PlayerQualities.TotalExperienceProperty] = Math.Max(stats.TotalExperience, recordedTotal);
+            int64s[Contracts.PlayerQualities.AvailableExperienceProperty] = Math.Max(stats.AvailableExperience, recordedAvailable);
+            if (stats.TotalExperience > recordedTotal || stats.AvailableExperience > recordedAvailable)
+            {
+                // M3 1.2 review R8: the placeholder is not silent. Logged once per session through the stand-in world's placeholder log (the session's log).
+                (sink as GameStateReducer)?.LocalResponder?.World?.NotePlaceholder(
+                    "m3-standin-recorded-xp",
+                    "the recorded character's experience (PropertyInt64 1 total, 2 available) is made up to the visit's stats because a graduated test character has none to spend; a placeholder, not the recorded values");
+            }
+
+            description = description with { Int64Properties = int64s.ToImmutable() };
+        }
+
+        if (!stats.Spells.IsEmpty || !stats.ExtraEnchantments.IsDefaultOrEmpty)
+        {
+            (sink as GameStateReducer)?.LocalResponder?.World?.NotePlaceholder(
+                "m3-standin-probe-spellbook",
+                "the visit's probe spellbook (replacing the recorded character's spells and spellbook filter) and probe enchantments (a harmful one and a vitae, appended to the recorded registry) are made up for the play checks; placeholders, not the recorded values");
+        }
+
+        return WithProbe(description, stats);
+    }
+
+    /// <summary>
+    /// <paramref name="description"/> with the visit's probe parts applied (M3 2.2 fix B, 2.2-R5 and R6): the stats' <see cref="StandInPlayerStats.Spells"/> and <see cref="StandInPlayerStats.SpellbookFilters"/> replace the description's, and their
+    /// <see cref="StandInPlayerStats.ExtraEnchantments"/> are appended to the registry. A description is unchanged when the stats hold none (the default). The synthetic description and a replayed recording both go through it, so the play checks
+    /// see the same extras on either path and derive their expectations from the result.
+    /// </summary>
+    /// <param name="description">The description to be sent.</param>
+    /// <param name="stats">The visit's stats.</param>
+    public static PlayerDescriptionMsg WithProbe(PlayerDescriptionMsg description, StandInPlayerStats? stats)
+    {
+        ArgumentNullException.ThrowIfNull(description);
+        if (stats is null)
+        {
+            return description;
+        }
+
+        if (!stats.Spells.IsEmpty)
+        {
+            description = description with { Spells = stats.Spells };
+        }
+
+        if (stats.SpellbookFilters is { } filters)
+        {
+            description = description with { SpellbookFilters = filters };
+        }
+
+        if (!stats.ExtraEnchantments.IsDefaultOrEmpty)
+        {
+            description = description with { Enchantments = description.Enchantments.IsDefault ? stats.ExtraEnchantments : description.Enchantments.AddRange(stats.ExtraEnchantments) };
+        }
+
+        return description;
+    }
+
+    /// <summary>The synthetic description the stand-in sends for <paramref name="stats"/> when no recording is replayed, probe parts included (<see cref="WithProbe"/>).</summary>
+    /// <param name="stats">The stats.</param>
+    public static PlayerDescriptionMsg SyntheticDescription(StandInPlayerStats stats)
+    {
+        ArgumentNullException.ThrowIfNull(stats);
+        return Description(stats);
+    }
+
+    private static PlayerDescriptionMsg Description(StandInPlayerStats s)
+    {
+        var ints = ImmutableDictionary.CreateBuilder<uint, int>();
+        if (s.Level > 0)
+        {
+            ints[Contracts.PlayerQualities.LevelProperty] = s.Level;
+        }
+
+        if (s.AvailableSkillCredits != 0)
+        {
+            ints[Contracts.PlayerQualities.AvailableSkillCreditsProperty] = s.AvailableSkillCredits;
+        }
+
+        var int64s = ImmutableDictionary.CreateBuilder<uint, long>();
+        if (s.TotalExperience != 0 || s.AvailableExperience != 0)
+        {
+            int64s[Contracts.PlayerQualities.TotalExperienceProperty] = s.TotalExperience;
+            int64s[Contracts.PlayerQualities.AvailableExperienceProperty] = s.AvailableExperience;
+        }
+
+        return WithProbe(Describe(s) with { IntProperties = ints.ToImmutable(), Int64Properties = int64s.ToImmutable(), Skills = s.Skills }, s);
+    }
+
+    private static PlayerDescriptionMsg Describe(StandInPlayerStats s) => new()
+    {
+        Options1 = s.Options1,
         Enchantments = s.Enchantments,
         Attributes =
         [

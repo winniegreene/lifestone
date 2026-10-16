@@ -70,6 +70,10 @@ public static class LifestoneCommand
 
         public void CharPurge(Player player, CharPurgeRequest request) => CharVerb.Purge(call, player, request);
 
+        public void SpellLearn(Player player, SpellLearnRequest request) => SpellVerb.Learn(call, player, request);
+
+        public void Item(Player player, ItemRequest request) => ItemVerb.Run(call, player, request);
+
         /// <summary>A request type the parser accepts but no verb here handles: a loud bug, answered as failed.</summary>
         public void Unhandled(ToolRequest request)
         {

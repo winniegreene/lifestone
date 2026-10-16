@@ -19,6 +19,9 @@ internal sealed class UseTracker(ActionHandle handle, uint guid) : ActionTracker
     internal override string WouldSend => "GameAction 0x0036 Use " + ActionText.Hex(guid);
 
     /// <inheritdoc/>
+    internal override bool ConsumesUseDone => true;
+
+    /// <inheritdoc/>
     internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api);
 
     /// <inheritdoc/>

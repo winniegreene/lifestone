@@ -227,6 +227,36 @@ internal sealed class ReplayAcSession : IAcSession
     public OutboundTicket SendQueryHealth(uint guid) => Sent(MessageOpcodes.GameAction, GameActionTypes.QueryHealth);
 
     /// <inheritdoc/>
+    public OutboundTicket SendRaiseAttribute(uint attribute, uint xp) => Sent(MessageOpcodes.GameAction, GameActionTypes.RaiseAttribute);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRaiseVital(uint vital, uint xp) => Sent(MessageOpcodes.GameAction, GameActionTypes.RaiseVital);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRaiseSkill(uint skill, uint xp) => Sent(MessageOpcodes.GameAction, GameActionTypes.RaiseSkill);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTrainSkill(uint skill, int credits) => Sent(MessageOpcodes.GameAction, GameActionTypes.TrainSkill);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendCastUntargetedSpell(uint spellId) => Sent(MessageOpcodes.GameAction, GameActionTypes.CastUntargetedSpell);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendCastTargetedSpell(uint target, uint spellId) => Sent(MessageOpcodes.GameAction, GameActionTypes.CastTargetedSpell);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendChangeCombatMode(uint mode) => Sent(MessageOpcodes.GameAction, GameActionTypes.ChangeCombatMode);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => Sent(MessageOpcodes.GameAction, GameActionTypes.GetAndWieldItem);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendPutItemInContainer(uint item, uint container, uint placement) => Sent(MessageOpcodes.GameAction, GameActionTypes.PutItemInContainer);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendStackableMerge(uint mergeFrom, uint mergeTo, int amount) => Sent(MessageOpcodes.GameAction, GameActionTypes.StackableMerge);
+
+    /// <inheritdoc/>
     public OutboundTicket SendTalk(ReadOnlySpan<char> text) => Sent(MessageOpcodes.GameAction, GameActionTypes.Talk);
 
     /// <inheritdoc/>

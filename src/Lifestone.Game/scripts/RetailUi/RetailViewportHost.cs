@@ -120,6 +120,11 @@ public sealed class RetailViewportHost : IUiViewportHost
             _entries.Add(viewportElementId, entry);
         }
 
+        if (entry.Source is { } replaced && !ReferenceEquals(replaced, source))
+        {
+            replaced.Bound(default, visible: false); // a replaced source is told its hole is gone (review 2.2-R2)
+        }
+
         entry.Source = source;
         if (entry.Bound)
         {

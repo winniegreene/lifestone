@@ -50,10 +50,13 @@ public sealed class HeadlessOptionsTests
         Assert.Equal(new IPEndPoint(IPAddress.Loopback, 9000), o.Session.Server);
         Assert.True(o.Session.RecordSession);
         Assert.Equal(HeadlessScenario.AcademyExit, HeadlessOptions.Parse(["--scenario=academy-exit"]).Scenario);
+        Assert.Equal(HeadlessScenario.MageBuild, HeadlessOptions.Parse(["--scenario=mage-build"]).Scenario);
+        Assert.Equal(HeadlessScenario.Gear, HeadlessOptions.Parse(["--scenario=gear"]).Scenario);
+        Assert.Equal(HeadlessScenario.Buff, HeadlessOptions.Parse(["--scenario=buff"]).Scenario);
     }
 
     [Theory]
-    [InlineData("--scenario=walk", "--scenario: 'walk' is not one of login, holtburg-laps, academy-exit")]
+    [InlineData("--scenario=walk", "--scenario: 'walk' is not one of login, holtburg-laps, academy-exit, mage-build, gear, buff")]
     [InlineData("--laps=0", "--laps: '0' is not 1 to 1000")]
     [InlineData("--laps=many", "--laps: 'many' is not an integer")]
     [InlineData("--quit-after=-5", "--quit-after: '-5' is not a positive number of seconds")]
@@ -67,6 +70,67 @@ public sealed class HeadlessOptionsTests
     {
         var o = HeadlessOptions.Parse([argument]);
         Assert.Equal(expected, Assert.Single(o.Errors));
+    }
+
+    [Fact]
+    public void Mage_build_refuses_any_account_but_the_default_test_account_loudly_and_exits_1_before_anything_runs()
+    {
+        // 1.1-R5: BSD Mage is built permanently, on accounts.test only.
+        var other = HeadlessOptions.Parse(["--scenario=mage-build", "--account=somebody"]);
+        var error = Assert.Single(other.Errors);
+        Assert.Equal("--account: --scenario=mage-build runs on the default test account 'test' only; the value is not shown", error);
+        Assert.DoesNotContain("somebody", error, StringComparison.Ordinal);
+        Assert.Empty(HeadlessOptions.Parse(["--scenario=mage-build"]).Errors);
+        Assert.Empty(HeadlessOptions.Parse(["--scenario=mage-build", "--account=test"]).Errors);
+        Assert.Empty(HeadlessOptions.Parse(["--scenario=login", "--account=somebody"]).Errors); // the other scenarios keep their own rules
+
+        using var output = new StringWriter();
+        using var errors = new StringWriter();
+        Assert.Equal(Program.BadArgumentsExitCode, Program.Run(["--scenario=mage-build", "--account=somebody"], output, errors));
+        Assert.Contains("mage-build runs on the default test account", errors.ToString(), StringComparison.Ordinal);
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public void Gear_runs_on_the_default_test_account_only_like_mage_build_and_exits_1_before_anything_runs()
+    {
+        // 1.4 s1: the gear scenario enters the permanent BSD Mage, so it has the same account rule.
+        var error = Assert.Single(HeadlessOptions.Parse(["--scenario=gear", "--account=somebody"]).Errors);
+        Assert.Equal("--account: --scenario=gear runs on the default test account 'test' only; the value is not shown", error);
+        Assert.DoesNotContain("somebody", error, StringComparison.Ordinal);
+        Assert.Empty(HeadlessOptions.Parse(["--scenario=gear"]).Errors);
+        Assert.Empty(HeadlessOptions.Parse(["--scenario=gear", "--account=test"]).Errors);
+
+        using var output = new StringWriter();
+        using var errors = new StringWriter();
+        Assert.Equal(Program.BadArgumentsExitCode, Program.Run(["--scenario=gear", "--account=somebody"], output, errors));
+        Assert.Contains("gear runs on the default test account", errors.ToString(), StringComparison.Ordinal);
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public void Buff_runs_on_the_default_test_account_only_takes_the_buff_options_and_has_a_cycle_long_default_limit()
+    {
+        // 2.1 s1: the buff scenario enters the permanent BSD Mage like the gear scenario, so it has the same account rule.
+        var error = Assert.Single(HeadlessOptions.Parse(["--scenario=buff", "--account=somebody"]).Errors);
+        Assert.Equal("--account: --scenario=buff runs on the default test account 'test' only; the value is not shown", error);
+        Assert.DoesNotContain("somebody", error, StringComparison.Ordinal);
+        Assert.Empty(HeadlessOptions.Parse(["--scenario=buff", "--account=test"]).Errors);
+
+        // The --buff-* options reach the scenario's cycle (and a bad one is reported, not repeated).
+        var o = HeadlessOptions.Parse(["--scenario=buff", "--buff-cast-chance=0.95", "--buff-rebuff-margin-s=120", "--buff-transfer-tries=3", "--buff-mana-wait-s=60"]);
+        Assert.Empty(o.Errors);
+        Assert.Equal((0.95, 120.0, 3, 60.0), (o.Buff.CastChance, o.Buff.RebuffMarginSeconds, o.Buff.TransferTries, o.Buff.ManaWaitSeconds));
+        Assert.Single(HeadlessOptions.Parse(["--scenario=buff", "--buff-cast-chance=0"]).Errors);
+
+        // A cycle is about 1,300 s of session time at the live rate (s0b): the default limit leaves room for it and the log off.
+        Assert.Equal(3000, Program.BuffQuitAfterSeconds);
+        Assert.True(Program.BuffQuitAfterSeconds > 1300 + Program.GearQuitAfterSeconds);
+
+        using var output = new StringWriter();
+        using var errors = new StringWriter();
+        Assert.Equal(Program.BadArgumentsExitCode, Program.Run(["--scenario=buff", "--account=somebody"], output, errors));
+        Assert.Empty(output.ToString());
     }
 
     [Fact]

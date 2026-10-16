@@ -11,7 +11,7 @@ internal enum ToolScope
     /// <summary>A player's session, but not the player in the world (<c>places</c>).</summary>
     Session,
 
-    /// <summary>The player in a landblock (<c>where</c>, <c>place</c>, <c>xp</c>, <c>quest</c>, <c>char</c>).</summary>
+    /// <summary>The player in a landblock (<c>where</c>, <c>place</c>, <c>xp</c>, <c>quest</c>, <c>char</c>, <c>spell</c>, <c>item</c>).</summary>
     Player,
 }
 
@@ -52,6 +52,12 @@ internal interface IToolVerbs<in TPlayer>
     /// <summary>Runs <c>char purge</c> for a player in the world (the caller is the player who asks, never the character purged).</summary>
     void CharPurge(TPlayer player, CharPurgeRequest request);
 
+    /// <summary>Runs <c>spell learn</c> for a player in the world.</summary>
+    void SpellLearn(TPlayer player, SpellLearnRequest request);
+
+    /// <summary>Runs <c>item</c> for a player in the world.</summary>
+    void Item(TPlayer player, ItemRequest request);
+
     /// <summary>A request type the parser makes but no verb here handles: a mod bug, answered as failed.</summary>
     void Unhandled(ToolRequest request);
 }
@@ -84,7 +90,7 @@ internal static class ToolRouting
     {
         StatusRequest or NetRequest => ToolScope.Console,
         PlacesRequest => ToolScope.Session,
-        WhereRequest or PlacePoiRequest or PlaceLocRequest or XpRequest or QuestRequest or CharPurgeRequest => ToolScope.Player,
+        WhereRequest or PlacePoiRequest or PlaceLocRequest or XpRequest or QuestRequest or CharPurgeRequest or SpellLearnRequest or ItemRequest => ToolScope.Player,
         _ => null,
     };
 
@@ -176,6 +182,12 @@ internal static class ToolRouting
                 return;
             case CharPurgeRequest purge:
                 verbs.CharPurge(player, purge);
+                return;
+            case SpellLearnRequest spell:
+                verbs.SpellLearn(player, spell);
+                return;
+            case ItemRequest item:
+                verbs.Item(player, item);
                 return;
             default:
                 verbs.Unhandled(request);

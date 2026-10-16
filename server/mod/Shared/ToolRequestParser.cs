@@ -49,6 +49,12 @@ public static class ToolRequestParser
     /// <summary>The largest <c>xp</c> amount: ACE's own grantxp limit (DeveloperCommands.cs:823; owner decision D51).</summary>
     public const long MaxXp = 999_999_999_999;
 
+    /// <summary>The most spell ids one <c>spell learn</c> may name; a longer list is refused as <see cref="ToolErrors.BadArgs"/>.</summary>
+    public const int MaxSpellIds = 128;
+
+    /// <summary>The largest <c>item</c> stack: ACE's <c>@ci</c> limit, a u16 (AdminCommands.cs:2502-2514).</summary>
+    public const int MaxItemStack = 65535;
+
     /// <summary>How far a rotation's length may be from 1.</summary>
     public const double QuaternionTolerance = 0.01;
 
@@ -119,6 +125,16 @@ public static class ToolRequestParser
             return ParseXp(words, id);
         }
 
+        if (Is(verb, ToolVerbs.Spell))
+        {
+            return ParseSpell(words, id);
+        }
+
+        if (Is(verb, ToolVerbs.Item))
+        {
+            return ParseItem(words, id);
+        }
+
         if (Is(verb, ToolVerbs.Place))
         {
             return ParsePlace(words, id);
@@ -163,6 +179,28 @@ public static class ToolRequestParser
                 }
 
                 text.Append(ToolVerbs.Xp).Append(' ').Append(xp.Amount.ToString(CultureInfo.InvariantCulture));
+                break;
+            case SpellLearnRequest spell:
+                if (spell.SpellIds is null || spell.SpellIds.Count is < 1 or > MaxSpellIds)
+                {
+                    throw new ArgumentException(SpellRule, nameof(request));
+                }
+
+                text.Append(ToolVerbs.Spell).Append(' ').Append(ToolVerbs.SpellLearn).Append(' ')
+                    .AppendJoin(',', spell.SpellIds.Select(i => i.ToString(CultureInfo.InvariantCulture)));
+                break;
+            case ItemRequest item:
+                if (item.Stack is < 1 or > MaxItemStack)
+                {
+                    throw new ArgumentException(ItemRule, nameof(request));
+                }
+
+                text.Append(ToolVerbs.Item).Append(' ').Append(item.Wcid.ToString(CultureInfo.InvariantCulture));
+                if (item.Stack is { } stack)
+                {
+                    text.Append(' ').Append(stack.ToString(CultureInfo.InvariantCulture));
+                }
+
                 break;
             case PlacePoiRequest poi:
                 if (!IsValidPoiName(poi.Name))
@@ -325,6 +363,10 @@ public static class ToolRequestParser
 
     private const string CharNameRule = "a character name is 1 to 32 of A-Z, a-z, 0-9, space, apostrophe and hyphen, in double quotes";
 
+    private const string SpellRule = "spell learn takes 1 to 128 whole spell ids, comma-separated with no spaces: spell learn 1,2,3";
+
+    private const string ItemRule = "item takes a weenie class id (a whole number) and optionally a stack size from 1 to 65,535: item <wcid> [<stack>]";
+
     private const string CharUsage = "char takes purge and one character name in double quotes: char purge \"<name>\"";
 
     private const string QuestUsage = "quest takes stamp, erase or has and one quest name: quest stamp <name>";
@@ -354,6 +396,77 @@ public static class ToolRequestParser
         }
 
         return new ToolRequestParse(new XpRequest(amount, id), null, ToolVerbs.Xp, id);
+    }
+
+    private static ToolRequestParse ParseSpell(List<(string Text, bool Quoted)> words, string? id)
+    {
+        if (words.Count < 2 || words[1].Quoted || !Is(words[1].Text, ToolVerbs.SpellLearn))
+        {
+            return Fail(ToolErrors.BadArgs, "spell takes learn and a list of ids: spell learn 1,2,3", ToolVerbs.Spell, id);
+        }
+
+        if (words.Count != 3 || words[2].Quoted)
+        {
+            return Fail(ToolErrors.BadArgs, SpellRule, ToolVerbs.Spell, id);
+        }
+
+        var parts = words[2].Text.Split(',');
+        if (parts.Length > MaxSpellIds)
+        {
+            return Fail(ToolErrors.BadArgs, SpellRule + "; at most " + MaxSpellIds.ToString(CultureInfo.InvariantCulture) + " per request", ToolVerbs.Spell, id);
+        }
+
+        var ids = new uint[parts.Length];
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (!TryParseWhole(parts[i], out ids[i]))
+            {
+                return Fail(ToolErrors.BadArgs, SpellRule, ToolVerbs.Spell, id);
+            }
+        }
+
+        return new ToolRequestParse(new SpellLearnRequest(ids, id), null, ToolVerbs.Spell, id);
+    }
+
+    private static ToolRequestParse ParseItem(List<(string Text, bool Quoted)> words, string? id)
+    {
+        if (words.Count is not (2 or 3) || words.Skip(1).Any(w => w.Quoted) || !TryParseWhole(words[1].Text, out var wcid))
+        {
+            return Fail(ToolErrors.BadArgs, ItemRule, ToolVerbs.Item, id);
+        }
+
+        int? stack = null;
+        if (words.Count == 3)
+        {
+            if (!TryParseWhole(words[2].Text, out var count) || count is < 1 or > MaxItemStack)
+            {
+                return Fail(ToolErrors.BadArgs, ItemRule, ToolVerbs.Item, id);
+            }
+
+            stack = (int)count;
+        }
+
+        return new ToolRequestParse(new ItemRequest(wcid, stack, id), null, ToolVerbs.Item, id);
+    }
+
+    /// <summary>A whole number of plain digits (no sign, separator or exponent) that fits a u32.</summary>
+    private static bool TryParseWhole(string text, out uint value)
+    {
+        value = 0;
+        if (text.Length is < 1 or > 10)
+        {
+            return false;
+        }
+
+        foreach (var c in text)
+        {
+            if (!char.IsAsciiDigit(c))
+            {
+                return false;
+            }
+        }
+
+        return uint.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
     }
 
     private static ToolRequestParse ParseChar(List<(string Text, bool Quoted)> words, string? id)

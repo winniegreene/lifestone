@@ -135,6 +135,18 @@ public sealed class RetailSoundPlayer : ISoundSink
     /// <summary>Calls refused by a disabled category or an inactive window.</summary>
     public int Disabled { get; private set; }
 
+    /// <summary>Of <see cref="Silent"/>: the probability roll said no (<c>SoundManager::PlayProbability</c>).</summary>
+    public int RollFailed { get; private set; }
+
+    /// <summary>Of <see cref="Silent"/>: the attenuation was quieter than <see cref="RetailSoundRules.VolMin"/> (<c>SoundManager::GetAttenuation</c>).</summary>
+    public int AttenuationFailed { get; private set; }
+
+    /// <summary>The distance (m) of the last sound the attenuation refused, and the volume it was asked at (a report-only diagnostic of M3 1.3 fix B).</summary>
+    public (float Distance, float Volume) LastAttenuationRefused { get; private set; }
+
+    /// <summary>The probability of the last sound the roll refused (a report-only diagnostic).</summary>
+    public float LastRollRefused { get; private set; }
+
     /// <summary>Calls that found no table, type, variant or playable wave.</summary>
     public int Missing { get; private set; }
 
@@ -344,6 +356,8 @@ public sealed class RetailSoundPlayer : ISoundSink
         }
 
         Silent++;
+        RollFailed++;
+        LastRollRefused = probability;
         return false;
     }
 
@@ -354,6 +368,8 @@ public sealed class RetailSoundPlayer : ISoundSink
         if (!RetailSoundRules.TryAttenuation(origin.Distance, volume, levels.EffectVolume, out var decibels))
         {
             Silent++;
+            AttenuationFailed++;
+            LastAttenuationRefused = (origin.Distance, volume);
             return;
         }
 

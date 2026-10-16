@@ -29,6 +29,18 @@ public sealed class ToolsWireTests
 
     internal static readonly CharPurgeData CharPurged = new("Lifestone Throwaway", 1, 1, 12);
 
+    /// <summary>Level 126's experience (4,286,609,098, above int.MaxValue): every field of an xp reply is 64-bit.</summary>
+    internal static readonly XpData XpToLevel126 = new(4_286_609_098, 4_286_609_098, 4_286_609_098, 4_286_609_098, 126);
+
+    internal static readonly SpellLearnData SpellsLearned = SpellLearnData.Of(
+    [
+        new SpellOutcome(1, SpellOutcomes.Learned, "Strength Other I"),
+        new SpellOutcome(2, SpellOutcomes.Known, "Strength Other II"),
+        new SpellOutcome(99999, SpellOutcomes.Unknown),
+    ]);
+
+    internal static readonly ItemData ItemCreated = new(0x7A000123, 273, "Pyreal", 25, 25, 25000, false);
+
     internal static readonly NetData Net = new(123_456, 234_567, 2, 17, 4);
 
     internal static readonly PlacesData Places = new(2, 3,
@@ -67,6 +79,11 @@ public sealed class ToolsWireTests
         AssertSame(QuestStamped, RoundTrip(QuestStamped, ToolVerbs.Quest, QuestStamped.Describe()));
         AssertSame(QuestErased, RoundTrip(QuestErased, ToolVerbs.Quest, QuestErased.Describe()));
         AssertSame(CharPurged, RoundTrip(CharPurged, ToolVerbs.Char, CharPurged.Describe()));
+        AssertSame(XpToLevel126, RoundTrip(XpToLevel126, ToolVerbs.Xp, XpToLevel126.Describe()));
+        AssertSame(SpellsLearned, RoundTrip(SpellsLearned, ToolVerbs.Spell, SpellsLearned.Describe()));
+        AssertSame(ItemCreated, RoundTrip(ItemCreated, ToolVerbs.Item, ItemCreated.Describe()));
+        var unstackable = ItemCreated with { Requested = null, MaxStack = null, Stack = 1 };
+        AssertSame(unstackable, RoundTrip(unstackable, ToolVerbs.Item, unstackable.Describe()));
         AssertSame(Net, RoundTrip(Net, ToolVerbs.Net, Net.Describe()));
         AssertSame(Places, RoundTrip(Places, ToolVerbs.Places, Places.Describe()));
     }
@@ -95,6 +112,7 @@ public sealed class ToolsWireTests
             [
                 "bad-args", "unknown-verb", "not-found", "invalid-cell", "busy", "not-in-world", "not-loopback", "needs-player", "failed",
                 "graduated", "own-character", "unknown-character", "character-online", "not-pending-deletion",
+                "unknown-wcid", "not-creatable", "no-room",
             ],
             ToolErrors.All);
     }
@@ -305,6 +323,13 @@ public sealed class ToolsWireTests
         Assert.Equal("purged Lifestone Throwaway: 1 character record, 1 player biota, 12 possessions", CharPurged.Describe());
         Assert.Equal("purged X: 1 character record, 1 player biota, 1 possession", new CharPurgeData("X", 1, 1, 1).Describe());
         Assert.Equal("purged X: 0 character records, 1 player biota, 0 possessions", new CharPurgeData("X", 0, 1, 0).Describe());
+        Assert.Equal("added 4,286,609,098 experience (asked 4,286,609,098); total 4,286,609,098, unassigned 4,286,609,098, level 126", XpToLevel126.Describe());
+        Assert.Equal("spells: 1 learned, 1 already known, 1 unknown (not in the spell table: 99999)", SpellsLearned.Describe());
+        Assert.Equal("spells: 0 learned, 2 already known, 0 unknown", SpellLearnData.Of([new SpellOutcome(1, SpellOutcomes.Known, "A"), new SpellOutcome(1, SpellOutcomes.Known, "A")]).Describe());
+        Assert.Equal("created 25 x Pyreal (wcid 273, 0x7A000123) in your pack", ItemCreated.Describe());
+        Assert.Equal("created Sword (wcid 5, 0x7A000124) in your pack", new ItemData(0x7A000124, 5, "Sword", 1, null, null, false).Describe());
+        Assert.Equal("created 100 x Pyreal (wcid 273, 0x7A000123) in your pack; the stack was clamped to 100", new ItemData(0x7A000123, 273, "Pyreal", 100, 500, 100, true).Describe());
+        Assert.Equal("created Sword (wcid 5, 0x7A000124) in your pack; it does not stack, so one was created", new ItemData(0x7A000124, 5, "Sword", 1, 5, null, true).Describe());
     }
 
     private static T RoundTrip<T>(T data, string verb, string sentence)

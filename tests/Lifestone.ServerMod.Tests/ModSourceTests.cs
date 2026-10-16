@@ -57,6 +57,9 @@ public sealed partial class ModSourceTests
             "server/mod/Lifestone.ServerMod/Verbs/PlacesVerb.cs",
             "server/mod/Lifestone.ServerMod/Verbs/QuestVerb.cs",
             "server/mod/Lifestone.ServerMod/Verbs/CharVerb.cs",
+            "server/mod/Lifestone.ServerMod/Verbs/SpellVerb.cs",
+            "server/mod/Lifestone.ServerMod/Verbs/ItemVerb.cs",
+            "server/mod/Lifestone.ServerMod/Core/ItemCreateRules.cs",
             "server/mod/Lifestone.ServerMod/Core/ToolRouting.cs",
             "server/mod/Lifestone.ServerMod/Core/CharPurgeRules.cs",
             "server/mod/Lifestone.ServerMod/Core/OneAnswer.cs",
@@ -287,6 +290,8 @@ public sealed partial class ModSourceTests
             ("XpVerb.cs", "DeveloperCommands.cs HandleGrantXp"),
             ("QuestVerb.cs", "AdminCommands.cs Handleqst"),
             ("CharVerb.cs", "CharacterCommands.cs HandleCharacterForcedDelete"),
+            ("SpellVerb.cs", "AdminCommands.cs HandleAddSpell"),
+            ("ItemVerb.cs", "AdminCommands.cs HandleCI"),
         ];
         foreach (var (file, source) in ports)
         {
@@ -372,13 +377,57 @@ public sealed partial class ModSourceTests
         Assert.Contains("caller.Session.Characters.RemoveAll(c => c.Id == target.Guid);", code, StringComparison.Ordinal);
 
         // The graduated test characters are spelled once, in the rules.
-        Assert.Contains("[\"Lifestone Smoke\", \"Lifestone Loopback\"]", File.ReadAllText(Path.Combine(ProjectFolder, "Core", "CharPurgeRules.cs")), StringComparison.Ordinal);
+        Assert.Contains("[\"Lifestone Smoke\", \"Lifestone Loopback\", \"BSD Mage\"]", File.ReadAllText(Path.Combine(ProjectFolder, "Core", "CharPurgeRules.cs")), StringComparison.Ordinal);
         var spelled = CSharp(ModRoot)
             .Where(p => !p.EndsWith("CharPurgeRules.cs", StringComparison.Ordinal))
             .Where(p => File.ReadAllLines(p).Any(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal) && l.Contains("Lifestone Smoke", StringComparison.Ordinal)))
             .Select(Relative)
             .ToArray();
         Assert.True(spelled.Length == 0, "the graduated names belong in CharPurgeRules only:\n" + string.Join('\n', spelled));
+    }
+
+    [Fact]
+    public void Spell_learn_reads_the_table_and_the_spellbook_around_ACE_s_one_call_and_checks_it_took()
+    {
+        // ACE call shapes no unit test reaches (SpellOutcomes.Classify is tested): LearnSpellWithNetworking returns nothing, so the verb
+        // classifies from the spell table and SpellIsKnown first, calls it once per learned spell on the requesting player only, and reads the
+        // spellbook again so a spell ACE did not add is a loud failure.
+        var code = string.Join(Environment.NewLine, File.ReadLines(Path.Combine(ProjectFolder, "Verbs", "SpellVerb.cs")).Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+        Assert.Contains("public static void Learn(ToolCall call, Player player, SpellLearnRequest request)", code, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(code, @"\bplayer\.LearnSpellWithNetworking\(spellId, false\)"));
+        Assert.Single(Regex.Matches(code, @"\.LearnSpellWithNetworking\("));
+        Assert.Contains("DatManager.PortalDat.SpellTable.Spells", code, StringComparison.Ordinal);
+        Assert.Contains("SpellOutcomes.Classify(", code, StringComparison.Ordinal);
+        Assert.Equal(2, Regex.Matches(code, @"player\.SpellIsKnown\(spellId\)").Count);
+        Assert.True(code.IndexOf("SpellIsKnown(", StringComparison.Ordinal) < code.IndexOf("LearnSpellWithNetworking(", StringComparison.Ordinal));
+        string[] forbidden = ["RemoveKnownSpell", "AddKnownSpell", "LearnSpellsInBulk", "Fellowship", "CurrentAppraisal", "GetTarget"];
+        Assert.All(forbidden, word => Assert.DoesNotContain(word, code, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Item_follows_the_HandleCI_path_into_the_callers_own_pack_with_no_audit_broadcast()
+    {
+        // ACE call shapes no unit test reaches (ItemCreateRulesTests run the decisions): the cached weenie, ACE's own type check,
+        // the factory, SetStackSize only for an item with a MaxStackSize, then the callers own TryCreateInInventoryWithNetworking; a pack
+        // with no room frees the object; nothing is placed in the world and nothing is broadcast to the audit channel.
+        var code = string.Join(Environment.NewLine, File.ReadLines(Path.Combine(ProjectFolder, "Verbs", "ItemVerb.cs")).Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+        Assert.Contains("public static void Run(ToolCall call, Player player, ItemRequest request)", code, StringComparison.Ordinal);
+        var steps = new[]
+        {
+            "DatabaseManager.World.GetCachedWeenie(request.Wcid)",
+            "AdminCommands.VerifyCreateWeenieType(",
+            "WorldObjectFactory.CreateNewWorldObject(weenie!)",
+            "item.SetStackSize(",
+            "player.TryCreateInInventoryWithNetworking(item)",
+            "item.Destroy()",
+        }.Select(s => code.IndexOf(s, StringComparison.Ordinal)).ToArray();
+        Assert.All(steps, i => Assert.True(i >= 0));
+        Assert.Equal(steps.OrderBy(i => i), steps);
+        Assert.Single(Regex.Matches(code, @"\.SetStackSize\("));
+        Assert.Single(Regex.Matches(code, @"\.TryCreateInInventoryWithNetworking\("));
+        Assert.Contains("item.MaxStackSize is { } max", code, StringComparison.Ordinal);
+        string[] forbidden = ["BroadcastToAuditChannel", "EnterWorld", "Location", "InFrontOf", "LastSpawnPos", "SaveBiota", "DatabaseManager.Shard", "CreateObjectForCommand"];
+        Assert.All(forbidden, word => Assert.DoesNotContain(word, code, StringComparison.Ordinal));
     }
 
     [Fact]

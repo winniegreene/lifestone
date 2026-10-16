@@ -4,6 +4,7 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Recording;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Net.Dispatch;
+using Lifestone.Net.Messages;
 using Lifestone.Net.Session;
 
 namespace Lifestone.Client.Session.State;
@@ -356,6 +357,24 @@ internal sealed partial class GameStateReducer : IAcSessionSink
         Publish(new SessionPhaseChanged(previous, SessionPhase.Failed, failure));
     }
 
+    /// <summary>
+    /// Takes a message net decodes as "decoded, not yet applied" (M3 1.2 s0): counts it (<see cref="ReducerCounters.DecodedNotApplied"/>)
+    /// and logs the first sighting of each message once, naming the lane that applies it. It publishes nothing and changes
+    /// no state, and it is not an <see cref="UnknownMessage"/>. Each lane replaces its own handler lines with the real
+    /// application; the handlers that still call this are that lane's open TODO.
+    /// </summary>
+    /// <param name="opcode">The GameMessage opcode, or <see cref="MessageOpcodes.GameEvent"/> for a game event.</param>
+    /// <param name="eventType">The game event type, or 0 for a GameMessage.</param>
+    /// <param name="what">The message's name and the TODO that names its lane.</param>
+    private void CountDecodedNotApplied(uint opcode, uint eventType, string what)
+    {
+        var key = eventType != 0 ? ReducerCounters.EventKey(eventType) : opcode;
+        if (Counters.AddDecodedNotApplied(key) == 1)
+        {
+            _log.Info(SessionLog.Category, what + ": decoded, not yet applied; first seen", new LogField("opcode", opcode), new LogField("eventType", eventType));
+        }
+    }
+
     private void UpdateServerTime(double serverSeconds, double clientSeconds)
     {
         _state.Time.Update(serverSeconds, clientSeconds);
@@ -390,4 +409,34 @@ internal sealed class ReducerCounters
     /// not newer while their teleport sequence was.
     /// </summary>
     internal long RetailErrorCount;
+
+    private readonly Dictionary<uint, long> _decodedNotApplied = [];
+
+    /// <summary>
+    /// Every M3 message net decodes that no lane applies yet (M3 1.2 s0): counted per message by
+    /// <see cref="GameStateReducer.CountDecodedNotApplied"/> and never reported as <see cref="UnknownMessage"/>. A lane that
+    /// applies its messages stops counting them, so this reads 0 once every M3 message is applied. Report-only.
+    /// </summary>
+    internal long DecodedNotApplied { get; private set; }
+
+    /// <summary>How many times the GameMessage <paramref name="opcode"/> was counted as decoded, not yet applied.</summary>
+    internal long DecodedNotAppliedOf(uint opcode) => _decodedNotApplied.GetValueOrDefault(opcode);
+
+    /// <summary>How many times the GameEvent <paramref name="eventType"/> was counted as decoded, not yet applied.</summary>
+    internal long DecodedNotAppliedOfEvent(uint eventType) => _decodedNotApplied.GetValueOrDefault(EventKey(eventType));
+
+    /// <summary>The distinct messages counted so far (keys: the opcode, or the event type with bit 31 set).</summary>
+    internal IReadOnlyDictionary<uint, long> DecodedNotAppliedByMessage => _decodedNotApplied;
+
+    /// <summary>The counter key of a game event type (bit 31 set, as the reducer's unknown report keys them).</summary>
+    internal static uint EventKey(uint eventType) => 0x80000000u | eventType;
+
+    /// <summary>Counts one message; returns how many times it was counted so far (1 on the first sighting).</summary>
+    internal long AddDecodedNotApplied(uint key)
+    {
+        DecodedNotApplied++;
+        var count = _decodedNotApplied.GetValueOrDefault(key) + 1;
+        _decodedNotApplied[key] = count;
+        return count;
+    }
 }

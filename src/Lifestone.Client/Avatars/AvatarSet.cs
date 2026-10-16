@@ -138,6 +138,37 @@ public sealed class AvatarStats
     /// <summary>Effect events dropped for want of a sink (counted, not silently dropped).</summary>
     public long EffectEventsDropped { get; internal set; }
 
+    /// <summary>F755 scripts played on a body: the type was in the body's PhysicsScriptTable and its script was queued (<c>CPhysicsObj::play_script</c>).</summary>
+    public long ServerScriptsPlayed { get; internal set; }
+
+    /// <summary>F755 scripts whose type the body's table does not have, or the body has no table: retail's <c>play_script</c> does nothing; here it is counted and logged once per table and type.</summary>
+    public long ServerScriptsMissing { get; internal set; }
+
+    /// <summary>F750 sounds mapped to a sound-table event on a body and queued for the effect sink (counted whether or not a sink exists: <see cref="EffectEventsDelivered"/> and <see cref="EffectEventsDropped"/> say what became of it).</summary>
+    public long ServerSoundsPlayed { get; internal set; }
+
+    /// <summary>
+    /// F750 and F755 for an object the set does not hold, dropped and counted (never a crash). The reducer already parks a message for an object the session does not know until its CreateObject
+    /// (<c>SmartBox::HandleSoundEvent</c> / <c>HandlePlayScriptType</c> park it in retail too), so what reaches the set names an object the session holds: this is an avatar the set lacks (its create
+    /// failed, or it was deleted while the event waited in the adapter's queue).
+    /// </summary>
+    public long ServerEffectsDropped { get; internal set; }
+
+    /// <summary>Cast windows opened (<see cref="AvatarSet.OpenCastWindow"/>): from the words or the first gesture of the player's cast to the cast's UseDone.</summary>
+    public long CastWindows { get; internal set; }
+
+    /// <summary>
+    /// F755 scripts played (<see cref="ServerScriptsPlayed"/> sense: the type was in the body's table) on the player, or on the cast's target when the host named one
+    /// (<see cref="AvatarSet.CastTarget"/>), while a cast window was open. M3 2.1 s2b; the judged counter of spec section 2 DoD 7.
+    /// </summary>
+    public long CastScripts { get; internal set; }
+
+    /// <summary>
+    /// Voices that <b>started</b> ("sounded", M3 1.3 fix B: <see cref="Lifestone.Client.Audio.ISoundVoiceCounter"/>, the router's hook and server voices) from the player's body, or the cast target's when the
+    /// host named one, while a cast window was open: the gesture animations' sound hooks, the scripts' sound hooks and the server's F750 sounds. 0 when the effect sink counts no voices (no sound player).
+    /// </summary>
+    public long CastSounds { get; internal set; }
+
     /// <summary>Avatars stepped by the last advance.</summary>
     public int SteppedLastFrame { get; internal set; }
 
@@ -235,6 +266,8 @@ public sealed class AvatarSet : ITargetWorld
     private readonly List<Avatar> _order = [];
     private readonly List<AvatarNotice> _notices = [];
     private readonly HashSet<uint> _spherelessSetupsLogged = [];
+    private readonly HashSet<(uint Table, uint Type)> _missingScriptsLogged = [];
+    private bool _droppedEffectLogged;
     private readonly List<EffectEvent> _events = [];
     private readonly List<string> _problems = [];
     private IPlayerBody? _playerBody;
@@ -283,8 +316,60 @@ public sealed class AvatarSet : ITargetWorld
     /// <summary>Receives the avatars' effect events (sounds); without one they are counted as dropped.</summary>
     public IEffectEventSink? EffectEvents { get; set; }
 
+    /// <summary>
+    /// Called with the PhysicsScriptTable (0x34xxxxxx) of every body created that has one, so the host can prepare the table's particle meshes off the frame thread
+    /// before the server plays a script from it (M3 1.3 s1); null does nothing. Not per frame.
+    /// </summary>
+    public Action<uint>? ScriptTableSeen { get; set; }
+
+    /// <summary>
+    /// Called with the sound table (0x20xxxxxx) of the player's body when it is made, so the host can prefetch the table's waves off the frame thread before the arrival
+    /// plays them (M3 1.3 s1); null does nothing. Not per frame.
+    /// </summary>
+    public Action<uint>? PlayerSoundTableSeen { get; set; }
+
+    /// <summary>
+    /// True while the player's cast is in flight (<see cref="OpenCastWindow"/> to <see cref="CloseCastWindow"/>, which takes effect after the next <see cref="Advance"/> has delivered the frame's effects, so a
+    /// script or sound the cast's last message started is still counted). <see cref="AvatarStats.CastScripts"/> and <see cref="AvatarStats.CastSounds"/> count only inside it.
+    /// </summary>
+    public bool CastWindowOpen { get; private set; }
+
+    /// <summary>
+    /// The object the open cast was aimed at, or 0 (a self cast, or a host that does not say): the scripts and voices of its avatar count in the cast window beside the player's. Set by the host that
+    /// starts the cast at a target (the avatar adapter, which sees only the bus, never sets it).
+    /// </summary>
+    public uint CastTarget { get; set; }
+
     /// <summary>Counters.</summary>
     public AvatarStats Stats { get; } = new();
+
+    /// <summary>
+    /// Opens the cast window (M3 2.1 s2b): the player's words (HearSpeech, chat type Spellcasting) or its first cast gesture (ACE's UpdateMotion in the Magic stance) came in. Opening an open window only
+    /// cancels a pending close.
+    /// </summary>
+    public void OpenCastWindow()
+    {
+        if (!CastWindowOpen)
+        {
+            CastWindowOpen = true;
+            Stats.CastWindows++;
+        }
+
+        _castClosing = false;
+    }
+
+    /// <summary>Closes the cast window once the next <see cref="Advance"/> has delivered its effects: the cast's UseDone came in.</summary>
+    public void CloseCastWindow()
+    {
+        if (CastWindowOpen)
+        {
+            _castClosing = true;
+        }
+    }
+
+    private bool _castClosing;
+
+    private bool InCastWindow(uint guid, bool isPlayer) => CastWindowOpen && (isPlayer || (CastTarget != 0 && guid == CastTarget));
 
     /// <summary>The draw output of the last <see cref="Advance"/>.</summary>
     public AvatarFrame Frame { get; } = new();
@@ -427,6 +512,12 @@ public sealed class AvatarSet : ITargetWorld
     /// <summary><see cref="ObjectPickedUp"/> (<c>SmartBox::DoPickupEvent</c>, 0x00452240 / 0x00452280).</summary>
     public AvatarApply Apply(in ObjectPickedUp e) => PickUp(e.Guid);
 
+    /// <summary>F755 PlayEffect (<see cref="PlayScript"/>).</summary>
+    public AvatarApply Apply(in ObjectScriptPlayed e) => PlayScript(e.Guid, e.ScriptType, e.Speed);
+
+    /// <summary>F750 Sound (<see cref="PlaySound"/>).</summary>
+    public AvatarApply Apply(in ObjectSoundPlayed e) => PlaySound(e.Guid, e.SoundId, e.Volume);
+
     /// <summary><see cref="ObjectDescChanged"/> (<c>SmartBox::HandleObjDescEvent</c>, 0x00453340 / 0x00453380).</summary>
     public AvatarApply Apply(in ObjectDescChanged e) => SetVisualDesc(e.Guid, AvatarWire.ToObjDesc(e.Model));
 
@@ -470,6 +561,16 @@ public sealed class AvatarSet : ITargetWorld
         body.Describe(create, now, withInterpreter: !create.IsSelf, _problems);
         _avatars[create.Guid] = avatar;
         _order.Add(avatar);
+        if (body.Effects.PhysicsScriptTableId != 0)
+        {
+            ScriptTableSeen?.Invoke(body.Effects.PhysicsScriptTableId);
+        }
+
+        if (create.IsSelf && body.SoundTableId != 0)
+        {
+            PlayerSoundTableSeen?.Invoke(body.SoundTableId);
+        }
+
         var result = body.Appearance.DoObjDescChanges(create.ObjDesc);
         if (!result.AllApplied)
         {
@@ -703,6 +804,71 @@ public sealed class AvatarSet : ITargetWorld
         return AvatarApply.Applied;
     }
 
+    /// <summary>
+    /// F755 PlayEffect (<c>SmartBox::HandlePlayScriptType</c>, 11.6096 0x004520B0, then <c>CPhysicsObj::play_script</c>): plays the script <paramref name="scriptType"/> of the body's PhysicsScriptTable at
+    /// intensity <paramref name="speed"/> on the body's <see cref="AvatarBody.Effects"/>: its particles and its own hooks run in the frames that follow, as the M1 effect layer runs them. A type the
+    /// table lacks (or a body without a table) plays nothing, as retail's does, but is counted (<see cref="AvatarStats.ServerScriptsMissing"/>) and logged once per table and type.
+    /// </summary>
+    public AvatarApply PlayScript(uint guid, uint scriptType, float speed)
+    {
+        if (!_avatars.TryGetValue(guid, out var avatar))
+        {
+            return DropServerEffect(guid, "F755 script");
+        }
+
+        var effects = avatar.Body.Effects;
+        if (effects.PlayScript((DatReaderWriter.Enums.PlayScript)scriptType, speed) != 0)
+        {
+            Stats.ServerScriptsPlayed++;
+            if (InCastWindow(guid, avatar.IsPlayer))
+            {
+                Stats.CastScripts++;
+            }
+
+            return AvatarApply.Applied;
+        }
+
+        Stats.ServerScriptsMissing++;
+        if (_missingScriptsLogged.Add((effects.PhysicsScriptTableId, scriptType)) && _log.IsEnabled(LogSeverity.Warning))
+        {
+            Log(
+                LogSeverity.Warning,
+                guid,
+                string.Create(CultureInfo.InvariantCulture, $"F755 script type {scriptType} (intensity {speed}) is not in the body's PhysicsScriptTable 0x{effects.PhysicsScriptTableId:X8}: nothing plays (retail's play_script is a silent no-op); logged once per table and type"));
+        }
+
+        return AvatarApply.Ignored;
+    }
+
+    /// <summary>
+    /// F750 Sound (<c>SmartBox::HandleSoundEvent</c>, 11.6096 0x00452000, then <c>CPhysicsObj::play_sound</c>): queues a sound-table event of <paramref name="soundType"/> at
+    /// <paramref name="volume"/> on the body (<see cref="ServerSoundTableHook"/>, with the body's sound table); the next <see cref="Advance"/> hands it to <see cref="EffectEvents"/> with the object's other
+    /// hook events, or counts it dropped when there is no sink. Counted as played when it is mapped.
+    /// </summary>
+    public AvatarApply PlaySound(uint guid, uint soundType, float volume)
+    {
+        if (!_avatars.TryGetValue(guid, out var avatar))
+        {
+            return DropServerEffect(guid, "F750 sound");
+        }
+
+        avatar.Body.QueueServerSound(soundType, volume);
+        Stats.ServerSoundsPlayed++;
+        return AvatarApply.Applied;
+    }
+
+    private AvatarApply DropServerEffect(uint guid, string what)
+    {
+        Stats.ServerEffectsDropped++;
+        if (!_droppedEffectLogged)
+        {
+            _droppedEffectLogged = true;
+            Log(LogSeverity.Warning, guid, what + " for an object the avatar set does not have: dropped and counted (the reducer parks a message for an object the session does not know; this is an avatar the set lacks); logged once");
+        }
+
+        return AvatarApply.UnknownObject;
+    }
+
     /// <summary>A pickup: out of the parent and the world.</summary>
     public AvatarApply PickUp(uint guid)
     {
@@ -788,36 +954,57 @@ public sealed class AvatarSet : ITargetWorld
                 Frame.Add(avatar, viewer, avatar.IsPlayer && Player is { FirstPerson: true }, RetailUnhideFlash);
             }
 
-            DeliverEvents(avatar.Body, viewer);
+            DeliverEvents(avatar.Body, viewer, avatar.IsPlayer, avatar.Guid);
+        }
+
+        if (_castClosing)
+        {
+            _castClosing = false;
+            CastWindowOpen = false;
         }
     }
 
-    private void DeliverEvents(AvatarBody body, in AvatarViewer viewer)
+    private void DeliverEvents(AvatarBody body, in AvatarViewer viewer, bool isPlayer, uint guid)
     {
-        if (body.Effects.PendingEvents.Count == 0)
+        if (body.Effects.PendingEvents.Count == 0 && body.PendingServerSounds == 0)
         {
             return;
         }
 
         if (EffectEvents is not { } sink)
         {
-            Stats.EffectEventsDropped += body.Effects.DiscardEvents();
+            Stats.EffectEventsDropped += body.Effects.DiscardEvents() + body.DiscardServerSounds();
             return;
         }
 
         _events.Clear();
         body.Effects.DrainEvents(_events);
+        body.DrainServerSounds(_events);
         var origin = SoundOriginOf(body, viewer);
+        var soundTable = body.SoundTableId;
+        var voices = InCastWindow(guid, isPlayer) ? sink as ISoundVoiceCounter : null;
+        var voicesBefore = voices?.VoicesStarted ?? 0;
         for (var i = 0; i < _events.Count; i++)
         {
-            sink.OnEffectEvent(_events[i], origin);
+            sink.OnEffectEvent(_events[i], origin, soundTable, isPlayer);
+        }
+
+        if (voices is not null)
+        {
+            Stats.CastSounds += voices.VoicesStarted - voicesBefore;
         }
 
         Stats.EffectEventsDelivered += _events.Count;
         _events.Clear();
     }
 
-    /// <summary>Where a body's sound comes from: its distance from the viewer and its bearing relative to the viewer's heading.</summary>
+    /// <summary>
+    /// Where a body's sound comes from, relative to the viewer: <see cref="SoundOrigin.Between"/>, which carries retail's
+    /// bearing (the compass heading from the <b>source to the listener</b> minus the listener's heading:
+    /// <c>SoundManager::PlaySoundInternal(SoundBufRef*, Position*, float, int)</c> 11.6096 0x00550D80 over
+    /// <c>Position::heading(source, listener)</c> 0x005AA5D0). The M3 1.3 s1 fix: this method used to measure the
+    /// listener-to-source bearing, which mirrored every positioned sound left to right.
+    /// </summary>
     private static SoundOrigin SoundOriginOf(AvatarBody body, in AvatarViewer viewer)
     {
         if (viewer.Position.CellId == 0 || body.Position.CellId == 0)
@@ -825,14 +1012,7 @@ public sealed class AvatarSet : ITargetWorld
             return SoundOrigin.Center;
         }
 
-        var distance = PositionFrames.Distance(viewer.Position, body.Position);
-        var bearing = PositionFrames.HeadingTo(viewer.Position, body.Position) - PositionFrames.Heading(viewer.Position.Orientation);
-        if (bearing < 0f)
-        {
-            bearing += 360f;
-        }
-
-        return new SoundOrigin(distance, bearing);
+        return SoundOrigin.Between(viewer.Position, body.Position);
     }
 
     // ----- helpers -----

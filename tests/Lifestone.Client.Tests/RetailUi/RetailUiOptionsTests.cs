@@ -138,7 +138,7 @@ public sealed class RetailUiOptionsTests
         Assert.Empty(RetailUiOptions.Parse(["--start=arwic", "--walk", "--mute"]).Errors);
         var registered = OptionCatalog.RetailUi().Options.Select(o => o.Name).Order(StringComparer.Ordinal);
         Assert.Equal(
-            ["--retail-disconnect", "--retail-ui", "--retail-ui-frames", "--retail-ui-glitches", "--retail-ui-only", "--retail-ui-start", "--ui-scale"],
+            ["--retail-disconnect", "--retail-effects-stale-info", "--retail-ui", "--retail-ui-frames", "--retail-ui-glitches", "--retail-ui-only", "--retail-ui-start", "--ui-scale"],
             registered);
     }
 
@@ -148,7 +148,7 @@ public sealed class RetailUiOptionsTests
         var registry = OptionCatalog.Registry;
         Assert.True(registry.EndsRun(CommandLineArgument.ParseAll(["--retail-ui-frames"]), OptionScenes.Main));
         Assert.True(registry.EndsRun(CommandLineArgument.ParseAll(["--retail-ui-checks"]), OptionScenes.Main));
-        foreach (var interactive in new[] { "--retail-ui=standin", "--ui-scale=2", "--retail-ui-start=charmanage", "--retail-ui-only", "--retail-ui-glitches", "--retail-disconnect" })
+        foreach (var interactive in new[] { "--retail-ui=standin", "--ui-scale=2", "--retail-ui-start=charmanage", "--retail-ui-only", "--retail-ui-glitches", "--retail-effects-stale-info", "--retail-disconnect" })
         {
             Assert.False(registry.EndsRun(CommandLineArgument.ParseAll([interactive]), OptionScenes.Main), interactive);
         }

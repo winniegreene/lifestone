@@ -28,6 +28,7 @@ internal sealed class ToolTracker<T> : ActionTracker
     private readonly bool _silent;
     private readonly Func<ToolReply, T> _read;
     private readonly Action<T>? _observe;
+    private readonly Func<T, string?>? _verdict;
     private T? _result;
 
     /// <summary>A request for <paramref name="handle"/>.</summary>
@@ -38,7 +39,8 @@ internal sealed class ToolTracker<T> : ActionTracker
     /// <param name="silent">True to keep the reply's line out of the chat.</param>
     /// <param name="read">Reads the result from an ok reply (throws <see cref="ToolDataException"/> for bad data).</param>
     /// <param name="observe">Called with the result when an ok reply arrives (the status probe's checks), or null.</param>
-    internal ToolTracker(ToolHandle<T> handle, ToolRequest request, string text, string? chatLine, bool silent, Func<ToolReply, T> read, Action<T>? observe = null)
+    /// <param name="verdict">Judges an ok reply's result: null to confirm, or the failure sentence (<c>code: sentence</c>) that ends the request as a server error with the result still set (spell learn with an unknown id), or null for none.</param>
+    internal ToolTracker(ToolHandle<T> handle, ToolRequest request, string text, string? chatLine, bool silent, Func<ToolReply, T> read, Action<T>? observe = null, Func<T, string?>? verdict = null)
         : base(handle, ActionLane.Tools, ActionPolicy.ToolSeconds)
     {
         _request = request;
@@ -47,6 +49,7 @@ internal sealed class ToolTracker<T> : ActionTracker
         _silent = silent;
         _read = read;
         _observe = observe;
+        _verdict = verdict;
     }
 
     /// <summary>The request's correlation id.</summary>
@@ -99,7 +102,8 @@ internal sealed class ToolTracker<T> : ActionTracker
         {
             var result = _read(r);
             _result = result;
-            Resolve(new ActionOutcome(ActionOutcomeKind.Confirmed, 0, reply.ChatLine));
+            var failure = _verdict?.Invoke(result);
+            Resolve(failure is null ? new ActionOutcome(ActionOutcomeKind.Confirmed, 0, reply.ChatLine) : new ActionOutcome(ActionOutcomeKind.ServerError, 0, failure));
             _observe?.Invoke(result);
         }
         catch (ToolDataException e)
@@ -126,5 +130,5 @@ internal sealed class ToolTracker<T> : ActionTracker
 
     /// <inheritdoc/>
     internal override bool CompleteHandle(ActionOutcome outcome, double time, Action<ActionHandle, Exception> onHandlerError) =>
-        ((ToolHandle<T>)Handle).TryComplete(outcome.Kind == ActionOutcomeKind.Confirmed ? _result : null, outcome, time, onHandlerError);
+        ((ToolHandle<T>)Handle).TryComplete(_result, outcome, time, onHandlerError);
 }

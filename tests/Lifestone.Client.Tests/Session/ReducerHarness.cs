@@ -181,6 +181,14 @@ internal sealed class ReducerHarness
         Track<HealthUpdated>();
         Track<QualitiesChanged>();
         Track<LogOffRequested>();
+        Track<EnchantmentChanged>();
+        Track<SpellbookChanged>();
+        Track<InventoryChanged>();
+        Track<InventoryFailed>();
+        Track<CombatEvent>();
+        Track<CombatModeChanged>();
+        Track<PlayerDied>();
+        Track<PlayerKilledSomething>();
         Track<MessageDropped>();
         Track<UnknownMessage>();
     }

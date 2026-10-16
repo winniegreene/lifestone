@@ -344,6 +344,9 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
   - `require` fails them instead of skipping them when the backend is down.
   - The `login-throwaway` step (`--login-check=throwaway`, docs/session.md section 28) creates, uses, deletes and purges a character on the test account. It is not part of
     `--login-check=all` and runs only under `-Backend require` (skipped under `auto` and `start`).
+- The `record-audio` step (M3 1.3 s3, no backend) runs `--play-checks --record-audio=<dir>` on the stand-in server: the game's own sound is recorded from the Master bus
+  (automated, so muted: M2 D8), read back by `WaveLevels` and judged non-silent (peak above -60 dBFS and an active 50 ms window). The per-source counters
+  (`sources=`) are printed, not judged.
 - The golden viewpoints render to `docs/screenshots/m1/golden/` (ignored by git) with the positions and times needed
   to take the same views in the retail client:
 

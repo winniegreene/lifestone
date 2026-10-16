@@ -1,4 +1,5 @@
 using Godot;
+using Lifestone.Client.Audio;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Play;
 using Lifestone.Client.PortalSpace;
@@ -11,6 +12,7 @@ using Lifestone.Client.Session;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.StandIn;
+using Lifestone.Data.CharacterCreation;
 using Lifestone.Data.Terrain;
 using Lifestone.Game.Core;
 using Lifestone.Game.Diagnostics;
@@ -48,9 +50,10 @@ public sealed partial class PlayChecks : Node
     public static StandInVisit Visit { get; } = new()
     {
         HoldEntry = true, // g4 live-gate fix 3: the server answers as a live one does, EnterAfter seconds after the retail character list is on the screen (docs/session.md section 27)
-        EnterAfter = 0.1,
+        EnterAfter = 0.2, // M3 1.2 s5: the plan's rehearsal: Enter 0.2 s after the list, so the arrival lands while the shell is still warming (was 0.1)
         UnhideAfter = 20.0,
-        Stats = new StandInPlayerStats { Enchantments = StandInPlayerStats.LiveShapedEnchantments() }, // the live gate's PlayerDescription shape: 138 enchantments with layered duplicates (docs/session.md section 27)
+        Stats = new StandInPlayerStats { Enchantments = StandInPlayerStats.LiveShapedEnchantments(), Level = 1, TotalExperience = 2_000_000, AvailableExperience = 2_000_000, Spells = StandInPlayerStats.ProbeSpells(), SpellbookFilters = StandInPlayerStats.ProbeSpellbookFilters, ExtraEnchantments = StandInPlayerStats.ProbeEnchantments() }, // M3 2.2 fix B: the probe spellbook (R5) and a harmful enchantment and a vitae (R6) on either path, synthetic or replayed; // level and experience: placeholders the raise check spends; // the live gate's PlayerDescription shape: 138 enchantments with layered duplicates (docs/session.md section 27)
+        Recorded = FindRecorded(), // M3 1.2 s5: the live-shaped rehearsal: a recorded PlayerDescription from cache/sessions when one exists, else the synthetic one above
         Teleports = [new StandInTeleport(4.0, AcademyCell, AcademyOrigin)],
         Objects =
         [
@@ -70,12 +73,14 @@ public sealed partial class PlayChecks : Node
             new StandInObject(0x80000A14, "Stand-in Player", new System.Numerics.Vector3(-5f, -55f, 0f), MotionTable: 0, DescriptionFlags: 0x8), // white
         ],
         Speech = [new StandInSpeech(1.0, "Stand-in Town Crier", 0x80000A03, "Hear ye: the portal to the Academy stands open.")], // a placeholder speaker for the chat window
+        Scripts = [new StandInScript(1.2, 0, (uint)DatReaderWriter.Enums.PlayScript.LevelUp, 1f)], // M3 1.3 s0: one F755 on the player (the human table's LevelUp: 3 particle emitters and a sound hook), as ACE sends a level-up's effect
+        Sounds = [new StandInSound(1.2, 0, (uint)DatReaderWriter.Enums.Sound.EnchantUp, 0.75f)], // M3 1.3 s0: one F750 on the player (a type the human SoundTable maps), right behind it
         VitalUpdates = [new StandInVitalUpdate(2.0, 2, 41)], // g3a: the current health 52 of 75 becomes 41 (PrivateUpdateAttribute2ndLevel) two seconds after the unhide
         LogOffDelay = 6.0, // longer than retail's 3 s wait and the transition's collapse, so portal space's logoff tunnel is up before the character list returns
     };
 
     /// <summary>The visit after a reconnect (the disconnected screen's button runs the stand-in again): the arrival only, with the unhide a little earlier.</summary>
-    public static StandInVisit ReplayVisit { get; } = Visit with { HoldEntry = false, EnterAfter = 3.0, UnhideAfter = 14.0, Teleports = [], Objects = [], Speech = [] };
+    public static StandInVisit ReplayVisit { get; } = Visit with { HoldEntry = false, EnterAfter = 3.0, UnhideAfter = 14.0, Teleports = [], Objects = [], Speech = [], Scripts = [], Sounds = [] };
 
     /// <summary>The stand-in portal's object id (a server object's: 0x80000000 and up). A Use of it teleports the player to the Academy.</summary>
     public const uint PortalGuid = 0x80000A03;
@@ -94,6 +99,11 @@ public sealed partial class PlayChecks : Node
 
     /// <summary>Fading frames that may show no twin part yet: the server-objects layer runs after this node, so its count of a frame is read one frame late (S4).</summary>
     public const int TwinLagFrames = 2;
+
+    // The particle GfxObjs of the human script table's LevelUp script (0x330006F7: three emitters, 40 particles each, 3 s): what the F755 shows on the player.
+    private const uint LevelUpGfxA = 0x01001062;
+    private const uint LevelUpGfxB = 0x01001067;
+    private const uint LevelUpGfxC = 0x010010A2;
 
     private const string LogCategory = "playcheck";
     private const double FrameLimitMilliseconds = 50.0;
@@ -149,6 +159,8 @@ public sealed partial class PlayChecks : Node
     private bool _afterTeleport;
     private bool _afterArrival;
     private double _maxFrameMs;
+    private string _maxFrameStage = "none";
+    private double _maxFrameSecondsSinceArrival;
     private long _frameNumber;
     private long _listFrame = -1; // the frame the retail character list came up in
     private double _fromListMaxMs; // the longest frame from three frames after the list came up to the arrival (the live login check's window starts there)
@@ -169,6 +181,9 @@ public sealed partial class PlayChecks : Node
     private readonly PipelineCompilationWatch _pipelines = new();
     private readonly List<FadeWatch> _fadeWatches = [new("player", 0, true), new("object", ApparitionGuid, false)]; // D63: what the materialise fade does on screen, frame by frame
     private bool _fadeFrameTaken;
+    private bool _effectWindowOpen; // M3 1.3 s0: the frames from the one the server's F755 was applied in to ten frames after the wait ended (reported, not judged)
+    private double _effectWindowMaxMs;
+    private int _effectWindowFrames;
     private ulong _canvasPipelinesFromEnter; // canvas pipelines compiled from Enter on (the arrival's frames must compile none: docs/session.md section 27)
 
     /// <summary>Adds the checks to the scene; they start when the scene is ready.</summary>
@@ -383,7 +398,19 @@ public sealed partial class PlayChecks : Node
             }
             else
             {
-                _maxFrameMs = Math.Max(_maxFrameMs, ms);
+                if (ms > _maxFrameMs)
+                {
+                    _maxFrameMs = ms;
+                    _maxFrameStage = _mode.Flow.Stage.ToString();
+                    _maxFrameSecondsSinceArrival = (Time.GetTicksMsec() - _arrivedAtMs) / 1000.0;
+                }
+
+                if (ms > EnterWindowNearMilliseconds && ms <= FrameLimitMilliseconds)
+                {
+                    // M3 1.2 s5, TODO(login-burst-frame): the attribution of a frame near the limit, reported (not judged) so the live probe's number can be compared with the offline one.
+                    Log.Warn(LogCategory, "TODO(login-burst-frame): a frame over 30 ms in the judged window, near the 50 ms limit", ("ms", ms), ("stage", _mode.Flow.Stage), ("seconds_since_arrival", (Time.GetTicksMsec() - _arrivedAtMs) / 1000.0), ("tunnel", _portal?.Director.Machine.TunnelVisible), ("process_ms_previous_frame", Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000.0));
+                }
+
                 if (ms > FrameLimitMilliseconds)
                 {
                     _slowFrames++;
@@ -399,6 +426,12 @@ public sealed partial class PlayChecks : Node
     /// </summary>
     private void SampleFades(double delta)
     {
+        if (_effectWindowOpen && _mode.Avatars?.Stats.ServerScriptsPlayed >= 1)
+        {
+            _effectWindowFrames++;
+            _effectWindowMaxMs = Math.Max(_effectWindowMaxMs, delta * 1000.0);
+        }
+
         if (_mode.Avatars is not { } avatars || _mode.Rig is null)
         {
             return;
@@ -496,6 +529,25 @@ public sealed partial class PlayChecks : Node
         public string Describe() => $"{Name}: hidden={SawHidden} intermediate_frames={Intermediate} twin_frames={TwinFrames} done={Done} popped={Popped} rose={Rose} fade_s={Seconds:0.000} window_max_ms={WindowMaxMs:0.0}";
     }
 
+    /// <summary>With <c>--play-frames</c>: one more review frame, in the frames folder's <c>extra</c> sub-folder (the shell's ten frames are counted by file, so an extra one never joins them).</summary>
+    private void SaveExtraFrame(string name)
+    {
+        if (_framesDirectory is not { } directory)
+        {
+            return;
+        }
+
+        _tunnelTallySkip = 2;
+        var path = $"{ShellFramesPlan.FolderFor(directory, _framesSize.X, _framesSize.Y)}/extra/{ShellFramesPlan.FileName(name)}";
+        if (!ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", name), ("scale", _ui?.Scale)))
+        {
+            FrameFailed($"{name} could not be saved");
+        }
+    }
+
+    /// <summary>A sounded counter for a log line: the number, or <c>n/a</c> when the router's sink cannot say how many voices it started.</summary>
+    private static string SoundedText(SoundHookRouter? router, int? count) => router is { CountsSounded: true } && count is { } n ? n.ToString(System.Globalization.CultureInfo.InvariantCulture) : "n/a";
+
     /// <summary>
     /// Review frames of the shell for the owner (<see cref="ShellFramesPlan"/>): with <c>--play-frames[=DIR]</c> the checks save the window to DIR (default
     /// <see cref="PlayOptions.DefaultFramesDirectory"/> plus the window's <c>WxH</c>) when each state is reached, and check the picture is the size asked for and not blank.
@@ -508,12 +560,20 @@ public sealed partial class PlayChecks : Node
             return;
         }
 
+        if (SaveCheckedFrame($"{ShellFramesPlan.FolderFor(directory, _framesSize.X, _framesSize.Y)}/{ShellFramesPlan.FileName(name)}", name))
+        {
+            _framesTaken.Add(name);
+        }
+    }
+
+    // Saves the window to path and checks it is the size asked for and not blank (a failure is counted and logged); shared by the shell's frames and the panel pages' (PlayChecks.Panels.cs).
+    private bool SaveCheckedFrame(string path, string name)
+    {
         _tunnelTallySkip = 2;
-        var path = $"{ShellFramesPlan.FolderFor(directory, _framesSize.X, _framesSize.Y)}/{ShellFramesPlan.FileName(name)}";
         if (!ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", name), ("scale", _ui?.Scale)))
         {
             FrameFailed($"{name} could not be saved");
-            return;
+            return false;
         }
 
         using var image = GetViewport().GetTexture().GetImage();
@@ -521,7 +581,7 @@ public sealed partial class PlayChecks : Node
         if (size != _framesSize)
         {
             FrameFailed($"{name} is {size.X}x{size.Y}, not the {_framesSize.X}x{_framesSize.Y} requested");
-            return;
+            return false;
         }
 
         var seen = new HashSet<uint>();
@@ -536,10 +596,10 @@ public sealed partial class PlayChecks : Node
         if (seen.Count < 8)
         {
             FrameFailed($"{name} is blank");
-            return;
+            return false;
         }
 
-        _framesTaken.Add(name);
+        return true;
     }
 
     private void FrameFailed(string message)
@@ -597,6 +657,8 @@ public sealed partial class PlayChecks : Node
             ("pass", _results.Count(r => r.Ok)),
             ("fail", _results.Count(r => !r.Ok)),
             ("max_frame_ms_after_arrival", _maxFrameMs),
+            ("max_frame_stage", _maxFrameStage),
+            ("max_frame_seconds_since_arrival", _maxFrameSecondsSinceArrival),
             ("enter_window_max_frame_ms", _enterWindowMaxMs),
             ("list_to_walking_max_frame_ms", Math.Max(_fromListMaxMs, _maxFrameMs)),
             ("slow_frames_over_50_ms", _slowFrames),
@@ -647,8 +709,14 @@ public sealed partial class PlayChecks : Node
         var vitalsKnown = qualities.TryGetVitalLevels(1, out var healthNow, out var healthMax) & qualities.TryGetVitalLevels(3, out var staminaNow, out var staminaMax) & qualities.TryGetVitalLevels(5, out var manaNow, out var manaMax);
         Check(
             "the-description-s-enchantments-are-kept-and-applied-to-the-vitals-maximums",
-            vitalsKnown && qualities.Enchantments.Length == 138 && (healthNow, staminaNow, manaNow) == (52u, 120u, 75u) && (healthMax, staminaMax, manaMax) == (75u, 160u, 100u),
-            $"enchantments={qualities.Enchantments.Length} current={healthNow}/{staminaNow}/{manaNow} maximum={healthMax}/{staminaMax}/{manaMax} (expected 138, 52/120/75, 75/160/100)");
+            vitalsKnown && qualities.Enchantments.Length == Expected.Enchantments && (healthNow, staminaNow, manaNow) == (Expected.Health, Expected.Stamina, Expected.Mana) && (healthMax, staminaMax, manaMax) == (Expected.HealthMax, Expected.StaminaMax, Expected.ManaMax),
+            $"enchantments={qualities.Enchantments.Length} current={healthNow}/{staminaNow}/{manaNow} maximum={healthMax}/{staminaMax}/{manaMax} (expected {Expected.Enchantments}, {Expected.Health}/{Expected.Stamina}/{Expected.Mana}, {Expected.HealthMax}/{Expected.StaminaMax}/{Expected.ManaMax}; {Expected.Source})");
+        // M3 1.2 s5: the live-shaped rehearsal: the registry the read model holds is the count of the description the stand-in sent (the recording's when one exists, else the synthetic 138), read from
+        // PlayerQualities.Enchantments and ActiveEnchantments (the registry the vitals and the enchantment events read).
+        Check(
+            "the-registry-holds-the-count-of-the-description-the-stand-in-sent",
+            qualities.Enchantments.Length == Expected.Enchantments && qualities.ActiveEnchantments.Length == Expected.Enchantments && Expected.Enchantments > 0,
+            $"registry={qualities.Enchantments.Length} active={qualities.ActiveEnchantments.Length} expected={Expected.Enchantments} source='{Expected.Source}' contained_objects={Visit.Recorded?.Items.Length ?? 0}");
         var arrivedAt = Time.GetTicksMsec();
         _arrivedAtMs = arrivedAt;
         Check(
@@ -718,8 +786,8 @@ public sealed partial class PlayChecks : Node
         Check(
             "the-vitals-show-the-stand-ins-values-in-the-window-its-options-choose",
             vitals is { Chosen: not null } && ReferenceEquals(vitals.Chosen, stacked) && stacked is { Window.IsShown: true } && vitals.SideBySide is { Window.IsShown: false }
-                && stacked.HealthMeter is { } hm && Math.Abs(hm.Position - (52f / 75f)) < 0.001f && stacked.StaminaMeter is { } sm && Math.Abs(sm.Position - (120f / 160f)) < 0.001f && stacked.ManaMeter is { } mm && Math.Abs(mm.Position - 0.75f) < 0.001f
-                && stacked.HealthLabel!.Text.Contains("52", StringComparison.Ordinal) && stacked.HealthLabel.Text.Contains("75", StringComparison.Ordinal) && stacked.ManaLabel!.Text.Contains("75", StringComparison.Ordinal),
+                && stacked.HealthMeter is { } hm && Math.Abs(hm.Position - ((float)Expected.Health / Expected.HealthMax)) < 0.001f && stacked.StaminaMeter is { } sm && Math.Abs(sm.Position - ((float)Expected.Stamina / Expected.StaminaMax)) < 0.001f && stacked.ManaMeter is { } mm && Math.Abs(mm.Position - ((float)Expected.Mana / Expected.ManaMax)) < 0.001f
+                && stacked.HealthLabel!.Text.Contains(Expected.Health.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) && stacked.HealthLabel.Text.Contains(Expected.HealthMax.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) && stacked.ManaLabel!.Text.Contains(Expected.Mana.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal),
             $"chosen={(ReferenceEquals(vitals?.Chosen, stacked) ? "stacked" : "side-by-side")} health={stacked?.HealthMeter?.Position:0.000} '{stacked?.HealthLabel?.Text}' stamina={stacked?.StaminaMeter?.Position:0.000} '{stacked?.StaminaLabel?.Text}' mana={stacked?.ManaMeter?.Position:0.000} '{stacked?.ManaLabel?.Text}' options=0x{session.State.Self.Qualities.CharacterOptions1:X8}");
 
         // R15: the stand-in session's placeholder values are labelled on screen while the shell is up (the status line is hidden then).
@@ -744,7 +812,7 @@ public sealed partial class PlayChecks : Node
         var shellFields = LoginCheckShell.Fields(_shellWatch.ShellUp, _shellWatch.VitalsOnScreen, _shellWatch.SpewPortal, _shellWatch.ShownWindow);
         Check(
             "the-login-check-s-shell-fields-read-ok-on-the-stand-in",
-            shellFields == " shell=ok vitals=52/120/75 spew_portal=yes vitals_window=stacked" && LoginCheckShell.VitalsWindow(session.State.Self.Qualities) == "stacked" && _shellWatch.RadarBlipsMax >= Visit.Objects.Length,
+            shellFields == $" shell=ok vitals={Expected.Health}/{Expected.Stamina}/{Expected.Mana} spew_portal=yes vitals_window=stacked" && LoginCheckShell.VitalsWindow(session.State.Self.Qualities) == "stacked" && _shellWatch.RadarBlipsMax >= Visit.Objects.Length,
             $"fields='{shellFields.TrimStart()}' shell_frames={_shellWatch.Frames} bare_world_frames={_shellWatch.BareWorldFrames} radar_blips_max={_shellWatch.RadarBlipsMax} session_vitals={LoginCheckShell.Vitals(session.State.Self.Qualities)}");
 
         var placed = await WaitFor(() => !rig.Controller.Placing, 60.0);
@@ -779,12 +847,55 @@ public sealed partial class PlayChecks : Node
             "an-unhidden-object-and-the-player-pass-through-intermediate-alpha-and-end-opaque-with-no-frame-over-50-ms",
             faded && fadeJudged,
             $"fade_ms={_fadeWatches[0].Seconds * 1000.0:0}/{_fadeWatches[1].Seconds * 1000.0:0} (player/object, want {FadeSeconds * 1000.0:0} within {FadeToleranceSeconds * 1000.0:0} ms plus a frame) twin_drawn={twinDrawn} twin_missing={twinMissing} | {string.Join(" | ", _fadeWatches.Select(w => w.Describe()))}{(_framesDirectory is not null ? " (frame time REPORTED, NOT JUDGED: a --play-frames run is not a timing run)" : string.Empty)}");
+        // --- M3 1.3 s0: the server's F755 PlayEffect and F750 Sound on the player reach its body (read from the avatar set's counters: what was applied, not what was sent) ---
+        _effectWindowOpen = true;
+        var effectsApplied = await WaitFor(() => _mode.Avatars?.Stats is { ServerScriptsPlayed: >= 1, ServerSoundsPlayed: >= 1 }, 15.0);
+        await WaitFor(() => _mode.Layer?.Particles is { PlayerObjectsLastFrame: 1 }, 5.0); // the layer hands the player's emitters to the particle renderer (the mesh of a particle is queued, then attached)
+        await WaitFor(() => false, 0.7); // real time, not frames (a frame is a few ms here): the particles' meshes are prepared on workers and attached within a budget, then the emitters' particles (3 s of life) are drawn
+        _effectWindowOpen = false;
+        var effectStats = _mode.Avatars?.Stats;
+        var scriptParticles = 0;
+        var scriptEmitters = 0;
+        if (_mode.Avatars?.Player?.Body.Effects.Particles.Emitters is { } emitters)
+        {
+            foreach (var emitter in emitters)
+            {
+                if (emitter.Info.HwGfxObjId is LevelUpGfxA or LevelUpGfxB or LevelUpGfxC)
+                {
+                    scriptEmitters++;
+                    scriptParticles += emitter.NumParticles;
+                }
+            }
+        }
+
+        Check(
+            "the-servers-script-and-sound-are-applied-to-the-players-body",
+            effectsApplied && effectStats is { ServerScriptsPlayed: >= 1, ServerSoundsPlayed: >= 1, ServerScriptsMissing: 0, ServerEffectsDropped: 0 } && scriptParticles > 0,
+            $"server_scripts={effectStats?.ServerScriptsPlayed} server_sounds={effectStats?.ServerSoundsPlayed} scripts_missing={effectStats?.ServerScriptsMissing} effects_dropped={effectStats?.ServerEffectsDropped} sounds_delivered={effectStats?.EffectEventsDelivered} sounds_dropped_no_sink={effectStats?.EffectEventsDropped} levelup_emitters={scriptEmitters} levelup_particles={scriptParticles} player_particle_objects={_mode.Layer?.Particles?.PlayerObjectsLastFrame} particle_batches={_mode.Layer?.Particles?.BatchesLastFrame} effect_window_max_ms={_effectWindowMaxMs:0.0} effect_window_frames={_effectWindowFrames} (report-only fields: no judge in smoke)");
+        SaveExtraFrame("02b-server-script");
         Check("login-complete-is-sent-once-before-the-unhide", _portal is { Director.LoginCompletesSent: 1 }, $"sent={_portal?.Director.LoginCompletesSent} suppressed={_portal?.Director.LoginCompletesSuppressed}");
         var back = await WaitFor(() => _portal is { Director.Machine: { TunnelVisible: false, WorldVisible: true } }, 15.0);
         Check("portal-space-ends-and-the-world-is-back", back, $"tunnel={_portal?.Director.Machine.TunnelVisible} world={_portal?.Director.Machine.WorldVisible}");
         await Frames(120);
         SaveReviewFrame("02-shell-arrival");
         Check("the-player-keys-are-on-the-ui-router", rig.Controller.Input is not null, $"input={(rig.Controller.Input is null ? "none" : "set")}");
+        // --- M3 1.3 s1, fix B (R2): the player's walk fires its footstep hooks and they are handed to the sound player, and the server's sound reached it too. Judged: what the names say, and no more.
+        // The player's own footsteps are counted apart from every object's (the avatars tell the router which body fired). "Handed" is a call to the sound player; "sounded" is a voice it started: the
+        // human sound table 0x20000001 has no variant for the footstep types 55 and 56 and retail uses the object's own table only (no fallback), so the player's footsteps are handed over and
+        // never sound, which is printed apart and not judged here. Read from the router's counters, independent of the volume (an automated run is silent unless --volume, M2 D8). ---
+        var hookSounds = _mode.HookSounds;
+        var stepsBefore = hookSounds?.PlayerFootsteps ?? 0;
+        rig.Controller.Controller.HandleCommand(Lifestone.Data.Animation.MotionCommands.WalkForward, true);
+        var stepped = hookSounds is not null && await WaitFor(() => hookSounds.PlayerFootsteps > stepsBefore, 6.0);
+        await WaitFor(() => false, 0.5);
+        rig.Controller.Controller.HandleCommand(Lifestone.Data.Animation.MotionCommands.WalkForward, false);
+        await Frames(10);
+        Check(
+            "the-players-walk-hands-its-footsteps-to-the-sound-player-and-the-servers-sound-reaches-it",
+            stepped && hookSounds is { PlayerFootsteps: >= 1, ServerSounds: >= 1 },
+            $"player_footsteps_handed={hookSounds?.PlayerFootsteps - stepsBefore} (all objects' footsteps handed={hookSounds?.Footsteps}) server_sounds_handed={hookSounds?.ServerSounds} " +
+            $"sounded (voices started; report-only, a footstep with the human table is silent as retail): player_footsteps_sounded={SoundedText(hookSounds, hookSounds?.PlayerFootstepsSounded)} hooks_sounded={SoundedText(hookSounds, hookSounds?.HooksSounded)} server_sounded={SoundedText(hookSounds, hookSounds?.ServerSounded)} " +
+            $"hooks_handed={hookSounds?.HooksPlayed} hook_outcomes=[{hookSounds?.Diagnostics.Summary()}] no_table={hookSounds?.NoTable} ignored={hookSounds?.Ignored} events_dropped_no_sink={_mode.Avatars?.Stats.EffectEventsDropped} (report-only fields: no judge in smoke)");
 
         // --- g2: a stand-in speech line in the main chat, and a typed line sent as Talk and answered ---
         var chat = (ui?.Screens?.Flow.CurrentScreen as GamePlayScreen)?.Chat;
@@ -818,7 +929,7 @@ public sealed partial class PlayChecks : Node
             var changed = await WaitFor(() => healthLabel is not null && healthLabel.Text.Contains("41", StringComparison.Ordinal), 30.0);
             Check(
                 "a-vital-update-moves-the-health-meter-and-label",
-                changed && healthMeter is not null && Math.Abs(healthMeter.Position - (41f / 75f)) < 0.001f && !healthLabel!.Text.Contains("52", StringComparison.Ordinal) && Math.Abs(shell!.Vitals!.Stacked!.StaminaMeter!.Position - (120f / 160f)) < 0.001f,
+                changed && healthMeter is not null && Math.Abs(healthMeter.Position - (41f / Expected.HealthMax)) < 0.001f && !healthLabel!.Text.TrimStart().StartsWith(Expected.Health.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) && Math.Abs(shell!.Vitals!.Stacked!.StaminaMeter!.Position - ((float)Expected.Stamina / Expected.StaminaMax)) < 0.001f,
                 $"health={healthMeter?.Position:0.000} label='{healthLabel?.Text}'");
 
             await Frames(40);
@@ -856,13 +967,13 @@ public sealed partial class PlayChecks : Node
 
             Check("the-panel-host-is-hidden-at-login-and-the-toolbar-is-built", !panelHost.IsOpen && shell.Placeholders.All(p => p is not ("toolbar" or "panels" or "indicators")), $"open={panelHost.IsOpen} placeholders=[{string.Join(", ", shell.Placeholders)}]");
 
-            // One press of a gameplay panel button (the inventory) opens the retail message; its OK closes it.
-            if (shell.Root!.GetChildRecursive(0x100001B1) is { } inventoryButton)
+            // One press of a panel button whose page no slice builds (the map; the inventory is b1's) opens the retail message ("Not in Lifestone M3"); its OK closes it.
+            if (shell.Root!.GetChildRecursive(0x1000019A) is { } mapButton)
             {
-                await Press(inventoryButton);
+                await Press(mapButton);
                 var message = Dialog();
                 var text = DialogText(message);
-                Check("the-inventory-button-opens-the-needs-gameplay-message", text == "Not in Lifestone M2: Inventory, backpack and paperdoll" && !panelHost.IsOpen, $"dialog='{text}' host_open={panelHost.IsOpen}");
+                Check("the-map-button-opens-the-not-in-m3-message", text == Lifestone.Client.RetailUi.Dialogs.NotInM3.Prefix + "Map" && !panelHost.IsOpen, $"dialog='{text}' host_open={panelHost.IsOpen}");
                 await Frames(40);
                 SaveReviewFrame("04-shell-toolbar-and-message");
                 await PressOk(message);
@@ -876,7 +987,7 @@ public sealed partial class PlayChecks : Node
                 await Press(combatButton);
                 var message = Dialog();
                 var text = DialogText(message);
-                Check("a-combat-button-opens-the-needs-gameplay-message", text == "Not in Lifestone M2: Combat and spellcasting", $"dialog='{text}'");
+                Check("a-combat-button-opens-the-not-in-m3-message", text == Lifestone.Client.RetailUi.Dialogs.NotInM3.Prefix + "Combat and spellcasting", $"dialog='{text}'");
                 await PressOk(message);
             }
 
@@ -996,6 +1107,10 @@ public sealed partial class PlayChecks : Node
         await WaitFor(() => _portal is { Director.LoginCompletesSent: >= 3 }, 30.0);
         Check("login-complete-is-sent-for-the-tools-teleport", _portal is { Director.LoginCompletesSent: 3 }, $"sent={_portal?.Director.LoginCompletesSent}");
         await WaitFor(() => _portal is { Director.Machine: { TunnelVisible: false, WorldVisible: true } }, 15.0);
+
+        // --- M3 2.2: the panel pages (PlayChecks.Panels.cs: one hook per slice, then the panel frames). They run here, in the world after the tools teleport: before the server teleport
+        // they outlasted the stand-in's fixed teleport time, so its tunnel showed during them (missed by the teleport check) and the panel frames showed portal space. ---
+        await PanelChecksAsync(shell);
         await ToolsPanelWhereAndXpAsync(session, ui); // G7 lane A: Where am I and Add XP through the panel, and its review frame
         await ThrowawayToolOpsAsync(session, ui); // p2: the throwaway leg's driver presses the same buttons (PlayChecks.Throwaway.cs)
 
@@ -1069,6 +1184,11 @@ public sealed partial class PlayChecks : Node
         Check("login-complete-is-sent-for-the-portal", _portal is { Director.LoginCompletesSent: 4 }, $"sent={_portal?.Director.LoginCompletesSent}");
         await WaitFor(() => _portal is { Director.Machine: { TunnelVisible: false, WorldVisible: true } }, 15.0);
         await InspectorShellChecks(ui); // G7 lane B: the automation inspector shows this run's own actions (docs/retail-ui.md section 22.2)
+        await RaiseCheckAsync(session); // M3 1.1 s1b: one RaiseAttribute against the stand-in, priced by the retail XpTable
+        await SpellAndItemChecksAsync(session); // M3 1.1 s2b: one spell learn (learned, then known) and one item against the stand-in
+        await ActionChecksAsync(session); // M3 1.2 s4c: a stand-in self cast, a fizzle, a combat-mode change, a wield and an unwield complete as the trackers say
+        await CastChecksAsync(session); // M3 2.1 s2b: a wand wielded, the Magic mode, a cast with a wind-up: cast_scripts>=1 cast_sounds>=1 and a mid-cast review frame
+        await KitChecksAsync(session); // M3 1.4 s0: SpawnGear against the stand-in: the kit arrives in the pack (kit=n/n), a second run asks for nothing (kit_topup=0)
 
         // --- a boot by the server: the player is taken away and the retail disconnected screen has the button that reconnects (D43) ---
         var server = _host.StandIn ?? throw new InvalidOperationException("the stand-in session has no server levers");
@@ -1304,6 +1424,77 @@ public sealed partial class PlayChecks : Node
     }
 
     /// <summary>Waits for <paramref name="condition"/>, a frame at a time, for at most <paramref name="seconds"/>; returns whether it held.</summary>
+    /// <summary>
+    /// M3 1.1 s1b: one <c>RaiseAttribute</c> (Strength, one rank at the retail XpTable's price, loaded from the dats) against the stand-in completes Confirmed on the attribute's private update,
+    /// and the read model shows the new rank, the experience spent and the available experience reduced by exactly that price. Offline: it proves the client's path, not ACE's acceptance
+    /// (the live <c>StatsLiveTests</c> do that).
+    /// </summary>
+    private async Task RaiseCheckAsync(IGameSessionView session)
+    {
+        const string name = "a-raise-attribute-is-confirmed-by-the-private-update-and-the-read-model-shows-it";
+        if (_services.Dats is not { } dats)
+        {
+            Check(name, false, "no dats: the stand-in cannot price the raise");
+            return;
+        }
+
+        var table = Visit.XpTable ??= XpTableData.Load(dats);
+        var cost = table.XpToRaiseAttribute(0, 1);
+        var q = session.State.Self.Qualities;
+        _ = q.TryGetAttribute(1, out var before);
+        var availableBefore = q.AvailableExperience;
+        var raise = session.Actions.RaiseAttribute(1, (uint)cost, ActionSource.Host);
+        var done = await WaitFor(() => raise.IsCompleted, 10.0);
+        _ = q.TryGetAttribute(1, out var after);
+        Check(
+            name,
+            done && raise.Outcome?.Kind == ActionOutcomeKind.Confirmed && after.Ranks == before.Ranks + 1 && after.Experience == before.Experience + cost && q.AvailableExperience == availableBefore - (long)cost,
+            $"outcome={raise.Outcome?.Kind} detail={raise.Outcome?.Detail} cost={cost} ranks={before.Ranks}->{after.Ranks} spent={before.Experience}->{after.Experience} available={availableBefore}->{q.AvailableExperience} level={q.Level}");
+    }
+
+    /// <summary>
+    /// M3 1.1 s2b: <c>PlayerTools.LearnSpells</c> against the stand-in, with the retail SpellTable loaded from the dats: Strength Self I (id 2) is learned the first time and known the
+    /// second, and an id outside the table fails by name; <c>PlayerTools.SpawnItem</c> creates Pyreal with the stack clamped to the item's maximum. Offline: it proves the client's
+    /// typed path and the stand-in's answers in the mod's reply bytes, not ACE's acceptance (the live <c>ModVerbsLiveTests</c> do that).
+    /// </summary>
+    private async Task SpellAndItemChecksAsync(IGameSessionView session)
+    {
+        const string spellName = "spell-learn-is-learned-then-known-and-an-unknown-id-fails-by-name";
+        const string itemName = "item-creates-a-clamped-stack-in-the-pack";
+        if (_services.Dats is not { } dats)
+        {
+            Check(spellName, false, "no dats: the stand-in cannot read the SpellTable");
+            Check(itemName, false, "no dats: skipped with the spell check");
+            return;
+        }
+
+        Visit.SpellTable ??= Lifestone.Data.Magic.SpellTableData.Load(dats);
+        var first = session.Tools.LearnSpells([2, 3], ActionSource.Host);
+        var firstDone = await WaitFor(() => first.IsCompleted, 10.0);
+        var second = session.Tools.LearnSpells([2, 3], ActionSource.Host);
+        var secondDone = await WaitFor(() => second.IsCompleted, 10.0);
+        var bad = session.Tools.LearnSpells([2, 99999999], ActionSource.Host);
+        var badDone = await WaitFor(() => bad.IsCompleted, 10.0);
+        Check(
+            spellName,
+            firstDone && secondDone && badDone
+                && first.Outcome?.Kind == ActionOutcomeKind.Confirmed && first.Result is { Ok: true, Learned: 2, Known: 0 }
+                && second.Outcome?.Kind == ActionOutcomeKind.Confirmed && second.Result is { Ok: true, AllAlreadyKnown: true }
+                && bad.Outcome?.Kind == ActionOutcomeKind.ServerError && bad.Result is { Ok: false, Unknown: 1 } && bad.Outcome?.Detail?.Contains("99999999", StringComparison.Ordinal) == true,
+            $"first={first.Outcome?.Kind} {first.Result?.Learned}L/{first.Result?.Known}K name={first.Result?.Spells.FirstOrDefault()?.Name} second={second.Outcome?.Kind} {second.Result?.Learned}L/{second.Result?.Known}K bad={bad.Outcome?.Kind} detail={bad.Outcome?.Detail}");
+
+        var item = session.Tools.SpawnItem(StandInItemKind.PyrealWcid, 60_000, ActionSource.Host);
+        var itemDone = await WaitFor(() => item.IsCompleted, 10.0);
+        var unknown = session.Tools.SpawnItem(99_999_999, 1, ActionSource.Host);
+        var unknownDone = await WaitFor(() => unknown.IsCompleted, 10.0);
+        Check(
+            itemName,
+            itemDone && unknownDone
+                && item.Outcome?.Kind == ActionOutcomeKind.Confirmed && item.Result is { Clamped: true, Stack: 25_000, Requested: 60_000, MaxStack: 25_000 } && item.Result.Guid >= 0x80000000
+                && ItemOutcomes.Of(unknown) == ItemOutcome.UnknownWcid,
+            $"item={item.Outcome?.Kind} guid=0x{item.Result?.Guid:X8} stack={item.Result?.Stack} requested={item.Result?.Requested} max={item.Result?.MaxStack} clamped={item.Result?.Clamped} unknown={ItemOutcomes.Of(unknown)}");
+    }
+
     private async Task<bool> WaitFor(Func<bool> condition, double seconds)
     {
         var deadline = Time.GetTicksMsec() + (ulong)(seconds * 1000.0);

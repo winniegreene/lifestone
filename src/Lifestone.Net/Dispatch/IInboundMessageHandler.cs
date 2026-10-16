@@ -214,6 +214,133 @@ public interface IInboundMessageHandler
     {
     }
 
+    // M3 1.2 s0: inventory, wield, combat notifications, magic and admin messages (append-only).
+
+    /// <summary>GM 0x0024 InventoryRemoveObject.</summary>
+    void OnInventoryRemoveObject(in InboundContext context, in InventoryRemoveObjectMsg message)
+    {
+    }
+
+    /// <summary>GM 0x0197 SetStackSize.</summary>
+    void OnSetStackSize(in InboundContext context, in SetStackSizeMsg message)
+    {
+    }
+
+    /// <summary>GM 0x019E PlayerKilled.</summary>
+    void OnPlayerKilled(in InboundContext context, in PlayerKilledMsg message)
+    {
+    }
+
+    /// <summary>GM 0x02CE PublicUpdatePropertyInt.</summary>
+    void OnPublicUpdatePropertyInt(in InboundContext context, in PublicUpdatePropertyIntMsg message)
+    {
+    }
+
+    /// <summary>GM 0x02DA PublicUpdateInstanceId.</summary>
+    void OnPublicUpdateInstanceId(in InboundContext context, in PublicUpdateInstanceIdMsg message)
+    {
+    }
+
+    /// <summary>GM 0xEA60 AdminEnvirons.</summary>
+    void OnAdminEnvirons(in InboundContext context, in AdminEnvironsMsg message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0022 InventoryPutObjInContainer.</summary>
+    void OnInventoryPutObjInContainer(in InboundContext context, in GameEventHeader header, in InventoryPutObjInContainerEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0023 WieldObject.</summary>
+    void OnWieldObject(in InboundContext context, in GameEventHeader header, in WieldObjectEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x019A InventoryPutObjectIn3D.</summary>
+    void OnInventoryPutObjectIn3D(in InboundContext context, in GameEventHeader header, in InventoryPutObjectIn3DEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x00A0 InventoryServerSaysFailed.</summary>
+    void OnInventoryServerSaysFailed(in InboundContext context, in GameEventHeader header, in InventoryServerSaysFailedEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x01AC VictimNotification.</summary>
+    void OnVictimNotification(in InboundContext context, in GameEventHeader header, in VictimNotificationEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x01AD KillerNotification.</summary>
+    void OnKillerNotification(in InboundContext context, in GameEventHeader header, in KillerNotificationEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x01B1 AttackerNotification.</summary>
+    void OnAttackerNotification(in InboundContext context, in GameEventHeader header, in AttackerNotificationEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x01B2 DefenderNotification.</summary>
+    void OnDefenderNotification(in InboundContext context, in GameEventHeader header, in DefenderNotificationEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x01B3 EvasionAttackerNotification.</summary>
+    void OnEvasionAttackerNotification(in InboundContext context, in GameEventHeader header, in EvasionAttackerNotificationEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x01B4 EvasionDefenderNotification.</summary>
+    void OnEvasionDefenderNotification(in InboundContext context, in GameEventHeader header, in EvasionDefenderNotificationEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x02C1 MagicUpdateSpell.</summary>
+    void OnMagicUpdateSpell(in InboundContext context, in GameEventHeader header, in MagicUpdateSpellEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x02C2 MagicUpdateEnchantment.</summary>
+    void OnMagicUpdateEnchantment(in InboundContext context, in GameEventHeader header, in MagicUpdateEnchantmentEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x02C3 MagicRemoveEnchantment.</summary>
+    void OnMagicRemoveEnchantment(in InboundContext context, in GameEventHeader header, in MagicRemoveEnchantmentEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x02C4 MagicUpdateMultipleEnchantments (ACE never sends it).</summary>
+    void OnMagicUpdateMultipleEnchantments(in InboundContext context, in GameEventHeader header, in MagicUpdateMultipleEnchantmentsEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x02C5 MagicRemoveMultipleEnchantments (ACE never sends it).</summary>
+    void OnMagicRemoveMultipleEnchantments(in InboundContext context, in GameEventHeader header, in MagicRemoveMultipleEnchantmentsEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x02C6 MagicPurgeEnchantments (no payload).</summary>
+    void OnMagicPurgeEnchantments(in InboundContext context, in GameEventHeader header, in MagicPurgeEnchantmentsEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x02C7 MagicDispelEnchantment.</summary>
+    void OnMagicDispelEnchantment(in InboundContext context, in GameEventHeader header, in MagicDispelEnchantmentEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x02C8 MagicDispelMultipleEnchantments.</summary>
+    void OnMagicDispelMultipleEnchantments(in InboundContext context, in GameEventHeader header, in MagicDispelMultipleEnchantmentsEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0312 MagicPurgeBadEnchantments (no payload).</summary>
+    void OnMagicPurgeBadEnchantments(in InboundContext context, in GameEventHeader header, in MagicPurgeBadEnchantmentsEvent message)
+    {
+    }
+
     // Everything else.
 
     /// <summary>A message the dispatcher does not decode; <paramref name="body"/> is the whole message, opcode included.</summary>

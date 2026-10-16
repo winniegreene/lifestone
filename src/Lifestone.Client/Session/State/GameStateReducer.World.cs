@@ -375,6 +375,50 @@ internal sealed partial class GameStateReducer
         Publish(new ObjectDescChanged(message.Guid, message.Model));
     }
 
+    /// <summary>Environ options already logged (an option logs once).</summary>
+    private readonly HashSet<uint> _environsLogged = [];
+
+    /// <summary>
+    /// GM 0xEA60 AdminEnvirons: <c>CM_Admin::DispatchUI_Environs</c> (11.6096 0x006AE870; 11.4186 0x006AD910) then
+    /// <c>CPlayerSystem::Handle_Admin__Environs</c> (11.6096 0x0055EB40; 11.4186 0x0055DE20), classified by
+    /// <see cref="AdminEnvirons.Classify"/>. The sound options publish <see cref="AdminEnvironChanged"/> for the host to play
+    /// from the UI sound table, only while the player's object exists (retail checks <c>GetPhysicsObject(playerID)</c> first). The
+    /// fog options (0 to 6, 9999) publish it too; applying the fog is out of M3's scope (<c>TODO(m3-environs-fog)</c>, logged
+    /// once per option). An option retail ignores is logged once and publishes nothing. No state changes.
+    /// </summary>
+    public void OnAdminEnvirons(in InboundContext context, in AdminEnvironsMsg message)
+    {
+        var option = message.Environ;
+        var effect = AdminEnvirons.Classify(option);
+        if (effect.Kind == EnvironKind.Ignored)
+        {
+            LogEnvironOnce(option, "GM 0xEA60 AdminEnvirons: option " + option + " is one retail's handler ignores; nothing happens");
+            return;
+        }
+
+        if (effect.Kind == EnvironKind.Sound && !_state.Objects.Contains(_state.Self.Guid))
+        {
+            // Retail: no physics object for the player yet, so the handler returns before the sound.
+            LogEnvironOnce(option, "GM 0xEA60 AdminEnvirons: sound option " + option + " arrived before the player's object exists; retail plays nothing");
+            return;
+        }
+
+        if (effect.Kind is EnvironKind.Fog or EnvironKind.Clear)
+        {
+            LogEnvironOnce(option, "GM 0xEA60 AdminEnvirons: option " + option + " sets the landscape fog and ambient override (TODO(m3-environs-fog): not drawn; the event is published)");
+        }
+
+        Publish(new AdminEnvironChanged(option, effect.Kind, effect.SoundType));
+    }
+
+    private void LogEnvironOnce(uint option, string what)
+    {
+        if (_environsLogged.Add(option))
+        {
+            _log.Info(SessionLog.Category, what, new LogField("environ", option));
+        }
+    }
+
     /// <summary>
     /// F750 Sound: <c>SmartBox::HandleSoundEvent</c> (11.4186 0x00451FC0, 11.6096 0x00452000): parked for an unknown object,
     /// else <see cref="ObjectSoundPlayed"/>.
@@ -615,6 +659,14 @@ internal sealed partial class GameStateReducer
 
         Changed();
         Publish(new ObjectCreated(message.Guid, isSelf, created.InWorld, recreated));
+        // Side-pack contents at login join the inventory model (M3 1.2 s2, TODO(m3-inventory-sidepack-contents)): ACE sends no 0022 for them, only each item's CreateObject. Only during the arrival
+        // (before the player is Present): a live grant (a pick-up, a loot, a gear kit into a full main pack's side pack) sends the CreateObject and then the item's own 0022, which the model applies and
+        // publishes once as Added at the real slot; adopting at the CreateObject would publish Added and then Moved (M3 1.2 fix R3). A main-pack item is held already by the description. The wielded arm
+        // (the item's WielderId is the player: no container) is reachable from here for the same arrival objects.
+        if (_state.Self.Travel != SelfTravel.Present && ((created.ContainerId is { } holder && holder != _state.Self.Guid) || (created.WielderId is { } wielder && wielder == _state.Self.Guid)))
+        {
+            AdoptHeldObject(created);
+        }
         if (created.Motion is { } motion)
         {
             Publish(new ObjectMotionChanged(message.Guid, isSelf, created.MotionAutonomous, motion));
@@ -766,6 +818,8 @@ internal sealed partial class GameStateReducer
         self.Stamps = default;
         self.PhysicsState = PhysicsState.None;
         self.Qualities.Clear();
+        self.Spellbook.Clear();
+        self.Inventory.Clear();
         self.Qualities.ClearSessionOptions();
         _qualityStamps.Clear();
         Changed();

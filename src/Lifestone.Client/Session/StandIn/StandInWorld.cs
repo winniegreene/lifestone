@@ -17,7 +17,7 @@ namespace Lifestone.Client.Session.StandIn;
 /// live session publishes, <see cref="DelaySeconds"/> later on the session clock. Nothing here is ACE's or retail's; it is what the checks need a server to say.
 /// </summary>
 /// <remarks>Only an offline session's reducer has one; a live session never reaches it. Game thread only.</remarks>
-internal sealed class StandInWorld(GameStateReducer reducer, StandInVisit visit, double delaySeconds)
+internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisit visit, double delaySeconds)
 {
     private readonly GameStateReducer _reducer = reducer;
     private readonly StandInVisit _visit = visit;
@@ -37,7 +37,11 @@ internal sealed class StandInWorld(GameStateReducer reducer, StandInVisit visit,
     /// <summary>The actions the world part answers.</summary>
     internal static bool Answers(Contracts.ActionKind kind) =>
         kind is Contracts.ActionKind.ToolPlace or Contracts.ActionKind.ToolWhereAmI or Contracts.ActionKind.ToolAddXp or Contracts.ActionKind.ToolStatus or Contracts.ActionKind.ToolCharPurge
-            or Contracts.ActionKind.Use or Contracts.ActionKind.QueryHealth or Contracts.ActionKind.LogOff or Contracts.ActionKind.Talk;
+            or Contracts.ActionKind.ToolSpell or Contracts.ActionKind.ToolItem
+            or Contracts.ActionKind.Use or Contracts.ActionKind.QueryHealth or Contracts.ActionKind.LogOff or Contracts.ActionKind.Talk
+            or Contracts.ActionKind.RaiseAttribute or Contracts.ActionKind.RaiseVital or Contracts.ActionKind.RaiseSkill or Contracts.ActionKind.TrainSkill
+            or Contracts.ActionKind.CastSpell or Contracts.ActionKind.SetCombatMode or Contracts.ActionKind.Wield or Contracts.ActionKind.Unwield or Contracts.ActionKind.MoveToPack
+            or Contracts.ActionKind.MergeStack;
 
     private OutboundTicket Ticket() => new(0, _reducer.Clock.Time.GetTimestamp());
 
@@ -45,7 +49,7 @@ internal sealed class StandInWorld(GameStateReducer reducer, StandInVisit visit,
 
     /// <summary>
     /// A Talk line. Plain speech is heard back as the player's own (a HearSpeech from the player, as ACE echoes it: the line the Talk completes on); a server-mod
-    /// request (<c>@lifestone ...</c>): <c>place</c> answers, every other verb gets an error reply (the stand-in does not do that); any other '@' command is refused.
+    /// request (<c>@lifestone ...</c>): <c>place</c>, <c>where</c>, <c>xp</c>, <c>char purge</c>, <c>spell learn</c>, <c>item</c> and <c>status</c> answer, every other verb gets an error reply (the stand-in does not do that); any other '@' command is refused.
     /// </summary>
     internal OutboundTicket Talk(ReadOnlySpan<char> text)
     {
@@ -98,11 +102,17 @@ internal sealed class StandInWorld(GameStateReducer reducer, StandInVisit visit,
                 // The stand-in's purge: the server mod's rules over the stand-in's character list (a placeholder: the counts are not a database's).
                 CharPurge(purge);
                 break;
+            case SpellLearnRequest spell:
+                SpellLearn(spell);
+                break;
+            case ItemRequest item:
+                Item(item);
+                break;
             case StatusRequest:
                 Later(sink => Say(sink, ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Status, PlaceholderStatus), PlaceholderStatus.Describe())));
                 break;
             default:
-                Refuse(request, "failed: the stand-in only answers place, where, xp, char purge and status");
+                Refuse(request, "failed: the stand-in only answers place, where, xp, char purge, spell learn, item and status");
                 break;
         }
 
@@ -110,7 +120,7 @@ internal sealed class StandInWorld(GameStateReducer reducer, StandInVisit visit,
     }
 
     /// <summary>The status the stand-in reports: a Player account on a mod that answers (the stand-in's own placeholder values).</summary>
-    private static StatusData PlaceholderStatus { get; } = new(1, "stand-in", new string('0', 40), new string('0', 64), "127.0.0.1", 0, false, "Player", "stand-in", "Stand-in", "Open", [ToolVerbs.Status, ToolVerbs.Where, ToolVerbs.Xp, ToolVerbs.PlacePoi, ToolVerbs.PlaceLoc, ToolVerbs.Char + " " + ToolVerbs.CharPurge]);
+    private static StatusData PlaceholderStatus { get; } = new(1, "stand-in", new string('0', 40), new string('0', 64), "127.0.0.1", 0, false, "Player", "stand-in", "Stand-in", "Open", [ToolVerbs.Status, ToolVerbs.Where, ToolVerbs.Xp, ToolVerbs.PlacePoi, ToolVerbs.PlaceLoc, ToolVerbs.Char + " " + ToolVerbs.CharPurge, ToolVerbs.Spell + " " + ToolVerbs.SpellLearn, ToolVerbs.Item]);
 
     private void Where(ToolRequest request)
     {

@@ -24,6 +24,26 @@ internal enum ActionLane : byte
     /// <summary>Automation's movement intents: rate-limited.</summary>
     Move,
 
+    /// <summary>
+    /// RaiseAttribute, RaiseVital, RaiseSkill and TrainSkill: one in flight at a time, in call order (M3 s1b). The server's answers
+    /// to a raise (the experience update, the stat update, the refusal line) carry no request id, and every raise spends from the same
+    /// available experience, so the next raise waits for the previous one's answer, which also keeps each stat's update unambiguous.
+    /// </summary>
+    Stats,
+
+    /// <summary>
+    /// Cast (both forms) and SetCombatMode (M3 1.2 s4b): one in flight at a time, in call order, and the lane stays busy after a cast's outcome until the server ends the cast
+    /// (ACE's UseDone 0x01C7). ACE handles one cast at a time (a second one while the player is busy is answered "You're too busy"), its answers carry no request id, and a
+    /// change of combat mode fails a cast in progress, so a combat-mode change waits behind a cast, which is why it shares the lane.
+    /// </summary>
+    Magic,
+
+    /// <summary>
+    /// Wield, Unwield and MoveToPack (M3 1.2 s4b): one in flight at a time, in call order. The server's answers (0x0022, 0x0023, 0x00A0) carry no request id, and ACE
+    /// answers a refusal with an item and an error of 0, so only one request at a time keeps each answer unambiguous.
+    /// </summary>
+    Inventory,
+
     /// <summary>LoginComplete and Quit: neither serialised nor rate-limited.</summary>
     Immediate,
 }
@@ -56,6 +76,12 @@ internal static class ActionPolicy
     /// <summary>LoginComplete: until the server clears Hidden.</summary>
     internal const double LoginCompleteSeconds = 15;
 
+    /// <summary>
+    /// LoginComplete's wait for the player's description and contained objects (M3 1.2 s5; retail's <c>CPlayerSystem::SendLoginCompleteNotification</c> waits without a limit): the most it waits on the session clock, counted from the call,
+    /// before it is sent anyway with a WARNING naming how many objects were still missing, so a lost object never strands the player in portal space.
+    /// </summary>
+    internal const double LoginCompleteContentsCapSeconds = 3;
+
     /// <summary>Use: until UseDone (ACE walks the player to the object first).</summary>
     internal const double UseSeconds = 20;
 
@@ -70,6 +96,24 @@ internal static class ActionPolicy
 
     /// <summary>LogOff: until the server's F653 and F658.</summary>
     internal const double LogOffSeconds = 30;
+
+    /// <summary>
+    /// RaiseAttribute, RaiseVital, RaiseSkill, TrainSkill: until the stat's private update (ACE answers at once; a request it drops
+    /// without a word, such as more experience than the character has, ends here as a timeout).
+    /// </summary>
+    internal const double StatSeconds = 5;
+
+    /// <summary>
+    /// Cast: until the spell's outcome (the enchantment, the projectile, a fizzle or a refusal). A cast takes the windup gesture, the cast gesture and the
+    /// recoil, which ACE paces in seconds (a high-level spell's windup is the longest), so the limit is twice the other world actions'.
+    /// </summary>
+    internal const double CastSeconds = 10;
+
+    /// <summary>SetCombatMode: until the combat-mode update (ACE changes the mode after the stance animation).</summary>
+    internal const double CombatModeSeconds = 5;
+
+    /// <summary>Wield, Unwield and MoveToPack: until the inventory message (0x0023, 0x0022) or the refusal (0x00A0).</summary>
+    internal const double InventorySeconds = 5;
 
     /// <summary>A player-tool request: until the mod's reply (m2-plan §4.12).</summary>
     internal const double ToolSeconds = 5;

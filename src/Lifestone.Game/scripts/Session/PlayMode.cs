@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Godot;
+using Lifestone.Client.Audio;
 using Lifestone.Client.Avatars;
 using Lifestone.Client.PortalSpace;
 using Lifestone.Client.Play;
@@ -9,12 +10,15 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.CharacterCreation;
 using Lifestone.Data.Physics.Geometry;
+using Lifestone.Game.Audio;
 using Lifestone.Game.Core;
+using Lifestone.Game.Diagnostics;
 using Lifestone.Game.PortalSpace;
 using Lifestone.Game.Player;
 using Lifestone.Game.RetailUi;
 using Lifestone.Game.World;
 using Lifestone.Game.World.Interiors;
+using Lifestone.Game.World.Objects;
 using Lifestone.Game.World.ServerObjects;
 
 namespace Lifestone.Game.Sessions;
@@ -71,6 +75,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
     private uint _destinationCell;
     private bool _loginCompleteFallback;
     private AvatarSet? _avatars;
+    private SoundHookRouter? _hookSounds;
     private SessionAvatarAdapter? _adapter;
     private ServerObjectsLayer? _layer;
     private ObjectLightTable? _lightTable;
@@ -120,6 +125,13 @@ public sealed partial class PlayMode : Node, IPlayWorld
 
     /// <summary>The session's avatar set: the player and every object the server created. A new one after each log off.</summary>
     public AvatarSet? Avatars => _avatars;
+
+    /// <summary>
+    /// The sound sink of the avatars' and the living statics' hook events and of the server's sounds (M3 1.3 s1): the sound router over the audio service's
+    /// retail sound player. Its counters (<see cref="SoundHookRouter.HooksPlayed"/>, <see cref="SoundHookRouter.Footsteps"/>, <see cref="SoundHookRouter.ServerSounds"/>)
+    /// read what was handed to the player, whatever the volume (an automated run is silent unless <c>--volume</c>). Null with no audio service.
+    /// </summary>
+    public SoundHookRouter? HookSounds => _hookSounds;
 
     /// <summary>The adapter that feeds <see cref="Avatars"/> from the session's events.</summary>
     public SessionAvatarAdapter? Adapter => _adapter;
@@ -243,8 +255,123 @@ public sealed partial class PlayMode : Node, IPlayWorld
             ui.Manager.Input.RegisterInputMap(EndSessionKey.InputMap, mode._endKey, EndKeyPriority);
             Log.Info(LogCategory, "the log-off key is Shift+Escape (retail's End Character Session, gmDefaultMap)");
         }
-        Log.Warn(LogCategory, "TODO(g5-w10-sounds): the sounds and scripts the server plays on an object are not played yet (the avatars' effect events have no sink in play mode)");
         return mode;
+    }
+
+    private readonly HashSet<uint> _soundTablesPrefetched = [];
+    private readonly Queue<uint> _wavesToPrefetch = new();
+    private readonly List<uint> _prefetchBatch = [];
+    private int _wavesPrefetched;
+    private int _prefetchFrames;
+
+    /// <summary>Waves a frame may hand to the audio service's decoders (M3 1.3 fix A, 1.3-R1 (b)): the player's table is spread over frames, not requested in the burst's frame.</summary>
+    internal const int WavesPerFrame = 6;
+
+    /// <summary>Waves of the player's sound table handed to the decoders so far, and the frames that did it (the arrival's attribution fields).</summary>
+    internal (int Waves, int Frames, int Waiting) PrefetchProgress => (_wavesPrefetched, _prefetchFrames, _wavesToPrefetch.Count);
+
+    /// <summary>Main thread, once per frame that did no heavy work: the next few waves of the player's table, then the next few particle models of the script tables seen.</summary>
+    private void PumpArrivalPrefetch()
+    {
+        if (_wavesToPrefetch.Count > 0 && AudioService.Current is { } audio)
+        {
+            _prefetchBatch.Clear();
+            while (_wavesToPrefetch.Count > 0 && _prefetchBatch.Count < WavesPerFrame)
+            {
+                _prefetchBatch.Add(_wavesToPrefetch.Dequeue());
+            }
+
+            audio.Prefetch(_prefetchBatch);
+            _wavesPrefetched += _prefetchBatch.Count;
+            _prefetchFrames++;
+            if (_wavesToPrefetch.Count == 0)
+            {
+                Log.Info(LogCategory, "the player's sound table is handed to the decoders", ("waves", _wavesPrefetched), ("frames", _prefetchFrames), ("per_frame", WavesPerFrame));
+            }
+        }
+
+        ServerObjectParticles.PumpPending(ServerObjectParticles.ModelsPerFrame);
+    }
+
+    /// <summary>
+    /// M3 1.3 s1: the player's body was made with a sound table. A worker lists the waves of every sound type in it (footsteps, the server's sounds, the level-up's), and the audio
+    /// service's workers decode them into their streams (<see cref="AudioService.Prefetch"/>, a few waves a frame: <see cref="PumpArrivalPrefetch"/>), so the first step and the first server sound play on the frame they are asked for and
+    /// not behind the world's streaming work on the pool. Once per table; nothing without an audio service.
+    /// </summary>
+    private void PrefetchPlayerSounds(uint soundTableId)
+    {
+        if (AudioService.Current is not { } audio || !_soundTablesPrefetched.Add(soundTableId))
+        {
+            return;
+        }
+
+        var services = _services;
+        _ = services.Workers.RunSync(cancellation =>
+        {
+            var waves = new List<uint>();
+            if (audio.Source.GetSoundTable(soundTableId) is { } table)
+            {
+                foreach (var node in table.Root.Children)
+                {
+                    foreach (var entry in node.Entries)
+                    {
+                        waves.Add(entry.WaveId);
+                    }
+                }
+            }
+
+            return waves.ToArray();
+        }).ContinueWith(
+            t =>
+            {
+                if (t.IsCompletedSuccessfully)
+                {
+                    services.MainThread.Enqueue(() =>
+                    {
+                        foreach (var id in t.Result)
+                        {
+                            _wavesToPrefetch.Enqueue(id); // handed to the decoders a few a frame (PumpArrivalPrefetch), not all in the frame the worker finishes
+                        }
+                    });
+                }
+                else
+                {
+                    Log.Warn(LogCategory, "the player's sound table could not be prefetched; its waves are decoded when first played", ("table", $"0x{soundTableId:X8}"), ("problem", t.Exception?.GetBaseException().Message ?? "cancelled"));
+                }
+            },
+            TaskScheduler.Default);
+    }
+
+    /// <summary>M3 1.3 s1: a body with a PhysicsScriptTable was made; its scripts' particle meshes are prepared ahead (<see cref="ServerObjectParticles.PrepareScriptTable"/>).</summary>
+    private void PrepareScriptTable(uint scriptTableId) => ServerObjectParticles.PrepareScriptTable(_services, scriptTableId);
+
+    /// <summary>
+    /// Plays the sound hooks (M3 1.3 s1; the M2 stub <c>TODO(g5-w10-sounds)</c>, which dropped them, is gone): the avatars' effect events (animation hooks, the server's F750 sounds) and
+    /// the living statics' hooks go to a <see cref="SoundHookRouter"/> over the audio service's retail sound player. The audio service is made after play mode (it comes with the portal view), so this
+    /// runs from <see cref="AttachPortal"/>. With no audio service the events are dropped and counted (<c>AvatarSet.Stats.EffectEventsDropped</c>), loudly, once.
+    /// </summary>
+    private void AttachHookSounds()
+    {
+        if (_hookSounds is not null)
+        {
+            return;
+        }
+
+        if (AudioService.Current is not { } audio)
+        {
+            Log.Warn(LogCategory, "no audio service: the avatars' and living statics' sound hooks and the server's sounds are dropped (counted), nothing plays; logged once");
+            return;
+        }
+
+        _hookSounds = new SoundHookRouter(audio.Sound);
+        LivingStaticsSystem.EffectEvents = _hookSounds;
+        if (_avatars is not null)
+        {
+            _avatars.EffectEvents = _hookSounds;
+        }
+
+        Log.Info(LogCategory, "the sound hooks are played: the avatars' hooks and the server's sounds, and the living statics' hooks, go to the audio service's sound player");
+        Log.Warn(LogCategory, "TODO(avatars-listener-camera): the avatars' sounds are positioned from the player's body, not the camera (retail's listener is the camera, SmartBox::set_viewer -> SoundManager::SetPlayerPosition); the living statics' use the camera. Differs in third person by the camera's offset; logged once");
     }
 
     /// <summary>
@@ -255,6 +382,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
     public void AttachPortal(PortalSpaceHandles? portal)
     {
         _portal = portal;
+        AttachHookSounds();
         if (GetParent()?.GetNodeOrNull<Lifestone.Game.PortalSpace.PortalNoticeLine>("PortalNoticeLine") is { } portalNotice)
         {
             portalNotice.Shell = () => _ui?.Screens?.Notices; // G4 g2: the shell's spew box takes the portal-space notice; the labelled line stays for a run without the shell
@@ -288,6 +416,113 @@ public sealed partial class PlayMode : Node, IPlayWorld
         // known to be applied when the count has risen past it.
         var recreatesBefore = _avatars?.Stats.Recreated ?? 0;
         Post(() => BuildPlayer(player, recreated, recreatesBefore, lead: TunnelLeadFrames));
+    }
+
+    // --play-screenshot: the seconds the placed player has been in the world, and whether the frame was taken.
+    private double _playShotWait;
+    private bool _playShotDone;
+
+    // --play-screenshot hides the developer HUD (the FPS and statistics text) for the capture frame: the frames drawn since it was hidden (-1: not hidden), and what was hidden.
+    private int _playShotHiddenFrames = -1;
+    private readonly List<(Node Node, bool WasVisible)> _playShotHidden = [];
+
+    /// <summary>The Lifestone developer text over the world (the main scene's <c>Hud</c> layer: position line, F3 overlay and objects rows; the interiors line; the player's key hints), the names <c>--clean-hud</c> hides too.</summary>
+    internal static readonly string[] PlayShotDeveloperHudNames = ["Hud", "InteriorsHud", "KeysLabel"];
+
+    /// <summary>Frames the capture waits after hiding the developer HUD, so the viewport's last rendered frame is drawn without it.</summary>
+    private const int PlayShotHiddenFrames = 2;
+
+    /// <summary>
+    /// <c>--play-screenshot</c>: once the player is present and its physics body is placed, waits <c>--play-screenshot-after</c> seconds and saves the viewport (a review frame of the character as it
+    /// is after a scenario), then quits with 0, or 1 when the save failed; with <c>--play-checks</c> it only saves (the checks end the run). A frame that has not got the player yet restarts the wait.
+    /// The frame has no developer HUD (the FPS and statistics text is a Lifestone debug overlay, not retail art; M3 1.4 fix B): the HUD is hidden when the wait is over, the capture is taken
+    /// <see cref="PlayShotHiddenFrames"/> frames later and the HUD is shown again at once, whether or not the save worked. The retail UI and the placeholder notices stay.
+    /// </summary>
+    private void StepPlayScreenshot(double delta, string path)
+    {
+        if (!IsPlayerPresent() || _rig is not { } rig || rig.Controller.Placing || rig.Controller.Position.CellId == 0)
+        {
+            _playShotWait = 0;
+            RestoreDeveloperHud();
+            return;
+        }
+
+        _playShotWait += delta;
+        if (_playShotWait < _services.Options.Play.ScreenshotAfterSeconds)
+        {
+            return;
+        }
+
+        if (_playShotHiddenFrames < 0)
+        {
+            HideDeveloperHud();
+            _playShotHiddenFrames = 0;
+            return;
+        }
+
+        if (++_playShotHiddenFrames < PlayShotHiddenFrames)
+        {
+            return;
+        }
+
+        _playShotDone = true;
+        var saved = ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", "play-screenshot"), ("after_seconds", _playShotWait), ("developer_hud", "hidden"));
+        RestoreDeveloperHud();
+        Log.Info(LogCategory, saved ? "play screenshot saved" : "play screenshot failed");
+        if (_services.Options.Checks != GameCheckSuite.Play)
+        {
+            GetTree().Quit(saved ? 0 : 1);
+        }
+    }
+
+    private void HideDeveloperHud()
+    {
+        _playShotHidden.Clear();
+        foreach (var name in PlayShotDeveloperHudNames)
+        {
+            switch (GetTree().Root.FindChild(name, recursive: true, owned: false))
+            {
+                case CanvasLayer layer:
+                    _playShotHidden.Add((layer, layer.Visible));
+                    layer.Visible = false;
+                    break;
+                case CanvasItem item:
+                    _playShotHidden.Add((item, item.Visible));
+                    item.Visible = false;
+                    break;
+            }
+        }
+
+        Log.Info(LogCategory, "play screenshot: the developer HUD is hidden for the capture frame", ("hidden", _playShotHidden.Count));
+    }
+
+    private void RestoreDeveloperHud()
+    {
+        if (_playShotHiddenFrames < 0)
+        {
+            return;
+        }
+
+        foreach (var (node, wasVisible) in _playShotHidden)
+        {
+            if (!GodotObject.IsInstanceValid(node))
+            {
+                continue;
+            }
+
+            switch (node)
+            {
+                case CanvasLayer layer:
+                    layer.Visible = wasVisible;
+                    break;
+                case CanvasItem item:
+                    item.Visible = wasVisible;
+                    break;
+            }
+        }
+
+        _playShotHidden.Clear();
+        _playShotHiddenFrames = -1;
     }
 
     /// <inheritdoc/>
@@ -371,6 +606,11 @@ public sealed partial class PlayMode : Node, IPlayWorld
         _bridge?.Dispose();
         _flow?.Dispose();
         _adapter?.Dispose();
+        if (ReferenceEquals(LivingStaticsSystem.EffectEvents, _hookSounds))
+        {
+            LivingStaticsSystem.EffectEvents = null;
+        }
+
         _lightTable?.Dispose(); // stops its pre-draw upload; a late Release or Write from a node leaving the tree after this one does nothing
         if (ReferenceEquals(Current, this))
         {
@@ -411,6 +651,20 @@ public sealed partial class PlayMode : Node, IPlayWorld
             var pumpStart = Stopwatch.GetTimestamp();
             applied = _adapter.Pump(pumpStart + (long)(AdapterBudgetMilliseconds * Stopwatch.Frequency / 1000.0));
             pumpMs = Stopwatch.GetElapsedTime(pumpStart).TotalMilliseconds;
+            if (pumpMs < HeavyWorkMilliseconds / 4)
+            {
+                PumpArrivalPrefetch(); // the sound and particle prefetch of the creation burst, a few items a frame, never on a frame that did the burst
+            }
+        }
+
+        if (!_playShotDone && _services.Options.Play.ScreenshotPath is { } shotPath)
+        {
+            StepPlayScreenshot(delta, shotPath);
+        }
+
+        if (!_panelShotsDone && _services.Options.Play.PanelShotsDirectory is { } panelShotsDirectory)
+        {
+            StepPanelShots(delta, panelShotsDirectory);
         }
 
         // Once the physics body is placed, the destination is the player's own cell (it follows portals and landblock crossings).
@@ -490,7 +744,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
     {
         _adapter?.Dispose();
         Selection.Clear(); // a log off (and the start): the objects belong to the arrival that is over
-        _avatars = new AvatarSet(_sources!, GodotLogSink.Instance) { RetailUnhideFlash = _services.Options.Play.RetailUnhideFlash }; // --retail-unhide-flash (docs/avatars.md section 17)
+        _avatars = new AvatarSet(_sources!, GodotLogSink.Instance) { RetailUnhideFlash = _services.Options.Play.RetailUnhideFlash, EffectEvents = _hookSounds, ScriptTableSeen = PrepareScriptTable, PlayerSoundTableSeen = PrefetchPlayerSounds }; // --retail-unhide-flash (docs/avatars.md section 17)
         var session = _host.Session!;
         _adapter = new SessionAvatarAdapter(session.Events, session.State, _avatars, PlayerController.Clock, GodotLogSink.Instance);
         if (_layer is not null)

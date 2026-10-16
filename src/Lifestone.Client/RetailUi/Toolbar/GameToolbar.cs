@@ -15,7 +15,7 @@ namespace Lifestone.Client.RetailUi.Toolbar;
 /// <item>The seven <b>panel buttons</b> (social, spell management, skill management, quest management, map, options, inventory) have no handler in retail's toolbar: each is a button whose click action (property 0x12)
 /// is the input action that toggles its page of the panel host (<c>UIElementManager::DoVisibilityToggleAction</c>, 11.6096 0x0045B740). Lifestone keeps that, and <see cref="Panels.GamePanelHost"/> answers the page that opens.</item>
 /// <item>The <b>action buttons</b> are heard here (<c>gmToolbarUI::ListenToElementMessage</c>, 11.6096 0x004BFB20): the four combat-mode buttons call <c>ToggleCombatMode</c>, Examine calls
-/// <c>ClientUISystem::ExamineObject</c> (or asks for a target) and Use calls <c>ItemHolder::UseObject</c> (or asks for a target). Use uses the selected object through the action layer (nothing happens without a selection, R10); the rest is gameplay and opens the NeedsGameplay message.</item>
+/// <c>ClientUISystem::ExamineObject</c> (or asks for a target) and Use calls <c>ItemHolder::UseObject</c> (or asks for a target). Use uses the selected object through the action layer (nothing happens without a selection, R10); the rest (combat, examination) is gameplay M3 builds later (item 3.2) and opens the NotInM3 message.</item>
 /// </list>
 /// The selection display (name, health and mana meters), the stack slider and the shortcut slots wait for selection (g5) and for items (the gameplay milestone): they keep the layout's art.
 /// </summary>
@@ -97,7 +97,7 @@ public sealed class GameToolbar : IUiElementListener
 
         if (message.MessageId == UiMessageIds.ButtonClick && _features.TryGetValue(message.Element.ElementId, out var feature))
         {
-            NotInM2.Show(_context.Manager.Dialogs, _context.Manager.Services.Log, feature);
+            NotInM3.Show(_context.Manager.Dialogs, _context.Manager.Services.Log, feature); // the combat panel is item 3.2's
             return UiListenResult.Handled;
         }
 

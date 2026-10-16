@@ -44,4 +44,10 @@ public sealed class SelfState
 
     /// <summary>The player's qualities from PlayerDescription and the private updates (empty until the description arrives).</summary>
     public PlayerQualities Qualities { get; } = new();
+
+    /// <summary>The player's spellbook: the known spells, the favourite bars, the filters and the desired components (empty until the description arrives; M3 1.2).</summary>
+    public Spellbook Spellbook { get; } = new();
+
+    /// <summary>The player's inventory: the packs, what is wielded or worn, and the burden (empty until the description arrives; M3 1.2 s2).</summary>
+    public PlayerInventory Inventory { get; } = new();
 }

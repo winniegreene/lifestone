@@ -23,6 +23,7 @@ public static partial class OptionCatalog
                 ValueOptional: true),
             new("--retail-ui-only", null, "Run the retail UI alone: no world and no sky behind it, for UI work (--retail-ui-frames implies it)."),
             new("--retail-ui-glitches", null, "Restore the retail UI glitches Lifestone fixes by default (dialog queueing, the A8 hit test, held actions on a focus loss, character creation's heritage tabs and the summary's heritage names; docs/retail-ui.md sections 14, 19 and 20)."),
+            new("--retail-effects-stale-info", null, "Retail's stale info box on the effects pages (default: the box and the selection clear when the last effect ends): retail's list rebuild returns before it updates the selection when nothing is in effect, so the ended spell's name and text stay (gmEffectsUI::RebuildList, 11.6096 0x004B8F70; docs/retail-ui.md section 14). --retail-ui-glitches includes it."),
             new("--retail-disconnect", null, "Retail's exit from the disconnected screen (D43); by default its button reconnects."),
         ],
         OptionScenes.Main);

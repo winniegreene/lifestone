@@ -95,6 +95,12 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
     /// <summary>The viewports' holes.</summary>
     public RetailViewportHost Viewports { get; private set; } = null!;
 
+    /// <summary>
+    /// What became of the sounds the UI asked for: requested, played (handed to the sound player; the login check's <c>sounds_ui=</c>), dropped
+    /// (no sound player), silenced and muted (<see cref="RetailUiSoundStats"/>). Read-only for readers; the layer's sound adapter fills it.
+    /// </summary>
+    public RetailUiSoundStats SoundStats { get; private set; } = null!;
+
     /// <summary>The mouse cursor.</summary>
     public RetailCursor Cursor { get; private set; } = null!;
 
@@ -232,7 +238,8 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
     /// <param name="sound">Finds the sound player when a sound plays (the audio service is installed later), or null for silence.</param>
     /// <param name="fixedStep">When above 0 the runtime's clock advances by this many seconds per frame, not by real time (scripted captures).</param>
     /// <param name="host">The session host of a <c>--play</c> run, whose live session the screens read and act on (no stand-in is made), or null for the offline stand-in.</param>
-    public static RetailUiLayer Create(GameServices services, RetailUiOptions options, Vector2I windowSize, Func<ISoundSink?>? sound, double fixedStep = 0.0, SessionHost? host = null)
+    /// <param name="soundMuted">True while the master level is silent (D8); only counted in <see cref="SoundStats"/>, or null when unknown.</param>
+    public static RetailUiLayer Create(GameServices services, RetailUiOptions options, Vector2I windowSize, Func<ISoundSink?>? sound, double fixedStep = 0.0, SessionHost? host = null, Func<bool>? soundMuted = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
@@ -266,12 +273,14 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
             Log.Info("retailui", "Lifestone's embedded layouts registered in the background", ("ok", read), ("ms", clock.Elapsed.TotalMilliseconds));
             return read;
         });
+        var soundAdapter = new UiSoundAdapter(sound ?? (() => null), log, soundMuted);
+        layer.SoundStats = soundAdapter.Stats;
         var uiServices = new UiServices
         {
             Descs = UiDescSource.From(layouts),
             Log = log,
             Random = new UiSeededRandom(services.Options.IsAutomated ? 1 : (int)(Stopwatch.GetTimestamp() & 0x7FFFFFFF)),
-            Sound = new UiSoundAdapter(sound ?? (() => null), log),
+            Sound = soundAdapter,
             Fonts = new UiFontsSource(new DataUiFonts(dats), services.Textures, log),
             Strings = new UiStringsSource(new UiStrings(new UiStringTables(dats), message => Log.Warn("retailui", message)), UiLanguageInfo.Load(dats)),
             Clipboard = new DisplayServerClipboard(),
@@ -396,7 +405,12 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
     /// Draws character creation's character (<paramref name="model"/>) in viewport element <paramref name="viewportElementId"/>'s hole: a
     /// <see cref="CharGenViewportBinder"/> is made under the layer and registered as the hole's source; disposing the result takes both away.
     /// </summary>
-    IDisposable ICg3DViewHost.Attach(uint viewportElementId, Cg3DViewModel model)
+    IDisposable ICg3DViewHost.Attach(uint viewportElementId, Cg3DViewModel model) => AttachView(viewportElementId, model);
+
+    /// <summary>The paperdoll's figure (M3 2.2 b4) in viewport element <paramref name="viewportElementId"/>'s hole: the same binder as character creation's, registered as the hole's source.</summary>
+    IDisposable? ICg3DViewHost.AttachFigure(uint viewportElementId, ICreatureView figure) => AttachView(viewportElementId, figure);
+
+    private IDisposable AttachView(uint viewportElementId, ICreatureView model)
     {
         var services = _services ?? throw new InvalidOperationException("the retail UI layer has no services");
         var binder = new CharGenViewportBinder(services, model, $"0x{viewportElementId:X8}");

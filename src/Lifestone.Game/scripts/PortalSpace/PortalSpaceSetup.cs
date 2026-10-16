@@ -72,8 +72,7 @@ public static class PortalSpaceSetup
 
         var args = OS.GetCmdlineUserArgs();
         var portal = PortalSpaceOptions.Parse(args);
-        var audioOptions = AudioOptions.Parse(args);
-        foreach (var problem in portal.Errors.Concat(audioOptions.Errors))
+        foreach (var problem in portal.Errors) // the audio options' own problems are logged by AudioService.Install
         {
             Log.Warn("portal", "bad argument", ("problem", problem));
         }
@@ -100,34 +99,15 @@ public static class PortalSpaceSetup
 
         var seed = frames || services.Options.IsAutomated ? 1 : (int)(Stopwatch.GetTimestamp() & 0x7FFFFFFF);
 
-        // W2: the sound card, silent in an automated run unless --volume is given (D8).
+        // W2: the sound card, silent in an automated run unless --volume is given (D8): the one install path (--volume, --mute, --record-audio and the guard),
+        // shared with the runs that have no portal view. Without the service, Main's deferred check reports a --record-audio.
         var timer = Stopwatch.StartNew();
-        var settings = audioOptions.Resolve(services.Options.IsAutomated);
-        AudioService? audio = null;
-        try
-        {
-            audio = AudioService.Create(services, settings, seed);
-            main.AddChild(audio);
-            main.AddChild(AudioService.ShutdownGuard.For(audio)); // after the service: it exits first and stops the voices cleanly
-            Log.Info(
-                "audio",
-                "audio service installed",
-                ("voices", AudioService.VoiceCount),
-                ("master_db", settings.MasterDecibels),
-                ("muted", settings.Muted),
-                ("device", AudioServer.GetOutputDevice()),
-                ("ms", timer.Elapsed.TotalMilliseconds));
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            Log.Error("audio", "the audio service could not be built; the game is silent", ("problem", ex.Message), ("type", ex.GetType().Name));
-            audio?.QueueFree();
-            audio = null;
-        }
+        var audio = AudioService.Install(main, services, args, seed, portalView: true);
 
-        if (audioOptions.RecordPath is not null && audio is not null)
+        // M3 1.3 s2b: retail's outdoor ambient sound (and the sound half of AdminEnvirons) over the service's sound player.
+        if (audio is not null)
         {
-            audio.StartRecording(audioOptions.RecordPath); // without the service, Main's deferred check reports it
+            AmbientSoundNode.Install(main, services, audio, camera, seed);
         }
 
         // W3: the tunnel and its view. (Its sounds are built first, on the workers, so the first whoosh and the first hum do not

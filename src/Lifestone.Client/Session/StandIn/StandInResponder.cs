@@ -75,6 +75,23 @@ internal sealed class StandInResponder
 
     private IReadOnlyList<CharacterSlot> Entries => _reducer.State.Characters.Entries;
 
+    /// <summary>
+    /// The magic, combat-mode and inventory actions the Action API sent through <see cref="Session"/> (M3 1.2 s4a): the game action type and its fields, in order, kept for the tests.
+    /// <see cref="StandInWorld"/> answers each (<c>StandInWorld.Actions.cs</c>, M3 1.2 s4c); a send needs the world's answers opted in, as every other world action does.
+    /// </summary>
+    internal List<(uint Type, uint First, uint Second, uint Third)> ActionSends { get; } = [];
+
+    private StandInWorld Record(uint type, uint first, uint second, uint third)
+    {
+        if (World is null)
+        {
+            throw new NotSupportedException("the offline stand-in has no server; only delete, restore and create are answered locally");
+        }
+
+        ActionSends.Add((type, first, second, third));
+        return World;
+    }
+
     private OutboundTicket Ticket() => new(0, _reducer.Clock.Time.GetTimestamp());
 
     private InboundContext Context() => new(0, MessageQueue.Login, _reducer.Clock.Time.GetTimestamp());
@@ -209,6 +226,26 @@ internal sealed class StandInResponder
         public OutboundTicket SendTalk(ReadOnlySpan<char> text) => owner.World is { } world ? world.Talk(text) : throw new NotSupportedException(NoServer);
 
         public OutboundTicket SendTell(ReadOnlySpan<char> target, ReadOnlySpan<char> text) => throw new NotSupportedException(NoServer);
+
+        public OutboundTicket SendRaiseAttribute(uint attribute, uint xp) => owner.World?.RaiseAttribute(attribute, xp) ?? throw new NotSupportedException(NoServer);
+
+        public OutboundTicket SendRaiseVital(uint vital, uint xp) => owner.World?.RaiseVital(vital, xp) ?? throw new NotSupportedException(NoServer);
+
+        public OutboundTicket SendRaiseSkill(uint skill, uint xp) => owner.World?.RaiseSkill(skill, xp) ?? throw new NotSupportedException(NoServer);
+
+        public OutboundTicket SendTrainSkill(uint skill, int credits) => owner.World?.TrainSkill(skill, credits) ?? throw new NotSupportedException(NoServer);
+
+        public OutboundTicket SendCastUntargetedSpell(uint spellId) => owner.Record(GameActionTypes.CastUntargetedSpell, spellId, 0, 0).Cast(spellId, 0);
+
+        public OutboundTicket SendCastTargetedSpell(uint target, uint spellId) => owner.Record(GameActionTypes.CastTargetedSpell, target, spellId, 0).Cast(spellId, target);
+
+        public OutboundTicket SendChangeCombatMode(uint mode) => owner.Record(GameActionTypes.ChangeCombatMode, mode, 0, 0).ChangeCombatMode(mode);
+
+        public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => owner.Record(GameActionTypes.GetAndWieldItem, item, equipMask, 0).GetAndWield(item, equipMask);
+
+        public OutboundTicket SendPutItemInContainer(uint item, uint container, uint placement) => owner.Record(GameActionTypes.PutItemInContainer, item, container, placement).PutInContainer(item, container, placement);
+
+        public OutboundTicket SendStackableMerge(uint mergeFrom, uint mergeTo, int amount) => owner.Record(GameActionTypes.StackableMerge, mergeFrom, mergeTo, unchecked((uint)amount)).MergeStacks(mergeFrom, mergeTo, amount);
 
         public void LogOff()
         {

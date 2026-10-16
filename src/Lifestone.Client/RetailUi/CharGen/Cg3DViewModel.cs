@@ -36,7 +36,7 @@ namespace Lifestone.Client.RetailUi.CharacterCreation;
 /// animation or motion), drawn behind the character at its resting placement.
 /// </para>
 /// </remarks>
-public sealed class Cg3DViewModel
+public sealed class Cg3DViewModel : ICreatureView
 {
     /// <summary>The light's direction as the view gives it (<c>UIElement_Viewport::SetLight(DISTANT_LIGHT, 2.0, (0.3, 1.9, 0.65))</c>; portal space's points the other way in Y).</summary>
     public static Vector3 LightDirection => CreaturePreview.LightDirection;

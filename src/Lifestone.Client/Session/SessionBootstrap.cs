@@ -77,7 +77,9 @@ public static class SessionBootstrap
         ArgumentNullException.ThrowIfNull(dats);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(log);
-        return CreateLiveWith(options, secretsJson, pidsJson, () => LanguageIterations(dats), time, log, recording, socketFactory: null, recordingHeader);
+        var session = CreateLiveWith(options, secretsJson, pidsJson, () => LanguageIterations(dats), time, log, recording, socketFactory: null, recordingHeader);
+        session.UseSpellsFrom(dats); // the cast tracker's SpellTable (read at the first cast)
+        return session;
     }
 
     /// <summary>

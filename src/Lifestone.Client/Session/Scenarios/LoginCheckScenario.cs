@@ -1,6 +1,8 @@
 using System.Globalization;
+using Lifestone.Client.Audio;
 using Lifestone.Client.Avatars;
 using Lifestone.Client.Movement.Routes;
+using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.World;
 using Lifestone.Net.Session;
@@ -199,6 +201,81 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
     /// <summary>What became of the exit leg's quest registry (<see cref="RoutePlay.QuestVerdict"/>: <c>put-back</c>, <c>unchanged</c> or <c>unverified</c>), or <c>n/a</c> when no exit leg is in the check; the verdict line's <c>quest=</c>.</summary>
     public string ExitQuestVerdict => _legs.FirstOrDefault(l => l.Name == RouteLibrary.AcademyExitName)?.QuestVerdict ?? "n/a";
 
+    /// <summary>
+    /// The entered character's level as the verdict line's <c>level=</c> (M3 1.1 s4, report-only): <see cref="PlayerQualities.Level"/> when the settle ended, <c>?</c> when the
+    /// server did not send it (the read model's 0), <see cref="LoginCheckShell.NotApplicable"/> before the settle ended.
+    /// </summary>
+    public string LevelField { get; private set; } = LoginCheckShell.NotApplicable;
+
+    /// <summary>
+    /// Whether the account's character list holds <see cref="MageTemplate.CharacterName"/> (case-insensitive), for the verdict line's <c>mage_char=</c> (M3 1.1 s4, report-only):
+    /// <c>present</c>, <c>absent</c> or <c>pending-delete</c>, read from the session state's character list when the check chose its character, else <see cref="LoginCheckShell.NotApplicable"/>.
+    /// </summary>
+    public string MageField { get; private set; } = LoginCheckShell.NotApplicable;
+
+    /// <summary>The two report-only fields as the verdict line carries them: <c> level=&lt;n|?&gt; mage_char=&lt;present|absent|pending-delete&gt;</c> (they never fail the check).</summary>
+    public string ReportFields => Fields(LevelField, MageField);
+
+    /// <summary>The report-only fields (M3 1.1 s4) with their leading space, for appending to the verdict line.</summary>
+    public static string Fields(string level, string mage) => string.Create(CultureInfo.InvariantCulture, $" level={level} mage_char={mage}");
+
+    /// <summary>
+    /// The report-only sound fields (M3 1.3 s3) with their leading space: <c> sounds_server=&lt;n|n/a&gt; sounds_hooks=&lt;n|n/a&gt; sounds_ui=&lt;n|n/a&gt; ambient=&lt;n|n/a&gt;</c>,
+    /// read by the runner from the per-leg tally (<see cref="SoundLegTally"/>: M3 1.3 fix B); a counter that does not exist in the run is <c>n/a</c>, never 0. Judged from item 2.1
+    /// (<c>ambient</c>: outdoors only, in the Holtburg laps), not here.
+    /// </summary>
+    public static string SoundFields(SoundSourceCounts counts) => counts.LoginCheckFields;
+
+    /// <summary>
+    /// The walking legs' sound judge (M3 2.1 s3, the second gate of M3 1.3's counters; DoD 13): <c>sounds_hooks</c> over the legs that walked (the Academy exit, the Holtburg laps) must be at least 1, since the animation
+    /// and script hooks of a walking, living world sound. Returns null when it holds or no leg walked, else the sentence that fails the check. A counter the run does not have (<c>n/a</c>) fails it: a judged field reads
+    /// what it names. The Academy arrival's <c>sounds_server</c> stays a report (D27: ACE sends no F750 at login; the buff leg judges it), and <c>sounds_ui</c> is judged in <c>--retail-ui-checks</c> only.
+    /// </summary>
+    /// <param name="hooksSounded">The voices the hooks started over the walking legs, or null when the run has no hook-sound counter.</param>
+    /// <param name="walkingLegs">The movement legs the check ran.</param>
+    public static string? JudgeWalkingSounds(int? hooksSounded, int walkingLegs)
+    {
+        if (walkingLegs <= 0)
+        {
+            return null;
+        }
+
+        return hooksSounded switch
+        {
+            null => "DoD 13: the run has no hook-sound counter (sounds_hooks=n/a), so the walking legs' sounds were not judged",
+            < 1 => "DoD 13: sounds_hooks=0 over the walking legs: no animation or script hook sounded while the player walked (>= 1 expected)",
+            _ => null,
+        };
+    }
+
+    /// <summary>The sound tally's leg for the frames from the Enter to the settle: the Academy arrival (<c>sounds_server</c> is read in it).</summary>
+    public const string SoundArrivalLeg = "academy-arrival";
+
+    /// <summary>The sound tally's leg for the frames after the settle that are in no movement leg (between legs, or after the last).</summary>
+    public const string SoundBetweenLegs = "between-legs";
+
+    /// <summary>The <c>level=</c> value for a read model: the level, or <c>?</c> when it is unknown (the model's 0).</summary>
+    public static string LevelOf(PlayerQualities qualities)
+    {
+        ArgumentNullException.ThrowIfNull(qualities);
+        return qualities.Level > 0 ? qualities.Level.ToString(CultureInfo.InvariantCulture) : "?";
+    }
+
+    /// <summary>The <c>mage_char=</c> value for a character list: <c>present</c>, <c>pending-delete</c> or <c>absent</c> (the name is compared case-insensitively).</summary>
+    public static string MageOf(IEnumerable<CharacterSlot> characters)
+    {
+        ArgumentNullException.ThrowIfNull(characters);
+        foreach (var c in characters)
+        {
+            if (string.Equals(c.Name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+            {
+                return c.PendingDeletion ? "pending-delete" : "present";
+            }
+        }
+
+        return "absent";
+    }
+
     /// <summary>True when the log off came back to the character list.</summary>
     public bool LogOffOk { get; private set; }
 
@@ -364,6 +441,11 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
 
     private ScenarioStatus Choose(IGameSessionView session, double clock)
     {
+        if (MageField == LoginCheckShell.NotApplicable)
+        {
+            MageField = MageOf(session.State.Characters.Entries);
+        }
+
         foreach (var c in session.State.Characters.Entries)
         {
             if (string.Equals(c.Name, Character, StringComparison.OrdinalIgnoreCase))
@@ -443,6 +525,7 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
 
         Vitals = LoginCheckShell.Vitals(state.Self.Qualities);
         VitalsWindow = LoginCheckShell.VitalsWindow(state.Self.Qualities);
+        LevelField = LevelOf(state.Self.Qualities);
         if (!LoginCheckShell.VitalsFilled(Vitals))
         {
             return Fail($"settling: the PlayerDescription left a vital empty (vitals {Vitals}; the shell's meters would be empty)");

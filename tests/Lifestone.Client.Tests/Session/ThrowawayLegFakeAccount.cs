@@ -218,6 +218,28 @@ internal sealed class ThrowawayLegFakeAccount : IGameSessionView, IActionApi, IT
 
     public ActionHandle QueryHealth(uint guid, ActionSource source) => throw new NotSupportedException();
 
+    public ActionHandle RaiseAttribute(uint attribute, uint xpToSpend, ActionSource source) => throw new NotSupportedException();
+
+    public ActionHandle RaiseVital(uint vital, uint xpToSpend, ActionSource source) => throw new NotSupportedException();
+
+    public ActionHandle RaiseSkill(uint skill, uint xpToSpend, ActionSource source) => throw new NotSupportedException();
+
+    public ActionHandle TrainSkill(uint skill, int creditsToSpend, ActionSource source) => throw new NotSupportedException();
+
+    public ActionHandle Cast(uint spellId, ActionSource source = ActionSource.Host) => throw new NotSupportedException();
+
+    public ActionHandle Cast(uint spellId, uint target, ActionSource source = ActionSource.Host) => throw new NotSupportedException();
+
+    public ActionHandle SetCombatMode(CombatMode mode, ActionSource source = ActionSource.Host) => throw new NotSupportedException();
+
+    public ActionHandle Wield(uint item, EquipMask location, ActionSource source = ActionSource.Host) => throw new NotSupportedException();
+
+    public ActionHandle Unwield(uint item, ActionSource source = ActionSource.Host) => throw new NotSupportedException();
+
+    public ActionHandle MoveToPack(uint item, uint container = 0, uint placement = 0, ActionSource source = ActionSource.Host) => throw new NotSupportedException();
+
+    public ActionHandle MergeStack(uint from, uint to, int amount, ActionSource source = ActionSource.Host) => throw new NotSupportedException();
+
     public ActionHandle Talk(string text, ActionSource source) => throw new NotSupportedException();
 
     public ActionHandle Tell(string target, string text, ActionSource source) => throw new NotSupportedException();

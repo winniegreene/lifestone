@@ -205,12 +205,22 @@ public sealed class GameCharacterInfo : IDisposable
         Append("ID_CharacterInfo_Fishing", Integers(("FISHING", fishing)));
     }
 
+    /// <summary>
+    /// <c>CACQualities::InqLoad</c> (11.6096 0x0058FF60): the burden (integer property 5) over the capacity, which is the Strength with the registry applied (10 when unknown; <c>InqAttribute</c> with <c>raw</c> false)
+    /// and the carrying augmentations (property 0xE6). The burden indicator reads it too (<c>gmUIElement_BurdenIndicator::Update</c>).
+    /// </summary>
+    public static float LoadOf(Lifestone.Client.Session.Contracts.PlayerQualities q, out int capacity, out int burden)
+    {
+        q.TryGetInt(5, out burden); // EncumbranceVal
+        q.TryGetInt(0xE6, out var augmentations); // AugmentationIncreasedCarrying
+        var strength = new Lifestone.Client.Session.Contracts.StatValues(q).TryAttribute(1, out _, out var current) ? current : 10u;
+        capacity = EncumbranceSystem.EncumbranceCapacity((int)strength, augmentations);
+        return (float)EncumbranceSystem.Load(capacity, burden);
+    }
+
     private void Load(Lifestone.Client.Session.Contracts.PlayerQualities q)
     {
-        q.TryGetInt(5, out var burden); // EncumbranceVal
-        q.TryGetInt(0xE6, out var augmentations); // AugmentationIncreasedCarrying
-        var capacity = EncumbranceSystem.EncumbranceCapacity((int)Raw(q, 1), augmentations);
-        var load = (float)EncumbranceSystem.Load(capacity, burden);
+        var load = LoadOf(q, out var capacity, out var burden);
         if (load >= 1f)
         {
             var penalty = 10 - (long)(EncumbranceSystem.LoadMod(load) * 10.0);

@@ -80,6 +80,26 @@ public sealed class XpGrantTests
         Assert.Equal("x1", grant.Request.Id);
     }
 
+    [Fact]
+    public void A_grant_to_level_126_is_counted_in_64_bits()
+    {
+        // XP to level 126 is 4,286,609,098 (XpTableData, handoff-m3-1-1): above int.MaxValue. The request, the parse, the count and the
+        // reply (XpData) are all 64-bit, so the grant that builds the mage is one request and reads back exactly.
+        const long ToLevel126 = 4_286_609_098;
+        Assert.True(ToLevel126 > int.MaxValue);
+        var request = ToolRequestParser.Parse("xp " + ToLevel126).Request;
+        Assert.Equal(new XpRequest(ToLevel126), request);
+
+        var grant = new XpGrant((XpRequest)request!);
+        grant.Before(5_000);
+        Assert.Equal(new XpData(ToLevel126, ToLevel126, ToLevel126 + 5_000, ToLevel126 + 5_000, 126), grant.After(ToLevel126 + 5_000, ToLevel126 + 5_000, 126));
+
+        // A second grant on top of a total already above int.MaxValue still counts exactly.
+        var again = new XpGrant(new XpRequest(10));
+        again.Before(ToLevel126);
+        Assert.Equal(10, again.After(ToLevel126 + 10, 10, 126).Added);
+    }
+
     /// <summary>The answer a queued xp request gave, once the queue has run.</summary>
     private sealed class Answer
     {

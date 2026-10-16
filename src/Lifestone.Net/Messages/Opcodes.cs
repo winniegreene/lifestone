@@ -36,6 +36,24 @@ public static class MessageOpcodes
     /// <summary>S→C PrivateUpdateAttribute2ndLevel (a vital's current value only).</summary>
     public const uint PrivateUpdateAttribute2ndLevel = 0x02E9;
 
+    /// <summary>S→C InventoryRemoveObject (ACE <c>GameMessageInventoryRemoveObject</c>; M3 1.2 s0).</summary>
+    public const uint InventoryRemoveObject = 0x0024;
+
+    /// <summary>S→C SetStackSize (ACE <c>GameMessageSetStackSize</c>; M3 1.2 s0).</summary>
+    public const uint SetStackSize = 0x0197;
+
+    /// <summary>S→C PlayerKilled (ACE <c>GameMessagePlayerKilled</c>; M3 1.2 s0).</summary>
+    public const uint PlayerKilled = 0x019E;
+
+    /// <summary>S→C PublicUpdatePropertyInt (ACE <c>GameMessagePublicUpdatePropertyInt</c>; M3 1.2 s0).</summary>
+    public const uint PublicUpdatePropertyInt = 0x02CE;
+
+    /// <summary>S→C PublicUpdateInstanceId (ACE <c>GameMessagePublicUpdateInstanceID</c>; M3 1.2 s0).</summary>
+    public const uint PublicUpdateInstanceId = 0x02DA;
+
+    /// <summary>S→C AdminEnvirons (ACE <c>GameMessageAdminEnvirons</c>; M3 1.2 s0).</summary>
+    public const uint AdminEnvirons = 0xEA60;
+
     /// <summary>S→C ObjDescEvent.</summary>
     public const uint ObjDescEvent = 0xF625;
 
@@ -165,6 +183,63 @@ public static class GameEventTypes
 
     /// <summary>CommunicationTransientString.</summary>
     public const uint TransientString = 0x02EB;
+
+    /// <summary>InventoryPutObjInContainer (ACE <c>GameEventItemServerSaysContainId</c>; M3 1.2 s0).</summary>
+    public const uint InventoryPutObjInContainer = 0x0022;
+
+    /// <summary>WieldObject (ACE <c>GameEventWieldItem</c>; M3 1.2 s0).</summary>
+    public const uint WieldObject = 0x0023;
+
+    /// <summary>InventoryServerSaysFailed (ACE <c>GameEventType.InventoryServerSaveFailed</c>; M3 1.2 s0).</summary>
+    public const uint InventoryServerSaysFailed = 0x00A0;
+
+    /// <summary>InventoryPutObjectIn3D (ACE <c>GameEventItemServerSaysMoveItem</c>; M3 1.2 s0).</summary>
+    public const uint InventoryPutObjectIn3D = 0x019A;
+
+    /// <summary>VictimNotification (the player died; M3 1.2 s0).</summary>
+    public const uint VictimNotification = 0x01AC;
+
+    /// <summary>KillerNotification (the player killed something; M3 1.2 s0).</summary>
+    public const uint KillerNotification = 0x01AD;
+
+    /// <summary>AttackerNotification (the player's own hit; M3 1.2 s0).</summary>
+    public const uint AttackerNotification = 0x01B1;
+
+    /// <summary>DefenderNotification (a hit on the player; M3 1.2 s0).</summary>
+    public const uint DefenderNotification = 0x01B2;
+
+    /// <summary>EvasionAttackerNotification (the player's attack was evaded; M3 1.2 s0).</summary>
+    public const uint EvasionAttackerNotification = 0x01B3;
+
+    /// <summary>EvasionDefenderNotification (the player evaded an attack; M3 1.2 s0).</summary>
+    public const uint EvasionDefenderNotification = 0x01B4;
+
+    /// <summary>MagicUpdateSpell (a spell added to the spellbook; M3 1.2 s0).</summary>
+    public const uint MagicUpdateSpell = 0x02C1;
+
+    /// <summary>MagicUpdateEnchantment (M3 1.2 s0).</summary>
+    public const uint MagicUpdateEnchantment = 0x02C2;
+
+    /// <summary>MagicRemoveEnchantment (M3 1.2 s0).</summary>
+    public const uint MagicRemoveEnchantment = 0x02C3;
+
+    /// <summary>MagicUpdateMultipleEnchantments (ACE never sends it; M3 1.2 s0).</summary>
+    public const uint MagicUpdateMultipleEnchantments = 0x02C4;
+
+    /// <summary>MagicRemoveMultipleEnchantments (ACE never sends it; M3 1.2 s0).</summary>
+    public const uint MagicRemoveMultipleEnchantments = 0x02C5;
+
+    /// <summary>MagicPurgeEnchantments (M3 1.2 s0).</summary>
+    public const uint MagicPurgeEnchantments = 0x02C6;
+
+    /// <summary>MagicDispelEnchantment (M3 1.2 s0).</summary>
+    public const uint MagicDispelEnchantment = 0x02C7;
+
+    /// <summary>MagicDispelMultipleEnchantments (M3 1.2 s0).</summary>
+    public const uint MagicDispelMultipleEnchantments = 0x02C8;
+
+    /// <summary>MagicPurgeBadEnchantments (M3 1.2 s0).</summary>
+    public const uint MagicPurgeBadEnchantments = 0x0312;
 }
 
 /// <summary>The GameAction types (inside <see cref="MessageOpcodes.GameAction"/>) M2 sends.</summary>
@@ -186,6 +261,36 @@ public static class GameActionTypes
 
     /// <summary>QueryHealth {u32 GUID}.</summary>
     public const uint QueryHealth = 0x01BF;
+
+    /// <summary>RaiseVital {u32 vital, u32 xp} (ACE <c>GameActionRaiseVital</c>).</summary>
+    public const uint RaiseVital = 0x0044;
+
+    /// <summary>RaiseAttribute {u32 attribute, u32 xp} (ACE <c>GameActionRaiseAttribute</c>).</summary>
+    public const uint RaiseAttribute = 0x0045;
+
+    /// <summary>RaiseSkill {u32 skill, u32 xp} (ACE <c>GameActionRaiseSkill</c>).</summary>
+    public const uint RaiseSkill = 0x0046;
+
+    /// <summary>TrainSkill {u32 skill, i32 credits} (ACE <c>GameActionTrainSkill</c>).</summary>
+    public const uint TrainSkill = 0x0047;
+
+    /// <summary>PutItemInContainer {u32 item, u32 container, u32 placement} (ACE <c>GameActionPutItemInContainer</c>).</summary>
+    public const uint PutItemInContainer = 0x0019;
+
+    /// <summary>GetAndWieldItem {u32 item, u32 equip mask} (ACE <c>GameActionGetAndWieldItem</c>).</summary>
+    public const uint GetAndWieldItem = 0x001A;
+
+    /// <summary>StackableMerge {u32 merge from, u32 merge to, i32 amount} (ACE <c>GameActionStackableMerge</c>).</summary>
+    public const uint StackableMerge = 0x0054;
+
+    /// <summary>CastUntargetedSpell {u32 spell id} (ACE <c>GameActionMagicCastUnTargetedSpell</c>).</summary>
+    public const uint CastUntargetedSpell = 0x0048;
+
+    /// <summary>CastTargetedSpell {u32 target, u32 spell id} (ACE <c>GameActionMagicCastTargetedSpell</c>).</summary>
+    public const uint CastTargetedSpell = 0x004A;
+
+    /// <summary>ChangeCombatMode {u32 mode} (ACE <c>GameActionChangeCombatMode</c>).</summary>
+    public const uint ChangeCombatMode = 0x0053;
 
     /// <summary>Jump (56 bytes, retail <c>JumpPack</c>).</summary>
     public const uint Jump = 0xF61B;

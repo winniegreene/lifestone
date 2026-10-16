@@ -154,6 +154,9 @@ public sealed record RetailUiOptions
                 case "--retail-ui-glitches":
                     options = options with { Glitches = UiRetailGlitches.All };
                     break;
+                case "--retail-effects-stale-info":
+                    options = options with { Glitches = options.Glitches | UiRetailGlitches.EffectsStaleInfo };
+                    break;
                 case "--retail-disconnect":
                     options = options with { RetailDisconnect = true };
                     break;

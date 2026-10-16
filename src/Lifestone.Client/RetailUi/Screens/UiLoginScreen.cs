@@ -75,6 +75,12 @@ public interface ICg3DViewHost
 {
     /// <summary>Draws <paramref name="model"/> in viewport element <paramref name="viewportElementId"/>'s hole; disposing the result takes it away.</summary>
     IDisposable Attach(uint viewportElementId, Cg3DViewModel model);
+
+    /// <summary>
+    /// Draws <paramref name="figure"/> (the paperdoll's player, <c>PaperDollFigure</c>; M3 2.2 b4) in viewport element <paramref name="viewportElementId"/>'s hole with the same drawing as <see cref="Attach"/>; disposing the result
+    /// takes it away. A host that cannot draw it answers null (the default), and the page keeps its placeholder.
+    /// </summary>
+    IDisposable? AttachFigure(uint viewportElementId, ICreatureView figure) => null;
 }
 
 /// <summary>

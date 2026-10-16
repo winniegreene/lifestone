@@ -3,6 +3,7 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Session.Actions;
 using Lifestone.Client.Session.Actions.Trackers;
+using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Tools;
 using Lifestone.ServerTools;
 
@@ -186,6 +187,180 @@ public sealed class PlayerTools
             observe: null,
             "ToolCharPurge " + (name ?? "(none)"));
 
+    /// <summary>The error code of a <see cref="LearnSpells"/> that named an id the spell table does not hold (a client-side word; the mod's reply is <c>ok</c>).</summary>
+    public const string UnknownSpellCode = "unknown-spell";
+
+    /// <summary>The most ids one <see cref="LearnSpells"/> may name; a longer list is refused before it is sent, as the mod would refuse it.</summary>
+    public const int MaxSpellIds = ToolRequestParser.MaxSpellIds;
+
+    /// <summary>
+    /// Teaches the character the spells <paramref name="spellIds"/> (<c>@lifestone spell learn &lt;id&gt;[,&lt;id&gt;...]</c>), over ACE's own learn path. Every id is
+    /// carried out; the result lists each one as learned, known (the character had it) or unknown (not in the spell table). The handle is
+    /// <see cref="ActionOutcomeKind.Confirmed"/> only when no id was unknown; an unknown id ends it as <see cref="ActionOutcomeKind.ServerError"/>
+    /// with <see cref="UnknownSpellCode"/> and the ids in <see cref="ActionOutcome.Detail"/>, and <see cref="ToolHandle{T}.Result"/> still set. A list of
+    /// no ids or of more than <see cref="MaxSpellIds"/> is <see cref="ActionOutcomeKind.Refused"/> at once and never sent.
+    /// </summary>
+    /// <param name="spellIds">The spell ids (a repeat is allowed).</param>
+    /// <param name="source">Who asked.</param>
+    /// <returns>The request's handle.</returns>
+    public ToolHandle<SpellLearnResult> LearnSpells(IReadOnlyList<uint> spellIds, ActionSource source)
+    {
+        var ids = spellIds?.ToArray();
+        return Request(
+            ActionKind.ToolSpell,
+            source,
+            id => new SpellLearnRequest(ids ?? throw new ArgumentException("no spell ids"), id),
+            string.Create(CultureInfo.InvariantCulture, $"Lifestone: asking the server to teach {ids?.Length ?? 0} spell{(ids?.Length == 1 ? string.Empty : "s")}..."),
+            silent: false,
+            ToolResultReader.SpellLearn,
+            observe: null,
+            "ToolSpell ids=" + ActionText.Count(ids?.Length ?? 0),
+            verdict: UnknownSpellVerdict);
+    }
+
+    /// <summary>
+    /// Creates an item in the character's pack (<c>@lifestone item &lt;wcid&gt; [&lt;stack&gt;]</c>), as ACE's <c>@ci</c> does. A stack above the item's maximum is clamped to
+    /// it and a stack asked for an item that does not stack is ignored (the result says <see cref="ItemResult.Clamped"/>, never an error). The errors
+    /// are <c>unknown-wcid</c>, <c>not-creatable</c> and <c>no-room</c> (<see cref="ItemOutcomes.Of"/> names them). A stack outside 1 to 65,535 is
+    /// <see cref="ActionOutcomeKind.Refused"/> at once and never sent.
+    /// </summary>
+    /// <param name="wcid">The weenie class id.</param>
+    /// <param name="stack">The stack size, or null for the item's default.</param>
+    /// <param name="source">Who asked.</param>
+    /// <returns>The request's handle.</returns>
+    public ToolHandle<ItemResult> SpawnItem(uint wcid, int? stack, ActionSource source) =>
+        Request(
+            ActionKind.ToolItem,
+            source,
+            id => new ItemRequest(wcid, stack, id),
+            string.Create(CultureInfo.InvariantCulture, $"Lifestone: asking the server for item {wcid}{(stack is { } n ? $" x {n:N0}" : string.Empty)}..."),
+            silent: false,
+            ToolResultReader.Item,
+            observe: null,
+            "ToolItem wcid=" + ActionText.Count(wcid) + (stack is { } count ? " stack=" + ActionText.Count(count) : string.Empty));
+
+    /// <summary>The gear spawn still under way, if any: a second <see cref="SpawnGear"/> returns it instead of counting an inventory that its grants have not finished changing.</summary>
+    private GearSpawn? _gear;
+
+    /// <summary>
+    /// Asks the server for the kit <paramref name="kit"/> over the <c>item</c> verb (<see cref="SpawnItem"/>), idempotently: it counts what the inventory read model already holds (the pack, the side packs, what is in
+    /// them and what is equipped, by weenie class id, stacks summed) and requests only what is missing: a component's missing count (topped up to the kit's stack), and the wand and each armour piece only when none is held.
+    /// A kit already held makes no request. The requests queue on the tools lane (2 a second, so a whole kit takes about half a minute), each ending as <see cref="SpawnItem"/>'s do; the result names every request and every
+    /// refusal (<see cref="ItemOutcome.UnknownWcid"/>, <see cref="ItemOutcome.NotCreatable"/>, <see cref="ItemOutcome.NoRoom"/>, anything else as <see cref="ItemOutcome.Failed"/>), each refusal is logged as an ERROR when it is known, and
+    /// <see cref="GearSpawn.Succeeded"/> is false when any request was refused. Nothing is requested, and <see cref="GearSpawn.NotStarted"/> says why, when the inventory cannot be counted yet (no description, or a pack entry whose world
+    /// object has not arrived: the wire order puts a grant's 0022 before its CreateObject, so wait for <see cref="GearSpawn.Arrived"/> before asking again). While an earlier spawn is not done (<see cref="GearSpawn.IsDone"/>) it is returned instead.
+    /// <para><b>A top-up is merged.</b> The mod's <c>item</c> verb makes every grant its own pack item (ACE's <c>TryAddToInventory</c> never merges), so once every grant has arrived the spawn merges each component line into its largest
+    /// held stack with <see cref="IActionApi.MergeStack"/> (GameAction 0x0054), and <see cref="GearSpawn.IsDone"/> waits for it: a top-up leaves one stack per line, and a rerun never grows the pack. The session's tick drives it
+    /// (<see cref="Update"/>).</para>
+    /// <para><b>The slot guard refuses before the server could</b> (<see cref="GearSpawn.GuardRefusal"/>, logged as an ERROR, nothing requested): the main pack's items plus the new grants, which each take a slot until they are merged,
+    /// would pass <see cref="GearKit.PackCapacity"/>. A held focus item is not a reason to refuse: the kit carries the foci formula's components (<see cref="GearKit.FociFormulaCounts"/>); an Info line names the focus and its school.</para>
+    /// </summary>
+    /// <param name="kit">The kit (<see cref="GearKit.Build"/>).</param>
+    /// <param name="source">Who asked.</param>
+    /// <returns>What was requested; poll <see cref="GearSpawn.IsDone"/> and read <see cref="GearSpawn.Succeeded"/>.</returns>
+    public GearSpawn SpawnGear(GearKit kit, ActionSource source)
+    {
+        ArgumentNullException.ThrowIfNull(kit);
+        _api.CheckThread("PlayerTools.SpawnGear");
+        if (_gear is { IsDone: false } running)
+        {
+            return running;
+        }
+
+        var state = _api.State;
+        if (!state.Self.Inventory.IsKnown)
+        {
+            return _gear = new GearSpawn(kit, state, [], 0, "inventory-unknown: no PlayerDescription has told the pack yet");
+        }
+
+        var held = GearInventory.CountAll(state, out var unsettled);
+        if (unsettled > 0)
+        {
+            return _gear = new GearSpawn(kit, state, [], 0, "inventory-unsettled: " + ActionText.Count(unsettled) + " held items have no world object yet");
+        }
+
+        foreach (var focus in GearKit.FociWcids)
+        {
+            if (held.ContainsKey(focus))
+            {
+                _api.Log.Info(SessionLog.Category, "SpawnGear: the character holds " + GearKit.FociName(focus) + " (weenie " + ActionText.Count(focus) + "): ACE casts that school with the foci formula, whose components the kit carries");
+            }
+        }
+
+        var wanted = new List<(GearItem Item, int Missing)>();
+        var alreadyHeld = 0;
+        foreach (var item in kit.Items)
+        {
+            var have = held.GetValueOrDefault(item.Wcid);
+            var missing = item.Kind == GearKind.Component ? item.Stack - have : have > 0 ? 0 : 1;
+            if (missing <= 0)
+            {
+                alreadyHeld++;
+                continue;
+            }
+
+            wanted.Add((item, missing));
+        }
+
+        // Each grant is a new pack item until it is merged, so the pack must hold them all at once.
+        var used = state.Self.Inventory.Pack.Count;
+        if (used + wanted.Count > GearKit.PackCapacity)
+        {
+            return Refuse(
+                kit,
+                state,
+                "slot-guard: the main pack holds " + ActionText.Count(used) + " of " + ActionText.Count(GearKit.PackCapacity) + " items and the kit needs " + ActionText.Count(wanted.Count)
+                    + " new ones (each grant takes a slot until it is merged), so the server would refuse a grant as no-room");
+        }
+
+        var grants = new List<GearGrant>();
+        foreach (var (item, missing) in wanted)
+        {
+            int? stack = item.Kind == GearKind.Component ? missing : null;
+            var handle = SpawnItem(item.Wcid, stack, source);
+            var grant = new GearGrant(item, stack, handle);
+            grants.Add(grant);
+            if (handle.IsCompleted)
+            {
+                LogGrant(grant);
+            }
+            else
+            {
+                handle.Completed += _ => LogGrant(grant);
+            }
+        }
+
+        return _gear = new GearSpawn(kit, state, grants, alreadyHeld, null, null, _api, source);
+    }
+
+    private GearSpawn Refuse(GearKit kit, GameState state, string guard)
+    {
+        _api.Log.Error(SessionLog.Category, "SpawnGear: refused before asking the server: " + guard);
+        return _gear = new GearSpawn(kit, state, [], 0, null, guard);
+    }
+
+    /// <summary>Called by the session's tick (<c>ActionApi.Update</c>): sends the next merge of the gear spawn under way, if one is due. Allocates nothing when there is none.</summary>
+    internal void Update()
+    {
+        if (_gear is { MergePending: true } gear)
+        {
+            gear.Pump();
+        }
+    }
+
+    private void LogGrant(GearGrant grant)
+    {
+        if (grant.Refusal is { } refusal)
+        {
+            _api.Log.Error(SessionLog.Category, "SpawnGear: the server refused a kit item: " + refusal);
+        }
+    }
+
+    private static string? UnknownSpellVerdict(SpellLearnResult result) =>
+        result.Ok
+            ? null
+            : UnknownSpellCode + ": not in the spell table: " + string.Join(", ", result.UnknownIds.Select(i => i.ToString(CultureInfo.InvariantCulture)));
+
     /// <summary>Why a request is refused for <paramref name="availability"/>.</summary>
     internal static string Refusal(ToolAvailability availability) => availability switch
     {
@@ -226,6 +401,7 @@ public sealed class PlayerTools
         _notLoopbackPublished = false;
         _probed = false;
         LastStatus = null;
+        _gear = null;
     }
 
     private ToolHandle<QuestResult> Quest(QuestAction action, string name, ActionSource source)
@@ -263,7 +439,8 @@ public sealed class PlayerTools
         Func<ToolReply, T> read,
         Action<T>? observe,
         string what,
-        bool availabilityNow = true)
+        bool availabilityNow = true,
+        Func<T, string?>? verdict = null)
         where T : class
     {
         var runner = "PlayerTools." + kind.ToString()["Tool".Length..];
@@ -300,7 +477,7 @@ public sealed class PlayerTools
             }
         }
 
-        var tracker = new ToolTracker<T>(handle, request ?? new StatusRequest(requestId), text, chatLine, silent, read, observe);
+        var tracker = new ToolTracker<T>(handle, request ?? new StatusRequest(requestId), text, chatLine, silent, read, observe, verdict);
         _api.Accept(tracker, early, loopbackChecked: true);
         return handle;
     }

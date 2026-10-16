@@ -1,6 +1,7 @@
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session;
+using Lifestone.Client.Session.Mage;
 
 namespace Lifestone.Headless;
 
@@ -15,6 +16,15 @@ internal enum HeadlessScenario
 
     /// <summary>From the Training Academy's spawn to its exit portal with zero server corrections (ST16).</summary>
     AcademyExit,
+
+    /// <summary>Find or create the test account's level-126 combat mage and bring it to the template (M3 1.1, <c>MageBuildScenario</c>); idempotent.</summary>
+    MageBuild,
+
+    /// <summary>Spawn BSD Mage's gear kit, wield its wand and wear its leather set (M3 1.4 s1, <c>GearScenario</c>); idempotent.</summary>
+    Gear,
+
+    /// <summary>Gear, then the buff cycle of the profile's 24 lines and a forced re-buff pass (M3 2.1 s1, <c>BuffScenario</c>); idempotent.</summary>
+    Buff,
 }
 
 /// <summary>
@@ -58,6 +68,9 @@ internal sealed record HeadlessOptions
     /// <summary>Decoding worker threads (<c>--workers</c>), or null for the default.</summary>
     internal int? Workers { get; init; }
 
+    /// <summary>The buff cycle's options (<c>--buff-*</c>), used by <c>--scenario=buff</c>.</summary>
+    internal BuffOptions Buff { get; init; } = new();
+
     /// <summary>The Session group's values.</summary>
     internal SessionOptions Session { get; init; } = new();
 
@@ -72,6 +85,8 @@ internal sealed record HeadlessOptions
         var errors = new List<string>(OptionCatalog.Registry.Problems(arguments, OptionScenes.Headless));
         var session = SessionOptions.FromArguments(arguments);
         errors.AddRange(session.Errors);
+        var buff = BuffOptions.FromArguments(arguments);
+        errors.AddRange(buff.Errors);
         var o = new HeadlessOptions();
         foreach (var argument in arguments)
         {
@@ -89,7 +104,10 @@ internal sealed record HeadlessOptions
                             o.Scenario,
                             ("login", HeadlessScenario.Login),
                             ("holtburg-laps", HeadlessScenario.HoltburgLaps),
-                            ("academy-exit", HeadlessScenario.AcademyExit)),
+                            ("academy-exit", HeadlessScenario.AcademyExit),
+                            ("mage-build", HeadlessScenario.MageBuild),
+                            ("gear", HeadlessScenario.Gear),
+                            ("buff", HeadlessScenario.Buff)),
                     };
                     break;
                 case "--laps":
@@ -165,7 +183,13 @@ internal sealed record HeadlessOptions
             }
         }
 
-        return o with { Session = session, Errors = errors };
+        if (o.Scenario is HeadlessScenario.MageBuild or HeadlessScenario.Gear or HeadlessScenario.Buff && session.Account is { } account && !string.Equals(account, Program.DefaultAccount, StringComparison.OrdinalIgnoreCase))
+        {
+            // M3 1.1-R5: the build creates and levels a permanent character, so it runs on the default test account only (automation uses accounts.test only).
+            errors.Add($"--account: --scenario={(o.Scenario switch { HeadlessScenario.Gear => "gear", HeadlessScenario.Buff => "buff", _ => "mage-build" })} runs on the default test account '{Program.DefaultAccount}' only; the value is not shown");
+        }
+
+        return o with { Session = session, Buff = buff, Errors = errors };
     }
 
     private static string? Required(CommandLineArgument argument, List<string> errors, string what)

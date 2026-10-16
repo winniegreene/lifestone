@@ -302,7 +302,7 @@ The core and main-scene options (the other features' options are in their docs: 
 | `--interior-engine-checks`, `--sky-checks` | The interiors' (interiors.md §9) and the sky's (sky.md §6) check suites; one suite per run |
 | `--portal-space-checks` | *(M2.)* The portal view's engine checks (above, portal-space.md §11.5), then quit; run off-screen |
 | `--retail-ui-checks` | *(M2.)* The retail UI layer's engine checks (above, retail-ui.md §17), then quit; run off-screen |
-| `--retail-ui=off\|standin`, `--ui-scale=N`, `--retail-ui-start=SCREEN`, `--retail-ui-frames[=DIR]`, `--retail-ui-only`, `--retail-ui-glitches`, `--retail-disconnect` | *(M2.)* The retail UI over the world, default off, which leaves the explore scene unchanged (retail-ui.md §17) |
+| `--retail-ui=off\|standin`, `--ui-scale=N`, `--retail-ui-start=SCREEN`, `--retail-ui-frames[=DIR]`, `--retail-ui-only`, `--retail-ui-glitches`, `--retail-effects-stale-info`, `--retail-disconnect` | *(M2; `--retail-effects-stale-info` M3 2.2.)* The retail UI over the world, default off, which leaves the explore scene unchanged (retail-ui.md §17) |
 | `--fov=DEG` | *(M2.)* The world camera's vertical field of view, 1 to 179 (default 60: `FlyCamera`; the spell viewer's own default is 55; the terrain preview's `--fov` is the same option). The portal zoom is a frustum and ignores it: its rest state is this field of view |
 | `--blend-space=byte\|linear` | *(Wave 3.)* Blend in retail's byte space (default) or Godot's linear light (render-contract.md §2.3) |
 | `--detail=on\|off` | *(Wave 3.)* Retail's building and environment detail textures (default on; render-contract.md §2.4). Also accepts 1/0 and true/false; any other value is reported as a bad argument |

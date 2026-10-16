@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Godot;
 using Lifestone.Client.RetailUi;
 using Lifestone.Client.RetailUi.Flow;
@@ -68,6 +69,12 @@ public static class RetailUiSetup
     /// </summary>
     public static RetailUiLayer? AttachOnly(Main main, GameServices services)
     {
+        // No world and so no portal view to install the audio service: install it here, so the UI's sounds play (silently when automated, D8) and are counted, not dropped (M3 1.3 s2a).
+        if (services.Dats is not null)
+        {
+            _ = AudioService.Install(main, services, OS.GetCmdlineUserArgs(), services.Options.IsAutomated ? 1 : (int)(Stopwatch.GetTimestamp() & 0x7FFFFFFF));
+        }
+
         var layer = Install(main, services);
         if (layer is not null && layer.Options.FramesDirectory is null && services.Options.ScreenshotPath is { } path)
         {
@@ -129,7 +136,8 @@ public static class RetailUiSetup
                 new Vector2I((int)windowSize.X, (int)windowSize.Y),
                 () => AudioService.Current?.Sound,
                 fixedStep: automated ? RetailUiFramesRunner.FixedStep : 0.0,
-                host: host);
+                host: host,
+                soundMuted: () => AudioService.Current?.IsSilent ?? true);
             main.AddChild(layer);
             var note = CreateNote();
             note.Visible = false;

@@ -61,6 +61,104 @@ public sealed class ServerObjectParticles : IDisposable
         }
     }
 
+    private static readonly HashSet<uint> TablesPrepared = [];
+    private static readonly Queue<uint> PendingModels = new();
+    private static readonly List<uint> PumpBuffer = [];
+
+    /// <summary>GfxObjs a frame may queue for their meshes (<see cref="PumpPending"/>): the creation burst's script tables are spread over frames, not queued in the burst's frame (M3 1.3 fix A, 1.3-R1 (a)).</summary>
+    public const int ModelsPerFrame = 4;
+
+    /// <summary>Particle GfxObjs resolved by a worker and waiting for <see cref="PumpPending"/>.</summary>
+    public static int PendingModelCount => PendingModels.Count;
+
+    /// <summary>Particle GfxObjs <see cref="PumpPending"/> has queued so far (all tables, this process).</summary>
+    public static int PumpedModelCount { get; private set; }
+
+    /// <summary>Frames on which <see cref="PumpPending"/> queued something.</summary>
+    public static int PumpFrames { get; private set; }
+
+    /// <summary>
+    /// Main thread, once per frame (play mode, on a frame that did no heavy work): queues up to <paramref name="maxModels"/> of the resolved particle models for their
+    /// meshes (<see cref="ParticleMeshLibrary.Request"/>; workers build them and <see cref="ParticleMeshLibrary.PrewarmStep"/> finishes them within its budget). Returns how many.
+    /// </summary>
+    public static int PumpPending(int maxModels)
+    {
+        if (PendingModels.Count == 0 || LivingStaticsSystem.Instance is not { Enabled: true } statics)
+        {
+            return 0;
+        }
+
+        PumpBuffer.Clear();
+        while (PendingModels.Count > 0 && PumpBuffer.Count < maxModels)
+        {
+            PumpBuffer.Add(PendingModels.Dequeue());
+        }
+
+        statics.Particles.Request(PumpBuffer);
+        PumpedModelCount += PumpBuffer.Count;
+        PumpFrames++;
+        return PumpBuffer.Count;
+    }
+
+    /// <summary>
+    /// Main thread, when a server object's body is made (M3 1.3 s1): queues the particle meshes of every script in its PhysicsScriptTable, so a script the server plays
+    /// (F755: a level-up's glow, a spell's burst) shows on the frame it lands and not a few hundred ms later, after the meshes are prepared on first use. A worker
+    /// walks the table and resolves the particle models (dat reads); the main thread then queues the meshes (<see cref="ParticleMeshLibrary.Request"/>) a few models a frame (<see cref="PumpPending"/>), which workers
+    /// build and <see cref="ParticleMeshLibrary.PrewarmStep"/> finishes within its budget. Once per table; nothing without the living statics' library (<c>--static-effects=off</c>).
+    /// </summary>
+    public static void PrepareScriptTable(GameServices services, uint scriptTableId)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        if (scriptTableId == 0 || LivingStaticsSystem.Instance is not { Enabled: true } statics || !TablesPrepared.Add(scriptTableId))
+        {
+            return;
+        }
+
+        var library = statics.Particles;
+        var sources = ObjectsShared.Sources(services);
+        var work = services.Workers.RunSync(cancellation =>
+        {
+            var ids = new HashSet<uint>();
+            if (sources.Effects.GetScriptTable(scriptTableId) is { } table)
+            {
+                foreach (var entries in table.Scripts.Values)
+                {
+                    foreach (var entry in entries)
+                    {
+                        foreach (var id in sources.ParticleGfxObjsOf(entry.ScriptId))
+                        {
+                            if (ids.Add(id))
+                            {
+                                _ = library.Get(id); // the model (LOD chain, degrade distance) is resolved here, not in a frame
+                            }
+                        }
+                    }
+                }
+            }
+
+            return ids.ToArray();
+        });
+        _ = work.ContinueWith(
+            t =>
+            {
+                if (t.IsCompletedSuccessfully)
+                {
+                    services.MainThread.Enqueue(() =>
+                    {
+                        foreach (var id in t.Result)
+                        {
+                            PendingModels.Enqueue(id); // queued for their meshes a few a frame (PumpPending), not all in the frame the worker finishes
+                        }
+                    });
+                }
+                else
+                {
+                    Log.Warn("particles", "the particle meshes of a PhysicsScriptTable could not be requested ahead; they are prepared when first used", ("table", $"0x{scriptTableId:X8}"), ("problem", t.Exception?.GetBaseException().Message ?? "cancelled"));
+                }
+            },
+            TaskScheduler.Default);
+    }
+
     /// <summary>Objects whose particles were handed to a renderer in the last <see cref="Update"/>.</summary>
     public int ObjectsLastFrame { get; private set; }
 

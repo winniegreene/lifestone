@@ -199,13 +199,13 @@ public sealed class InboundDispatcherTests
     public void An_undecoded_message_reaches_OnUnknown_with_its_opcode_and_whole_body()
     {
         var handler = new RecordingHandler();
-        byte[] body = [0x60, 0xEA, 0x00, 0x00, 0xAA, 0xBB];  // EA60 AdminEnvirons, which M2 does not decode
+        byte[] body = [0x54, 0xF7, 0x00, 0x00, 0xAA, 0xBB];  // F754 PlayScript, which Lifestone does not decode (EA60 AdminEnvirons is decoded since M3 1.2 s0)
 
         var result = InboundDispatcher.Dispatch(Context, body, handler);
 
-        Assert.Equal(new DispatchResult(DispatchOutcome.Unknown, 0xEA60), result);
+        Assert.Equal(new DispatchResult(DispatchOutcome.Unknown, 0xF754), result);
         var call = Assert.Single(handler.Calls);
-        Assert.Equal((nameof(IInboundMessageHandler.OnUnknown), 0xEA60u), (call.Name, call.Opcode));
+        Assert.Equal((nameof(IInboundMessageHandler.OnUnknown), 0xF754u), (call.Name, call.Opcode));
         Assert.Equal(body, call.Bytes);
     }
 

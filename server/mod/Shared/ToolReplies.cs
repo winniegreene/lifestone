@@ -52,9 +52,18 @@ public static class ToolErrors
     /// <summary><c>char purge</c>: the character is not marked for deletion (delete it on the character screen first).</summary>
     public const string NotPendingDeletion = "not-pending-deletion";
 
+    /// <summary><c>item</c>: the world database has no weenie with that class id.</summary>
+    public const string UnknownWcid = "unknown-wcid";
+
+    /// <summary><c>item</c>: the weenie exists but ACE's <c>@ci</c> would not create it in a pack (a weenie type it never spawns, or one that is stuck and cannot be picked up).</summary>
+    public const string NotCreatable = "not-creatable";
+
+    /// <summary><c>item</c>: the pack has no room for it (burden, or no free slot in the main pack and the side packs); nothing was created.</summary>
+    public const string NoRoom = "no-room";
+
     /// <summary>Every code above.</summary>
     public static IReadOnlyList<string> All { get; } =
-        [BadArgs, UnknownVerb, NotFound, InvalidCell, Busy, NotInWorld, NotLoopback, NeedsPlayer, Failed, Graduated, OwnCharacter, UnknownCharacter, CharacterOnline, NotPendingDeletion];
+        [BadArgs, UnknownVerb, NotFound, InvalidCell, Busy, NotInWorld, NotLoopback, NeedsPlayer, Failed, Graduated, OwnCharacter, UnknownCharacter, CharacterOnline, NotPendingDeletion, UnknownWcid, NotCreatable, NoRoom];
 }
 
 /// <summary>Why a request failed: a code from <see cref="ToolErrors"/> and one human sentence.</summary>
@@ -78,8 +87,8 @@ public sealed record ToolReply(int V, string? Id, string Verb, bool Ok, string? 
 {
     /// <summary>
     /// The data as <typeparamref name="T"/> (one of <see cref="StatusData"/>, <see cref="WhereData"/>,
-    /// <see cref="PlaceData"/>, <see cref="XpData"/>, <see cref="QuestData"/>, <see cref="CharPurgeData"/>, <see cref="NetData"/>,
-    /// <see cref="PlacesData"/>), or null when the
+    /// <see cref="PlaceData"/>, <see cref="XpData"/>, <see cref="QuestData"/>, <see cref="CharPurgeData"/>, <see cref="SpellLearnData"/>,
+    /// <see cref="ItemData"/>, <see cref="NetData"/>, <see cref="PlacesData"/>), or null when the
     /// reply has none. Throws <see cref="JsonException"/> when the data does not have that shape.
     /// </summary>
     public T? DataAs<T>()
@@ -291,6 +300,87 @@ public sealed record CharPurgeData(string Name, int Characters, int PlayerBiotas
     public string Describe() => string.Create(
         CultureInfo.InvariantCulture,
         $"purged {Name}: {Characters} character record{(Characters == 1 ? string.Empty : "s")}, {PlayerBiotas} player biota{(PlayerBiotas == 1 ? string.Empty : "s")}, {Possessions} possession{(Possessions == 1 ? string.Empty : "s")}");
+}
+
+/// <summary>The outcome words of one spell in a <c>spell learn</c> reply (<see cref="SpellOutcome.Outcome"/>).</summary>
+public static class SpellOutcomes
+{
+    /// <summary>The spell was not known and now is.</summary>
+    public const string Learned = "learned";
+
+    /// <summary>The player already knew the spell; nothing changed (so a ready spellbook is verified by this word).</summary>
+    public const string Known = "known";
+
+    /// <summary>The id is not in ACE's spell table (the portal dat's SpellTable); nothing was learned.</summary>
+    public const string Unknown = "unknown";
+
+    /// <summary>The outcome for a spell: unknown when it is not in the table, else known or learned by whether the player had it.</summary>
+    public static string Classify(bool inSpellTable, bool alreadyKnown) => !inSpellTable ? Unknown : alreadyKnown ? Known : Learned;
+}
+
+/// <summary>One spell of a <c>spell learn</c> request, in request order.</summary>
+/// <param name="Id">The spell id as requested.</param>
+/// <param name="Outcome">One of <see cref="SpellOutcomes"/>.</param>
+/// <param name="Name">The spell's name in the spell table, or null for an unknown id.</param>
+public sealed record SpellOutcome(uint Id, string Outcome, string? Name = null);
+
+/// <summary>
+/// The data of a <c>spell learn</c> reply: one <see cref="SpellOutcome"/> per requested id, in order, and the three counts. The reply is
+/// <c>ok</c> whenever the verb ran; a client that wants every spell known checks <see cref="Unknown"/> is 0 (an unknown id is
+/// not an error code because the other ids of the request are still carried out).
+/// </summary>
+/// <param name="Spells">The outcomes.</param>
+/// <param name="Learned">How many were <see cref="SpellOutcomes.Learned"/>.</param>
+/// <param name="Known">How many were <see cref="SpellOutcomes.Known"/>.</param>
+/// <param name="Unknown">How many were <see cref="SpellOutcomes.Unknown"/>.</param>
+public sealed record SpellLearnData(IReadOnlyList<SpellOutcome> Spells, int Learned, int Known, int Unknown)
+{
+    /// <summary>The data for <paramref name="outcomes"/>, with the counts worked out from them.</summary>
+    public static SpellLearnData Of(IReadOnlyList<SpellOutcome> outcomes)
+    {
+        ArgumentNullException.ThrowIfNull(outcomes);
+        return new SpellLearnData(
+            outcomes,
+            outcomes.Count(o => o.Outcome == SpellOutcomes.Learned),
+            outcomes.Count(o => o.Outcome == SpellOutcomes.Known),
+            outcomes.Count(o => o.Outcome == SpellOutcomes.Unknown));
+    }
+
+    /// <summary>Equal when the outcomes are equal in order (a record's default would compare the list by reference).</summary>
+    public bool Equals(SpellLearnData? other) => other is not null && Learned == other.Learned && Known == other.Known && Unknown == other.Unknown && Spells.SequenceEqual(other.Spells);
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(Spells.Count, Learned, Known, Unknown);
+
+    /// <summary>The reply's human sentence; it names the ids that were unknown.</summary>
+    public string Describe()
+    {
+        var text = string.Create(CultureInfo.InvariantCulture, $"spells: {Learned} learned, {Known} already known, {Unknown} unknown");
+        if (Unknown > 0)
+        {
+            text += " (not in the spell table: " + string.Join(", ", Spells.Where(s => s.Outcome == SpellOutcomes.Unknown).Select(s => s.Id.ToString(CultureInfo.InvariantCulture))) + ")";
+        }
+
+        return text;
+    }
+}
+
+/// <summary>
+/// The data of an <c>item</c> reply: the item ACE created in the player's pack.
+/// </summary>
+/// <param name="Guid">The new object's id.</param>
+/// <param name="Wcid">The weenie class id.</param>
+/// <param name="Name">The item's name.</param>
+/// <param name="Stack">The stack size it was created with (1 for an item that does not stack).</param>
+/// <param name="Requested">The stack size the request asked for, or null when it asked for none.</param>
+/// <param name="MaxStack">The item's maximum stack size, or null when it does not stack.</param>
+/// <param name="Clamped">True when <paramref name="Stack"/> is below <paramref name="Requested"/>: clamped to the maximum, or ignored for an item that does not stack (as @ci does).</param>
+public sealed record ItemData(uint Guid, uint Wcid, string Name, int Stack, int? Requested, int? MaxStack, bool Clamped)
+{
+    /// <summary>The reply's human sentence.</summary>
+    public string Describe() => string.Create(
+        CultureInfo.InvariantCulture,
+        $"created {(Stack > 1 ? Stack.ToString("N0", CultureInfo.InvariantCulture) + " x " : string.Empty)}{Name} (wcid {Wcid}, 0x{Guid:X8}) in your pack{(Clamped ? MaxStack is { } max ? $"; the stack was clamped to {max:N0}" : "; it does not stack, so one was created" : string.Empty)}");
 }
 
 /// <summary>

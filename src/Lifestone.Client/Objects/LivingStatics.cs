@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
+using Lifestone.Client.Audio;
 using Lifestone.Client.Effects;
 using Lifestone.Data.Animation;
 using Lifestone.Data.Effects;
 using Lifestone.Data.Models;
+using Lifestone.Data.World;
 
 namespace Lifestone.Client.Objects;
 
@@ -84,8 +86,8 @@ public sealed class LivingStaticSources(IEffectSource effects, DatAnimationSourc
 
     /// <summary>
     /// Any thread: the hook types a model's default script (following CallPES) and default animation use that M1 executes
-    /// but does not draw or play (texture scrolling, part material fades, scale, NoDraw, lights, part swaps; sounds are
-    /// dropped on purpose and not listed), so the renderer can name each such Setup once (docs/objects.md §4). Cached.
+    /// but does not draw (texture scrolling, part material fades, scale, NoDraw, lights, part swaps; sounds play since M3 1.3 s1 and are
+    /// not listed), so the renderer can name each such Setup once (docs/objects.md §4). Cached.
     /// </summary>
     public IReadOnlyList<string> UndrawnHooks(ObjectModel model)
     {
@@ -324,7 +326,8 @@ public sealed class LivingStatic
     /// </summary>
     /// <param name="now">The clock (seconds).</param>
     /// <param name="drawRange">Per emitter, whether its particles are in draw range (<c>ShouldDrawParticles</c>).</param>
-    public bool Animate(double now, Func<ParticleEmitter, bool> drawRange)
+    /// <param name="sounds">Where the hooks' events go (sounds), or null to discard them as M1 did.</param>
+    public bool Animate(double now, Func<ParticleEmitter, bool> drawRange, LivingStaticSounds? sounds = null)
     {
         var dt = now - UpdateTime;
         if (dt <= Epsilon)
@@ -364,9 +367,13 @@ public sealed class LivingStatic
         Effects.UpdateStatic(now, Frame, _partFrames, HasDefaultScript, drawRange);
         if (Effects.PendingEvents.Count > 0)
         {
-            // Sound, SoundTweaked, SetLight and NoDraw hooks are handed to the engine as events. M1 has no audio and no
-            // dynamic lights (docs/objects.md §4); nothing else would drain them, and a looping script would grow the list.
-            EventsDropped += Effects.DiscardEvents();
+            // Sound, SoundTweaked, SetLight and NoDraw hooks are handed to the engine as events: the sounds play through the
+            // set's sink (M3 1.3 s1); the lights and NoDraw are not drawn (docs/objects.md section 4), and with no sink or
+            // listener nothing else would drain them, and a looping script would grow the list.
+            if (sounds is null || !sounds.Deliver(this))
+            {
+                EventsDropped += Effects.DiscardEvents();
+            }
         }
 
         UpdateTime = now;
@@ -374,7 +381,7 @@ public sealed class LivingStatic
         return moved;
     }
 
-    /// <summary>Engine events (sounds, lights, NoDraw) this static's hooks raised and M1 does not act on.</summary>
+    /// <summary>Engine events (sounds, lights, NoDraw) this static's hooks raised that nothing took: no sound sink or listener yet.</summary>
     public long EventsDropped { get; private set; }
 
     /// <summary><c>CPartArray::UpdateParts</c>: the current pose (or the rest pose) under the object frame and scale.</summary>
@@ -461,6 +468,62 @@ public sealed record LivingStaticPlan(LandblockObjectSet Set, int[] ObjectIndice
 public readonly record struct LivingStaticStats(int Statics, int Stepped, int Emitters, int LiveParticles, int DegradedEmitters);
 
 /// <summary>
+/// Where a set's living statics play their sound hooks (M3 1.3 s1; docs/objects.md section 4): the sink, and the listener the
+/// sounds are heard from. The static's origin is <see cref="SoundOrigin.Between"/> the listener and the static's frame,
+/// the way retail's sound manager positions a sound (<c>SoundManager::PlaySoundInternal</c>, 11.6096 0x00550D80), and its
+/// sound table is its Setup's default (<c>CSetup::default_sound_table</c>; a static has no weenie to give another). The host
+/// sets <see cref="Listener"/> each frame before the set advances. Frame thread; allocation-free once warm.
+/// </summary>
+public sealed class LivingStaticSounds
+{
+    private readonly List<EffectEvent> _events = new(8);
+
+    /// <summary>Where the events go; null drops them (counted by the static as dropped).</summary>
+    public IEffectEventSink? Sink { get; set; }
+
+    /// <summary>True once <see cref="Listener"/> was given for this frame.</summary>
+    public bool HasListener { get; private set; }
+
+    /// <summary>The listener, in the landblock space of the statics' set (its cell id names that landblock).</summary>
+    public CellFrame Listener { get; private set; }
+
+    /// <summary>Events handed to the sink.</summary>
+    public long Delivered { get; private set; }
+
+    /// <summary>Gives this frame's listener.</summary>
+    public void SetListener(in CellFrame listener)
+    {
+        Listener = listener;
+        HasListener = true;
+    }
+
+    /// <summary>The listener is unknown this frame: events are dropped.</summary>
+    public void ClearListener() => HasListener = false;
+
+    /// <summary>Hands the static's pending events to the sink; false (nothing taken) with no sink or no listener.</summary>
+    internal bool Deliver(LivingStatic s)
+    {
+        if (Sink is not { } sink || !HasListener)
+        {
+            return false;
+        }
+
+        _events.Clear();
+        s.Effects.DrainEvents(_events);
+        var origin = SoundOrigin.Between(Listener, new CellFrame(s.Object.CellId, s.Frame));
+        var table = s.Model.Assembly?.DefaultSoundTableId ?? 0;
+        for (var i = 0; i < _events.Count; i++)
+        {
+            sink.OnEffectEvent(_events[i], origin, table);
+        }
+
+        Delivered += _events.Count;
+        _events.Clear();
+        return true;
+    }
+}
+
+/// <summary>
 /// The living statics of one landblock (or one landblock's EnvCells): created when the landblock's objects are, stepped
 /// each frame within a time budget, destroyed with them (retail <c>CPhysicsObj::Destroy</c> →
 /// <c>CPhysics::RemoveStaticAnimatingObject</c>). Engine-agnostic.
@@ -521,6 +584,9 @@ public sealed class LivingStaticSet
     }
 
     public LivingStaticPlan Plan { get; }
+
+    /// <summary>Where the statics' sound hooks go (<see cref="LivingStaticSounds.Sink"/>, <see cref="LivingStaticSounds.Listener"/>); shared by the host between its sets.</summary>
+    public LivingStaticSounds? Sounds { get; set; }
 
     public LandblockObjectSet Set => Plan.Set;
 
@@ -583,7 +649,7 @@ public sealed class LivingStaticSet
             var i = (_cursor + n) % _statics.Length;
             var s = _statics[i];
             Prepare(s, cellVisible);
-            if (s.Animate(now, _drawRange))
+            if (s.Animate(now, _drawRange, Sounds))
             {
                 _moved.Add(i);
             }
