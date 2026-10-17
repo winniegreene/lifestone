@@ -46,7 +46,7 @@ public sealed class BuffLoopLiveTests(ITestOutputHelper output)
     private const double QuitAfterSeconds = 3000;
 
     private static readonly Regex Verdict = new(
-        @"^gear=(?<gear>\w+) worn=(?<worn>\d+) buffs=(?<active>\d+)/(?<wanted>\d+) levels=(?<levels>\S+) rebuffed=(?<rebuffed>yes|no) forced=(?<forced>yes|no) min_remaining_s=(?<min>\d+|n/a) transfers=(?<fired>\d+)/(?<tried>\d+) revitalizes=(?<revitalizes>\d+) fizzles=(?<fizzles>\d+) mana_min=(?<mana>\d+|n/a) cycle_s=(?<cycle>\d+) misses=(?<misses>\S+)$",
+        @"^gear=(?<gear>\w+) worn=(?<worn>\d+) buffs=(?<active>\d+)/(?<wanted>\d+) levels=(?<levels>\S+) rebuffed=(?<rebuffed>yes|no) forced=(?<forced>yes|no) min_remaining_s=(?<min>\d+|n/a) transfers=(?<fired>\d+)/(?<tried>\d+) revitalizes=(?<revitalizes>\d+) fizzles=(?<fizzles>\d+) mana_min=(?<mana>\d+|n/a) cycle_s=(?<cycle>\d+) misses=(?<misses>\S+) surpassed=(?<surpassed>\d+)$",
         RegexOptions.CultureInvariant);
 
     private static readonly Regex CastLine = new(

@@ -248,6 +248,12 @@ internal sealed class ReplayAcSession : IAcSession
     public OutboundTicket SendChangeCombatMode(uint mode) => Sent(MessageOpcodes.GameAction, GameActionTypes.ChangeCombatMode);
 
     /// <inheritdoc/>
+    public OutboundTicket SendSuicide() => Sent(MessageOpcodes.GameAction, GameActionTypes.Suicide);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => Sent(MessageOpcodes.GameAction, GameActionTypes.AddSpellFavorite);
+
+    /// <inheritdoc/>
     public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => Sent(MessageOpcodes.GameAction, GameActionTypes.GetAndWieldItem);
 
     /// <inheritdoc/>

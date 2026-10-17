@@ -1343,13 +1343,18 @@ public class UiTextElement : UiScrollable, IUiTickTarget
     /// </summary>
     public event Action? AcceptInput;
 
-    /// <summary>True when the view shows the end of the text (<c>UIElement_Text::IsAtVerticalEnd</c>; the chat log keeps following new lines while it does).</summary>
+    /// <summary>
+    /// True when the view shows the end of the text (<c>UIElement_Text::IsAtVerticalEnd</c>, 11.4186 0x00469350, 11.6096 0x004695E0): an empty text is at its end; else the
+    /// LAST GLYPH is in view (<see cref="IsPositionInView"/> at count-1). The chat log keeps following new lines while it is. It is not "the paper's bottom is in view": the
+    /// chat appends its line break first (<c>ChatInterface::RecvNotice_DisplayFinalStringInfo</c>, 11.6096 0x004F52A0), which opens an empty line below the view, and the
+    /// paper test then said "not at the end" at every arrival, so the log stopped following after its first page.
+    /// </summary>
     public bool IsAtVerticalEnd
     {
         get
         {
             RecalculateGlyphList();
-            return ScrollY + (Box.Height - _marginBottom - _marginTop) >= PaperHeight;
+            return _glyphs.Count == 0 || IsPositionInView(_glyphs.Count - 1);
         }
     }
 

@@ -41,24 +41,26 @@ public sealed class GearLiveTests(ITestOutputHelper output)
     {
         using var dats = DatSet.Open();
         var spells = SpellTableData.Load(dats).Spells;
-        var first = RunOnce(dats, spells, "first", cast: false);
+        var first = RunOnce(dats, spells, "first", cast: false, out var firstMissing);
         var firstMatch = Wielded.Match(first);
         Assert.True(firstMatch.Success, first);
-        Assert.Equal(firstMatch.Groups["lines"].Value, firstMatch.Groups["held"].Value); // every kit line is held
+        Assert.True(firstMatch.Groups["lines"].Value == firstMatch.Groups["held"].Value, "every kit line is held; missing: " + MissingText(firstMissing) + " in " + first); // every kit line is held
 
-        var second = RunOnce(dats, spells, "second", cast: false);
+        var second = RunOnce(dats, spells, "second", cast: false, out var secondMissing);
         var secondMatch = Wielded.Match(second);
         Assert.True(secondMatch.Success, second);
         Assert.Equal("0", secondMatch.Groups["steps"].Value); // the wand, the armour and the wields: none (the components are topup=, not asserted)
         Assert.Equal("n/a", secondMatch.Groups["cast"].Value);
-        Assert.Equal(firstMatch.Groups["lines"].Value, secondMatch.Groups["held"].Value);
+        Assert.True(firstMatch.Groups["lines"].Value == secondMatch.Groups["held"].Value, "the second run holds every kit line; missing: " + MissingText(secondMissing) + " in " + second);
 
         // Report-only: the cast on (it burns components and mana; the top-up the next run needs is its own field).
-        var third = RunOnce(dats, spells, "third (cast on, report-only)", cast: true);
+        var third = RunOnce(dats, spells, "third (cast on, report-only)", cast: true, out _);
         Assert.True(Wielded.Match(third).Success, third);
     }
 
-    private string RunOnce(DatSet dats, IReadOnlyDictionary<uint, SpellInfo> spells, string label, bool cast)
+    private static string MissingText(IReadOnlyList<string> missing) => missing.Count == 0 ? "none" : string.Join("; ", missing);
+
+    private string RunOnce(DatSet dats, IReadOnlyDictionary<uint, SpellInfo> spells, string label, bool cast, out IReadOnlyList<string> missing)
     {
         var files = BackendProbe.MainCheckoutFiles;
         var log = new RecordingLogSink();
@@ -117,6 +119,7 @@ public sealed class GearLiveTests(ITestOutputHelper output)
 
         Assert.True(result.Ok, result.Failure);
         Assert.Equal(0, result.Errors);
+        missing = [.. scenario.MissingKit];
         return scenario.VerdictFields();
     }
 }

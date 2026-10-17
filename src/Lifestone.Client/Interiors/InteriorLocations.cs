@@ -67,6 +67,20 @@ public static class InteriorLocations
         "glenden-wood-dungeon", "Glenden Wood Dungeon", 0x01E3033D, new Vector3(161f, -150f, 0f), -0.983255, -0.182236);
 
     /// <summary>
+    /// The Aluvian Black Spawn Den, landblock 0x0105: the arrival of the den's portal (wcid 7242, world database
+    /// v0.9.296, <c>Session/Mage/BlackSpawnDen.cs</c>), where the M3 fight loop (3.1) fights Tusker Slaves on the
+    /// arrival's floor.
+    /// </summary>
+    public static readonly InteriorLocation BlackSpawnDenAluvian = Dungeon(
+        "black-spawn-den-aluvian",
+        "Black Spawn Den (Aluvian)",
+        0x01050375,
+        new Vector3(100f, -210f, 0f),
+        0.707107,
+        -0.707107,
+        "ACE world database v0.9.296: portal 7242's destination, docs/milestones/m3-lights-and-sound.md section 5.1");
+
+    /// <summary>
     /// The Training Academy, landblock 0x8602: where a new character from Holtburg's start area appears. ACE places a new
     /// character at <c>CharGen.StarterAreas[startArea].Locations[0]</c> (ACE.Server/Factories/PlayerFactory.cs, ACE
     /// @95ef426d), which the end-of-retail portal dat (CharGen 0x0E000002, start area 0, "Holtburg") gives as cell
@@ -112,6 +126,7 @@ public static class InteriorLocations
         Marketplace,
         MinesOfDespair,
         GlendenWoodDungeon,
+        BlackSpawnDenAluvian,
         TrainingAcademy,
         HoltburgShop,
         HoltburgSmithy,
@@ -139,10 +154,10 @@ public static class InteriorLocations
         return false;
     }
 
-    private static InteriorLocation Dungeon(string key, string name, uint cellId, Vector3 origin, double w, double z) =>
+    private static InteriorLocation Dungeon(string key, string name, uint cellId, Vector3 origin, double w, double z, string? source = null) =>
         new(
             key,
             InteriorKind.Dungeon,
             new WorldLocation(name, new CellPosition(cellId, origin), true, WorldLocations.HeadingFromQuaternion(w, z)),
-            $"{AcViewer}: \"{name}\" 0x{cellId:X8} [{origin.X} {origin.Y} {origin.Z}] {w} 0 0 {z}");
+            source ?? $"{AcViewer}: \"{name}\" 0x{cellId:X8} [{origin.X} {origin.Y} {origin.Z}] {w} 0 0 {z}");
 }

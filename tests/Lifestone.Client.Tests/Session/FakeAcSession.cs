@@ -30,6 +30,8 @@ internal enum FakeSendKind
     GetAndWieldItem,
     PutItemInContainer,
     StackableMerge,
+    Suicide,
+    AddSpellFavorite,
     Talk,
     Tell,
     LogOff,
@@ -176,6 +178,12 @@ internal sealed class FakeAcSession : IAcSession
 
     /// <inheritdoc/>
     public OutboundTicket SendChangeCombatMode(uint mode) => Send(new FakeSend(FakeSendKind.ChangeCombatMode, Amount: mode));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSuicide() => Send(new FakeSend(FakeSendKind.Suicide));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => Send(new FakeSend(FakeSendKind.AddSpellFavorite, spellId, Index: (int)index, Amount: bar));
 
     /// <inheritdoc/>
     public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => Send(new FakeSend(FakeSendKind.GetAndWieldItem, item, Amount: equipMask));

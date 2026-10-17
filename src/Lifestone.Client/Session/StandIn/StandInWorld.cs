@@ -41,7 +41,7 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
             or Contracts.ActionKind.Use or Contracts.ActionKind.QueryHealth or Contracts.ActionKind.LogOff or Contracts.ActionKind.Talk
             or Contracts.ActionKind.RaiseAttribute or Contracts.ActionKind.RaiseVital or Contracts.ActionKind.RaiseSkill or Contracts.ActionKind.TrainSkill
             or Contracts.ActionKind.CastSpell or Contracts.ActionKind.SetCombatMode or Contracts.ActionKind.Wield or Contracts.ActionKind.Unwield or Contracts.ActionKind.MoveToPack
-            or Contracts.ActionKind.MergeStack;
+            or Contracts.ActionKind.MergeStack or Contracts.ActionKind.Suicide or Contracts.ActionKind.AddSpellFavorite;
 
     private OutboundTicket Ticket() => new(0, _reducer.Clock.Time.GetTimestamp());
 
@@ -197,9 +197,15 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
         });
     }
 
-    /// <summary>A Use: a portal object of the visit answers UseDone and teleports the player; any other object is answered with UseDone and nothing else.</summary>
+    /// <summary>A Use: a lifestone binds the player (M3 3.2 db); a portal object of the visit answers UseDone and teleports the player; any other object is answered with UseDone and nothing else.</summary>
     internal OutboundTicket Use(uint guid)
     {
+        if (IsLifestone(guid))
+        {
+            Later(sink => UseLifestone(sink, guid)); // M3 3.2 db: StandInWorld.Death.cs
+            return Ticket();
+        }
+
         var portal = _visit.Objects.FirstOrDefault(o => o.Guid == guid && o.PortalTo is not null);
         Later(sink =>
         {
@@ -212,16 +218,25 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
         return Ticket();
     }
 
-    /// <summary>The health fraction the stand-in answers a QueryHealth with (a placeholder value; the stand-in has no creatures with health).</summary>
+    /// <summary>The health fraction the stand-in answers a QueryHealth with for an attackable object that has no health model (a placeholder value).</summary>
     internal const float PlaceholderHealth = 0.6f;
 
     /// <summary>
-    /// A QueryHealth: ACE answers (GameEvent 0x01C0 UpdateHealth) only for a creature, so the stand-in answers for an object of the visit whose description carries the attackable bit (0x10),
-    /// with <see cref="PlaceholderHealth"/>; any other object, and object 0 (the cancel), is not answered.
+    /// A QueryHealth: ACE answers (GameEvent 0x01C0 UpdateHealth) only for a creature, with <c>Health.Current / MaxValue</c> read when the query arrives (<c>WorldObject.cs</c> <c>QueryHealth</c>). The stand-in answers for a creature
+    /// it holds health for (<see cref="StandInObject.MaxHealth"/>, M3 3.1 fb) with its real fraction, and for any other object of the visit whose description carries the attackable bit (0x10) with <see cref="PlaceholderHealth"/>;
+    /// any other object, and object 0 (the cancel), is not answered.
     /// </summary>
     internal OutboundTicket QueryHealth(uint guid)
     {
-        if (_visit.Objects.Any(o => o.Guid == guid && (o.DescriptionFlags & 0x10) != 0))
+        if (TryCreature(guid, out var creature))
+        {
+            if (_reducer.State.Objects.Contains(guid))
+            {
+                var fraction = creature.Fraction;
+                Later(sink => sink.OnUpdateHealth(Context(sink), new GameEventHeader(_reducer.State.Self.Guid, 0, 0x01C0), new UpdateHealthEvent(guid, fraction)));
+            }
+        }
+        else if (_visit.Objects.Any(o => o.Guid == guid && (o.DescriptionFlags & 0x10) != 0))
         {
             Later(sink => sink.OnUpdateHealth(Context(sink), new GameEventHeader(_reducer.State.Self.Guid, 0, 0x01C0), new UpdateHealthEvent(guid, PlaceholderHealth)));
         }
@@ -234,9 +249,30 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
 
     private void Teleport(IAcSessionSink sink, StandInTeleport jump)
     {
+        DispelProtectionOnTeleport(sink); // M3 3.2 db: a teleport dispels the lifestone protection (Player_Location.cs 702)
         Teleports++;
         var sequence = (ushort)(_reducer.State.Self.Stamps.Teleport + 1);
         StandInSessions.SendTeleport(sink, _reducer.State.Self.Guid, jump, sequence);
+        if (UnhideAfterTeleport)
+        {
+            _reducer.StandIn!.At(_reducer.Clock.Now + UnhideAfterTeleportSeconds, UnhidePlayer);
+        }
+    }
+
+    /// <summary>
+    /// M3 3.2 dd (opt-in, <see cref="StandInServer.UnhideAfterTeleport"/>): ACE clears the player's Hidden state when the client's LoginComplete arrives after a teleport (<c>Player.OnTeleportComplete</c>), which ends the arrival
+    /// (<c>SelfTravel.Present</c>). The offline session refuses LoginComplete (there is no server), so a stand-in teleport leaves the player at <c>SelfTravel.TeleportArrived</c> for good; a scenario that waits for the player to be
+    /// present after a death's teleport (<c>DeathScenario</c>'s respawn) needs this. Off by default: the other checks run as they did.
+    /// </summary>
+    internal bool UnhideAfterTeleport { get; set; }
+
+    private const double UnhideAfterTeleportSeconds = 1.0;
+
+    private void UnhidePlayer(IAcSessionSink sink)
+    {
+        var self = _reducer.State.Self;
+        var stamps = self.Stamps;
+        sink.OnSetState(Context(sink), new SetStateMsg(self.Guid, PhysicsState.Gravity | PhysicsState.EdgeSlide, stamps.Instance, unchecked((ushort)(stamps.State + 1))));
     }
 
     private static void Say(IAcSessionSink sink, string text) => sink.OnServerMessage(Context(sink), new ServerMessageMsg(text, ToolsWire.ReplyChatType));

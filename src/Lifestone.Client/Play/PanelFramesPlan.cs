@@ -3,6 +3,7 @@ using System.Text;
 using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Widgets;
+using Lifestone.Client.Session.Contracts;
 
 namespace Lifestone.Client.Play;
 
@@ -35,6 +36,33 @@ public static class PanelFramesPlan
         [11] = [(0x10000228, 'a', "attributes"), (0x10000229, 'b', "skills")],
         [13] = [(0x100002A9, 'a', "spellbook"), (0x100002AA, 'b', "components")],
     };
+
+    /// <summary>
+    /// The review frames of the floaty windows that are not host pages (M3 3.2 pa): the combat window and the power bar, each taken in melee mode, named <c>c1-combat</c> and <c>c1-powerbar</c> (the spellcasting window's
+    /// <c>c2-...</c> frame is pb's, after these). The caller changes the mode (the UI notice, not a session action, so a live run's character is not touched), drives the power bar (<see cref="WindowFrame.DrivePowerBar"/>: M3 has no attack to
+    /// begin it, so the frame shows it begun by hand at <see cref="WindowFrame.PowerBarLevel"/>, a placeholder), takes the shot and puts the mode back.
+    /// </summary>
+    public static IReadOnlyList<WindowFrame> WindowFrames { get; } =
+    [
+        new("c1-combat", 0x1000005C, 2, false),
+        new("c1-powerbar", 0x10000044, 2, true),
+    ];
+
+    /// <summary>
+    /// The review frame of the spellcasting window (M3 3.2 pb): <c>c2-spellcasting</c>, taken in Magic mode. It is not in <see cref="WindowFrames"/> because pa's play-check loop over that list drives the combat window and the
+    /// power bar only; the window's own checks (<c>PlayChecks.PanelC2.cs</c>) and the panel shots (<see cref="AllWindowFrames"/>) take it after pa's rows.
+    /// </summary>
+    public static WindowFrame SpellcastingFrame { get; } = new("c2-spellcasting", 0x10000061, CombatModes.Magic, false);
+
+    /// <summary>Every floaty window's frame in the order the panel shots take them: pa's <see cref="WindowFrames"/>, then <see cref="SpellcastingFrame"/>.</summary>
+    public static IReadOnlyList<WindowFrame> AllWindowFrames { get; } = [.. WindowFrames, SpellcastingFrame];
+
+    /// <summary>The file name of <paramref name="frame"/>: <c>&lt;name&gt;.png</c>.</summary>
+    public static string FileName(WindowFrame frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        return frame.Name + ".png";
+    }
 
     /// <summary>The file name of the frame of <paramref name="page"/> (the whole page, no tab): <c>&lt;panelId&gt;-&lt;name&gt;.png</c>, the name in lower case with each run of other characters as one hyphen ("7-inventory-backpack-and-paperdoll.png").</summary>
     public static string FileName(PanelPage page)
@@ -108,6 +136,23 @@ public static class PanelFramesPlan
         return pageElement is UiPanel panel && (panel.OpenTabId == frame.TabButton || panel.OpenTab(frame.TabButton)) && panel.OpenTabId == frame.TabButton;
     }
 
+    /// <summary>
+    /// Opens, for the <c>c2-spellcasting</c> frame, the first tab of <paramref name="window"/> whose bar holds spells (a click on its tab button, as <see cref="OpenTab"/> does a page's tab): the live character's spells sit on bars 1 and 2, so
+    /// retail's own opening tab (the first) would be an empty list in the shot (M3 3.2 fix B, 3.2-R7). When no bar holds spells the open tab stays. The caller logs <see cref="SpellcastingTabChoice"/> and puts the earlier tab back
+    /// with <see cref="GameSpellcastingPanel.OpenTabByClick"/> after the shot.
+    /// </summary>
+    public static SpellcastingTabChoice OpenSpellcastingFrameTab(GameSpellcastingPanel window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        var tab = window.FirstTabWithSpells();
+        if (tab < 0)
+        {
+            return new SpellcastingTabChoice(window.OpenTab, false, true);
+        }
+
+        return new SpellcastingTabChoice(tab, true, window.OpenTabByClick(tab));
+    }
+
     /// <summary>The verdict line of a panel frames run: <c>panel frames done captured=N failures=F</c>.</summary>
     public static string Verdict(int captured, int failures) =>
         string.Create(CultureInfo.InvariantCulture, $"{VerdictText} captured={captured} failures={failures}");
@@ -144,3 +189,20 @@ public static class PanelFramesPlan
 /// <param name="Letter">The tab's letter in the file name ('a', 'b'), or '\u0000'.</param>
 /// <param name="TabName">The tab's name in the file name, or empty.</param>
 public sealed record PanelFrame(PanelPage Page, uint TabButton, char Letter, string TabName);
+
+/// <summary>One review frame of a floaty window that is not a host page (<see cref="PanelFramesPlan.WindowFrames"/>).</summary>
+/// <param name="Name">The file name without extension (<c>c1-combat</c>).</param>
+/// <param name="WindowId">The window's element id in the gameplay layout; the frame is taken when it shows.</param>
+/// <param name="CombatMode">The combat mode (<c>CombatModes</c>: 2 melee) the window is shown in.</param>
+/// <param name="DrivePowerBar">True when the frame begins the power bar by hand first (an advanced-mode bar at <see cref="PowerBarLevel"/>) and finishes it after.</param>
+public sealed record WindowFrame(string Name, uint WindowId, int CombatMode, bool DrivePowerBar)
+{
+    /// <summary>The level the power bar shows in its frame (a placeholder: nothing in M3 charges a bar).</summary>
+    public const float PowerBarLevel = 0.6f;
+}
+
+/// <summary>The tab the spellcasting frame shows (<see cref="PanelFramesPlan.OpenSpellcastingFrameTab"/>).</summary>
+/// <param name="Tab">The tab (0 to 7) that is open for the shot.</param>
+/// <param name="HoldsSpells">True when the tab was chosen because its bar holds spells; false when no bar does (the open tab stays).</param>
+/// <param name="Opened">True when the tab is the open one.</param>
+public readonly record struct SpellcastingTabChoice(int Tab, bool HoldsSpells, bool Opened);

@@ -18,7 +18,7 @@ namespace Lifestone.Client.Tests.Session.Mage;
 public sealed class BuffScenarioTests
 {
     private static readonly Regex Verdict = new(
-        @"^gear=(wielded|failed) worn=\d buffs=\d+/24 levels=(n/a|(\w+:(I|II|III|IV|V|VI|VII|VIII|-),){23}\w+:(I|II|III|IV|V|VI|VII|VIII|-)) rebuffed=(yes|no) forced=(yes|no) min_remaining_s=(\d+|n/a) transfers=\d+/\d+ revitalizes=\d+ fizzles=\d+ mana_min=(\d+|n/a) cycle_s=\d+ misses=\S+$",
+        @"^gear=(wielded|failed) worn=\d buffs=\d+/24 levels=(n/a|(\w+:(I|II|III|IV|V|VI|VII|VIII|-),){23}\w+:(I|II|III|IV|V|VI|VII|VIII|-)) rebuffed=(yes|no) forced=(yes|no) min_remaining_s=(\d+|n/a) transfers=\d+/\d+ revitalizes=\d+ fizzles=\d+ mana_min=(\d+|n/a) cycle_s=\d+ misses=\S+ surpassed=\d+$",
         RegexOptions.CultureInvariant);
 
     /// <summary>The session view over the scripted rig: the real read model, clock, bus and Action API.</summary>
@@ -120,7 +120,7 @@ public sealed class BuffScenarioTests
         Assert.Matches(Verdict, verdict);
         Assert.StartsWith("gear=wielded worn=5 buffs=24/24 levels=Focus:VII,", verdict, StringComparison.Ordinal);
         Assert.Contains(" rebuffed=yes forced=yes ", verdict, StringComparison.Ordinal);
-        Assert.EndsWith(" misses=none", verdict, StringComparison.Ordinal);
+        Assert.EndsWith(" misses=none surpassed=0", verdict, StringComparison.Ordinal);
         Assert.Equal(0, scenario.Gear.GearSteps); // a ready mage: the gear stage sent nothing
         Assert.Contains(t.R.H.Log.Lines, l => l.Contains("verdict gear=wielded", StringComparison.Ordinal));
 

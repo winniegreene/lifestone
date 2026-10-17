@@ -240,6 +240,10 @@ internal sealed class ThrowawayLegFakeAccount : IGameSessionView, IActionApi, IT
 
     public ActionHandle MergeStack(uint from, uint to, int amount, ActionSource source = ActionSource.Host) => throw new NotSupportedException();
 
+    public ActionHandle Suicide(ActionSource source = ActionSource.Host) => throw new NotSupportedException();
+
+    public ActionHandle AddSpellFavorite(uint spellId, int index, int bar, ActionSource source = ActionSource.Host) => throw new NotSupportedException();
+
     public ActionHandle Talk(string text, ActionSource source) => throw new NotSupportedException();
 
     public ActionHandle Tell(string target, string text, ActionSource source) => throw new NotSupportedException();

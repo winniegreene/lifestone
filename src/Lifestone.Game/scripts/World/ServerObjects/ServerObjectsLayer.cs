@@ -68,6 +68,7 @@ public sealed partial class ServerObjectsLayer : Node3D
     private int _twinParts;
     private int _solidFadingParts;
     private bool _wasActive;
+    private ProjectileWarmUp? _projectileWarm;
 
     public ServerObjectsLayer(GameServices services, WorldRoot world, InteriorController? interiors, ObjectLightTable lights)
     {
@@ -83,6 +84,8 @@ public sealed partial class ServerObjectsLayer : Node3D
         _indoor = new ServerObjectMeshes(services, SurfaceLighting.DynamicCellObject);
         Name = "ServerObjectsLayer";
         ProcessPriority = Priority;
+        _projectileWarm = new ProjectileWarmUp(services, _outdoor, _indoor); // M3 3.1 fc: the war spells' bolts are prepared on workers from the first frame (Poll hands the worker's plan to the meshes)
+        _projectileWarm.Start();
         world.OriginShifted += (_, _, _) => _originEpoch++;
     }
 
@@ -129,6 +132,18 @@ public sealed partial class ServerObjectsLayer : Node3D
     /// <summary>True once any frame drew a fading part solid for want of its twin (<c>TODO(g5-translucency-twin)</c> was logged); the fade checks fail on it.</summary>
     public bool TwinMissing => _translucencyLogged;
 
+    /// <summary>The projectile warm-up (M3 3.1 lane fc), or null once it finished and was released.</summary>
+    public ProjectileWarmUp? ProjectileWarm => _projectileWarm;
+
+    /// <summary>Projectiles shown over the run (every part mesh attached), counted once each.</summary>
+    public long ProjectilesShown { get; private set; }
+
+    /// <summary>The most frames any projectile waited for its part meshes before it was first shown (0: it drew on the frame its create was applied).</summary>
+    public int MaxProjectileWaitFrames { get; private set; }
+
+    /// <summary>Frames the last projectile shown waited before its first draw.</summary>
+    public int LastProjectileWaitFrames { get; private set; }
+
     /// <summary>Batches that exist (one per mesh variant and layer in use).</summary>
     public int BatchCount => _slots.Count;
 
@@ -163,6 +178,7 @@ public sealed partial class ServerObjectsLayer : Node3D
         _frameNo++;
         _outdoor.BeginFrame();
         _indoor.BeginFrame();
+        _projectileWarm?.Poll();
         UploadsLastFrame = 0;
         _drawn = 0;
         _waiting = 0;
@@ -294,11 +310,23 @@ public sealed partial class ServerObjectsLayer : Node3D
             if (!complete)
             {
                 _waiting++;
+                if (avatar.Body.IsProjectile)
+                {
+                    state.WaitFrames++;
+                }
+
                 return;
             }
 
             state.Shown = true;
             Shown++;
+            if (avatar.Body.IsProjectile)
+            {
+                ProjectilesShown++;
+                LastProjectileWaitFrames = state.WaitFrames;
+                MaxProjectileWaitFrames = Math.Max(MaxProjectileWaitFrames, state.WaitFrames);
+                Log.Info("serverobjects", "projectile shown", ("guid", $"0x{draw.Guid:X8}"), ("waited_frames", state.WaitFrames), ("warm", _projectileWarm is { Done: true }), ("parts", parts.Length));
+            }
         }
 
         var slot = inCell ? _interiors!.SlotOf(draw.CellId) : 0;
@@ -356,10 +384,13 @@ public sealed partial class ServerObjectsLayer : Node3D
             any = true;
         }
 
-        if (any)
+        // A projectile counts as shown (AvatarStats.ProjectilesShown, 3.1-R6: not "drawn") when it is shown, whether or not a part has a mesh to put in a batch: the war spells' bolts have a Setup part whose GfxObj degrades to nothing (the Flame Bolt's 0x010001EC
+        // has no level that draws), and what the player sees of them is the particles of their scripts, which ServerObjectParticles hands to the particle renderer for any shown avatar with emitters.
+        if (any || avatar.Body.IsProjectile)
         {
             _drawn++;
             state.DrawnFrame = _frameNo;
+            avatars.NoteDrawn(avatar); // a projectile's first shown frame counts (AvatarStats.ProjectilesShown)
         }
     }
 
@@ -618,6 +649,7 @@ public sealed partial class ServerObjectsLayer : Node3D
         public ArrayMesh?[] Last { get; } = new ArrayMesh?[partCount];
 
         public bool Shown;
+        public int WaitFrames;
         public long SeenFrame;
         public long DrawnFrame = -1;
         public int LightRow = -1;

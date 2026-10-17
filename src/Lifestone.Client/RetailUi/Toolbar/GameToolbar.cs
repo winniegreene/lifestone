@@ -1,6 +1,7 @@
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Dialogs;
+using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.Session.Contracts;
 
@@ -15,7 +16,9 @@ namespace Lifestone.Client.RetailUi.Toolbar;
 /// <item>The seven <b>panel buttons</b> (social, spell management, skill management, quest management, map, options, inventory) have no handler in retail's toolbar: each is a button whose click action (property 0x12)
 /// is the input action that toggles its page of the panel host (<c>UIElementManager::DoVisibilityToggleAction</c>, 11.6096 0x0045B740). Lifestone keeps that, and <see cref="Panels.GamePanelHost"/> answers the page that opens.</item>
 /// <item>The <b>action buttons</b> are heard here (<c>gmToolbarUI::ListenToElementMessage</c>, 11.6096 0x004BFB20): the four combat-mode buttons call <c>ToggleCombatMode</c>, Examine calls
-/// <c>ClientUISystem::ExamineObject</c> (or asks for a target) and Use calls <c>ItemHolder::UseObject</c> (or asks for a target). Use uses the selected object through the action layer (nothing happens without a selection, R10); the rest (combat, examination) is gameplay M3 builds later (item 3.2) and opens the NotInM3 message.</item>
+/// <c>ClientUISystem::ExamineObject</c> (or asks for a target) and Use calls <c>ItemHolder::UseObject</c> (or asks for a target). Use uses the selected object through the action layer (nothing happens without a selection, R10). <b>M3 3.2:</b> the combat buttons
+/// change the combat mode through <see cref="IActionApi.SetCombatMode"/> (<see cref="CombatModeRules.Toggle"/>: <c>ClientCombatSystem::ToggleCombatMode</c>, 11.6096 0x0056D610, asks for the wielded weapon's mode from non-combat and for non-combat otherwise) and the layout's button for the current mode
+/// shows (<see cref="SetCombatModeButtons"/>); Examination (gameplay M3 builds later) still opens the NotInM3 message.</item>
 /// </list>
 /// The selection display (name, health and mana meters), the stack slider and the shortcut slots wait for selection (g5) and for items (the gameplay milestone): they keep the layout's art.
 /// </summary>
@@ -47,6 +50,7 @@ public sealed class GameToolbar : IUiElementListener
 
     private readonly UiLoginContext _context;
     private readonly Dictionary<uint, string> _features = [];
+    private int _combatMode;
 
     /// <summary>The toolbar of <paramref name="window"/> (null when the layout lacks it).</summary>
     public GameToolbar(UiLoginContext context, UiElement? window)
@@ -54,11 +58,6 @@ public sealed class GameToolbar : IUiElementListener
         ArgumentNullException.ThrowIfNull(context);
         _context = context;
         Window = window;
-        foreach (var id in CombatButtonIds)
-        {
-            _features[id] = "Combat and spellcasting";
-        }
-
         _features[ExamineButtonId] = "Examination";
         window?.RegisterForElementMessages(this);
     }
@@ -71,6 +70,30 @@ public sealed class GameToolbar : IUiElementListener
 
     /// <summary>The toolbar window, or null.</summary>
     public UiElement? Window { get; }
+
+    /// <summary>Where the chat line of a held item that forbids combat goes (the shell's local chat); null: only logged.</summary>
+    public Action<string>? ChatNotice { get; set; }
+
+    /// <summary>The combat button presses so far.</summary>
+    public int CombatPresses { get; private set; }
+
+    /// <summary>The combat mode the buttons show (<see cref="CombatModes"/>; 0 before any notice).</summary>
+    public int ShownCombatMode => _combatMode;
+
+    /// <summary>
+    /// <c>gmToolbarUI::RecvNotice_SetCombatMode</c> (11.6096 0x004BE2A0): the button for <paramref name="mode"/> shows (0x10000192 non-combat, 0x10000193 melee, 0x10000194 missile, 0x10000195 magic) and the others hide.
+    /// The combat window (<see cref="Panels.GameCombatPanel"/>) calls it on <c>CombatModeChanged</c>, because the toolbar has no end of life to unsubscribe at. Retail also ghosts the shortcut slots that hold spells outside the
+    /// magic mode; the slots wait for items (<c>TODO(m3-toolbar-shortcut-ghost)</c>).
+    /// </summary>
+    public void SetCombatModeButtons(int mode)
+    {
+        _combatMode = mode;
+        var shown = mode switch { CombatModes.Melee => 1, CombatModes.Missile => 2, CombatModes.Magic => 3, _ => 0 };
+        for (var i = 0; i < CombatButtonIds.Count; i++)
+        {
+            Window?.GetChildRecursive(CombatButtonIds[i])?.SetVisible(i == shown);
+        }
+    }
 
     /// <summary>The feature an action button opens the message for, or null when <paramref name="buttonId"/> is not one.</summary>
     public string? FeatureOf(uint buttonId) => _features.TryGetValue(buttonId, out var feature) ? feature : null;
@@ -95,12 +118,21 @@ public sealed class GameToolbar : IUiElementListener
             return UiListenResult.Handled;
         }
 
+        if (message.MessageId == UiMessageIds.ButtonClick && IsCombatButton(message.Element.ElementId))
+        {
+            CombatPresses++;
+            CombatModeRules.Toggle(_context.Session, _context.Manager.Services.Log, ChatNotice);
+            return UiListenResult.Handled;
+        }
+
         if (message.MessageId == UiMessageIds.ButtonClick && _features.TryGetValue(message.Element.ElementId, out var feature))
         {
-            NotInM3.Show(_context.Manager.Dialogs, _context.Manager.Services.Log, feature); // the combat panel is item 3.2's
+            NotInM3.Show(_context.Manager.Dialogs, _context.Manager.Services.Log, feature);
             return UiListenResult.Handled;
         }
 
         return UiListenResult.Default;
     }
+
+    private static bool IsCombatButton(uint id) => id is >= 0x10000192 and <= 0x10000195;
 }

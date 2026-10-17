@@ -25,6 +25,9 @@ public static class AvatarStateBits
     /// <summary>Not drawn (<c>set_nodraw</c>).</summary>
     public const uint NoDraw = 0x20;
 
+    /// <summary>A missile (a spell projectile, an arrow): flies on its own velocity until the server says it hit (M3 3.1 lane fc).</summary>
+    public const uint Missile = 0x40;
+
     /// <summary>Turns to face the direction it moves.</summary>
     public const uint AlignPath = 0x100;
 
@@ -314,6 +317,26 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
     /// <summary>Interpolating to a server position.</summary>
     public bool IsInterpolating => Positions.IsInterpolating;
 
+    /// <summary>
+    /// True for an object the server created in the Missile state (a spell projectile): it flies on its own velocity, with gravity only when its state says Gravity (<see cref="MissileAcceleration"/>), until the
+    /// server's state and vector updates stop it and its F747 removes it. Sticky: the hit's state change keeps the Missile bit, and the flag keeps the object a projectile whatever a later state says.
+    /// </summary>
+    public bool IsProjectile { get; private set; }
+
+    /// <summary>
+    /// True for <c>--retail-sphereless-missile</c>: a projectile whose Setup has no spheres keeps its origin as retail's <c>CPhysicsObj::UpdateObjectInternal</c> (11.6096 0x005161B0, 11.4186 0x005156B0; <c>CPartArray::GetNumSphere</c>
+    /// 0x00518B90 is 0) does for any object, so it never flies. Default false (a glitch fix: every retail projectile Setup has a sphere, so only a placeholder or an unknown Setup meets the branch, and a bolt that hangs
+    /// where it was created is not worth reproducing). Set by <see cref="AvatarSet"/> when the body is made.
+    /// </summary>
+    public bool RetailSpherelessMissile { get; internal set; }
+
+    /// <summary>
+    /// Retail <c>CPhysicsObj::calc_acceleration</c> (11.6096 0x00511420) for an object off the ground: (0, 0, gravity) when the state has Gravity, else 0 (a bolt flies straight). The ground rule
+    /// (contact and walkable ground zero it) does not apply to a projectile: it has no contact (no transition runs, D24).
+    /// </summary>
+    private static Vector3 MissileAcceleration(uint state) =>
+        (state & AvatarStateBits.Gravity) != 0 ? new Vector3(0f, 0f, PhysicsGlobals.Gravity) : Vector3.Zero;
+
     /// <summary>Retail <c>state</c> Gravity.</summary>
     public bool HasGravity => (State & AvatarStateBits.Gravity) != 0;
 
@@ -393,6 +416,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
             SetPlacementFrame(create.Placement);
         }
 
+        IsProjectile = (create.PhysicsState & AvatarStateBits.Missile) != 0;
         SetCreationState(create.PhysicsState);
         Active = Driver is MotionPlayer || create.Movement is not null || (State & AvatarStateBits.Static) == 0;
         Scale = create.Scale;
@@ -400,6 +424,11 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         SetVelocity(create.Velocity);
         Omega = create.Omega;
         Acceleration = create.Acceleration;
+        if (IsProjectile && Acceleration == Vector3.Zero)
+        {
+            Acceleration = MissileAcceleration(State);
+        }
+
         Effects.DefaultScript = create.DefaultScript;
         Effects.DefaultScriptIntensity = create.DefaultScriptIntensity;
         Time = now;
@@ -587,6 +616,11 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
     private HiddenChange ApplyState(uint old, uint newState)
     {
         State = newState;
+        if (IsProjectile && ((old ^ newState) & AvatarStateBits.Gravity) != 0)
+        {
+            Acceleration = MissileAcceleration(newState);
+        }
+
         var change = HiddenChange.None;
         if (((old ^ newState) & AvatarStateBits.Hidden) != 0)
         {
@@ -887,9 +921,10 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
             var old = Position;
             var newOrigin = newFrame.Origin;
             var probe = step.GroundProbe;
-            if (Setup.Spheres.Count == 0)
+            if (Setup.Spheres.Count == 0 && (!IsProjectile || RetailSpherelessMissile))
             {
-                // CPartArray::GetNumSphere (0x00518060; TODO(avatars): 11.6096) is 0: retail puts the old origin back into
+                // A projectile moves through the else branch below unless --retail-sphereless-missile (the registered glitch fix; AvatarSet.Create logs a glitch-fix notice once per such Setup).
+                // CPartArray::GetNumSphere (11.6096 0x00518B90, 11.4186 0x00518060) is 0 in CPhysicsObj::UpdateObjectInternal (11.6096 0x005161B0, 11.4186 0x005156B0): retail puts the old origin back into
                 // the new frame, so only the rotation changes. Root motion, interpolation and velocity never move the
                 // object (its interpolation fails its progress checks and the position manager blips it), and AlignPath
                 // does not turn it. No transition runs, so the ground probe that stands in for one (D24) does not either.

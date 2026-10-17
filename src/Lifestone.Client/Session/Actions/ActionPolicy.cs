@@ -115,6 +115,11 @@ internal static class ActionPolicy
     /// <summary>Wield, Unwield and MoveToPack: until the inventory message (0x0023, 0x0022) or the refusal (0x00A0).</summary>
     internal const double InventorySeconds = 5;
 
+    /// <summary>
+    /// Suicide (M3 3.2 s0): until the player's death is seen, on the session clock from the send. ACE speaks five lines 3 s apart and then kills the player, so the death comes 15 s after the send; the limit is twice that.
+    /// </summary>
+    internal const double SuicideSeconds = 30;
+
     /// <summary>A player-tool request: until the mod's reply (m2-plan §4.12).</summary>
     internal const double ToolSeconds = 5;
 

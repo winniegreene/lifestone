@@ -45,6 +45,18 @@ public enum LoginCheckKind
     /// (<see cref="Lifestone.Client.Session.Scenarios.BuffLegVerdict"/>).
     /// </summary>
     Buff,
+
+    /// <summary>
+    /// <c>--login-check=bsd-fight</c> (M3 3.1): a separate check, never part of <see cref="All"/>. Enters the mage (BSD Mage), goes to the Aluvian Black Spawn Den, tops up the buffs and fights the
+    /// tuskers on the arrival's floor with Flame Bolt, logs off and judges what it measured (<see cref="Lifestone.Client.Session.Scenarios.FightLegVerdict"/>).
+    /// </summary>
+    BsdFight,
+
+    /// <summary>
+    /// <c>--login-check=bsd-death</c> (M3 3.2): a separate check, never part of <see cref="All"/>. Enters the mage (BSD Mage), binds at Holtburg's lifestone, goes to the Aluvian Black Spawn Den, is unbuffed by a suicide,
+    /// dies to the tuskers, respawns at the lifestone, re-gears, logs off and judges what it measured (<see cref="Lifestone.Client.Session.Scenarios.DeathLegVerdict"/>).
+    /// </summary>
+    BsdDeath,
 }
 
 /// <summary>
@@ -78,8 +90,8 @@ public sealed record PlayOptions
     public bool ScreenshotAfterGiven { get; init; }
 
     /// <summary>
-    /// The PNG the buff leg saves mid-cast (M3 2.1 s3): <c>--play-screenshot=PATH</c> with <c>--login-check=buff</c> and no <c>--play-screenshot-after</c> moves the path here, so play mode's own capture
-    /// (a fixed wait after the player is placed, then quit) does not fire; null otherwise.
+    /// The PNG the buff leg saves mid-cast (M3 2.1 s3), or the stem of the fight leg's three frames (M3 3.1 fd): <c>--play-screenshot=PATH</c> with <c>--login-check=buff</c> or <c>bsd-fight</c> and no
+    /// <c>--play-screenshot-after</c> moves the path here, so play mode's own capture (a fixed wait after the player is placed, then quit) does not fire; null otherwise.
     /// </summary>
     public string? BuffShotPath { get; init; }
 
@@ -91,6 +103,9 @@ public sealed record PlayOptions
 
     /// <summary>True for <c>--retail-picking</c>: retail's picking rules where Lifestone fixes them (<see cref="RayPicking.Pick"/>; docs/avatars.md §18). Default false.</summary>
     public bool RetailPicking { get; init; }
+
+    /// <summary>True for <c>--retail-sphereless-missile</c>: a projectile whose Setup has no spheres never moves, as retail's sphereless branch (docs/avatars.md section 17; <c>AvatarSet.RetailSpherelessMissile</c>). Default false: it flies on its own velocity.</summary>
+    public bool RetailSphereless { get; init; }
 
     /// <summary>True for <c>--retail-unhide-flash</c>: retail's one opaque frame after an unhide that follows a re-hide mid-fade (docs/avatars.md section 17). Default false: that frame is not drawn.</summary>
     public bool RetailUnhideFlash { get; init; }
@@ -177,6 +192,12 @@ public sealed record PlayOptions
                 continue;
             }
 
+            if (argument.Name == "--retail-sphereless-missile")
+            {
+                options = options with { RetailSphereless = true };
+                continue;
+            }
+
             if (argument.Name == "--retail-unhide-flash")
             {
                 options = options with { RetailUnhideFlash = true };
@@ -211,14 +232,16 @@ public sealed record PlayOptions
                         ("holtburg-laps", LoginCheckKind.HoltburgLaps),
                         ("throwaway", LoginCheckKind.Throwaway),
                         ("buff", LoginCheckKind.Buff),
+                        ("bsd-fight", LoginCheckKind.BsdFight),
+                        ("bsd-death", LoginCheckKind.BsdDeath),
                         ("all", LoginCheckKind.All)),
                 };
             }
         }
 
-        if (options is { LoginCheck: LoginCheckKind.Buff, ScreenshotPath: { } shot, ScreenshotAfterGiven: false })
+        if (options is { LoginCheck: LoginCheckKind.Buff or LoginCheckKind.BsdFight or LoginCheckKind.BsdDeath, ScreenshotPath: { } shot, ScreenshotAfterGiven: false })
         {
-            options = options with { ScreenshotPath = null, BuffShotPath = shot }; // the buff leg takes its own frame, mid-cast
+            options = options with { ScreenshotPath = null, BuffShotPath = shot }; // the buff leg takes its own frames, mid-cast, and the fight leg its three
         }
 
         return options with { Errors = errors };

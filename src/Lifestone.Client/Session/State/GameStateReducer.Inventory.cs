@@ -30,6 +30,7 @@ internal sealed partial class GameStateReducer
     private const uint ItemTypeContainer = 0x200;
 
     private readonly HashSet<uint> _inventoryNotedProperties = [];
+    private bool _heldDeleteNoted;
 
     /// <summary>
     /// The PlayerDescription's <c>Inventory</c> (the main pack, in wire order) and <c>Equipped</c> lists, applied after the qualities (the one call from <c>OnPlayerDescription</c>). A description
@@ -288,6 +289,33 @@ internal sealed partial class GameStateReducer
             Changed();
             Publish(new InventoryChanged(InventoryChangeKind.Added, item.Guid, container, inventory.Find(item.Guid).Placement));
         }
+    }
+
+    /// <summary>
+    /// F747 ObjectDelete for an item the player holds: it leaves the model too. ACE's death drop of a WIELDED item is <c>TryDequipObjectWithNetworking(ToCorpseOnDeath)</c> (<c>Player_Inventory.cs</c> 397-441, called from
+    /// <c>Player_Death.cs</c> 548 and 565): 02DA Wielder 0, 02CE CurrentWieldedLocation 0, F74A PickupEvent, the unwield sound and F747 DeleteObject, and no 0024 (a pack item gets 02DA Container 0 and 0024 instead,
+    /// <c>TryRemoveFromInventoryWithNetworking</c> 217-226). Without this the equipped list kept the guid of an object that no longer existed, and a re-gear counted it as an item with no world object (live, M3 3.2).
+    /// <para><b>Retail.</b> The client takes an F747 through <c>CM_Physics::DispatchSB_DeleteObject</c> (11.6096 0x006AD600) to <c>SmartBox::HandleDeleteObject</c> (0x00451EE0: refuses the player's own guid, queues a blob for an
+    /// object it does not know yet, compares the instance timestamp), then <c>ACCObjectMaint::DeleteObject</c> (0x00558330: tells the plugin interface and marks a corpse deleted) and <c>CObjectMaint::DeleteObject(id)</c>
+    /// (0x00508FA0), which destroys the physics object (out of the world, out of its parent) and the weenie object, whatever container or slot held it. Lifestone's model forgets the held entry with it, as an object that no longer
+    /// exists must be. <c>TODO(m3-inventory-delete-retail)</c>: whether the weenie's destruction hook (the virtual call <c>CObjectMaint::DeleteObject</c> makes before it removes the weenie from its tables) also takes the item
+    /// out of retail's placement list was not read; the first such release is logged with the name, so a live round shows when it mattered.</para>
+    /// </summary>
+    private void ReleaseDeletedHeld(uint guid)
+    {
+        var inventory = _state.Self.Inventory;
+        if (!inventory.IsKnown || !inventory.Contains(guid))
+        {
+            return;
+        }
+
+        if (!_heldDeleteNoted)
+        {
+            _heldDeleteNoted = true;
+            _log.Info(SessionLog.Category, "TODO(m3-inventory-delete-retail): a held object was deleted by its F747 and the held entry released; retail's placement-list handling of it is not read; first seen", new LogField("guid", guid));
+        }
+
+        Leave(guid, InventoryChangeKind.Removed, MessageOpcodes.ObjectDelete);
     }
 
     /// <summary>An item leaves the player's holdings (0024, 019A, or a 0022 into a container that is not the player's).</summary>

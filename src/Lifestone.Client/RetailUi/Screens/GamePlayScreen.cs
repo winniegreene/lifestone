@@ -90,6 +90,12 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             registry.Register(classId, static (in UiElementInit init) => new UiElement(init));
         }
 
+        // M3 3.2 s0: the three floaty windows of the combat and spell slices (docs/milestones/m3-plan.md section 4.8) are plain containers until their controllers land: gmCombatUI (0x1000000C), gmPowerbarUI (0x1000000F)
+        // and gmSpellcastingUI (0x10000015). They are windows of the gameplay layout, not host pages; layout-combat.txt, layout-powerbar.txt and layout-spellcasting.txt (PanelLayoutDumpTests) show each subtree.
+        registry.Register(0x1000000C, static (in UiElementInit init) => new UiElement(init));
+        registry.Register(0x1000000F, static (in UiElementInit init) => new UiElement(init));
+        registry.Register(0x10000015, static (in UiElementInit init) => new UiElement(init));
+
         GamePanels.RegisterClasses(registry); // the panel slices' own classes (M3 2.2: GamePanels.A1.cs ... B3.cs)
     }
 

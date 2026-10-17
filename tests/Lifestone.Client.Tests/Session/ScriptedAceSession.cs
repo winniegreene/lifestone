@@ -529,6 +529,16 @@ internal sealed class ScriptedAceSession : IAcSession
     public OutboundTicket SendChangeCombatMode(uint mode) => WorldAction(GameActionTypes.ChangeCombatMode, mode, 0, 0, 1);
 
     /// <inheritdoc/>
+    public OutboundTicket SendSuicide()
+    {
+        WorldActionSends.Add((GameActionTypes.Suicide, 0, 0, 0));
+        return Action(GameActionTypes.Suicide, _ => { });
+    }
+
+    /// <inheritdoc/>
+    public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => WorldAction(GameActionTypes.AddSpellFavorite, spellId, index, bar, 3);
+
+    /// <inheritdoc/>
     public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => WorldAction(GameActionTypes.GetAndWieldItem, item, equipMask, 0, 2);
 
     /// <inheritdoc/>

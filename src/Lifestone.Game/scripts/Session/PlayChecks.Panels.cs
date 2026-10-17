@@ -8,7 +8,7 @@ namespace Lifestone.Game.Sessions;
 
 /// <summary>
 /// The play checks of the panel pages (M3 2.2 s0, docs/milestones/m3-plan.md section 4.6): <see cref="PanelChecksAsync"/> runs once from <c>CheckAllAsync</c>, in the world after the tools teleport (M3 2.2 lead: before the server teleport the panel phase outlasted the stand-in's fixed teleport time). It calls
-/// one hook per slice (<c>PlayChecks.PanelA1.cs</c> ... <c>PlayChecks.PanelB3.cs</c>, each a slice's own file: it writes its asserts there and nothing else), then takes the frame of every page that has
+/// one hook per slice (<c>PlayChecks.PanelA1.cs</c> ... <c>PlayChecks.PanelC2.cs</c>, each a slice's own file: it writes its asserts there and nothing else), then takes the frame of every page that has
 /// a controller. A slice opens its page with <see cref="OpenPanelAsync"/> (the path a toolbar click takes), asserts, and closes it with <see cref="ClosePanelAsync"/>.
 /// </summary>
 public sealed partial class PlayChecks
@@ -25,6 +25,10 @@ public sealed partial class PlayChecks
     private partial Task PanelB2ChecksAsync(GamePlayScreen shell);
 
     private partial Task PanelB3ChecksAsync(GamePlayScreen shell);
+
+    private partial Task PanelC1ChecksAsync(GamePlayScreen shell);
+
+    private partial Task PanelC2ChecksAsync(GamePlayScreen shell);
 
     private async Task PanelChecksAsync(GamePlayScreen? shell)
     {
@@ -46,6 +50,8 @@ public sealed partial class PlayChecks
         await PanelB1ChecksAsync(shell);
         await PanelB2ChecksAsync(shell);
         await PanelB3ChecksAsync(shell);
+        await PanelC1ChecksAsync(shell);
+        await PanelC2ChecksAsync(shell);
 
         if (_framesDirectory is not { } directory)
         {

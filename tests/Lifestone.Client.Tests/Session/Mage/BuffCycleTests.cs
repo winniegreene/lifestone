@@ -15,7 +15,7 @@ namespace Lifestone.Client.Tests.Session.Mage;
 public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     private static readonly Regex Fields = new(
-        @"^buffs=\d+/24 levels=(\w+:(I|II|III|IV|V|VI|VII|VIII|-),){23}\w+:(I|II|III|IV|V|VI|VII|VIII|-) rebuffed=(yes|no) min_remaining_s=(\d+|n/a) fizzles=\d+ transfers=\d+/\d+ revitalizes=\d+ mana_min=(\d+|n/a) cycle_s=\d+ mode_changes=\d+ misses=\S+( forced=yes)?$",
+        @"^buffs=\d+/24 levels=(\w+:(I|II|III|IV|V|VI|VII|VIII|-),){23}\w+:(I|II|III|IV|V|VI|VII|VIII|-) rebuffed=(yes|no) min_remaining_s=(\d+|n/a) fizzles=\d+ transfers=\d+/\d+ revitalizes=\d+ mana_min=(\d+|n/a) cycle_s=\d+ mode_changes=\d+ misses=\S+( forced=yes)? surpassed=\d+$",
         RegexOptions.CultureInvariant);
 
     private sealed class Rig
@@ -304,6 +304,33 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_piece_whose_armour_cast_was_surpassed_holds_a_stronger_version_and_the_line_counts_active()
+    {
+        // ACE: "You cast <spell> on <item>, but it is surpassed by <spell>" (WorldObject_Magic.cs 419): the stronger enchantment stays (retail), so the line is active for that piece. Closes TODO(m3-buff-armour-surpassed).
+        var t = new Rig();
+        t.Caster.SurpassPiece("Leather Boots");
+        t.Caster.SurpassPiece("Leather Cap");
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        var r = t.Cycle.Result!;
+        Assert.Empty(r.Misses);
+        Assert.Equal(24, r.Active);
+        Assert.Equal(4, r.Surpassed); // two pieces, two armour lines
+        Assert.EndsWith(" surpassed=4", r.Fields, StringComparison.Ordinal);
+        Assert.Matches(Fields, r.Fields);
+        Assert.Equal("VII", t.Levels()[ShortOf("Impenetrability")]);
+
+        // A silent piece is still a miss next to a surpassed one.
+        var mixed = new Rig();
+        mixed.Caster.SurpassPiece("Leather Cap");
+        mixed.Caster.SilencePiece("Leather Boots");
+        Assert.True(mixed.Cycle.Start(mixed.Now));
+        Assert.Equal(BuffStatus.Done, mixed.Run());
+        Assert.Equal(["Impen:no-piece:Leather_Boots", "BludB:no-piece:Leather_Boots"], mixed.Cycle.Result!.Misses);
+        Assert.Equal(2, mixed.Cycle.Result.Surpassed);
+    }
+
+    [Fact]
     public void A_transfer_that_fizzles_twice_is_tried_again_until_it_fires()
     {
         var t = new Rig(mana: 60);
@@ -449,7 +476,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal(1, first.RecastWhileActive);
         Assert.True(first.Rebuffed);
         Assert.Contains(" rebuffed=yes ", first.Fields, StringComparison.Ordinal);
-        Assert.EndsWith(" forced=yes", first.Fields, StringComparison.Ordinal);
+        Assert.EndsWith(" forced=yes surpassed=0", first.Fields, StringComparison.Ordinal);
 
         // Every buff runs out (the longest lasts under two hours): the same cycle object's forced pass finds no active line, so every line is due and every cast lands on an expired line.
         t.R.Tick(8000);
@@ -463,7 +490,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal(0, second.RecastWhileActive);
         Assert.False(second.Rebuffed);
         Assert.Contains(" rebuffed=no ", second.Fields, StringComparison.Ordinal);
-        Assert.EndsWith(" forced=yes", second.Fields, StringComparison.Ordinal);
+        Assert.EndsWith(" forced=yes surpassed=0", second.Fields, StringComparison.Ordinal);
         Assert.Matches(Fields, second.Fields);
     }
 

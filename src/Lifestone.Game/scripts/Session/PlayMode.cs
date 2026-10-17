@@ -744,7 +744,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
     {
         _adapter?.Dispose();
         Selection.Clear(); // a log off (and the start): the objects belong to the arrival that is over
-        _avatars = new AvatarSet(_sources!, GodotLogSink.Instance) { RetailUnhideFlash = _services.Options.Play.RetailUnhideFlash, EffectEvents = _hookSounds, ScriptTableSeen = PrepareScriptTable, PlayerSoundTableSeen = PrefetchPlayerSounds }; // --retail-unhide-flash (docs/avatars.md section 17)
+        _avatars = new AvatarSet(_sources!, GodotLogSink.Instance) { RetailUnhideFlash = _services.Options.Play.RetailUnhideFlash, RetailSpherelessMissile = _services.Options.Play.RetailSphereless, EffectEvents = _hookSounds, ScriptTableSeen = PrepareScriptTable, PlayerSoundTableSeen = PrefetchPlayerSounds }; // --retail-unhide-flash (docs/avatars.md section 17)
         var session = _host.Session!;
         _adapter = new SessionAvatarAdapter(session.Events, session.State, _avatars, PlayerController.Clock, GodotLogSink.Instance);
         if (_layer is not null)

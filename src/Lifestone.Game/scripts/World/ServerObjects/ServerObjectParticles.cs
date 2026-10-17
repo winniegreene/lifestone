@@ -116,28 +116,88 @@ public sealed class ServerObjectParticles : IDisposable
 
         var library = statics.Particles;
         var sources = ObjectsShared.Sources(services);
-        var work = services.Workers.RunSync(cancellation =>
-        {
-            var ids = new HashSet<uint>();
-            if (sources.Effects.GetScriptTable(scriptTableId) is { } table)
+        QueueModels(
+            services,
+            () =>
             {
-                foreach (var entries in table.Scripts.Values)
+                var ids = new HashSet<uint>();
+                if (sources.Effects.GetScriptTable(scriptTableId) is { } table)
                 {
-                    foreach (var entry in entries)
+                    foreach (var entries in table.Scripts.Values)
                     {
-                        foreach (var id in sources.ParticleGfxObjsOf(entry.ScriptId))
+                        foreach (var entry in entries)
                         {
-                            if (ids.Add(id))
-                            {
-                                _ = library.Get(id); // the model (LOD chain, degrade distance) is resolved here, not in a frame
-                            }
+                            CollectModels(sources, library, entry.ScriptId, ids);
                         }
                     }
                 }
-            }
 
-            return ids.ToArray();
-        });
+                return ids.ToArray();
+            },
+            $"table 0x{scriptTableId:X8}");
+    }
+
+    /// <summary>
+    /// Main thread (M3 3.1 lane fc, the projectile warm-up): <see cref="PrepareScriptTable"/> for single scripts, such as a Setup's default script (a bolt's own trail or glow, which no table names): the worker resolves the
+    /// particle models the scripts can create and the main thread queues their meshes a few a frame (<see cref="PumpPending"/>). Once per script; nothing without the living statics' library.
+    /// </summary>
+    public static void PrepareScripts(GameServices services, IReadOnlyList<uint> scriptIds)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(scriptIds);
+        if (LivingStaticsSystem.Instance is not { Enabled: true } statics)
+        {
+            return;
+        }
+
+        var fresh = scriptIds.Where(id => id != 0 && ScriptsPrepared.Add(id)).ToArray();
+        if (fresh.Length == 0)
+        {
+            return;
+        }
+
+        var library = statics.Particles;
+        var sources = ObjectsShared.Sources(services);
+        QueueModels(
+            services,
+            () =>
+            {
+                var ids = new HashSet<uint>();
+                foreach (var scriptId in fresh)
+                {
+                    CollectModels(sources, library, scriptId, ids);
+                }
+
+                return ids.ToArray();
+            },
+            $"{fresh.Length} script(s)");
+    }
+
+    private static readonly HashSet<uint> ScriptsPrepared = [];
+
+    private static void CollectModels(Lifestone.Client.Objects.LivingStaticSources sources, ParticleMeshLibrary library, uint scriptId, HashSet<uint> ids)
+    {
+        foreach (var id in sources.ParticleGfxObjsOf(scriptId))
+        {
+            if (ids.Add(id))
+            {
+                _ = library.Get(id); // the model (LOD chain, degrade distance) is resolved here, not in a frame
+            }
+        }
+    }
+
+    private static int _resolving;
+
+    /// <summary>
+    /// Particle work not yet queued for meshes: worker resolutions still running (<see cref="PrepareScriptTable"/> and <see cref="PrepareScripts"/>) plus the resolved models waiting for <see cref="PumpPending"/>.
+    /// 0 means every model asked for so far has been handed to the particle library (its workers still build the meshes). Main thread (3.1-R9: the projectile warm-up's done line waits for it).
+    /// </summary>
+    public static int PrepareBacklog => Volatile.Read(ref _resolving) + PendingModels.Count;
+
+    private static void QueueModels(GameServices services, Func<uint[]> resolve, string what)
+    {
+        Interlocked.Increment(ref _resolving);
+        var work = services.Workers.RunSync(_ => resolve());
         _ = work.ContinueWith(
             t =>
             {
@@ -149,11 +209,14 @@ public sealed class ServerObjectParticles : IDisposable
                         {
                             PendingModels.Enqueue(id); // queued for their meshes a few a frame (PumpPending), not all in the frame the worker finishes
                         }
+
+                        Interlocked.Decrement(ref _resolving); // after the models are pending, so PrepareBacklog never reads 0 in between
                     });
                 }
                 else
                 {
-                    Log.Warn("particles", "the particle meshes of a PhysicsScriptTable could not be requested ahead; they are prepared when first used", ("table", $"0x{scriptTableId:X8}"), ("problem", t.Exception?.GetBaseException().Message ?? "cancelled"));
+                    Interlocked.Decrement(ref _resolving);
+                    Log.Warn("particles", "the particle meshes of a PhysicsScriptTable could not be requested ahead; they are prepared when first used", ("what", what), ("problem", t.Exception?.GetBaseException().Message ?? "cancelled"));
                 }
             },
             TaskScheduler.Default);

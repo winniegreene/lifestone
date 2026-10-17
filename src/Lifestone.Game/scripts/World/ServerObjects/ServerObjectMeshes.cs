@@ -85,6 +85,28 @@ public sealed class ServerObjectMeshes : IDisposable
     }
 
     /// <summary>
+    /// Prepares the plain mesh of <paramref name="gfxObjId"/> (no texture swap, no palette: the key a Setup's own parts have, <see cref="PartAppearance.VariantKey"/> "") on a worker and keeps it
+    /// resident (M3 3.1 lane fc, the projectile warm-up): <see cref="Sweep"/> never releases a warmed mesh, so a bolt created a minute later still finds its part ready on the frame its create is applied.
+    /// Main thread. Returns true when the mesh is ready now (already attached), false when it is queued.
+    /// </summary>
+    public bool Warm(uint gfxObjId)
+    {
+        var key = ActorMeshLibrary.Key(gfxObjId, _lighting);
+        if (_entries.TryGetValue(key, out var entry))
+        {
+            entry.Pinned = true;
+            return !entry.Pending;
+        }
+
+        entry = new Entry { LastUsed = _frame, Pending = true, Pinned = true };
+        _entries.Add(key, entry);
+        Pending++;
+        var lighting = _lighting;
+        _ = _services.Workers.RunSync(_ => PrepareAndQueue(key, gfxObjId, null, lighting));
+        return false;
+    }
+
+    /// <summary>
     /// The blended twin of a mesh <see cref="TryGet"/> gave out: the same geometry with every opaque or alpha-tested surface blended and writing no depth (the materialise
     /// fade, D45 and D63), built beside the mesh so the first frame of a fade compiles and uploads nothing. Null for a mesh this set does not know.
     /// </summary>
@@ -97,7 +119,7 @@ public sealed class ServerObjectMeshes : IDisposable
         List<string>? drop = null;
         foreach (var (key, entry) in _entries)
         {
-            if (!entry.Pending && _frame - entry.LastUsed > IdleFrames)
+            if (!entry.Pending && !entry.Pinned && _frame - entry.LastUsed > IdleFrames)
             {
                 (drop ??= []).Add(key);
             }
@@ -143,7 +165,7 @@ public sealed class ServerObjectMeshes : IDisposable
     }
 
     /// <summary>Worker: decodes the part and queues the attach.</summary>
-    private int PrepareAndQueue(string key, uint gfxObjId, PartAppearance appearance, SurfaceLighting lighting)
+    private int PrepareAndQueue(string key, uint gfxObjId, PartAppearance? appearance, SurfaceLighting lighting)
     {
         PreparedMesh? prepared = null;
         PreparedSurface[]? surfaces = null;
@@ -155,8 +177,8 @@ public sealed class ServerObjectMeshes : IDisposable
                 surfaces = prepared.SubMeshes.Select(s => _services.Render.PrepareSurface(SurfaceRequest.For(s.Source) with
                 {
                     Lighting = lighting,
-                    Palette = appearance.Palette,
-                    SurfaceTextureOverride = appearance.TextureOverrideFor(s.Source.SurfaceId),
+                    Palette = appearance?.Palette,
+                    SurfaceTextureOverride = appearance?.TextureOverrideFor(s.Source.SurfaceId),
                 })).ToArray();
             }
             else
@@ -239,6 +261,7 @@ public sealed class ServerObjectMeshes : IDisposable
     {
         public ArrayMesh? Mesh;
         public bool Pending;
+        public bool Pinned;
         public long LastUsed;
     }
 }

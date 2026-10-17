@@ -82,6 +82,19 @@
                                live mana rate, a few minutes with the login and the gear (the Godot run gets 900 s); verdict "[logincheck] buff done ok=true gear=wielded worn=<n> cast=<ok|fizzled|failed|n/a> buffs=24/24 rebuffed=yes forced=<yes|no>
                                min_remaining_s=<s> levels=<..> cycle_s=<s> cast_scripts=<n> cast_sounds=<n> cast_windows=<n> cast_frame_max_ms=<x|n/a> sounds_server=<n>" (ok judges the gear, the 24 lines,
                                the re-buff and sounds_server>=1; the cast_* fields and cast= are report-only; the step prints the line)
+      login-bsd                --account=test --login-check=bsd-fight (M3 3.1 fd; docs/session.md section 31; needs the local backend with BSD Mage built; runs ONLY with -Backend require, SKIP under
+                               auto and start: it changes the character, experience and burned components): the game enters BSD Mage, tops up the buffs, goes to the Aluvian Black Spawn Den, fights
+                               the Tusker Slaves of the arrival's floor with Flame Bolt until the first kill (--fight-kills, --fight-seconds default 300) and logs off; the Godot run gets 1200 s; verdict
+                               "[logincheck] bsd-fight done ok=true kills=<n> damage_dealt=<n> spells_cast=<n> misses=<n> xp_gained=<n> damage_taken=<n> hits_taken=<n> evades=<n> projectiles=<n>
+                               cast_frame_max_ms=<x|n/a> fight_frame_max_ms=<x|n/a> bsd_min_fps=<x|n/a> fight_s=<s>" (ok judges kills>=1 and damage_dealt>0; every other field is report-only; the step
+                               prints the line and, with --play-screenshot, the bolt, hit and kill frames)
+      login-death              --account=test --login-check=bsd-death (M3 3.2 dd; docs/session.md section 32; needs the local backend with BSD Mage built; runs ONLY with -Backend require, SKIP under
+                               auto and start: it changes the character, a death, vitae and dropped items): the game enters BSD Mage, binds it at Holtburg's lifestone, goes to the Black Spawn Den (a suicide
+                               there first when buffed), is killed by the tuskers (--death-seconds, default 600), respawns at the lifestone with vitae and is regeared, then logs off; the Godot run gets 1650 s;
+                               verdict "[logincheck] bsd-death done ok=true died=<n> suicides=<n> vitae=<n> respawn=<lifestone|elsewhere|none> corpse=<n> purged=<n> protected=<n> vitals_pct=<x|n/a>
+                               gear_restored=<yes|no> worn=<n> hits_taken=<n> damage_taken=<n> evades=<n> health_min_pct=<x|n/a> death_s=<s> death_frame_max_ms=<x|n/a> fight_frame_max_ms=<x|n/a> deaths=<n> corpses_stale=<n> protection=<dispelled|expired|none> vitae_paid=<xp|n/a> vitae_after=<pct|n/a>"
+                               (ok judges died=1, respawn=lifestone, gear_restored=yes, hits_taken>=1 and damage_taken>0; every other field is report-only; the step prints the line and, with
+                               --play-screenshot, the hit, dead, corpse and lifestone frames)
       spell-showcase           --scene=spellviewer --showcase (four entries; must end with exceptions=0)
       golden-viewpoints        --golden-viewpoints (every viewpoint captured)
       fly-path                 --fly-path=holtburg:arwic:<FlySpeed> (DoD 8: no frame over 50 ms; exit 2 if one is)
@@ -205,9 +218,9 @@ $DotnetRoot = Find-LifestoneDotnetRoot -DotnetRoot $DotnetRoot
 $dotnetExe = Join-Path $DotnetRoot 'dotnet.exe'
 
 $allSteps = @('build', 'test', 'cli-help', 'cli-bad-argument', 'terrain-golden', 'engine-checks', 'interior-engine-checks',
-    'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'login-buff', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
+    'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
 # The steps that need the local backend (gated by -Backend).
-$backendSteps = @('login-check', 'login', 'login-throwaway', 'login-buff')
+$backendSteps = @('login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death')
 # The default test run leaves out the loopback tests (they need the backend) and the soak tier (merge gates only).
 $testFilter = 'Category!=Loopback&Tier!=Soak'
 # 'pwsh -File' passes '-Only a,b' as one string: split on commas either way.
@@ -777,6 +790,16 @@ try {
             Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it buffs BSD Mage on the test account (a cycle at the live mana rate, about 60 s, a few minutes in all); runs only with -Backend require (this is -Backend $Backend)" -Skipped
             continue
         }
+        if ($step -eq 'login-bsd' -and $Backend -ne 'require') {
+            # It fights in the Black Spawn Den as BSD Mage (experience gained, components burned by the top-up): only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
+            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it fights as BSD Mage on the test account (a buff top-up, the den, the first kill; about 5 minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
+            continue
+        }
+        if ($step -eq 'login-death' -and $Backend -ne 'require') {
+            # It kills BSD Mage (a death, vitae, dropped items, a re-gear): only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
+            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it kills BSD Mage on the test account (a bind, the den, a death, the respawn and the re-gear; about 10 minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
+            continue
+        }
         if ($backendSteps -contains $step -and -not (Test-BackendGate $step $timer)) { continue }
         switch ($step) {
             'build' {
@@ -989,6 +1012,23 @@ try {
                 $run = Invoke-Godot $step '--account=test --login-check=buff' 900 '' $defaultSize
                 $verdict = if ($run.Text -match '\[logincheck\] (buff done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
                 Add-Result $step ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] buff done ok=true ') $run.Code $timer.Elapsed.TotalSeconds $verdict $run.Log (Get-ErrorCount $run.Text)
+            }
+            'login-bsd' {
+                # --login-check=bsd-fight (docs/session.md section 31): the game enters BSD Mage on the test account, tops up the buffs, goes to the Black Spawn Den and fights the tuskers of the arrival's floor
+                # with Flame Bolt until the first kill, then logs off. The test account only; the game reads its password from secrets.json itself. 1200 s: the leg stops itself at 750 s (login 60, gear 120, top-up
+                # 240, teleport 30, the fight's 300) and may take 120 s more to log off after a failure; FightLegRunner.WholeCheckSeconds must stay under this so the leg logs off before it reports a failure.
+                $run = Invoke-Godot $step '--account=test --login-check=bsd-fight' 1200 '' $defaultSize
+                $verdict = if ($run.Text -match '\[logincheck\] (bsd-fight done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
+                Add-Result $step ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] bsd-fight done ok=true ') $run.Code $timer.Elapsed.TotalSeconds $verdict $run.Log (Get-ErrorCount $run.Text)
+            }
+            'login-death' {
+                # --login-check=bsd-death (docs/session.md section 32): the game enters BSD Mage on the test account, binds it at Holtburg's lifestone, goes to the Black Spawn Den (a suicide first when any
+                # enchantment but the vitae is active), is killed by the tuskers, respawns at the lifestone and is regeared, then logs off. The test account only; the game reads its password from secrets.json itself.
+                # 1650 s: the leg stops itself at 1205 s with the default --death-seconds (login 60, gear 120, bars 30, bind 90, suicide and respawn 90, the den 30, the wait 600, the respawn 65, the re-gear 120) and
+                # may take 120 s more to log off after a failure; DeathLegRunner.WholeCheckSecondsFor must stay under this so the leg logs off before it reports a failure.
+                $run = Invoke-Godot $step '--account=test --login-check=bsd-death' 1650 '' $defaultSize
+                $verdict = if ($run.Text -match '\[logincheck\] (bsd-death done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
+                Add-Result $step ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] bsd-death done ok=true ') $run.Code $timer.Elapsed.TotalSeconds $verdict $run.Log (Get-ErrorCount $run.Text)
             }
             'login' {
                 # The player's own entry point (tools\play.ps1) on the test account (-Offscreen makes it the test account and refuses any other). The backend is the

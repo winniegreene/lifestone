@@ -20,7 +20,7 @@ public sealed class CatalogWithInteriorsTests
         Assert.True(dungeons.Length >= 3, string.Join(", ", dungeons));
         Assert.NotEmpty(buildings);
         Assert.Equal(
-            ["Glenden Wood Dungeon", "Holtburg Redoubt", "Mines of Despair", "The Marketplace of Dereth", "Town Network", "Training Academy"],
+            ["Black Spawn Den (Aluvian)", "Glenden Wood Dungeon", "Holtburg Redoubt", "Mines of Despair", "The Marketplace of Dereth", "Town Network", "Training Academy"],
             dungeons);
         Assert.Equal(["Holtburg shop (interior)", "Holtburg smithy (interior)"], buildings);
         Assert.All(Catalog.Destinations.Where(d => d.Interior is not null), d => Assert.Equal(DestinationKind.Indoor, d.Kind));
@@ -71,7 +71,7 @@ public sealed class CatalogWithInteriorsTests
     public void Typing_a_kind_of_place_lists_every_place_of_that_kind_after_name_matches()
     {
         var dungeons = Catalog.Search("dungeon");
-        Assert.Equal(6, dungeons.Count);
+        Assert.Equal(7, dungeons.Count);
         Assert.All(dungeons, d => Assert.Equal(InteriorKind.Dungeon, d.Interior));
 
         var interiors = Catalog.Search("interior").Select(d => d.Name).ToArray();

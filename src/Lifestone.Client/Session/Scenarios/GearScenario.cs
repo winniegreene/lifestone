@@ -87,6 +87,7 @@ public sealed class GearScenario : IScenario
     private bool _finished;
     private int _worn;
     private int _kitHeld;
+    private readonly List<string> _missingKit = [];
     private bool _snapshotted;
     private bool _asked;
     private double _lastAsk;
@@ -180,6 +181,9 @@ public sealed class GearScenario : IScenario
 
     /// <summary>The wields sent, in order, as logged (the tests').</summary>
     public IReadOnlyList<string> SentWields => _sentWields;
+
+    /// <summary>The kit lines not held at the last count (name, weenie, held of wanted), for a failure message; empty when the kit is whole.</summary>
+    public IReadOnlyList<string> MissingKit => _missingKit;
 
     private readonly List<string> _sentWields = [];
 
@@ -674,11 +678,16 @@ public sealed class GearScenario : IScenario
 
         var counts = GearInventory.CountAll(state, out _);
         _kitHeld = 0;
+        _missingKit.Clear();
         foreach (var item in _kit.Items)
         {
             if (counts.GetValueOrDefault(item.Wcid) >= (item.Kind == GearKind.Component ? item.Stack : 1))
             {
                 _kitHeld++;
+            }
+            else
+            {
+                _missingKit.Add(string.Create(CultureInfo.InvariantCulture, $"{item.Name} (weenie {item.Wcid}, held {counts.GetValueOrDefault(item.Wcid)} of {(item.Kind == GearKind.Component ? item.Stack : 1)})"));
             }
         }
 

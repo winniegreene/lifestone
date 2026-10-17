@@ -241,6 +241,11 @@ internal sealed class StandInResponder
 
         public OutboundTicket SendChangeCombatMode(uint mode) => owner.Record(GameActionTypes.ChangeCombatMode, mode, 0, 0).ChangeCombatMode(mode);
 
+        // M3 3.2 db: the suicide is the death the stand-in plays (StandInWorld.Death.cs); ACE answers an AddSpellFavorite with nothing, so the stand-in keeps the bar for its next description.
+        public OutboundTicket SendSuicide() => owner.Record(GameActionTypes.Suicide, 0, 0, 0).Suicide();
+
+        public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => owner.Record(GameActionTypes.AddSpellFavorite, spellId, index, bar).AddSpellFavorite(spellId, index, bar);
+
         public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => owner.Record(GameActionTypes.GetAndWieldItem, item, equipMask, 0).GetAndWield(item, equipMask);
 
         public OutboundTicket SendPutItemInContainer(uint item, uint container, uint placement) => owner.Record(GameActionTypes.PutItemInContainer, item, container, placement).PutInContainer(item, container, placement);

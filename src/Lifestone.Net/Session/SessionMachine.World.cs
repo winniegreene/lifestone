@@ -231,6 +231,26 @@ internal sealed partial class SessionMachine
         return SendAction(connection, writer);
     }
 
+    public OutboundTicket SendSuicide()
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendSuicide");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        MagicActionCodecs.WriteSuicide(writer, connection.NextActionSequence);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendAddSpellFavorite");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        MagicActionCodecs.WriteAddSpellFavorite(writer, connection.NextActionSequence, spellId, index, bar);
+        return SendAction(connection, writer);
+    }
+
     public OutboundTicket SendTalk(ReadOnlySpan<char> text)
     {
         EnterGameThread(capture: false);

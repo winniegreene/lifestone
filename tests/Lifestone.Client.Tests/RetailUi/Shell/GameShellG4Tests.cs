@@ -15,7 +15,7 @@ using Lifestone.Data.Ui;
 namespace Lifestone.Client.Tests.RetailUi.Shell;
 
 /// <summary>
-/// The toolbar, the panel host and the indicators of the in-game shell (docs/retail-ui.md section 21.5): every gameplay button with no controller answers with the NotInM3 message that names its panel, the host is hidden at
+/// The toolbar, the panel host and the indicators of the in-game shell (docs/retail-ui.md section 21.5): every gameplay button with no controller answers with the NotInM3 message that names its panel (the combat buttons change the combat mode since M3 3.2: GameCombatPanelTests), the host is hidden at
 /// login (<c>gmPanelUI::PostInit</c>), g6's two pages call their hook, and the link indicator follows the time since the last server packet.
 /// </summary>
 public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
@@ -45,10 +45,6 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
 
     public static TheoryData<uint, string> ActionButtons => new()
     {
-        { 0x10000192, "Combat and spellcasting" },
-        { 0x10000193, "Combat and spellcasting" },
-        { 0x10000194, "Combat and spellcasting" },
-        { 0x10000195, "Combat and spellcasting" },
         { 0x100001A5, "Examination" },
     };
 
@@ -98,7 +94,7 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
 
     [RequiresLocalDatsTheory]
     [MemberData(nameof(ActionButtons))]
-    public void A_combat_or_examine_button_opens_the_NotInM3_message(uint buttonId, string feature)
+    public void The_examine_button_opens_the_NotInM3_message(uint buttonId, string feature)
     {
         using var rig = new LoginRig(fixture, liveGame: true);
         var screen = EnterGame(rig);

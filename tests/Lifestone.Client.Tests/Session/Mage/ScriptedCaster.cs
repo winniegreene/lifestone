@@ -45,6 +45,7 @@ internal sealed class ScriptedCaster
     private readonly Dictionary<uint, byte> _sequence = [];
     private readonly List<(Func<SpellInfo, bool> Match, int Left)> _fizzles = [];
     private readonly HashSet<string> _silentPieces = [];
+    private readonly HashSet<string> _surpassedPieces = [];
     private int _seen;
     private double _lastNow = double.NaN;
     private readonly Dictionary<uint, uint> _topOfCategory = [];
@@ -112,6 +113,9 @@ internal sealed class ScriptedCaster
 
     /// <summary>ACE leaves this piece out of the armour cast's chat lines (a piece that is not enchantable, or a server that does not name it).</summary>
     public void SilencePiece(string name) => _silentPieces.Add(name);
+
+    /// <summary>The piece's armour line says it was surpassed (ACE, <c>WorldObject_Magic.cs</c> 419: ", but it is surpassed by &lt;spell&gt;"): the piece already holds a stronger version.</summary>
+    public void SurpassPiece(string name) => _surpassedPieces.Add(name);
 
     /// <summary>The spell ids of the answered casts that landed, in order.</summary>
     public IEnumerable<uint> Landed => Answered.Where(a => !a.Fizzled).Select(a => a.Spell);
@@ -311,7 +315,7 @@ internal sealed class ScriptedCaster
                 {
                     if (!_silentPieces.Contains(PieceNames[i]))
                     {
-                        Chat("You cast " + info.Name + " on " + PieceNames[i]);
+                        Chat("You cast " + info.Name + " on " + PieceNames[i] + (_surpassedPieces.Contains(PieceNames[i]) ? ", but it is surpassed by " + info.Name + " VII" : string.Empty));
                     }
                 }
 

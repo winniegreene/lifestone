@@ -2,6 +2,7 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Scenarios;
 
 namespace Lifestone.Headless;
 
@@ -25,6 +26,12 @@ internal enum HeadlessScenario
 
     /// <summary>Gear, then the buff cycle of the profile's 24 lines and a forced re-buff pass (M3 2.1 s1, <c>BuffScenario</c>); idempotent.</summary>
     Buff,
+
+    /// <summary>Gear, the buff top-up, the Black Spawn Den and a Flame Bolt fight until <c>--fight-kills</c> kills (M3 3.1, <c>FightScenario</c>); idempotent apart from the experience the kills earn.</summary>
+    Fight,
+
+    /// <summary>Gear, the spell bars, a bind at Holtburg's lifestone, the Black Spawn Den, a suicide when buffed, the tuskers' death of the player, the respawn and the gear again (M3 3.2, <c>DeathScenario</c>); changes the character (vitae, dropped items, a corpse).</summary>
+    DeathAndRegear,
 }
 
 /// <summary>
@@ -71,6 +78,12 @@ internal sealed record HeadlessOptions
     /// <summary>The buff cycle's options (<c>--buff-*</c>), used by <c>--scenario=buff</c>.</summary>
     internal BuffOptions Buff { get; init; } = new();
 
+    /// <summary>The fight loop's options (<c>--fight-*</c>), used by <c>--scenario=fight</c>.</summary>
+    internal FightOptions Fight { get; init; } = new();
+
+    /// <summary>The death loop's option (<c>--death-seconds</c>), used by <c>--scenario=death-and-regear</c>.</summary>
+    internal DeathOptions Death { get; init; } = new();
+
     /// <summary>The Session group's values.</summary>
     internal SessionOptions Session { get; init; } = new();
 
@@ -87,6 +100,10 @@ internal sealed record HeadlessOptions
         errors.AddRange(session.Errors);
         var buff = BuffOptions.FromArguments(arguments);
         errors.AddRange(buff.Errors);
+        var fight = FightOptions.FromArguments(arguments);
+        errors.AddRange(fight.Errors);
+        var death = DeathOptions.FromArguments(arguments);
+        errors.AddRange(death.Errors);
         var o = new HeadlessOptions();
         foreach (var argument in arguments)
         {
@@ -107,7 +124,9 @@ internal sealed record HeadlessOptions
                             ("academy-exit", HeadlessScenario.AcademyExit),
                             ("mage-build", HeadlessScenario.MageBuild),
                             ("gear", HeadlessScenario.Gear),
-                            ("buff", HeadlessScenario.Buff)),
+                            ("buff", HeadlessScenario.Buff),
+                            ("fight", HeadlessScenario.Fight),
+                            ("death-and-regear", HeadlessScenario.DeathAndRegear)),
                     };
                     break;
                 case "--laps":
@@ -183,13 +202,13 @@ internal sealed record HeadlessOptions
             }
         }
 
-        if (o.Scenario is HeadlessScenario.MageBuild or HeadlessScenario.Gear or HeadlessScenario.Buff && session.Account is { } account && !string.Equals(account, Program.DefaultAccount, StringComparison.OrdinalIgnoreCase))
+        if (o.Scenario is HeadlessScenario.MageBuild or HeadlessScenario.Gear or HeadlessScenario.Buff or HeadlessScenario.Fight or HeadlessScenario.DeathAndRegear && session.Account is { } account && !string.Equals(account, Program.DefaultAccount, StringComparison.OrdinalIgnoreCase))
         {
             // M3 1.1-R5: the build creates and levels a permanent character, so it runs on the default test account only (automation uses accounts.test only).
-            errors.Add($"--account: --scenario={(o.Scenario switch { HeadlessScenario.Gear => "gear", HeadlessScenario.Buff => "buff", _ => "mage-build" })} runs on the default test account '{Program.DefaultAccount}' only; the value is not shown");
+            errors.Add($"--account: --scenario={(o.Scenario switch { HeadlessScenario.Gear => "gear", HeadlessScenario.Buff => "buff", HeadlessScenario.Fight => "fight", HeadlessScenario.DeathAndRegear => "death-and-regear", _ => "mage-build" })} runs on the default test account '{Program.DefaultAccount}' only; the value is not shown");
         }
 
-        return o with { Session = session, Buff = buff, Errors = errors };
+        return o with { Session = session, Buff = buff, Fight = fight, Death = death, Errors = errors };
     }
 
     private static string? Required(CommandLineArgument argument, List<string> errors, string what)

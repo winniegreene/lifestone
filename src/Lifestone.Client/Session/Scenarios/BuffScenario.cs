@@ -149,7 +149,7 @@ public sealed class BuffScenario : IScenario
         var mana = best?.ManaMin is { } m ? m.ToString(CultureInfo.InvariantCulture) : "n/a";
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{Token(gear, "gear")} {Token(gear, "worn")} buffs={best?.Active ?? 0}/{best?.Wanted ?? _wanted} levels={(best is null ? "n/a" : best.Levels)} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(_forcedLanded ? "yes" : "no")} min_remaining_s={min} transfers={best?.TransfersFired ?? 0}/{best?.TransfersTried ?? 0} revitalizes={best?.Revitalizes ?? 0} fizzles={best?.Fizzles ?? 0} mana_min={mana} cycle_s={Math.Floor(_first?.CycleSeconds ?? 0).ToString("0", CultureInfo.InvariantCulture)} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))}");
+            $"{Token(gear, "gear")} {Token(gear, "worn")} buffs={best?.Active ?? 0}/{best?.Wanted ?? _wanted} levels={(best is null ? "n/a" : best.Levels)} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(_forcedLanded ? "yes" : "no")} min_remaining_s={min} transfers={best?.TransfersFired ?? 0}/{best?.TransfersTried ?? 0} revitalizes={best?.Revitalizes ?? 0} fizzles={best?.Fizzles ?? 0} mana_min={mana} cycle_s={Math.Floor(_first?.CycleSeconds ?? 0).ToString("0", CultureInfo.InvariantCulture)} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={_first?.Surpassed ?? 0}");
     }
 
     /// <inheritdoc/>

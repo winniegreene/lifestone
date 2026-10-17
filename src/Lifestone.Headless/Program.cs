@@ -72,6 +72,19 @@ internal static class Program
     /// <summary>The default limit of <c>--scenario=buff</c>: the gear, then a cycle (about 1,300 s of session time at the live regeneration rate, M3 2.1 s0b), the forced pass and the log off.</summary>
     internal const double BuffQuitAfterSeconds = 3000;
 
+    /// <summary>The default limit of <c>--scenario=fight</c>: the gear, a buff top-up (a full cycle is about 1,300 s), the teleport, the fight (<c>--fight-seconds</c>, 300 s by default) and the log off.</summary>
+    internal const double FightQuitAfterSeconds = 3600;
+
+    /// <summary>
+    /// What <c>--scenario=death-and-regear</c> needs besides <c>--death-seconds</c>, in seconds: the gear (about 120 s with the spell bars), the bind at Holtburg's lifestone (teleport, settle, the Use: 120 s), the den (60 s),
+    /// a suicide (ACE's five lines 3 s apart, the death, the arrival and the vitals: 120 s), the respawn, the vitals and the regear (150 s), and the log off (120 s), with margin.
+    /// </summary>
+    internal const double DeathQuitAfterOverheadSeconds = 900;
+
+    /// <summary>The default limit of <c>--scenario=death-and-regear</c>: <see cref="DeathQuitAfterOverheadSeconds"/> plus <c>--death-seconds</c>.</summary>
+    /// <param name="deathSeconds">The wait among the tuskers (<c>--death-seconds</c>).</param>
+    internal static double DeathQuitAfterSeconds(double deathSeconds) => DeathQuitAfterOverheadSeconds + deathSeconds;
+
     /// <summary>The account the headless host uses when <c>--account</c> is not given (D10).</summary>
     internal const string DefaultAccount = "test";
 
@@ -282,6 +295,8 @@ internal static class Program
                 HeadlessScenario.MageBuild => MageBuildQuitAfterSeconds,
                 HeadlessScenario.Gear => GearQuitAfterSeconds,
                 HeadlessScenario.Buff => BuffQuitAfterSeconds,
+                HeadlessScenario.Fight => FightQuitAfterSeconds,
+                HeadlessScenario.DeathAndRegear => DeathQuitAfterSeconds(options.Death.Seconds),
                 _ => HeadlessRunOptions.DefaultQuitAfterSeconds,
             },
             LifestoneVersion = typeof(Program).Assembly.GetName().Version?.ToString(),
@@ -345,6 +360,26 @@ internal static class Program
                     }
 
                     scenario = new BuffScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Buff, log);
+                }
+                else if (options.Scenario == HeadlessScenario.Fight)
+                {
+                    if (options.Session.Character is not null || options.CreateCharacter is not null)
+                    {
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=fight (the mage is always the template's character)");
+                    }
+
+                    log.Info("headless", "building the Black Spawn Den's collision and floor graph for the fight walk");
+                    scenario = new FightScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Buff, options.Fight, DenWalk.Create(dats, log), log);
+                }
+                else if (options.Scenario == HeadlessScenario.DeathAndRegear)
+                {
+                    if (options.Session.Character is not null || options.CreateCharacter is not null)
+                    {
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=death-and-regear (the mage is always the template's character)");
+                    }
+
+                    log.Info("headless", "building the Black Spawn Den's collision and floor graph for the death wait's walk");
+                    scenario = new DeathScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Death, DenWalk.Create(dats, log), log, stages: options.Death.Stages ?? DeathStages.All, approach: HoltburgApproach.Create(dats, log)) { LevelXp = DeathScenario.LevelXpOf(XpTableData.Load(dats)) };
                 }
                 else if (options.CreateCharacter is { } create)
                 {
@@ -410,6 +445,16 @@ internal static class Program
         if (scenario is BuffScenario buffRun)
         {
             output.WriteLine("buff " + buffRun.VerdictFields());
+        }
+
+        if (scenario is FightScenario fightRun)
+        {
+            output.WriteLine("fight " + fightRun.VerdictFields());
+        }
+
+        if (scenario is DeathScenario deathRun)
+        {
+            output.WriteLine("death " + deathRun.VerdictFields());
         }
 
         output.WriteLine(result.SummaryLine(shown));

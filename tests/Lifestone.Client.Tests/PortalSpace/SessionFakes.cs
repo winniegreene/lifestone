@@ -115,6 +115,10 @@ internal sealed class FakeActions : IActionApi
 
     public ActionHandle MergeStack(uint from, uint to, int amount, ActionSource source = ActionSource.Host) => throw Unexpected();
 
+    public ActionHandle Suicide(ActionSource source = ActionSource.Host) => throw Unexpected();
+
+    public ActionHandle AddSpellFavorite(uint spellId, int index, int bar, ActionSource source = ActionSource.Host) => throw Unexpected();
+
     public ActionHandle Talk(string text, ActionSource source) => throw Unexpected();
 
     public ActionHandle Tell(string target, string text, ActionSource source) => throw Unexpected();

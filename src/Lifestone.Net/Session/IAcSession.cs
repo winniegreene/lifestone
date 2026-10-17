@@ -226,6 +226,21 @@ public interface IAcSession : IDisposable
     /// <param name="amount">How many units to move from the source to the target (ACE refuses 0 or less).</param>
     OutboundTicket SendStackableMerge(uint mergeFrom, uint mergeTo, int amount);
 
+    /// <summary>
+    /// Sends GameAction 0x0279 Suicide (no payload; in world only), retail <c>CM_Character::Event_Suicide</c> (11.4186 0x006A1B00, 11.6096 0x006A2920); ACE
+    /// <c>GameActionDie</c> answers with five speech lines 3 s apart and then the death, or WeenieError YoureTooBusy when the player is dead or teleporting.
+    /// </summary>
+    OutboundTicket SendSuicide();
+
+    /// <summary>
+    /// Sends GameAction 0x01E3 AddSpellFavorite {u32 spell, u32 index, u32 bar} (in world only), retail <c>CM_Character::Event_AddSpellFavorite</c> (11.4186 0x006A0F70,
+    /// 11.6096 0x006A1D90); ACE answers nothing (it ignores a bar above 7 or a spell the player does not know).
+    /// </summary>
+    /// <param name="spellId">The spell id.</param>
+    /// <param name="index">The position on the bar (0 is the first).</param>
+    /// <param name="bar">The bar (0 to 7).</param>
+    OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar);
+
     /// <summary>Sends GameAction 0x0015 Talk (in world only). The text is the message's last field, so any Windows-1252
     /// character may be sent.</summary>
     /// <exception cref="ArgumentException">A character Windows-1252 lacks, or a text over 65,535 bytes; nothing is sent.</exception>

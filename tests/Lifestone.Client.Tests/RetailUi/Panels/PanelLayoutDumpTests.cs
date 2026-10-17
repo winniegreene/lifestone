@@ -109,6 +109,74 @@ public sealed class PanelLayoutDumpTests(DatSetFixture fixture) : IClassFixture<
         Assert.True(differences.Count == 0, string.Join("; ", differences));
     }
 
+    /// <summary>
+    /// The floaty windows M3 3.2's panel slices build (s0, docs/milestones/m3-plan.md section 4.8): the combat panel (<c>gmCombatUI</c>), the power bar (<c>gmPowerbarUI</c>) and the spellcasting panel (<c>gmSpellcastingUI</c>), by
+    /// retail class, with the file each is dumped to (<c>cache/m3/3-2/</c>) and the retail classes its subtree holds (the window itself included): pinned from the dump. They are windows of the gameplay layout
+    /// (<see cref="UiLayoutEnums.GameplayRoot"/>), not host pages.
+    /// </summary>
+    private static readonly (string Name, uint ClassId, string File, uint[] PinnedClasses)[] Windows =
+    [
+        ("gmCombatUI", 0x1000000C, "layout-combat.txt", [0x01, 0x03, 0x07, 0x0B, 0x0C, 0x11, 0x1000000C, 0x10000035]), // window 0x1000005C, in gmFloatyCombatPanelUI 0x100006B5
+        ("gmPowerbarUI", 0x1000000F, "layout-powerbar.txt", [0x03, 0x07, 0x0C, 0x1000000F]), // window 0x10000044, in the SmartBox frame 0x1000049A: a meter and its text
+        ("gmSpellcastingUI", 0x10000015, "layout-spellcasting.txt", [0x01, 0x03, 0x08, 0x0B, 0x0C, 0x10000015, 0x10000031]), // window 0x10000061, in gmFloatyCombatPanelUI 0x100006B5; holds UIElement_ItemList (0x10000031)
+    ];
+
+    private static string CombatCacheFolder()
+    {
+        var root = CheckoutLocator.EnclosingCheckouts(AppContext.BaseDirectory).FirstOrDefault()
+            ?? throw new InvalidOperationException("TODO(panel-layout-dump): the test is not running inside a checkout");
+        return Path.Combine(root, "cache", "m3", "3-2");
+    }
+
+    private static bool FindWithPath(UiLayouts layouts, UiElementDesc local, uint classId, List<UiElementDesc> path)
+    {
+        var full = layouts.RequireFullDesc(local);
+        path.Add(full);
+        if (full.Type == classId)
+        {
+            return true;
+        }
+
+        foreach (var child in full.Children.Values)
+        {
+            if (FindWithPath(layouts, child, classId, path))
+            {
+                return true;
+            }
+        }
+
+        path.RemoveAt(path.Count - 1);
+        return false;
+    }
+
+    [RequiresLocalDatsTheory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void A_floaty_window_of_the_gameplay_layout_is_dumped_and_the_classes_it_holds_are_pinned(int row)
+    {
+        var (name, classId, file, pinned) = Windows[row];
+        var layouts = new UiLayouts(fixture.Dats);
+        var root = layouts.GetRootDesc(UiLayoutEnums.GameplayRoot);
+        var folder = CombatCacheFolder();
+        Directory.CreateDirectory(folder);
+        var path = new List<UiElementDesc>();
+        Assert.True(FindWithPath(layouts, root, classId, path), $"{name} (0x{classId:X8}) is in no window of the gameplay layout");
+        var window = path[^1];
+        var text = new StringBuilder();
+        text.Append(CultureInfo.InvariantCulture, $"# {name} window 0x{window.ElementId:X8}: the layout subtree, resolved (derived from the retail dats; never committed)\n");
+        text.Append("# path from the gameplay root: ").Append(string.Join(" > ", path.Select(static e => $"0x{e.ElementId:X8} {UiClassRegistry.NameOf(e.Type)}"))).Append('\n');
+        text.Append("# element id | class | template (base element @ base layout) | source layout | box x,y wxh | z | default state | edges | properties id=value | media | states\n");
+        Dump(layouts, window, 0, text);
+        File.WriteAllText(Path.Combine(folder, file), text.ToString());
+
+        var classes = new SortedSet<uint>();
+        Classes(layouts, window, classes);
+        Assert.True(
+            pinned.Order().SequenceEqual(classes),
+            $"{name} window 0x{window.ElementId:X8} (under {string.Join(" > ", path.Take(path.Count - 1).Select(static e => $"0x{e.ElementId:X8}"))}) holds [{string.Join(", ", classes.Select(c => $"0x{c:X8}"))}], pinned [{string.Join(", ", pinned.Order().Select(c => $"0x{c:X8}"))}]");
+    }
+
     private static void Dump(UiLayouts layouts, UiElementDesc local, int depth, StringBuilder into)
     {
         var d = layouts.RequireFullDesc(local);

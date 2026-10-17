@@ -158,7 +158,7 @@ public static class BuffLegVerdict
         var ok = problems.Count == 0;
         var line = string.Create(
             inv,
-            $"buff done ok={(ok ? "true" : "false")} gear={gear} worn={worn} cast={cast} buffs={active}/{wanted} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(forcedLanded ? "yes" : "no")} min_remaining_s={min} levels={(best is null ? "n/a" : best.Levels)} cycle_s={Math.Floor(scenario.Cycle?.CycleSeconds ?? 0).ToString("0", inv)} cast_scripts={measures.CastScripts} cast_sounds={measures.CastSounds} cast_windows={measures.CastWindows} cast_frame_max_ms={(measures.CastFrameMaxMs is { } ms ? ms.ToString("0.0", inv) : "n/a")} sounds_server={(measures.SoundsServer is { } s ? s.ToString(inv) : "n/a")} fizzles={best?.Fizzles ?? 0} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))}");
+            $"buff done ok={(ok ? "true" : "false")} gear={gear} worn={worn} cast={cast} buffs={active}/{wanted} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(forcedLanded ? "yes" : "no")} min_remaining_s={min} levels={(best is null ? "n/a" : best.Levels)} cycle_s={Math.Floor(scenario.Cycle?.CycleSeconds ?? 0).ToString("0", inv)} cast_scripts={measures.CastScripts} cast_sounds={measures.CastSounds} cast_windows={measures.CastWindows} cast_frame_max_ms={(measures.CastFrameMaxMs is { } ms ? ms.ToString("0.0", inv) : "n/a")} sounds_server={(measures.SoundsServer is { } s ? s.ToString(inv) : "n/a")} fizzles={best?.Fizzles ?? 0} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={(scenario.Cycle?.Surpassed ?? 0) + (scenario.Forced?.Surpassed ?? 0)}");
         return new BuffLegOutcome(ok, cast, line, problems);
     }
 

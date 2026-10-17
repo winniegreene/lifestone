@@ -14,6 +14,10 @@ namespace Lifestone.Net.Messages;
 /// <b>first</b>, then the spell id.</item>
 /// <item>0x0053 ChangeCombatMode {u32 mode}: retail <c>CM_Combat::Event_ChangeCombatMode</c> (11.4186 0x006A9A70,
 /// 11.6096 0x006AA9D0); ACE <c>GameActionChangeCombatMode</c> reads one <c>ReadUInt32</c> (1 non-combat, 2 melee, 4 missile, 8 magic).</item>
+/// <item>0x0279 Suicide (no payload; M3 3.2 s0): retail <c>CM_Character::Event_Suicide</c> (11.4186 0x006A1B00, 11.6096 0x006A2920);
+/// ACE <c>GameActionDie</c> (<c>GameActionType.Suicide</c>) reads nothing and calls <c>HandleActionDie</c>.</item>
+/// <item>0x01E3 AddSpellFavorite {u32 spell, u32 index, u32 bar} (M3 3.2 s0): retail <c>CM_Character::Event_AddSpellFavorite</c> (11.4186 0x006A0F70,
+/// 11.6096 0x006A1D90), prototype (spell, index, list); ACE <c>GameActionAddSpellFavorite</c> reads the spell, the position on the bar, then the bar.</item>
 /// </list>
 /// </summary>
 internal static class MagicActionCodecs
@@ -38,5 +42,18 @@ internal static class MagicActionCodecs
     {
         GameActionEnvelope.WriteHeader(writer, sequence, GameActionTypes.ChangeCombatMode);
         writer.WriteUInt32(mode);
+    }
+
+    /// <summary>Writes F7B1 {<paramref name="sequence"/>, 0x0279}: the suicide request carries no payload.</summary>
+    public static void WriteSuicide(PacketWriter writer, uint sequence) =>
+        GameActionEnvelope.WriteHeader(writer, sequence, GameActionTypes.Suicide);
+
+    /// <summary>Writes F7B1 {<paramref name="sequence"/>, 0x01E3, <paramref name="spellId"/>, <paramref name="index"/>, <paramref name="bar"/>}: the spell, its position on the bar, then the bar, as ACE reads them.</summary>
+    public static void WriteAddSpellFavorite(PacketWriter writer, uint sequence, uint spellId, uint index, uint bar)
+    {
+        GameActionEnvelope.WriteHeader(writer, sequence, GameActionTypes.AddSpellFavorite);
+        writer.WriteUInt32(spellId);
+        writer.WriteUInt32(index);
+        writer.WriteUInt32(bar);
     }
 }

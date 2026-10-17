@@ -51,6 +51,52 @@ public static class PlayWarmUp
 
     private static CellFrame At(in CellFrame from, System.Numerics.Vector3 offset) => new(from.CellId, new AcFrame(from.Origin + offset, from.Orientation));
 
+    /// <summary>
+    /// A scratch Missile per distinct war-spell projectile Setup (the ACE world extract's table, the one <c>StandInVisit.ProjectileSetup</c> reads), in the order ACE sends a bolt's messages: the create with its
+    /// velocity and PhysicsScriptTable, the Launch script, a few steps of flight, the hit's state change and zero vector, the Explode script, the delete. The Setups, parts, scripts and emitters are read from the dats and
+    /// cached in the shared <see cref="AvatarSources"/>, and the avatar code of a bolt is jitted. Returns the Setups warmed.
+    /// </summary>
+    private static int WarmProjectiles(AvatarSet set, in CellFrame spawn, ref double now)
+    {
+        const uint hitState = AvatarStateBits.Missile | AvatarStateBits.IgnoreCollisions | AvatarStateBits.NoDraw;
+        var warmed = 0;
+        var guid = ScratchGuid + 16;
+        foreach (var projectile in Lifestone.Data.Magic.AceWorldExtract.Load().Projectiles.DistinctBy(p => p.SetupId))
+        {
+            var bolt = new AvatarCreate
+            {
+                Guid = guid,
+                SetupId = projectile.SetupId,
+                PhysicsState = AvatarStateBits.Missile | AvatarStateBits.AlignPath | AvatarStateBits.ReportCollisions,
+                Velocity = new System.Numerics.Vector3(0f, 15f, 0f),
+                PhysicsScriptTableId = projectile.PhysicsEffectTableId ?? 0,
+                Position = At(spawn, new System.Numerics.Vector3(0f, 2f, 1f)),
+            };
+            if (set.Create(bolt, now) != AvatarApply.Applied)
+            {
+                continue;
+            }
+
+            set.PlayScript(guid, (uint)DatReaderWriter.Enums.PlayScript.Launch, 1f);
+            for (var i = 0; i < 3; i++)
+            {
+                now += 1.0 / 30.0;
+                set.Advance(now, new AvatarViewer(spawn), long.MaxValue);
+            }
+
+            set.SetState(guid, hitState);
+            set.SetVectors(guid, System.Numerics.Vector3.Zero, System.Numerics.Vector3.Zero);
+            set.PlayScript(guid, (uint)DatReaderWriter.Enums.PlayScript.Explode, 1f);
+            now += 1.0 / 30.0;
+            set.Advance(now, new AvatarViewer(spawn), long.MaxValue);
+            set.Delete(guid);
+            warmed++;
+            guid++;
+        }
+
+        return warmed;
+    }
+
     /// <summary>Runs the warm-up on the main thread; returns the milliseconds it took.</summary>
     public static double Run(GameServices services, AvatarSources sources, PhysicsGeometryLibrary geometry)
     {
@@ -141,6 +187,11 @@ public static class PlayWarmUp
                 set.Advance(now + 0.1, new AvatarViewer(spawn), long.MaxValue);
                 set.Delete(npc.Guid);
             }
+
+            // M3 3.1 lane fc: the war spells' bolts, so the CreateObject of the first one reads no Setup, script table or emitter from the dats and runs no first-use code on the play path.
+            var projectileTimer = Stopwatch.StartNew();
+            var projectiles = WarmProjectiles(set, spawn, ref now);
+            Log.Info(LogCategory, "projectile paths warmed (a scratch bolt per war-spell Setup: create, launch, flight, hit, explode, delete)", ("setups", projectiles), ("ms", projectileTimer.Elapsed.TotalMilliseconds));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

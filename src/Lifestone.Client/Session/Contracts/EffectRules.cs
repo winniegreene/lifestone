@@ -228,4 +228,30 @@ public static class EffectRules
         var level = qualities.TryGetInt(VitaeLevelProperty, out var special) ? special : qualities.Level;
         return unchecked((int)(VitaeCpPoolThreshold(vitaeValue, unchecked((uint)level)) - pool));
     }
+
+    /// <summary>
+    /// The experience that clears the whole vitae penalty, by ACE's rule (<c>Player_Xp.cs</c> <c>UpdateXpVitae</c> 133-175): each 1% step from <paramref name="vitaeValue"/> up to 1.0 costs
+    /// <see cref="VitaeCpPoolThreshold"/> at the multiplier it starts from (ACE casts it to int; the multiplier is a float stepped by 0.01f, the end test is within 0.0001 of 1.0), and the experience already in the
+    /// pool (<see cref="VitaeCpPoolProperty"/>) counts against the sum. At least 1 while a penalty is held (a grant of 0 clears nothing); 0 when there is none.
+    /// </summary>
+    /// <param name="vitaeValue">The multiplier (0.60 for a 40% penalty).</param>
+    /// <param name="level">The level the thresholds use: ACE's <c>DeathLevel</c> (property 0x8B), else the level.</param>
+    /// <param name="pool">The experience already in the vitae pool (property 0x81).</param>
+    public static long VitaeExperienceToClear(float vitaeValue, int level, long pool)
+    {
+        if (vitaeValue >= 1f || Math.Abs(vitaeValue - 1f) < 0.0001f)
+        {
+            return 0;
+        }
+
+        long total = 0;
+        var v = vitaeValue;
+        while (v < 1f && Math.Abs(v - 1f) >= 0.0001f)
+        {
+            total += (int)VitaeCpPoolThreshold(v, unchecked((uint)level));
+            v += 0.01f;
+        }
+
+        return Math.Max(1, total - pool);
+    }
 }

@@ -272,6 +272,47 @@ public sealed class GameChatTests(DatSetFixture fixture) : IClassFixture<DatSetF
     }
 
     [RequiresLocalDatsFact]
+    public void A_log_filled_past_one_page_while_at_the_end_keeps_following_new_lines()
+    {
+        // 3.1 fix B: ChatInterface::RecvNotice_DisplayFinalStringInfo (11.6096 0x004F52A0) appends the line break, then asks UIElement_Text::IsAtVerticalEnd
+        // (11.6096 0x004695E0: is the LAST GLYPH in view), then appends the text and scrolls to the end when it was. A paper-height test is false right after the
+        // break (the empty line is below the view), so the log stopped following at the first page and the new-text indicator came up.
+        using var rig = new LoginRig(fixture, liveGame: true);
+        var main = EnterGame(rig).Chat!.Main!;
+        var log = main.Log!;
+        for (var i = 0; i < 60; i++)
+        {
+            main.DisplayText(ChatTextTypes.System, $"line {i:000} " + new string('x', 30)); // no frame between: the layout is redone on demand
+            Assert.True(log.IsAtVerticalEnd, $"the view left the end after line {i}");
+            Assert.False(main.IndicatorShown, $"the new-text indicator came up at line {i}");
+        }
+
+        Assert.True(log.ScrollY > 0, "sixty lines fill more than one page of the main chat");
+        rig.Frame();
+        Assert.True(log.IsAtVerticalEnd);
+        Assert.False(main.IndicatorShown);
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_log_scrolled_away_from_the_end_keeps_its_place_and_shows_the_indicator()
+    {
+        using var rig = new LoginRig(fixture, liveGame: true);
+        var main = EnterGame(rig).Chat!.Main!;
+        var log = main.Log!;
+        for (var i = 0; i < 60; i++)
+        {
+            main.DisplayText(ChatTextTypes.System, $"line {i:000} " + new string('x', 30));
+        }
+
+        log.SetScrollableXY(0, 0);
+        Assert.False(log.IsAtVerticalEnd);
+        var scroll = log.ScrollY;
+        main.DisplayText(ChatTextTypes.System, "a new line");
+        Assert.Equal(scroll, log.ScrollY);
+        Assert.True(main.IndicatorShown);
+    }
+
+    [RequiresLocalDatsFact]
     public void The_shell_unregisters_its_windows_when_it_goes()
     {
         using var rig = new LoginRig(fixture, liveGame: true);

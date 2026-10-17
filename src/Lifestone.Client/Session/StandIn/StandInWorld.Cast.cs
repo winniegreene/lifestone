@@ -105,6 +105,20 @@ internal sealed partial class StandInWorld
 
     private CastPlan? PlanFor(SpellInfo info)
     {
+        if (_visit.CastPlanner is null && _visit.CastPlannerFactory is { } factory)
+        {
+            // M3 3.1 fb (TODO(m3-standin-cast-plan-lazy) closed): no host planner is ready, so the stand-in makes one itself, once, here; it then plans the cast spell (and any other the stand-in is asked for) on demand.
+            try
+            {
+                _visit.CastPlanner = factory().Plan;
+                Log?.Info(SessionLog.Category, "the stand-in's cast planner was made on demand by the first cast (" + info.Name + "); every spell is planned when it is cast");
+            }
+            catch (Exception e) when (e is KeyNotFoundException or InvalidDataException or FileNotFoundException or IOException)
+            {
+                Log?.Error(SessionLog.Category, "TODO(m3-standin-cast-plan): the stand-in's cast planner could not be made on demand, so the cast plays without gestures: " + e.Message);
+            }
+        }
+
         if (_visit.CastPlanner is not { } planner)
         {
             Placeholder("m3-standin-cast-plan", "the stand-in has no cast planner (no dats were given to its visit): a cast is its effect and ACE's UseDone, with no words, gestures or scripts");

@@ -196,6 +196,9 @@ moving objects in cells and the retail cadence the oracle tests check re-express
 The lighting rows continue [interiors.md](interiors.md), which lists the same functions by their decompile line numbers.
 
 The scenarios themselves (`RoutePlay`, `HoltburgLapsScenario`, `AcademyExitScenario`, `LoginCheckScenario`,
-`PortalExit`, `RoutePlayHost`) and the stand-in server (`StandIn*`) are Lifestone's own; ACE (AGPL, v1.78.4816 @95ef426d)
-was read only for what it sends and accepts (the Academy portal rows of its world database, its position handling) and
-nothing was copied.
+`PortalExit`, `RoutePlayHost`) and the stand-in server (`StandIn*`) are Lifestone's own, with four exceptions: `StandInWorld.Cast.cs`, `StandInWorld.Combat.cs`, `StandInWorld.Death.cs` (M3 3.2) and
+`StandInDamageText.cs` re-express ACE's cast, projectile, damage-line and death behaviour (listed in [effects.md](effects.md); their headers
+name ACE@95ef426d and AGPL-3.0). ACE (AGPL, v1.78.4816 @95ef426d) was otherwise read only for what it sends and accepts (the Academy
+portal rows of its world database, its position handling; for the fight scenario, the range rule of `Player_Magic.cs` 495-505 and the
+spell-damage line forms of `SpellProjectile.cs` 810-845, which `FightScenario` and `FightTally` state as constants and parse) and
+nothing else was copied.

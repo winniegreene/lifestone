@@ -9,7 +9,7 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// controllers' <see cref="IGamePanel.OnShown"/> and <see cref="IGamePanel.OnHidden"/> as the page shows and hides. A page with no controller answers the NotInM3 message.
 /// </summary>
 /// <remarks>
-/// <para><b>The seam.</b> Each slice owns two partial-class files and nothing else of this class: <c>GamePanels.A1.cs</c> ... <c>GamePanels.B3.cs</c> (the slice's row in section 4.6 names its file). In its file a
+/// <para><b>The seam.</b> Each slice owns two partial-class files and nothing else of this class: <c>GamePanels.A1.cs</c> ... <c>GamePanels.C2.cs</c> (the slice's row in section 4.6 names its file). In its file a
 /// slice fills <c>Register&lt;Slice&gt;Classes</c> (the UI element classes its page needs, called from <see cref="GamePlayScreen.RegisterClasses"/>) and <c>Queue&lt;Slice&gt;</c> (calls <see cref="Queue"/> once per
 /// controller). Nothing in this file changes for a slice.</para>
 /// <para><b>The staged wiring.</b> <see cref="Build"/> is an <c>IEnumerator&lt;bool&gt;</c> run from <c>GamePlayScreen.Wire</c> after the shell's other controllers (so the toolbar, the indicators and character information
@@ -66,6 +66,8 @@ public sealed partial class GamePanels : IDisposable
         RegisterB1Classes(registry);
         RegisterB2Classes(registry);
         RegisterB3Classes(registry);
+        RegisterC1Classes(registry);
+        RegisterC2Classes(registry);
     }
 
     private static partial void RegisterA1Classes(UiClassRegistry registry);
@@ -80,6 +82,10 @@ public sealed partial class GamePanels : IDisposable
 
     private static partial void RegisterB3Classes(UiClassRegistry registry);
 
+    private static partial void RegisterC1Classes(UiClassRegistry registry);
+
+    private static partial void RegisterC2Classes(UiClassRegistry registry);
+
     private partial void QueueA1();
 
     private partial void QueueA2();
@@ -91,6 +97,10 @@ public sealed partial class GamePanels : IDisposable
     private partial void QueueB2();
 
     private partial void QueueB3();
+
+    private partial void QueueC1();
+
+    private partial void QueueC2();
 
     /// <summary>Queues one controller for the staged wiring (called from a slice's <c>Queue&lt;Slice&gt;</c>): <paramref name="build"/> runs in a unit of its own and returns the controller, or null when its page is missing from the layout (log why).</summary>
     public void Queue(Func<GamePanels, IGamePanel?> build)
@@ -126,6 +136,8 @@ public sealed partial class GamePanels : IDisposable
         QueueB1();
         QueueB2();
         QueueB3();
+        QueueC1();
+        QueueC2();
         for (var i = 0; i < _queue.Count; i++)
         {
             var panel = _queue[i](this);

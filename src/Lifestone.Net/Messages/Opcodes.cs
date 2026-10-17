@@ -292,6 +292,12 @@ public static class GameActionTypes
     /// <summary>ChangeCombatMode {u32 mode} (ACE <c>GameActionChangeCombatMode</c>).</summary>
     public const uint ChangeCombatMode = 0x0053;
 
+    /// <summary>Suicide (no payload; ACE <c>GameActionDie</c>, retail <c>CM_Character::Event_Suicide</c>, 11.6096 0x006A2920).</summary>
+    public const uint Suicide = 0x0279;
+
+    /// <summary>AddSpellFavorite {u32 spell, u32 index, u32 bar} (ACE <c>GameActionAddSpellFavorite</c>, retail <c>CM_Character::Event_AddSpellFavorite</c>, 11.6096 0x006A1D90).</summary>
+    public const uint AddSpellFavorite = 0x01E3;
+
     /// <summary>Jump (56 bytes, retail <c>JumpPack</c>).</summary>
     public const uint Jump = 0xF61B;
 

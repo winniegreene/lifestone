@@ -169,6 +169,27 @@ public sealed class AvatarStats
     /// </summary>
     public long CastSounds { get; internal set; }
 
+    /// <summary>Projectiles created: objects the server made in the Missile state (a spell's bolt), counted once each (M3 3.1 lane fc).</summary>
+    public long ProjectilesCreated { get; internal set; }
+
+    /// <summary>
+    /// Projectiles shown on at least one frame, counted once each (3.1-R6: named "shown", not "drawn", because a projectile with no drawable part, like the Flame Bolt, counts without its particles being checked): the draw layer calls <see cref="AvatarSet.NoteDrawn"/> for every avatar it draws, so a projectile whose meshes were not ready is not counted until
+    /// the frame it appears in (M3 3.1 lane fc).
+    /// </summary>
+    public long ProjectilesShown { get; internal set; }
+
+    /// <summary>F755 Launch scripts the server played on a projectile (received for a projectile body, whether or not its table had the type: <see cref="ProjectileScriptsMissing"/> says how many it lacked).</summary>
+    public long ProjectileLaunches { get; internal set; }
+
+    /// <summary>F755 Explode scripts the server played on a projectile (received for a projectile body, whether or not its table had the type).</summary>
+    public long ProjectileExplodes { get; internal set; }
+
+    /// <summary>Launch and Explode scripts received for a projectile whose PhysicsScriptTable lacked the type (also counted in <see cref="ServerScriptsMissing"/>, and logged once per table and type).</summary>
+    public long ProjectileScriptsMissing { get; internal set; }
+
+    /// <summary>Times the projectile window opened (<see cref="AvatarSet.ProjectileWindowOpen"/>: the first projectile alive after none).</summary>
+    public long ProjectileWindows { get; internal set; }
+
     /// <summary>Avatars stepped by the last advance.</summary>
     public int SteppedLastFrame { get; internal set; }
 
@@ -209,6 +230,12 @@ public sealed class Avatar
 
     /// <summary>The player's own character.</summary>
     public bool IsPlayer { get; }
+
+    /// <summary>True once a projectile avatar was drawn on a frame (<see cref="AvatarSet.NoteDrawn"/>).</summary>
+    internal bool ProjectileDrawn { get; set; }
+
+    /// <summary>True while this avatar is counted in <see cref="AvatarSet.LiveProjectiles"/>.</summary>
+    internal bool CountedLive { get; set; }
 
     /// <summary>A parent that was not there yet when the avatar was created or parented: it waits for it.</summary>
     internal (uint Parent, int Location, uint Placement)? PendingParent { get; set; }
@@ -266,6 +293,8 @@ public sealed class AvatarSet : ITargetWorld
     private readonly List<Avatar> _order = [];
     private readonly List<AvatarNotice> _notices = [];
     private readonly HashSet<uint> _spherelessSetupsLogged = [];
+    private readonly HashSet<uint> _spherelessMissilesLogged = [];
+    private bool _projectileCellLogged;
     private readonly HashSet<(uint Table, uint Type)> _missingScriptsLogged = [];
     private bool _droppedEffectLogged;
     private readonly List<EffectEvent> _events = [];
@@ -368,6 +397,39 @@ public sealed class AvatarSet : ITargetWorld
     }
 
     private bool _castClosing;
+
+    private int _liveProjectiles;
+
+    /// <summary>
+    /// True while any projectile lives (M3 3.1 lane fc): from the CreateObject of an object in the Missile state to its F747, the five seconds ACE keeps a bolt after its hit included. Beside
+    /// <see cref="CastWindowOpen"/>: the fight leg samples its worst frame over both.
+    /// </summary>
+    public bool ProjectileWindowOpen => _liveProjectiles > 0;
+
+    /// <summary>Projectiles alive now.</summary>
+    public int LiveProjectiles => _liveProjectiles;
+
+    /// <summary>The guid of the projectile created last, or 0 (checks follow a bolt by it).</summary>
+    public uint LastProjectileGuid { get; private set; }
+
+    /// <summary>
+    /// True for <c>--retail-sphereless-missile</c>: a projectile whose Setup has no spheres never moves, as retail's sphereless branch (<see cref="AvatarBody.RetailSpherelessMissile"/>). Default false: it flies on its
+    /// velocity like any other (a glitch fix; no retail projectile Setup lacks a sphere). Read when a body is made.
+    /// </summary>
+    public bool RetailSpherelessMissile { get; set; }
+
+    /// <summary>
+    /// The draw layer showed <paramref name="avatar"/> this frame (all its meshes ready; a projectile with no drawable part is shown too, and what is seen of it is its scripts' particles): the first time a projectile is, <see cref="AvatarStats.ProjectilesShown"/> counts it. Nothing for any other avatar; allocates nothing.
+    /// </summary>
+    public void NoteDrawn(Avatar avatar)
+    {
+        ArgumentNullException.ThrowIfNull(avatar);
+        if (avatar.Body.IsProjectile && !avatar.ProjectileDrawn)
+        {
+            avatar.ProjectileDrawn = true;
+            Stats.ProjectilesShown++;
+        }
+    }
 
     private bool InCastWindow(uint guid, bool isPlayer) => CastWindowOpen && (isPlayer || (CastTarget != 0 && guid == CastTarget));
 
@@ -554,6 +616,7 @@ public sealed class AvatarSet : ITargetWorld
         var body = new AvatarBody(create.Guid, setup, appearance, Sources, this, random, create.IsCreature, now);
         var avatar = new Avatar(body, create, Sources, create.IsSelf);
         _problems.Clear();
+        body.RetailSpherelessMissile = RetailSpherelessMissile;
         body.SetContact(create.HasContact);
 
         // An object created Hidden plays its Hidden script here (set_description applies the state through set_state,
@@ -561,6 +624,34 @@ public sealed class AvatarSet : ITargetWorld
         body.Describe(create, now, withInterpreter: !create.IsSelf, _problems);
         _avatars[create.Guid] = avatar;
         _order.Add(avatar);
+        if (body.IsProjectile)
+        {
+            avatar.CountedLive = true;
+            if (_liveProjectiles++ == 0)
+            {
+                Stats.ProjectileWindows++;
+            }
+
+            Stats.ProjectilesCreated++;
+            LastProjectileGuid = create.Guid;
+            if (!_projectileCellLogged && create.Position is { } at && Lifestone.Data.World.LandDefs.IsEnvCell(at.CellId))
+            {
+                _projectileCellLogged = true;
+                Log(
+                    LogSeverity.Info,
+                    create.Guid,
+                    "TODO(m3-bolt-cell-tracking): a projectile created in a dungeon cell keeps that cell while it flies (no collision transition for a server object, D24), so a bolt that crosses into another cell is lit and shown by its creation cell until the server's hit messages; retail's transition would hand it from cell to cell");
+            }
+
+            if (setup.Spheres.Count == 0 && !RetailSpherelessMissile && _spherelessMissilesLogged.Add(create.SetupId))
+            {
+                Log(
+                    LogSeverity.Warning,
+                    create.Guid,
+                    $"glitch fix (--retail-sphereless-missile restores retail): projectile Setup 0x{create.SetupId:X8} has no spheres; retail's sphereless branch (CPhysicsObj::UpdateObjectInternal, 11.6096 0x005161B0, 11.4186 0x005156B0; CPartArray::GetNumSphere 11.6096 0x00518B90, 11.4186 0x00518060) would keep its origin so it never flies; it flies on its velocity here");
+            }
+        }
+
         if (body.Effects.PhysicsScriptTableId != 0)
         {
             ScriptTableSeen?.Invoke(body.Effects.PhysicsScriptTableId);
@@ -817,6 +908,23 @@ public sealed class AvatarSet : ITargetWorld
         }
 
         var effects = avatar.Body.Effects;
+        var projectile = avatar.Body.IsProjectile;
+        if (projectile)
+        {
+            if (scriptType == (uint)DatReaderWriter.Enums.PlayScript.Launch)
+            {
+                Stats.ProjectileLaunches++;
+            }
+            else if (scriptType == (uint)DatReaderWriter.Enums.PlayScript.Explode)
+            {
+                Stats.ProjectileExplodes++;
+            }
+            else
+            {
+                projectile = false;
+            }
+        }
+
         if (effects.PlayScript((DatReaderWriter.Enums.PlayScript)scriptType, speed) != 0)
         {
             Stats.ServerScriptsPlayed++;
@@ -829,6 +937,11 @@ public sealed class AvatarSet : ITargetWorld
         }
 
         Stats.ServerScriptsMissing++;
+        if (projectile)
+        {
+            Stats.ProjectileScriptsMissing++;
+        }
+
         if (_missingScriptsLogged.Add((effects.PhysicsScriptTableId, scriptType)) && _log.IsEnabled(LogSeverity.Warning))
         {
             Log(
@@ -1039,6 +1152,12 @@ public sealed class AvatarSet : ITargetWorld
         }
 
         avatar.Body.ExitWorld();
+        if (avatar.CountedLive)
+        {
+            avatar.CountedLive = false;
+            _liveProjectiles--;
+        }
+
         _avatars.Remove(avatar.Guid);
         _order.Remove(avatar);
         if (ReferenceEquals(Player?.Avatar, avatar))

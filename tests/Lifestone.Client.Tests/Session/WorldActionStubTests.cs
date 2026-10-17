@@ -121,7 +121,7 @@ public sealed class WorldActionStubTests
         // Appended after ToolItem so the recorded values above stay stable.
         Assert.Equal(ActionKind.ToolItem + 1, ActionKind.CastSpell);
         Assert.Equal(
-            [ActionKind.CastSpell, ActionKind.SetCombatMode, ActionKind.Wield, ActionKind.Unwield, ActionKind.MoveToPack, ActionKind.MergeStack],
+            [ActionKind.CastSpell, ActionKind.SetCombatMode, ActionKind.Wield, ActionKind.Unwield, ActionKind.MoveToPack, ActionKind.MergeStack, ActionKind.Suicide, ActionKind.AddSpellFavorite],
             Enum.GetValues<ActionKind>().Where(k => k > ActionKind.ToolItem));
     }
 

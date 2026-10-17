@@ -981,15 +981,7 @@ public sealed partial class PlayChecks : Node
                 Check("the-message-closes-with-ok", Dialog() is null && okPresses == 1, $"open_dialogs={uiManager.Dialogs.OpenDialogs.Count()} ok_presses={okPresses}");
             }
 
-            // One press of a combat button.
-            if (shell.Root!.GetChildRecursive(0x10000192) is { } combatButton)
-            {
-                await Press(combatButton);
-                var message = Dialog();
-                var text = DialogText(message);
-                Check("a-combat-button-opens-the-not-in-m3-message", text == Lifestone.Client.RetailUi.Dialogs.NotInM3.Prefix + "Combat and spellcasting", $"dialog='{text}'");
-                await PressOk(message);
-            }
+            // The combat buttons change the combat mode since M3 3.2 (PlayChecks.PanelC1.cs judges them); a press here would leave the stand-in in melee mode for the checks after.
 
             // The link indicator with the stand-in (no link to measure: connected and just heard), then with the server silent for 25 and 45 seconds.
             var standInState = link.State;
@@ -1113,6 +1105,9 @@ public sealed partial class PlayChecks : Node
         await PanelChecksAsync(shell);
         await ToolsPanelWhereAndXpAsync(session, ui); // G7 lane A: Where am I and Add XP through the panel, and its review frame
         await ThrowawayToolOpsAsync(session, ui); // p2: the throwaway leg's driver presses the same buttons (PlayChecks.Throwaway.cs)
+        await FightChecksAsync(); // M3 3.1 fb: the stand-in's fight (PlayChecks.Fight.cs), after the tools teleport
+        await ProjectileChecksAsync(); // M3 3.1 fc: the projectile on screen (PlayChecks.Projectile.cs)
+        await DeathChecksAsync(); // M3 3.2 db: the stand-in's death (PlayChecks.Death.cs), after the fight checks
 
         // --- picking and selection (G5 W7): the stand-in portal is picked at its projected screen point; a double click Uses it ---
         var picking = _mode.Picking;
@@ -1152,6 +1147,7 @@ public sealed partial class PlayChecks : Node
         await SelectionShellChecks(ui); // g5b: the toolbar's name and health and the vivid target indicator for the stand-in drudge (docs/retail-ui.md section 21.7)
         tunnelsBefore = _tunnelShowings;
         teleportsBefore = _mode.Flow.Teleports;
+        var completesBeforePortal = _portal?.Director.LoginCompletesSent ?? 0; // M3 3.2 dd: the death checks before this section add LoginCompletes of their own (one each); this check counts the portal's
         await LookAtThePortal();
         picking.TryProject(PortalGuid, out portalRect, out _);
         clickX = (int)Math.Clamp(MathF.Round(portalRect.X + (portalRect.Width / 2f)), 0f, viewSize.X - 1f);
@@ -1180,8 +1176,8 @@ public sealed partial class PlayChecks : Node
             "the-portal-cue-hides-the-vivid-target-indicator-while-the-tunnel-shows",
             cueOff && holdsOff && cueOn && _tunnelFramesIndicatorDrawn == 0 && (_ui?.Screens?.Flow.CurrentScreen as GamePlayScreen)?.SelectionUi is { Indicator.Enabled: true },
             $"cue_off={cueOff} held_off_for_a_selected_object={holdsOff} cue_on_again={cueOn} tunnel_frames_cue_off={_tunnelFramesIndicatorOff} indicator_drawn_in_them={_tunnelFramesIndicatorDrawn} frames_with_an_object_selected={_tunnelFramesSelected}");
-        await WaitFor(() => _portal is { Director.LoginCompletesSent: >= 4 }, 30.0);
-        Check("login-complete-is-sent-for-the-portal", _portal is { Director.LoginCompletesSent: 4 }, $"sent={_portal?.Director.LoginCompletesSent}");
+        await WaitFor(() => _portal is { } done && done.Director.LoginCompletesSent >= completesBeforePortal + 1, 30.0);
+        Check("login-complete-is-sent-for-the-portal", _portal is { } sentFor && sentFor.Director.LoginCompletesSent == completesBeforePortal + 1, $"sent={_portal?.Director.LoginCompletesSent} before_the_portal={completesBeforePortal}");
         await WaitFor(() => _portal is { Director.Machine: { TunnelVisible: false, WorldVisible: true } }, 15.0);
         await InspectorShellChecks(ui); // G7 lane B: the automation inspector shows this run's own actions (docs/retail-ui.md section 22.2)
         await RaiseCheckAsync(session); // M3 1.1 s1b: one RaiseAttribute against the stand-in, priced by the retail XpTable

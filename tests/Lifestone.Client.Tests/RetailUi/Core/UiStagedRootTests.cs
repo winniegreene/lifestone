@@ -88,7 +88,7 @@ public sealed class UiStagedRootTests
 
         Assert.All(GamePlayScreen.ControllerClasses, id => Assert.True(registry.IsImplemented(id), UiClassRegistry.NameOf(id)));
         Assert.Contains(0x10000016u, GamePlayScreen.ControllerClasses); // gmSpewBoxUI
-        Assert.DoesNotContain(0x1000000Fu, GamePlayScreen.ControllerClasses); // gmPowerbarUI has no controller: it stays loud
-        Assert.False(registry.IsImplemented(0x1000000F));
+        Assert.DoesNotContain(0x1000000Fu, GamePlayScreen.ControllerClasses); // gmPowerbarUI is not one of the shell's controller classes...
+        Assert.True(registry.IsImplemented(0x1000000F)); // ...but M3 3.2 s0 registers it (and gmCombatUI, gmSpellcastingUI) as a plain container until slice pa builds its controller
     }
 }

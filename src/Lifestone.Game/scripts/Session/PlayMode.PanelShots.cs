@@ -27,6 +27,10 @@ public sealed partial class PlayMode
     }
 
     private double _panelShotWait;
+    private int _panelShotWindowIndex;
+    private int _panelShotRestoreMode;
+    private int _panelShotRestoreTab; // the spellcasting window's open tab before its frame (M3 3.2 fix B)
+    private PanelShotPhase _panelShotWindowPhase;
     private bool _panelShotsDone;
     private bool _panelShotTabOpen;
     private IReadOnlyList<PanelFrame>? _panelShotPages;
@@ -46,7 +50,7 @@ public sealed partial class PlayMode
 
         _panelShotWait += delta;
         if (_panelShotWait < _services.Options.Play.ScreenshotAfterSeconds
-            || _ui?.Screens?.Flow.CurrentScreen is not GamePlayScreen { IsBuilt: true, PanelHost: { } host, PanelControllers: { } panels })
+            || _ui?.Screens?.Flow.CurrentScreen is not GamePlayScreen { IsBuilt: true, PanelHost: { } host, PanelControllers: { } panels } shell)
         {
             return;
         }
@@ -61,6 +65,11 @@ public sealed partial class PlayMode
 
         if (_panelShotIndex >= _panelShotPages.Count)
         {
+            if (StepWindowShots(shell, directory))
+            {
+                return; // the combat window's and the power bar's frames (M3 3.2 pa) follow the pages'
+            }
+
             Log.Info(LogCategory, PanelFramesPlan.Verdict(_panelShotCaptured, _panelShotFailures));
             FinishPanelShots(_panelShotFailures == 0 ? 0 : 1);
             return;
@@ -130,5 +139,101 @@ public sealed partial class PlayMode
         {
             GetTree().Quit(exitCode); // as --play-screenshot: with --play-checks it only saves and the checks go on
         }
+    }
+
+    // M3 3.2 pa and pb: after the pages, the floaty windows that are not host pages (PanelFramesPlan.AllWindowFrames: c1-combat, c1-powerbar, c2-spellcasting). Each is shown by the UI's own mode notice (never a session action: a live run's character
+    // keeps its mode), the power bar begun by hand at a placeholder level (nothing in M3 charges a bar), the shot taken, the notice put back. True while frames remain.
+    private bool StepWindowShots(GamePlayScreen shell, string directory)
+    {
+        var frames = PanelFramesPlan.AllWindowFrames; // pa's two, then pb's c2-spellcasting
+        if (_panelShotWindowIndex >= frames.Count)
+        {
+            return false;
+        }
+
+        var frame = frames[_panelShotWindowIndex];
+        var combat = shell.Root?.GetChildRecursive(GameCombatPanel.WindowId) as GameCombatPanel;
+        var bar = shell.Root?.GetChildRecursive(GamePowerBar.WindowId) as GamePowerBar;
+        var spells = shell.Root?.GetChildRecursive(GameSpellcastingPanel.WindowId) as GameSpellcastingPanel;
+        if (combat is null || bar is null || spells is null)
+        {
+            Log.Error(LogCategory, "window shot failed: the shell has no combat window, power bar or spellcasting window", ("window", frame.Name));
+            _panelShotFailures++;
+            _panelShotWindowIndex++;
+            return true;
+        }
+
+        switch (_panelShotWindowPhase)
+        {
+            case PanelShotPhase.Open:
+                _panelShotRestoreMode = combat.Mode;
+                combat.SetCombatMode(frame.CombatMode);
+                spells.SetCombatMode(frame.CombatMode); // M3 3.2 pb: the spellcasting window shows in Magic mode only (the UI's notice, never a session action)
+                if (frame.WindowId == GameSpellcastingPanel.WindowId)
+                {
+                    // M3 3.2 fix B (3.2-R7): the first tab whose bar holds spells (live, BSD Mage's sit on bars 1 and 2), opened as a tab click; put back after the shot.
+                    _panelShotRestoreTab = spells.OpenTab;
+                    var choice = PanelFramesPlan.OpenSpellcastingFrameTab(spells);
+                    Log.Info(LogCategory, "spellcasting shot tab", ("window", frame.Name), ("tab", choice.Tab), ("holds_spells", choice.HoldsSpells), ("opened", choice.Opened));
+                }
+
+                if (frame.DrivePowerBar)
+                {
+                    bar.Begin(PowerBarMode.Advanced, frame.CombatMode);
+                    bar.SetLevel(PowerBarMode.Advanced, WindowFrame.PowerBarLevel);
+                }
+
+                _panelShotFrames = 0;
+                _panelShotWindowPhase = PanelShotPhase.Settle;
+                break;
+            case PanelShotPhase.Settle:
+                if (++_panelShotFrames >= PanelShotSettleFrames)
+                {
+                    HideDeveloperHud();
+                    _playShotHiddenFrames = 0;
+                    _panelShotFrames = 0;
+                    _panelShotWindowPhase = PanelShotPhase.Capture;
+                }
+
+                break;
+            default:
+                if (++_panelShotFrames < PlayShotHiddenFrames)
+                {
+                    break;
+                }
+
+                var shown = shell.Root?.GetChildRecursive(frame.WindowId)?.IsShown == true;
+                var path = System.IO.Path.Combine(directory, PanelFramesPlan.FileName(frame));
+                var saved = shown && ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", "play-panel-shots"), ("window", frame.Name), ("developer_hud", "hidden"));
+                RestoreDeveloperHud();
+                if (saved)
+                {
+                    _panelShotCaptured++;
+                    Log.Info(LogCategory, "panel shot saved", ("window", frame.Name), ("path", path));
+                }
+                else
+                {
+                    _panelShotFailures++;
+                    Log.Error(LogCategory, "panel shot failed", ("window", frame.Name), ("shown", shown));
+                }
+
+                if (frame.DrivePowerBar)
+                {
+                    bar.Finish(PowerBarMode.Advanced);
+                }
+
+                if (frame.WindowId == GameSpellcastingPanel.WindowId)
+                {
+                    spells.OpenTabByClick(_panelShotRestoreTab);
+                }
+
+                combat.SetCombatMode(_panelShotRestoreMode);
+                spells.SetCombatMode(_panelShotRestoreMode);
+                _panelShotWindowIndex++;
+                _panelShotWindowPhase = PanelShotPhase.Open;
+                break;
+        }
+
+        return true;
     }
 }

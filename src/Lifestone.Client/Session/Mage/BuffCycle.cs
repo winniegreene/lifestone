@@ -77,6 +77,9 @@ public sealed record BuffResult
     /// <summary>Of <see cref="Cast"/>, the armour lines (Impenetrability, Bludgeon Bane) cast and landed: a new cycle object does not remember an earlier one's armour casts, so a second run recasts them (<c>TODO(m3-buff-armour-memory)</c>).</summary>
     public int ArmourCast { get; init; }
 
+    /// <summary>The armour pieces whose cast was surpassed by a stronger version of the line they already held, counted active for the line (<c>surpassed=</c>; closes <c>TODO(m3-buff-armour-surpassed)</c>).</summary>
+    public int Surpassed { get; init; }
+
     /// <summary>The lines of this pass cast again at a higher level than the one they held (the first cycle's upgrade pass; closes <c>TODO(m3-buff-upgrade-skip)</c>).</summary>
     public int Upgraded { get; init; }
 
@@ -99,7 +102,7 @@ public sealed record BuffResult
         var mana = r.ManaMin is { } m ? m.ToString(CultureInfo.InvariantCulture) : "n/a";
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"buffs={r.Active}/{r.Wanted} levels={r.Levels} rebuffed={(r.Rebuffed ? "yes" : "no")} min_remaining_s={min} fizzles={r.Fizzles} transfers={r.TransfersFired}/{r.TransfersTried} revitalizes={r.Revitalizes} mana_min={mana} cycle_s={Math.Floor(r.CycleSeconds).ToString("0", CultureInfo.InvariantCulture)} mode_changes={r.ModeChanges} misses={misses}{(r.Forced ? " forced=yes" : string.Empty)}");
+            $"buffs={r.Active}/{r.Wanted} levels={r.Levels} rebuffed={(r.Rebuffed ? "yes" : "no")} min_remaining_s={min} fizzles={r.Fizzles} transfers={r.TransfersFired}/{r.TransfersTried} revitalizes={r.Revitalizes} mana_min={mana} cycle_s={Math.Floor(r.CycleSeconds).ToString("0", CultureInfo.InvariantCulture)} mode_changes={r.ModeChanges} misses={misses}{(r.Forced ? " forced=yes" : string.Empty)} surpassed={r.Surpassed}");
     }
 }
 
@@ -124,7 +127,7 @@ public sealed record BuffResult
 /// produced: a worn armour piece (item type Armor or Clothing) with no line is a named miss.</para>
 /// <para><b>Expiry.</b> A self cast's expiry is its registry entry's start plus its duration (<see cref="ActiveEnchantment.ExpirySeconds"/>, the spell id the line holds in
 /// <see cref="PlayerQualities.ActiveEnchantments"/>); an armour line's is the cast's UseDone time plus the SpellTable duration, kept per worn piece (<c>TODO(m3-buff-armour-memory)</c>: the cycle object remembers it;
-/// a new object does not know an earlier object's armour casts, since the server sends no registry for an item). A piece whose line says "surpassed" is a miss (<c>TODO(m3-buff-armour-surpassed)</c>).</para>
+/// a new object does not know an earlier object's armour casts, since the server sends no registry for an item). A piece whose line says "surpassed" holds a stronger version of the line and is counted active (retail keeps the stronger enchantment; <see cref="BuffResult.Surpassed"/>, <c>surpassed=</c>; closes <c>TODO(m3-buff-armour-surpassed)</c>).</para>
 /// <para><b>The mana loop</b> (D24, retail's way): before a cast whose cost (<see cref="GearCasts.ManaCeiling"/>: the base mana and ACE's armour surcharge, <c>Creature_Magic.cs</c> 14-60) is above the current mana,
 /// the cycle casts Stamina to Mana Self at the highest level whose chance reaches the threshold and whose own cost is affordable, tried again until one fires (a try is a separate cast; <see cref="BuffOptions.TransferTries"/>
 /// fizzles in a row fail the cycle); when the stamina is too low for a transfer to cover the shortfall (<see cref="BuffStatMods.Transfer"/> gives the yield) it casts Revitalize Self first by the same rule; when neither can
@@ -286,6 +289,7 @@ public sealed class BuffCycle
     private double _nextEvaluate;
     private int _passCast;
     private int _passArmour;
+    private int _passSurpassed;
     private int _fizzles;
     private int _fired;
     private int _tried;
@@ -520,6 +524,7 @@ public sealed class BuffCycle
         _line = 0;
         _passCast = 0;
         _passArmour = 0;
+        _passSurpassed = 0;
         _misses.Clear();
         _missDetails.Clear();
         _pending = null;
@@ -1093,7 +1098,15 @@ public sealed class BuffCycle
                 }
             }
 
-            if (found && !surpassed)
+            if (found && surpassed)
+            {
+                // The piece already holds a stronger enchantment of the line (ACE: "You cast <spell> on <item>, but it is surpassed by ..."); retail keeps the stronger one, so the line is active for this piece.
+                // Its own expiry is not known to the client; the cast's is the conservative stand-in. Closes TODO(m3-buff-armour-surpassed).
+                _passSurpassed++;
+                _log.Info(LogCategory, $"{w.Line.Name}: {_expectedName[p]} holds a stronger version of the line (the cast was surpassed); counted active");
+            }
+
+            if (found)
             {
                 w.PieceGuid[w.PieceCount] = _expectedGuid[p];
                 w.PieceExpiry[w.PieceCount] = doneAt + info.Duration;
@@ -1102,7 +1115,7 @@ public sealed class BuffCycle
             else
             {
                 missingCount++;
-                missing = (missing is null ? string.Empty : missing + ";") + _expectedName[p].Replace(' ', '_') + (surpassed ? "(surpassed)" : string.Empty);
+                missing = (missing is null ? string.Empty : missing + ";") + _expectedName[p].Replace(' ', '_');
             }
         }
 
@@ -1112,7 +1125,7 @@ public sealed class BuffCycle
         }
         else if (missingCount > 0)
         {
-            Miss(w, "no-piece:" + missing, string.Create(CultureInfo.InvariantCulture, $"{w.Line.Name}: {missingCount} of {count} worn pieces got no \"You cast {info.Name} on <item>\" line during the cast ({missing}); TODO(m3-buff-armour-surpassed) for a piece a stronger spell covers"));
+            Miss(w, "no-piece:" + missing, string.Create(CultureInfo.InvariantCulture, $"{w.Line.Name}: {missingCount} of {count} worn pieces got no \"You cast {info.Name} on <item>\" line during the cast ({missing})"));
         }
         else
         {
@@ -1281,6 +1294,7 @@ public sealed class BuffCycle
             Pass = _rebuff ? "rebuff" : "cycle",
             Cast = _passCast,
             ArmourCast = _passArmour,
+            Surpassed = _passSurpassed,
             Upgraded = _upgraded,
             CycleSeconds = now - _passStart,
             ModeChanges = _modeChanges,

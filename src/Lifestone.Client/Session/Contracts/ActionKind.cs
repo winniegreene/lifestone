@@ -99,6 +99,12 @@ public enum ActionKind
 
     /// <summary><see cref="IActionApi.MergeStack"/> (M3 1.4 fix A; appended).</summary>
     MergeStack,
+
+    /// <summary><see cref="IActionApi.Suicide"/> (M3 3.2 s0; appended).</summary>
+    Suicide,
+
+    /// <summary><see cref="IActionApi.AddSpellFavorite"/> (M3 3.2 s0).</summary>
+    AddSpellFavorite,
 }
 
 /// <summary>Where an <see cref="ActionHandle"/> is in its life.</summary>

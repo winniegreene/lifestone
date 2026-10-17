@@ -186,9 +186,9 @@ public sealed class LoginCompleteWaitTests
     }
 
     [Fact]
-    public void TODO_m3_inventory_delete_alone_a_delete_without_the_0024_leaves_the_entry_in_the_model_and_LoginComplete_waits_the_cap()
+    public void A_delete_without_the_0024_releases_the_held_item_as_ACEs_death_drop_of_a_wielded_item_sends_it_and_LoginComplete_does_not_wait()
     {
-        // Not reachable on ACE's order (R10 closed as not reproducible there): this pins what the model does with an F747 that no 0024 preceded, so the day a server sends one the gap is known.
+        // Closes TODO(m3-inventory-delete-alone) (M3 3.2 live): ACE's drop of a wielded item to the corpse is 02DA, 02CE, F74A, the sound and F747 with no 0024 (Player_Inventory.cs 397-441), so the F747 itself releases a held item.
         var h = new ActionHarness();
         h.InWorld();
         h.Describe(Description());
@@ -198,9 +198,10 @@ public sealed class LoginCompleteWaitTests
         h.R.Reducer.OnDeleteObject(h.R.Context, new DeleteObjectMsg(PackA, 0));
 
         Assert.False(h.State.Objects.Contains(PackA));
-        Assert.True(h.State.Self.Inventory.Contains(PackA));
+        Assert.False(h.State.Self.Inventory.Contains(PackA));
+        Assert.Equal(0, LoginCompleteTracker.MissingContents(h.State, out _));
         h.Api.LoginComplete();
         h.Tick(0.5);
-        Assert.Equal(0, Sent(h));
+        Assert.Equal(1, Sent(h));
     }
 }

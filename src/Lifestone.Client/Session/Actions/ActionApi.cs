@@ -422,6 +422,22 @@ internal sealed class ActionApi : IActionApi, IDisposable
     }
 
     /// <inheritdoc/>
+    public ActionHandle Suicide(ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Suicide");
+        return Accept(new SuicideTracker(NewHandle(ActionKind.Suicide, source, "Suicide")));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle AddSpellFavorite(uint spellId, int index, int bar, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.AddSpellFavorite");
+        var handle = NewHandle(ActionKind.AddSpellFavorite, source, "AddSpellFavorite spell=" + spellId + " index=" + index + " bar=" + bar);
+        var problem = spellId == 0 ? "no spell to add" : index < 0 ? "a negative position on the bar" : bar is < 0 or > 7 ? "the bar must be 0 to 7 (ACE ignores a bar above 7)" : null;
+        return Accept(new AddSpellFavoriteTracker(handle, spellId, index, bar), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
     public ActionHandle LogOff(ActionSource source)
     {
         CheckThread("IActionApi.LogOff");

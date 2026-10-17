@@ -228,6 +228,18 @@ public sealed partial class LoginCheckRunner : Node
             return;
         }
 
+        if (kind == LoginCheckKind.BsdFight)
+        {
+            FightLegRunner.Install(main, services, host, mode, ui); // a kind of its own (M3 3.1): BSD Mage's fight in the Aluvian den, never part of 'all'
+            return;
+        }
+
+        if (kind == LoginCheckKind.BsdDeath)
+        {
+            DeathLegRunner.Install(main, services, host, mode, ui); // a kind of its own (M3 3.2): BSD Mage's death and re-gear in the Aluvian den, never part of 'all'
+            return;
+        }
+
         var dats = services.Dats ?? throw new InvalidOperationException("the login check needs the dats (Main checks for them first)");
         // The log off is asked for with retail's key, Shift+Escape (End Character Session), through the retail UI's input router: the key's whole path is checked live.
         Func<ActionHandle?>? logOffKey = ui is null || mode.EndKey is null ? null : () => PressLogOffKey(ui, mode.EndKey);

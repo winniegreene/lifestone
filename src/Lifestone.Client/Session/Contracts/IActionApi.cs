@@ -226,6 +226,26 @@ public interface IActionApi
     ActionHandle MergeStack(uint from, uint to, int amount, ActionSource source = ActionSource.Host);
 
     /// <summary>
+    /// Kills the player on purpose (GameAction 0x0279, no payload; retail <c>CM_Character::Event_Suicide</c>, 11.6096 0x006A2920; ACE <c>GameActionDie</c>). ACE has the player say five lines 3 s apart ("I feel faint..." and on), then
+    /// the death without a victim notice (no 0x01AC): the Dead motion, health 0x02E9 to 0, NumDeaths 0x02CD up, the vitae, the purge of every enchantment, the corpse and the lifestone teleport. Completes
+    /// <see cref="ActionOutcomeKind.Confirmed"/> when the player's death is seen (health 0 and NumDeaths up, in either order); the player already dead or teleporting gets WeenieError YoureTooBusy, which completes
+    /// it <see cref="ActionOutcomeKind.Refused"/> with code 0x001D. Time limit 30 s on the session clock from the send (<see cref="ActionOutcomeKind.TimedOut"/>). Refused at once when the player is not in the world.
+    /// </summary>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle Suicide(ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Puts a spell on one of the character's spell bars (GameAction 0x01E3 {spell, index, bar}; retail <c>CM_Character::Event_AddSpellFavorite</c>, 11.6096 0x006A1D90; ACE <c>GameActionAddSpellFavorite</c>). ACE answers nothing
+    /// (it ignores a bar above 7 and a spell the player does not know), so this completes as <see cref="ActionOutcomeKind.Sent"/> when it is sent. Refused at once for spell 0, a negative index, a bar outside 0 to 7, or when
+    /// the player is not in the world.
+    /// </summary>
+    /// <param name="spellId">The spell id.</param>
+    /// <param name="index">The position on the bar (0 is the first).</param>
+    /// <param name="bar">The bar, 0 to 7.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle AddSpellFavorite(uint spellId, int index, int bar, ActionSource source = ActionSource.Host);
+
+    /// <summary>
     /// Logs the character off: adds "Logging off..." to the chat as retail does, sends F653 (the only sender), and
     /// publishes <see cref="LogOffRequested"/> for portal space. Completes when the server's F653 and the character list
     /// have arrived.

@@ -106,6 +106,7 @@ internal sealed partial class GameStateReducer
         }
 
         _state.Objects.Remove(message.Guid);
+        ReleaseDeletedHeld(message.Guid);
         Changed();
         Publish(new ObjectDeleted(message.Guid));
     }

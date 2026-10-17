@@ -27,7 +27,78 @@ public readonly record struct StandInTeleport(double After, uint Cell, Vector3 O
 /// <param name="BlipColor">The server's radar blip colour byte (1 to 10), or 0 to send none.</param>
 /// <param name="UnhideAfter">Null for an object created in plain sight. Otherwise the server creates it Hidden (with the human's script table, as a real server does for an object it materialises: the Hidden script's bubbles and
 /// the UnHide script's fade) and clears the bit this many seconds after the player's unhide (D63: the materialise fade of an object, drawn by the same path as the player's).</param>
-public readonly record struct StandInObject(uint Guid, string Name, Vector3 Offset, uint Setup = StandInVisit.HumanSetup, uint MotionTable = StandInVisit.HumanMotionTable, StandInTeleport? PortalTo = null, uint DescriptionFlags = 0, byte BlipColor = 0, double? UnhideAfter = null);
+/// <param name="WeenieClassId">The weenie class id the object's description carries (2 for the stand-in's own placeholder objects; <see cref="StandInTusker.Wcid"/> for a tusker).</param>
+/// <param name="MaxHealth">M3 3.1 fb: more than 0 makes the object a creature with health: the spell hit takes health from it, QueryHealth answers its real fraction (0x01C0) and at zero it dies as ACE's creature does
+/// (<c>StandInWorld.Combat.cs</c>). 0: no health model (QueryHealth answers <see cref="StandInWorld.PlaceholderHealth"/> for an attackable object, as before).</param>
+/// <param name="XpOverride">The experience a kill grants (ACE's <c>XpOverride</c>: <c>Creature_Death.cs</c> <c>OnDeath_GrantXP</c>); 0 grants none.</param>
+/// <param name="Height">The object's height in metres, which aims a projectile (ACE aims at two thirds of it); 0: the stand-in's placeholder (<c>TODO(m3-standin-object-sizes)</c>).</param>
+/// <param name="Attacks">M3 3.2 db: a placed creature with health that attacks a player within reach, as ACE's monster does (<c>StandInWorld.Death.cs</c>, <c>TODO(m3-standin-tusker-attack)</c>). False (the default) keeps the creature still, as the fight's checks use it.</param>
+public readonly record struct StandInObject(
+    uint Guid,
+    string Name,
+    Vector3 Offset,
+    uint Setup = StandInVisit.HumanSetup,
+    uint MotionTable = StandInVisit.HumanMotionTable,
+    StandInTeleport? PortalTo = null,
+    uint DescriptionFlags = 0,
+    byte BlipColor = 0,
+    double? UnhideAfter = null,
+    uint WeenieClassId = 2,
+    uint MaxHealth = 0,
+    long XpOverride = 0,
+    float Height = 0f,
+    bool Attacks = false);
+
+/// <summary>
+/// The stand-in's Tusker Slave (M3 3.1 fb; <c>TODO(m3-standin-tusker-stats)</c>): the creature the Aluvian den's floor holds (weenie 1628, the Setup 0x02000964, attackable). The stand-in has no weenie database, so the
+/// numbers ACE's world database holds for it that the checks need are placeholders: the maximum health (<see cref="PlaceholderMaxHealth"/>), and the motion table (the caller reads the Setup's own default from the dats). Its
+/// <see cref="XpOverride"/> is the plan's figure for the kill (30,000), not read from the database.
+/// </summary>
+public static class StandInTusker
+{
+    /// <summary>The weenie class id of the Tusker Slave.</summary>
+    public const uint Wcid = 1628;
+
+    /// <summary>The Tusker Slave's Setup.</summary>
+    public const uint Setup = 0x02000964;
+
+    /// <summary>The Tusker Slave's name.</summary>
+    public const string Name = "Tusker Slave";
+
+    /// <summary>The object description bit of an attackable creature (ACE <c>ObjectDescriptionFlags.Attackable</c>).</summary>
+    public const uint AttackableFlag = 0x10;
+
+    /// <summary>The experience a kill of it grants (ACE's <c>XpOverride</c> as the plan gives it).</summary>
+    public const long XpOverride = 30_000;
+
+    /// <summary>The maximum health the stand-in gives it (a placeholder: ACE's weenie row is not in the stand-in; <c>TODO(m3-standin-tusker-stats)</c>).</summary>
+    public const uint PlaceholderMaxHealth = 400;
+
+    /// <summary>A tusker for a visit or a placement: an attackable creature on its Setup with health, and its kill's experience.</summary>
+    /// <param name="guid">The object id.</param>
+    /// <param name="offset">Where it stands (from the player's creation position in a visit; ignored by a placement).</param>
+    /// <param name="motionTable">Its motion table (the Setup's default, read from the dats by the caller), or 0 for none.</param>
+    /// <param name="height">Its height in metres, or 0 for the placeholder.</param>
+    /// <param name="maxHealth">Its maximum health; 0 takes <see cref="PlaceholderMaxHealth"/>.</param>
+    /// <param name="attacks">True: a placed tusker attacks a player within reach (M3 3.2 db; <c>TODO(m3-standin-tusker-attack)</c>); false keeps it still.</param>
+    public static StandInObject Make(uint guid, Vector3 offset, uint motionTable = 0, float height = 0f, uint maxHealth = 0, bool attacks = false) =>
+        new(guid, Name, offset, Setup, motionTable, DescriptionFlags: AttackableFlag, WeenieClassId: Wcid, MaxHealth: maxHealth != 0 ? maxHealth : PlaceholderMaxHealth, XpOverride: XpOverride, Height: height, Attacks: attacks);
+}
+
+/// <summary>
+/// The stand-in's lifestone (M3 3.2 db): an object whose description flags carry <c>BF_LIFESTONE</c> (0x4000, <see cref="Contracts.WorldObjectTable.LifestoneFlag"/>). A Use of it binds the player (<c>StandInWorld.Death.cs</c>: the Sanctuary
+/// motion, a Magic chat line, the stand-in's sanctuary set to the player's position, half the stamina; ACE <c>Lifestone.cs</c> <c>ActOnUse</c> 45-75). The name is Lifestone-authored and the look is a placeholder (the human Setup):
+/// the stand-in has no weenie database (<c>TODO(m3-standin-lifestone-weenie)</c>).
+/// </summary>
+public static class StandInLifestone
+{
+    /// <summary>The name of the stand-in's lifestone (Lifestone-authored; ACE's weenie is called "Lifestone").</summary>
+    public const string Name = "Stand-in Lifestone";
+
+    /// <summary>A lifestone for a placement (<see cref="StandInServer.Place"/>): <see cref="Contracts.WorldObjectTable.LifestoneFlag"/> in its description flags, on the human Setup with no motion table.</summary>
+    /// <param name="guid">The object id.</param>
+    public static StandInObject Make(uint guid) => new(guid, Name, default, StandInVisit.HumanSetup, 0, DescriptionFlags: Contracts.WorldObjectTable.LifestoneFlag, WeenieClassId: 2);
+}
 
 /// <summary>A weenie the stand-in knows for the server mod's <c>item</c> request (a placeholder: the stand-in has no weenie database; <c>TODO(m3-standin-weenies)</c>).</summary>
 /// <param name="Name">The item's name.</param>
@@ -144,6 +215,12 @@ public sealed record StandInVisit
     /// sets it once the dats are open (settable like <see cref="XpTable"/>). Null: a cast is its effect and ACE's UseDone with no words, gestures or scripts (<c>TODO(m3-standin-cast-plan)</c>, logged once).
     /// </summary>
     public Func<SpellInfo, CastPlan?>? CastPlanner { get; set; }
+
+    /// <summary>
+    /// M3 3.1 fb (<c>TODO(m3-standin-cast-plan-lazy)</c> closed): makes the planner when a cast finds <see cref="CastPlanner"/> still null (the host's worker is not done, or no host made one), once, on the casting thread. The planner
+    /// then plans any spell the stand-in knows when it is cast (<see cref="StandInCastPlanner.Plan"/> caches by spell id and is thread-safe), not only the ones a host planned ahead. Null: a cast with no planner plays none, as before.
+    /// </summary>
+    public Func<StandInCastPlanner>? CastPlannerFactory { get; set; }
 
     /// <summary>
     /// The Setup of the projectile a war spell launches (the ACE world extract the visuals use; null: not known). The stand-in dresses its projectile placeholder with it, so the cast tracker, which
@@ -516,11 +593,11 @@ public static partial class StandInSessions
         if (visit.Recorded is { } recorded)
         {
             // The recorded description as the server sent it (it holds no guid: the event's header names this player).
-            sink.OnPlayerDescription(WorldContext(sink), new GameEventHeader(guid, 1, 0x0013), RecordedFor(visit, recorded, sink));
+            sink.OnPlayerDescription(WorldContext(sink), new GameEventHeader(guid, 1, 0x0013), WithBars(sink, RecordedFor(visit, recorded, sink)));
         }
         else if (visit.Stats is { } stats)
         {
-            sink.OnPlayerDescription(WorldContext(sink), new GameEventHeader(guid, 1, 0x0013), Description(stats));
+            sink.OnPlayerDescription(WorldContext(sink), new GameEventHeader(guid, 1, 0x0013), WithBars(sink, Description(stats)));
         }
 
         sink.OnSessionEvent(SessionEvent.PhaseChanged(Now(sink), SessionPhase.EnteringWorld, SessionPhase.InWorld));
@@ -548,33 +625,46 @@ public static partial class StandInSessions
 
         foreach (var obj in visit.Objects)
         {
-            var hiddenAtCreation = obj.UnhideAfter is not null;
-            var objectPhysics = new PhysicsDesc
-            {
-                Flags = PhysicsDescFlags.CSetup | PhysicsDescFlags.Position | (obj.MotionTable != 0 ? PhysicsDescFlags.MTable : PhysicsDescFlags.None) | (hiddenAtCreation ? PhysicsDescFlags.PeTable : PhysicsDescFlags.None),
-                State = hiddenAtCreation
-                    ? PhysicsState.Hidden | PhysicsState.IgnoreCollisions | PhysicsState.Gravity | PhysicsState.EdgeSlide
-                    : PhysicsState.Gravity | PhysicsState.ReportCollisions | PhysicsState.EdgeSlide,
-                PhysicsEffectTableId = hiddenAtCreation ? StandInVisit.HumanScriptTable : null,
-                Position = new AcPosition(visit.Cell, visit.Origin + obj.Offset, Quaternion.Identity),
-                SetupId = obj.Setup,
-                MotionTableId = obj.MotionTable != 0 ? obj.MotionTable : null,
-                Timestamps = Stamps(1, 1),
-            };
-            // g3b: every stand-in object is shown on the radar (RadarBehavior 4, show always; a placeholder: the stand-in's weenie carries no data); a portal has the portal bit, and a server blip colour is sent when the object names one.
-            var objectWeenie = new WeenieDesc
-            {
-                Header = WeenieHeaderFlags.RadarBehavior | (obj.BlipColor != 0 ? WeenieHeaderFlags.RadarBlipColor : WeenieHeaderFlags.None),
-                Name = obj.Name,
-                WeenieClassId = 2,
-                IconId = 0x06000001,
-                ItemType = 0x10,
-                ObjectDescriptionFlags = obj.DescriptionFlags | (obj.PortalTo is not null ? 0x40000u : 0u),
-                RadarBehavior = 4,
-                RadarBlipColor = obj.BlipColor != 0 ? obj.BlipColor : null,
-            };
-            sink.OnCreateObject(WorldContext(sink), new CreateObjectMsg(obj.Guid, ModelData.Empty, objectPhysics, objectWeenie), isUpdate: false);
+            sink.OnCreateObject(WorldContext(sink), ObjectMessage(obj, new AcPosition(visit.Cell, visit.Origin + obj.Offset, Quaternion.Identity)), isUpdate: false);
         }
+    }
+
+    /// <summary>The description with the favourite-spell bars the stand-in holds since an <c>AddSpellFavorite</c> (M3 3.2 db; <see cref="StandInWorld.WithBars"/>), unchanged when none was added.</summary>
+    private static PlayerDescriptionMsg WithBars(IAcSessionSink sink, PlayerDescriptionMsg description) =>
+        (sink as GameStateReducer)?.LocalResponder?.World is { } world ? world.WithBars(description) : description;
+
+    /// <summary>
+    /// The CreateObject the server sends for one object of a visit (<paramref name="obj"/>) at <paramref name="position"/>: the visit's objects at their offsets from the player's creation position, and an object a check places (M3 3.1 fb,
+    /// <see cref="StandInServer.Place"/>) where it is told.
+    /// </summary>
+    internal static CreateObjectMsg ObjectMessage(StandInObject obj, AcPosition position)
+    {
+        var hiddenAtCreation = obj.UnhideAfter is not null;
+        var objectPhysics = new PhysicsDesc
+        {
+            Flags = PhysicsDescFlags.CSetup | PhysicsDescFlags.Position | (obj.MotionTable != 0 ? PhysicsDescFlags.MTable : PhysicsDescFlags.None) | (hiddenAtCreation ? PhysicsDescFlags.PeTable : PhysicsDescFlags.None),
+            State = hiddenAtCreation
+                ? PhysicsState.Hidden | PhysicsState.IgnoreCollisions | PhysicsState.Gravity | PhysicsState.EdgeSlide
+                : PhysicsState.Gravity | PhysicsState.ReportCollisions | PhysicsState.EdgeSlide,
+            PhysicsEffectTableId = hiddenAtCreation ? StandInVisit.HumanScriptTable : null,
+            Position = position,
+            SetupId = obj.Setup,
+            MotionTableId = obj.MotionTable != 0 ? obj.MotionTable : null,
+            Timestamps = Stamps(1, 1),
+        };
+        // g3b: every stand-in object is shown on the radar (RadarBehavior 4, show always; a placeholder: the stand-in's weenie carries no data); a portal has the portal bit, and a server blip colour is sent when the object names one.
+        var objectWeenie = new WeenieDesc
+        {
+            Header = WeenieHeaderFlags.RadarBehavior | (obj.BlipColor != 0 ? WeenieHeaderFlags.RadarBlipColor : WeenieHeaderFlags.None),
+            Name = obj.Name,
+            WeenieClassId = obj.WeenieClassId,
+            IconId = 0x06000001,
+            ItemType = (obj.DescriptionFlags & Contracts.WorldObjectTable.LifestoneFlag) != 0 ? 0x80u : 0x10u, // Misc for a lifestone (M3 3.2 db: it must not read as a creature); every other stand-in object keeps Creature
+            ObjectDescriptionFlags = obj.DescriptionFlags | (obj.PortalTo is not null ? 0x40000u : 0u),
+            RadarBehavior = 4,
+            RadarBlipColor = obj.BlipColor != 0 ? obj.BlipColor : null,
+        };
+        return new CreateObjectMsg(obj.Guid, ModelData.Empty, objectPhysics, objectWeenie);
     }
 
     /// <summary>

@@ -32,7 +32,7 @@ namespace Lifestone.Client.Session.StandIn;
 /// stack between the world and the pack (3048-3053), which the stand-in does not have.</item>
 /// </list>
 /// Placeholders, each named and logged where it is used: the spell's stat modifier (ACE's world database, not the dat: <c>TODO(m3-standin-spell-statmods)</c>), the magic skill the fizzle rule reads
-/// (<c>TODO(m3-standin-magic-skill)</c>) and the missing mana and component rules (<c>TODO(m3-standin-cast-mana)</c>, <c>TODO(m3-standin-cast-components)</c>); the words, the gestures, the effect scripts and the vital spells are <c>StandInWorld.Cast.cs</c> (M3 2.1 s2a). The projectile is <c>TODO(m3-standin-projectile-model)</c>: a placeholder object named as such, at the player, deleted a moment later.
+/// (<c>TODO(m3-standin-magic-skill)</c>) and the missing mana and component rules (<c>TODO(m3-standin-cast-mana)</c>, <c>TODO(m3-standin-cast-components)</c>); the words, the gestures, the effect scripts and the vital spells are <c>StandInWorld.Cast.cs</c> (M3 2.1 s2a). A war spell whose projectile the host knows flies and hits as ACE's does (<c>StandInWorld.Combat.cs</c>, M3 3.1 fb); any other is <c>TODO(m3-standin-projectile-model)</c>: a placeholder object named as such, at the player, deleted a moment later.
 /// </summary>
 internal sealed partial class StandInWorld
 {
@@ -297,11 +297,17 @@ internal sealed partial class StandInWorld
 
     /// <summary>
     /// The projectile of a war spell: ACE creates the spell projectile at the caster (<c>WorldObject_Magic.cs</c> <c>CreateSpellProjectile</c>) and tells the client with CreateObject 0xF745 in the
-    /// Missile physics state. The stand-in has no projectile weenies, so the object is a placeholder, labelled in its name and logged, small, and deleted <see cref="ProjectileLifeSeconds"/> later
-    /// (<c>TODO(m3-standin-projectile-model)</c>; impact, damage and the explosion are items 1.3 and 2.1).
+    /// Missile physics state. When the host knows the spell's projectile (<see cref="StandInVisit.ProjectileSetup"/>) it is ACE's, with its flight and hit (<c>StandInWorld.Combat.cs</c>, M3 3.1 fb). Otherwise
+    /// the object is the old placeholder, labelled in its name and logged, small, and deleted <see cref="ProjectileLifeSeconds"/> later (<c>TODO(m3-standin-projectile-model)</c>, now only for a spell the host has no projectile for).
     /// </summary>
     private void CreateProjectile(IAcSessionSink sink, SpellInfo info, uint target)
     {
+        if (ModelFor(info) is { } model)
+        {
+            LaunchBolt(sink, info, target, model); // M3 3.1 fb: the projectile as ACE sends it (StandInWorld.Combat.cs)
+            return;
+        }
+
         var self = _reducer.State.Self;
         var known = _visit.ProjectileSetup?.Invoke(info.Id);
         var guid = _nextProjectileGuid++;

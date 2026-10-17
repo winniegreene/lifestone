@@ -190,6 +190,41 @@ public sealed class GamePanelsTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.NotNull(screen.IndicatorsUi);
     }
 
+    [RequiresLocalDatsFact]
+    public void No_frame_of_the_staged_build_shows_the_combat_or_spellcasting_window_or_their_floaty_in_non_combat()
+    {
+        // M3 3.2 fix B (3.2-R9): the layout shows the two windows by default; their PostInit hides them (and the floaty that holds them), so the frames between the root and the controllers' Attach draw neither.
+        using var rig = new LoginRig(fixture, liveGame: true, stageShell: true);
+        rig.Run(2.5);
+        rig.Flow.QueueUIMode(UiModes.GamePlay);
+        rig.Frame();
+        var screen = Assert.IsType<GamePlayScreen>(rig.Flow.CurrentScreen);
+        var framesWithRootBeforeBuilt = 0;
+        for (var i = 0; i < 400 && !screen.IsBuilt; i++)
+        {
+            rig.Frame();
+            if (screen.Root is { } root)
+            {
+                if (!screen.IsBuilt)
+                {
+                    framesWithRootBeforeBuilt++;
+                }
+
+                var combat = root.GetChildRecursive(GameCombatPanel.WindowId);
+                var spells = root.GetChildRecursive(GameSpellcastingPanel.WindowId);
+                Assert.NotNull(combat);
+                Assert.NotNull(spells);
+                Assert.False(combat.Visible, $"the combat window shows at build frame {i}");
+                Assert.False(spells.Visible, $"the spellcasting window shows at build frame {i}");
+                Assert.False(spells.Parent!.Visible, $"their floaty shows at build frame {i}");
+            }
+        }
+
+        Assert.True(screen.IsBuilt);
+        Assert.True(framesWithRootBeforeBuilt > 0, "the build left no frame between the root and the last controller to look at");
+        Assert.False(screen.Root!.GetChildRecursive(GameSpellcastingPanel.WindowId)!.Parent!.Visible); // built, in NonCombat: still hidden
+    }
+
     [Fact]
     public void The_panel_frames_name_each_page_by_its_id_and_name_and_go_under_panels()
     {
