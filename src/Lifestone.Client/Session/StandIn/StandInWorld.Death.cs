@@ -41,7 +41,7 @@ internal enum AttackPhase
 /// <para><b>A hit</b> (<c>Player_Combat.cs</c> <c>TakeDamage</c> 478-560): the health update 0x02E9, the stamina's when the player is in a combat mode, then (the player lives) the DefenderNotification 0x01B2, the hit sound F750 and the splatter F755,
 /// and the wound sound at a tenth of the health or more. A death by a hit sends the 0x01AC victim notice and the 0x019E broadcast after those updates (<c>OnDeath</c>), then <c>Die</c>. A blow while the lifestone protection holds is the 0x028A
 /// 0x0502 with the ShieldUpBlue script (<c>DamageEvent.cs</c> 184-187) and nothing else.</para>
-/// <para><b>Die</b> (<c>Player_Death.cs</c> 168-244): the health to 0 (0x02E9 when it changed), NumDeaths up, the Dead motion F74C, 0x02E9 health 0, 0x02CD NumDeaths, for a suicide the WeenieError YouKilledYourself, DeathLevel and VitaeCpPool (0x02CD),
+/// <para><b>Die</b> (<c>Player_Death.cs</c> 150-242): the health to 0 (0x02E9 when it changed), NumDeaths up, the Dead motion F74C, 0x02E9 health 0, 0x02CD NumDeaths, for a suicide the WeenieError YouKilledYourself, DeathLevel and VitaeCpPool (0x02CD),
 /// the vitae 0x02C2 (spell 666, 0.95 and 5% lower per death, never below the floor of the level), the purge 0x02C6; then the Dead animation plus 1 s later (<see cref="DeathAnimationSeconds"/> is the Dead animation's placeholder length) the
 /// lost items, the corpse and the teleport; on arrival the stance NonCombat, the protection (60 s), and 3 s later the three vitals at 75% of their maximum.</para>
 /// </remarks>
@@ -427,7 +427,7 @@ internal sealed partial class StandInWorld
     // --- the player's death -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// ACE's <c>Die</c> for the player (<c>Player_Death.cs</c> 168-244): the Dead motion and the updates, the vitae and the purge, then the corpse and the teleport after the Dead animation plus a second.
+    /// ACE's <c>Die</c> for the player (<c>Player_Death.cs</c> 150-242): the Dead motion and the updates, the vitae and the purge, then the corpse and the teleport after the Dead animation plus a second.
     /// </summary>
     private void Die(IAcSessionSink sink, bool suicide)
     {
@@ -664,7 +664,7 @@ internal sealed partial class StandInWorld
     }
 
     /// <summary>
-    /// <c>ThreadSafeTeleportOnDeath</c>'s callback (<c>Player_Death.cs</c> 249-292): the stance back to NonCombat (the motion and the combat mode), the lifestone protection, and 3 s later the three vitals at 75% of their maximum (health, stamina, mana
+    /// <c>ThreadSafeTeleportOnDeath</c>'s callback (<c>Player_Death.cs</c> 247-292): the stance back to NonCombat (the motion and the combat mode), the lifestone protection, and 3 s later the three vitals at 75% of their maximum (health, stamina, mana
     /// as 0x02E9 each).
     /// </summary>
     private void ArriveAfterDeath(IAcSessionSink sink)

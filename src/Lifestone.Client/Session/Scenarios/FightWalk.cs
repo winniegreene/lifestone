@@ -519,7 +519,12 @@ public sealed class DenWalk : IFightWalk
     }
 
     /// <inheritdoc/>
-    public void Abandon() => _driver?.Abandon();
+    /// <remarks>The driver is dropped too: <see cref="RouteDriver.Abandon"/> marks a running route Failed and its <c>Tick</c> keeps answering that, so a walk that kept it would report an abandoned leg as a failure on its next tick.</remarks>
+    public void Abandon()
+    {
+        _driver?.Abandon();
+        _driver = null;
+    }
 
     /// <inheritdoc/>
     public void Dispose()
@@ -530,7 +535,7 @@ public sealed class DenWalk : IFightWalk
         }
 
         _disposed = true;
-        _driver?.Abandon();
+        Abandon();
         _movesSubscription?.Dispose();
         _motionSubscription?.Dispose();
     }

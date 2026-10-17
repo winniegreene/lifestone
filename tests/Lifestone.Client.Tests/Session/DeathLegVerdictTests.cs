@@ -1,7 +1,10 @@
+using System.Numerics;
 using System.Text.RegularExpressions;
 using Lifestone.Client.Play;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Data.Animation;
+using Lifestone.Data.World;
 using Lifestone.Net.Diagnostics;
 using Lifestone.Net.Messages;
 using Lifestone.Net.Types;
@@ -198,6 +201,32 @@ public sealed class DeathLegVerdictTests
         Lifestone(h, 0x7001, ReducerHarness.Position(0xA9B40019, 84 + 12, 20)); // 12 m east: within 15 m of the arrival
         Assert.Equal(DeathRespawn.Lifestone, DeathLegVerdict.ClassifyRespawn(tally, objects));
         Assert.Equal(15f, DeathLegVerdict.LifestoneRadiusMetres);
+    }
+
+    [Fact]
+    public void A_run_that_bound_classifies_the_respawn_against_its_own_lifestone_not_against_any_lifestone_near_the_arrival()
+    {
+        var h = new ReducerHarness();
+        h.EnterWorld();
+        using var tally = new DeathTally();
+        tally.Start(new TallyView(h));
+        var objects = h.State.Objects;
+        var nearAt = ReducerHarness.Position(0xA9B40019, 84 + 12, 20); // 12 m east of the arrival
+        var near = new CellFrame(nearAt.CellId, new AcFrame(nearAt.Origin, nearAt.Rotation));
+        var far = new CellFrame(0xA9B40019, new AcFrame(new Vector3(84 + 20, 20, 30), Quaternion.Identity)); // 20 m east
+        Assert.Equal(DeathRespawn.None, DeathLegVerdict.ClassifyRespawn(tally, objects, near)); // no arrival yet
+
+        h.Reducer.OnUpdateMotion(h.Context, new UpdateMotionMsg(ReducerHarness.PlayerGuid, 1, 2, 1, false, new ServerMotionState { MovementType = MovementType.Interpreted, Forward = WorldObjectTable.DeadMotionLowWord }));
+        h.Reducer.OnPlayerTeleport(h.Context, new PlayerTeleportMsg(2));
+        h.Reducer.OnUpdatePosition(h.Context, ReducerHarness.Move(ReducerHarness.PlayerGuid, instance: 1, position: 2, teleport: 2, forcePosition: 1, cell: 0xA9B40019, x: 84));
+        Lifestone(h, 0x7001, nearAt); // another lifestone object stands 12 m from the arrival
+
+        Assert.Equal(DeathRespawn.Lifestone, DeathLegVerdict.ClassifyRespawn(tally, objects, near)); // bound at the near one: within 15 m
+        Assert.Equal(DeathRespawn.Elsewhere, DeathLegVerdict.ClassifyRespawn(tally, objects, far)); // bound at the far one: the near object does not count
+        Assert.Equal(DeathRespawn.Lifestone, DeathLegVerdict.ClassifyRespawn(tally, objects, null)); // no bind in the run: any lifestone object within 15 m, as before
+        Assert.Equal(DeathRespawn.Lifestone, DeathLegVerdict.ClassifyRespawn(tally, objects));
+        Assert.Equal(DeathRespawn.Elsewhere, DeathLegVerdict.Measure(tally, objects, 0, false, 0, null, null, null, far).Respawn);
+        Assert.Equal(DeathRespawn.Lifestone, DeathLegVerdict.Measure(tally, objects, 0, false, 0, null, null, null).Respawn);
     }
 
     [Fact]

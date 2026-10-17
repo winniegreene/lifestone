@@ -566,11 +566,15 @@ public sealed partial class PlayChecks : Node
         }
     }
 
-    // Saves the window to path and checks it is the size asked for and not blank (a failure is counted and logged); shared by the shell's frames and the panel pages' (PlayChecks.Panels.cs).
-    private bool SaveCheckedFrame(string path, string name)
+    // Saves the window to path and checks it is the size asked for and not blank (a failure is counted and logged); shared by the shell's frames and the panel pages' (PlayChecks.Panels.cs). A frame that shows something nothing in M3
+    // produces says so in its log line's placeholder field (CLAUDE.md, Placeholders: the power bar's frame, WindowFrame.Placeholder).
+    private bool SaveCheckedFrame(string path, string name, string? placeholder = null)
     {
         _tunnelTallySkip = 2;
-        if (!ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", name), ("scale", _ui?.Scale)))
+        var saved = placeholder is null
+            ? ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", name), ("scale", _ui?.Scale))
+            : ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", name), ("scale", _ui?.Scale), ("placeholder", placeholder));
+        if (!saved)
         {
             FrameFailed($"{name} could not be saved");
             return false;

@@ -10,13 +10,13 @@ namespace Lifestone.Client.Session.Scenarios;
 /// blows taken. <see cref="Start"/> subscribes and takes the baselines; <see cref="Dispose"/> unsubscribes (the counters stay readable); <see cref="Reset"/> zeroes them. Nothing allocates per message.
 /// </summary>
 /// <remarks>
-/// <para><b>ACE's order</b> (<c>Player_Death.cs</c> <c>OnDeath</c> 34-90, <c>Die</c> 168-244, <c>ThreadSafeTeleportOnDeath</c> 249-292): for a death by a monster the victim notice 0x01AC comes first (a suicide has none), then the Dead
+/// <para><b>ACE's order</b> (<c>Player_Death.cs</c> <c>OnDeath</c> 34-93, <c>Die</c> 150-242, <c>ThreadSafeTeleportOnDeath</c> 247-292): for a death by a monster the victim notice 0x01AC comes first (a suicide has none), then the Dead
 /// motion F74C, the health update 0x02E9 to 0 and the NumDeaths update 0x02CD, the vitae 0x02C2 (DeathLevel and VitaeCpPool before it), the purge 0x02C6, and after the Dead animation plus 1 s the corpse F745 and the teleport F751
 /// (the position after it is the arrival); 3 s after the arrival the vitals go to 75% (three 0x02E9). A blow while the lifestone protection holds is the 0x028A with WeenieError
 /// <see cref="LifestoneProtectsYou"/> (<c>WeenieError.LifestoneMagicProtectsYou</c>, ACE.Entity <c>WeenieError.cs</c> line 968, sent by <c>HandleLifestoneProtection</c>, <c>Player_Death.cs</c> 913-917); ACE ends the protection with one
 /// of two Magic chat lines (<see cref="Protection"/>).</para>
 /// <para><b>The corpse.</b> Only between a death signal and that death's arrival (<see cref="CorpsesSeen"/>; the others are <see cref="StaleCorpses"/>). A CreateObject whose description flags contain <see cref="WorldObjectTable.CorpseFlag"/> and whose name is exactly "Corpse of " followed by the player's name (ordinal comparison against
-/// <see cref="SelfState.Name"/>; ACE writes <c>$"{prefix} of {Name}"</c>, <c>Creature_Death.cs</c> line 477). A corpse of another name is not counted, so a tusker's corpse in the den does not read as the player's.</para>
+/// <see cref="SelfState.Name"/>; ACE writes <c>$"{prefix} of {Name}"</c>, <c>Creature_Death.cs</c> line 496). A corpse of another name is not counted, so a tusker's corpse in the den does not read as the player's.</para>
 /// <para><b>Deaths.</b> <see cref="Deaths"/> is the NumDeaths delta (a suicide counts; <see cref="VictimNotices"/> does not), so a run with a suicide and a tusker death reads <c>Deaths=2 VictimNotices=1</c>.</para>
 /// </remarks>
 public sealed class DeathTally : IDisposable
@@ -313,8 +313,9 @@ public sealed class DeathTally : IDisposable
             case QualityChange.Int when e.Key == NumDeathsProperty && q.TryGetInt(NumDeathsProperty, out var now):
                 if (_deathsBaselinePending)
                 {
-                    // No description yet: this update is the first value we see; count it as a death only if it is above zero.
-                    _deathsBaseline = 0;
+                    // No description yet: this update is the first value we see, so it is the baseline (delta 0), as FightTally takes its first total experience. A baseline of 0 would read the character's lifetime count
+                    // as this run's deaths and open the corpse window with no death.
+                    _deathsBaseline = now;
                     _deathsBaselinePending = false;
                 }
 

@@ -325,7 +325,12 @@ public sealed partial class ServerObjectsLayer : Node3D
                 ProjectilesShown++;
                 LastProjectileWaitFrames = state.WaitFrames;
                 MaxProjectileWaitFrames = Math.Max(MaxProjectileWaitFrames, state.WaitFrames);
-                Log.Info("serverobjects", "projectile shown", ("guid", $"0x{draw.Guid:X8}"), ("waited_frames", state.WaitFrames), ("warm", _projectileWarm is { Done: true }), ("parts", parts.Length));
+                if (ProjectilesShown == 1)
+                {
+                    // Once, on the transition (package 2 review, finding 12): a line per bolt built a params array, boxed fields and a formatted guid in the frame cast_frame_max_ms and fight_frame_max_ms measure.
+                    // The bolts after the first are counted only (ProjectilesShown, LastProjectileWaitFrames, MaxProjectileWaitFrames: the fight leg and the play-checks report them).
+                    Log.Info("serverobjects", "first projectile shown", ("guid", $"0x{draw.Guid:X8}"), ("waited_frames", state.WaitFrames), ("warm", _projectileWarm is { Done: true }), ("parts", parts.Length));
+                }
             }
         }
 

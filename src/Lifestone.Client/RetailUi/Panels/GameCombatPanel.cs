@@ -1,3 +1,4 @@
+using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Dialogs;
@@ -15,24 +16,37 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// </summary>
 /// <remarks>
 /// <para><b>ToggleCombatMode.</b> In the non-combat mode it asks for the default mode, in any other it asks for the non-combat mode (both through <c>SetCombatMode</c>, which Lifestone sends as
-/// <see cref="IActionApi.SetCombatMode"/>).</para>
+/// <see cref="IActionApi.SetCombatMode"/>). When the mode it would ask for is the one the player is in (from non-combat: a held item that forbids combat, or a wielded item the object table lacks) nothing is asked: the
+/// session's own rule answers a request for the current mode Local at once and sends nothing (docs/session.md, the <c>SetCombatMode</c> row), and the log says why the press did nothing (M3 3.2 review finding 13; what retail's
+/// <c>SetCombatMode</c> does for an unchanged mode was not read).</para>
 /// <para><b>GetDefaultCombatMode.</b> No player object: non-combat. Something in the melee, missile or two-handed slot (<c>0x2500000</c>): missile mode when it is a missile weapon, else melee. Else something in the held
 /// slot (<c>0x1000000</c>): magic when it is a caster (ItemType 0x8000), else the chat line "You can't enter combat mode while wielding the &lt;name&gt;" and non-combat. Nothing wielded: melee (fists).
 /// <b>Deviation (named):</b> retail tells a missile weapon from a melee one by a quality of the weenie that the client does not keep; Lifestone reads the slot (<c>MissileWeapon</c> 0x400000 against
-/// <c>MeleeWeapon</c> and <c>TwoHanded</c>), which agrees for every weapon ACE gives a slot (<c>TODO(m3-combat-use)</c>).</para>
+/// <c>MeleeWeapon</c> and <c>TwoHanded</c>), which agrees for every weapon ACE gives a slot (<c>TODO(m3-combat-use)</c>). A wielded item whose object the table does not hold (its CreateObject has not arrived, or an F747
+/// alone deleted it) has no kind to read: the mode is non-combat, never a guess, and the item is named once (<see cref="MissingObjectTodo"/>).</para>
 /// </remarks>
 public static class CombatModeRules
 {
     /// <summary>The ItemType bit of a caster (wand, staff, orb).</summary>
     public const uint ItemTypeCaster = 0x8000;
 
+    /// <summary>The TODO named, once per item, when the inventory says an item is wielded but the object table has no such object, so the default mode falls back to non-combat and a press does nothing.</summary>
+    public const string MissingObjectTodo = "TODO(m3-combat-default-mode-missing)";
+
     private const uint WeaponSlots = (uint)(EquipMask.MeleeWeapon | EquipMask.MissileWeapon | EquipMask.TwoHanded);
 
     /// <summary><c>GetDefaultCombatMode</c>: the mode a press of a combat button asks for from non-combat. <paramref name="blockedBy"/> is the name of the held item that forbids combat, or null.</summary>
-    public static CombatMode DefaultMode(GameState state, out string? blockedBy)
+    public static CombatMode DefaultMode(GameState state, out string? blockedBy) => DefaultMode(state, out blockedBy, out _);
+
+    /// <summary>
+    /// <c>GetDefaultCombatMode</c> with its fallback named: <paramref name="missing"/> is the wielded item the object table has no object for (the mode is then non-combat for want of the item's kind, which the caller names,
+    /// <see cref="MissingObjectTodo"/>), or 0.
+    /// </summary>
+    public static CombatMode DefaultMode(GameState state, out string? blockedBy, out uint missing)
     {
         ArgumentNullException.ThrowIfNull(state);
         blockedBy = null;
+        missing = 0;
         var inventory = state.Self.Inventory;
         if (state.Self.Guid == 0)
         {
@@ -43,6 +57,7 @@ public static class CombatModeRules
         {
             if (!state.Objects.TryGet(weapon, out _) || !inventory.TryGetEquipped(weapon, out var entry))
             {
+                missing = weapon;
                 return CombatMode.NonCombat;
             }
 
@@ -53,6 +68,7 @@ public static class CombatModeRules
         {
             if (!state.Objects.TryGet(held, out var item))
             {
+                missing = held;
                 return CombatMode.NonCombat;
             }
 
@@ -69,21 +85,33 @@ public static class CombatModeRules
     }
 
     /// <summary>
-    /// <c>ToggleCombatMode</c>: asks the session for the next mode and returns the handle. <paramref name="notice"/> gets the chat line of a held item that forbids combat (null: only logged).
+    /// <c>ToggleCombatMode</c>: asks the session for the next mode and returns the handle, or null when the mode it would ask for is the one the player is in (nothing is asked: the session would answer Local and send nothing,
+    /// see the remarks). <paramref name="notice"/> gets the chat line of a held item that forbids combat (null: only logged); <paramref name="manager"/> logs that line and, once per item, <see cref="MissingObjectTodo"/>.
     /// </summary>
-    public static ActionHandle Toggle(IGameSessionView session, ILogSink log, Action<string>? notice)
+    public static ActionHandle? Toggle(IGameSessionView session, UiElementManager manager, Action<string>? notice)
     {
         ArgumentNullException.ThrowIfNull(session);
-        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(manager);
         var current = session.State.Self.Qualities.CombatMode;
         if (current is 0 or CombatModes.NonCombat)
         {
-            var mode = DefaultMode(session.State, out var blockedBy);
+            var mode = DefaultMode(session.State, out var blockedBy, out var missing);
+            if (missing != 0)
+            {
+                var hex = "0x" + missing.ToString("X8", CultureInfo.InvariantCulture);
+                manager.LogOnce("combat:default-mode-missing:" + hex, LogSeverity.Warning, MissingObjectTodo + ": the inventory says " + hex + " is wielded but the object table has no such object (its CreateObject has not arrived, or it was deleted), so GetDefaultCombatMode cannot tell its kind: the default mode is non-combat and the press does nothing");
+            }
+
             if (blockedBy is not null)
             {
                 var line = $"You can't enter combat mode while wielding the {blockedBy}";
-                log.Info("retailui", line);
+                manager.Services.Log.Info("retailui", line);
                 notice?.Invoke(line);
+            }
+
+            if (mode == CombatMode.NonCombat)
+            {
+                return null; // the player is in non-combat already: nothing to ask
             }
 
             return session.Actions.SetCombatMode(mode, ActionSource.Ui);
@@ -150,8 +178,8 @@ public sealed class UiFloatyCombatPanel : UiElement
 /// </summary>
 /// <remarks>
 /// <para><b>Shown by the mode</b> (<c>RecvNotice_SetCombatMode</c>, 0x004CD210). With the advanced combat UI option on, the window hides in every mode (the power bar window is used instead). Else melee puts it in state
-/// 0x10000003 and shows it, missile in state 0x10000004 and shows it, any other mode hides it. Melee also shows the recklessness field (0x100005EF) when the Recklessness skill (50) is trained or specialized. The floaty that holds
-/// it (<see cref="UiFloatyCombatPanel"/>) follows. The toolbar's four combat buttons follow the same mode (<see cref="GameToolbar.SetCombatModeButtons"/>, <c>gmToolbarUI::RecvNotice_SetCombatMode</c> 0x004BE2A0): their
+/// 0x10000003 and shows it, missile in state 0x10000004 and shows it, any other mode hides it. Melee also shows the recklessness field (0x100005EF) when the Recklessness skill (50) is trained or specialized; every other mode
+/// hides the field, and a move of the power slider re-reads the same rule, so it cannot bring the field back in missile mode (M3 3.2 review finding 14). The floaty that holds it (<see cref="UiFloatyCombatPanel"/>) follows. The toolbar's four combat buttons follow the same mode (<see cref="GameToolbar.SetCombatModeButtons"/>, <c>gmToolbarUI::RecvNotice_SetCombatMode</c> 0x004BE2A0): their
 /// notice rides this subscription because the toolbar has no end of life of its own.</para>
 /// <para><b>Its controls</b> (<c>PostInit</c> 0x004CCD90, <c>ListenToElementMessage</c> 0x004CD020). The three check boxes (0x10000053 auto-repeat attack, 0x10000054 auto-target, 0x10000055 view combat target) show the
 /// player options of those names with the <c>ID_CombatPanelOption_*</c> labels; Lifestone ghosts a box whose option nothing honours (<see cref="PlayerOptionTable"/>), as the options page does, and a click on one does
@@ -316,7 +344,6 @@ public sealed class GameCombatPanel : UiElement
         {
             SetState(MeleeState);
             SetVisible(true);
-            UpdateRecklessness();
             RefreshOptions();
         }
         else if (mode == CombatModes.Missile)
@@ -330,6 +357,7 @@ public sealed class GameCombatPanel : UiElement
             SetVisible(false);
         }
 
+        UpdateRecklessness(); // after the state (a state change re-applies the state's own attributes): melee shows the field by skill, every other mode hides it
         (Parent as UiFloatyCombatPanel)?.UpdateVisibility();
     }
 
@@ -413,7 +441,8 @@ public sealed class GameCombatPanel : UiElement
         }
     }
 
-    // The recklessness field shows in melee mode (and when the slider moves) while the skill is trained or specialized (class 2 or more).
+    // RecvNotice_SetCombatMode's rule for the field (11.6096 0x004CD210): melee shows it while the skill is trained or specialized (class 2 or more); any other mode hides it. The slider's move re-reads the same rule, so a move in
+    // missile mode shows nothing (M3 3.2 review finding 14). Whether the missile state's own attributes also hide the child is not known without the layout dump, so the window does not rely on them.
     private void UpdateRecklessness()
     {
         if (_recklessness is null || _context is null)
@@ -422,7 +451,7 @@ public sealed class GameCombatPanel : UiElement
         }
 
         var trained = SkillRules.ClassOf(_context.Session.State.Self.Qualities, RecklessnessSkill) >= 2;
-        _recklessness.SetVisible(trained);
+        _recklessness.SetVisible(Mode == CombatModes.Melee && trained);
     }
 
     // PostInit's SetPlayerOption and labels: each box shows its option, labelled with the combat panel's own string.

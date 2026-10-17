@@ -58,15 +58,31 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
         public LinkStats Link => default;
     }
 
-    /// <summary>A walk that arrives after a few ticks; it counts the legs it was asked for and can fail on demand.</summary>
+    /// <summary>
+    /// A walk that arrives after a few ticks; it counts the legs it was asked for. It keeps two rules of the real walks, so the scenario is seen never to tick a leg it should have dropped: a leg abandoned while it was still walking
+    /// answers Failed on the next tick (what <c>RouteDriver.Abandon</c> leaves in a driver a walk keeps: the route is marked Failed and <c>Tick</c> returns that status), and a leg ticked after the player's landblock changed under
+    /// it (a death's teleport) answers Failed with the driver's own reason (<c>RouteDriver.TeleportMetres</c>: the player was moved in one frame). <see cref="TicksAfterAbandon"/> counts the ticks made after an abandon: the
+    /// scenario makes none, so what the real walks answer then (Idle since they drop the driver) is never read.
+    /// </summary>
     private sealed class FakeWalk : IFightWalk
     {
         private int _ticks;
         private bool _walking;
+        private bool _abandoned;
+        private bool _abandonedMidLeg;
+        private uint _legLandblock;
 
         public int Prepared { get; private set; }
 
         public int Legs { get; private set; }
+
+        /// <summary>The abandons, and those that came while a leg was still walking.</summary>
+        public int Abandons { get; private set; }
+
+        public int AbandonsMidLeg { get; private set; }
+
+        /// <summary>The ticks after an abandon (before the next leg).</summary>
+        public int TicksAfterAbandon { get; private set; }
 
         public int TicksPerLeg { get; set; } = 4;
 
@@ -79,15 +95,37 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
             Legs++;
             description = "fake leg " + Legs;
             _walking = true;
+            _abandoned = false;
+            _abandonedMidLeg = false;
             _ticks = 0;
+            _legLandblock = (session.State.Self.Position?.CellId ?? 0) >> 16;
             return true;
         }
 
         public FightWalkStatus Tick(IGameSessionView session, double now)
         {
+            if (_abandoned)
+            {
+                TicksAfterAbandon++;
+            }
+
+            if (_abandonedMidLeg)
+            {
+                _abandonedMidLeg = false;
+                Failure = "route 'fake' lap 0 goal 0: the route was abandoned for a new one";
+                return FightWalkStatus.Failed;
+            }
+
             if (!_walking)
             {
                 return FightWalkStatus.Idle;
+            }
+
+            if ((session.State.Self.Position?.CellId ?? 0) >> 16 != _legLandblock)
+            {
+                _walking = false;
+                Failure = "route 'fake' lap 0 goal 0: the player was moved in one frame (a teleport or a server correction)";
+                return FightWalkStatus.Failed;
             }
 
             if (++_ticks < TicksPerLeg)
@@ -99,7 +137,18 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
             return FightWalkStatus.Arrived;
         }
 
-        public void Abandon() => _walking = false;
+        public void Abandon()
+        {
+            Abandons++;
+            _abandoned = true;
+            if (_walking)
+            {
+                AbandonsMidLeg++;
+                _abandonedMidLeg = true;
+            }
+
+            _walking = false;
+        }
 
         public void Dispose()
         {
@@ -299,8 +348,20 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
         /// <summary>When set, a Use on the lifestone is answered with this chat line.</summary>
         public string? UseLine { get; set; } = "The lifestone's attune line (a test's placeholder).";
 
-        /// <summary>Seconds after the UseDone that ACE's action chain ends and the attune line follows (Lifestone.cs 44-75: the motion comes first).</summary>
+        /// <summary>Seconds after the Use that ACE's lifestone chain ends (Lifestone.cs 44-75: the stance change and the Sanctuary motion come first): the attune line, the stamina halving and, in that order, the UseDone.</summary>
         public double UseLineDelay { get; set; } = 6;
+
+        /// <summary>
+        /// True: the UseDone comes 1 s after the Use, before the attune (the order the review left UNCERTAIN: the UseDone's own timer, Player_Use.cs 235-238, runs for the same stance and motion time as the lifestone chain's);
+        /// false (the default, ACE's order as the package-4 brief gives it): the attune line, the stamina halving, then the UseDone, all after the Sanctuary motion.
+        /// </summary>
+        public bool UseDoneFirst { get; set; }
+
+        /// <summary>True (the default): the attune action halves the stamina (a stamina 0x02E9, Lifestone.cs 68-69) right after the UseMessage line.</summary>
+        public bool UseStaminaHalving { get; set; } = true;
+
+        /// <summary>Magic chat lines the server sends 2 s after the Use, between it and the attune (an enchantment's expiry during the bind, the protection and vitae lines).</summary>
+        public List<string> UseOtherLines { get; } = [];
 
         /// <summary>True: three WeenieError 0x051C (the chat channel joins) arrive just before the attune line.</summary>
         public bool UseNoise { get; set; }
@@ -374,7 +435,22 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
                         break;
                     case FakeSendKind.Use:
                         Used.Add(send.Guid);
-                        At(1.0, () => R.UseDone(UseError));
+                        if (UseDoneFirst)
+                        {
+                            At(1.0, () => R.UseDone(UseError));
+                        }
+
+                        if (UseOtherLines.Count > 0)
+                        {
+                            At(2.0, () =>
+                            {
+                                foreach (var other in UseOtherLines)
+                                {
+                                    R.H.ServerMessage(other, 7);
+                                }
+                            });
+                        }
+
                         At(1.0 + UseLineDelay, () =>
                         {
                             if (UseNoise)
@@ -388,9 +464,23 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
                             {
                                 R.WeenieError(UseWeenieError);
                             }
-                            else if (UseLine is { } line)
+                            else
                             {
-                                R.H.ServerMessage(line, 7);
+                                // Lifestone.cs 64-69, one action: the UseMessage as a Magic line, then UpdateVital(Stamina, Math.Round(current / 2f)).
+                                if (UseLine is { } line)
+                                {
+                                    R.H.ServerMessage(line, 7);
+                                }
+
+                                if (UseStaminaHalving)
+                                {
+                                    Vital(4, (uint)Math.Round(Current(3) / 2f));
+                                }
+                            }
+
+                            if (!UseDoneFirst)
+                            {
+                                R.UseDone(UseError); // TryUseItem's own chain, Player_Use.cs 235-238: after the same stance and motion time
                             }
                         });
                         break;
@@ -504,6 +594,10 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
             R.Raw(AceWireWriters.SetState(WorldActionRig.Player, (uint)PhysicsState.Gravity, 1, (ushort)(40 + _teleport))); // a state without Hidden ends the arrival
         }
 
+        /// <summary>
+        /// A tusker's blow as <c>Player.TakeDamage</c> sends it (<c>Player_Combat.cs</c> 507-529): the health update 0x02E9 first; at 0 or below <c>OnDeath</c>, <c>Die</c> and the return, so the lethal blow has no 0x01B2 and a
+        /// one-blow death reads <c>hits_taken=0</c>; a blow the player survives is followed by the DefenderNotification 0x01B2 (542). Every n-th blow is an evade (0x01B4) when <see cref="EvadeEvery"/> says so.
+        /// </summary>
         private void Blow()
         {
             _blows++;
@@ -513,16 +607,22 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
                 return;
             }
 
-            R.Server((p, s) => AceM3Writers.DefenderNotification(p, s, "Tusker Slave", 4, 0.1, Damage, 4, false, 0));
             _health = _health > Damage ? _health - Damage : (Lethal ? 0u : 1u);
             Vital(2, _health);
             if (_health == 0)
             {
                 Die(suicide: false);
+                return;
             }
+
+            R.Server((p, s) => AceM3Writers.DefenderNotification(p, s, "Tusker Slave", 4, 0.1, Damage, 4, false, 0));
         }
 
-        /// <summary>ACE's order, Player_Death.cs: the victim notice (not for a suicide), the Dead motion, health 0, NumDeaths, the vitae, the purge; 2 s later the corpse; 3 s later the teleport, the arrival and, 3 s on, the vitals.</summary>
+        /// <summary>
+        /// ACE's order, <c>Player_Death.cs</c>: the victim notice (<c>OnDeath</c> 34-93; not for a suicide), then <c>Die</c> (150-242): the Dead motion, health 0, NumDeaths, the vitae, the purge; after the Dead animation plus 1 s
+        /// (3 s here: the animation's length is a placeholder) the corpse and the teleport in one tick (229-239: <c>CreateCorpse</c>, then <c>ThreadSafeTeleportOnDeath</c>, whose F751 comes with the arrival's position,
+        /// <c>Player_Location.cs</c> 686-694); 3 s after the arrival the vitals at 75% (262-282).
+        /// </summary>
         private void Die(bool suicide)
         {
             _dead = true;
@@ -538,13 +638,10 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
             R.PrivateInt(NumDeaths, ++_numDeaths);
             R.Server((p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, new AceEnchantment(666, 1, 666, 0, 0, 0, -1, p, 0f, 0f, 0.0, VitaeType, 0, 0.95f, 0)));
             R.Server((p, s) => AceM3Writers.MagicPurgeEnchantments(p, s));
-            At(2.0, () =>
+            At(3.0, () =>
             {
                 var corpse = ReducerHarness.Create(0x80000900u + (uint)_numDeaths, ReducerHarness.Stamps(), ReducerHarness.Position(R.H.State.Self.Position?.CellId ?? DenArrival, 50, 30), name: "Corpse");
                 h.Reducer.OnCreateObject(h.Context, corpse with { Weenie = corpse.Weenie with { Name = "Corpse of " + R.H.State.Self.Name, ObjectDescriptionFlags = WorldObjectTable.CorpseFlag } }, isUpdate: false);
-            });
-            At(3.0, () =>
-            {
                 Land(RespawnCell);
                 _dead = false;
                 _health = Max(1);
@@ -653,7 +750,7 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
         Assert.Equal(1, scenario.Tally.VictimNotices);
         Assert.Equal(1, scenario.Tally.Deaths);
         Assert.Equal(1, scenario.Tally.DeathTeleports);
-        Assert.Contains(Lines(rig), l => l.StartsWith("unbuff: the mage holds no enchantment but the vitae; no suicide", StringComparison.Ordinal));
+        Assert.Contains(Lines(rig), l => l.StartsWith("unbuff: the mage holds no enchantment a death would purge", StringComparison.Ordinal));
         Assert.DoesNotContain(Lines(rig), l => l.Contains("stage unbuff-dying", StringComparison.Ordinal));
         Assert.Contains(" died=1 suicides=0 ", scenario.VerdictFields(), StringComparison.Ordinal);
     }
@@ -668,6 +765,52 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
         Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
         Assert.Equal(0, rig.Suicides);
         Assert.Equal("none", scenario.UnbuffNote);
+    }
+
+    /// <summary>An item's lasting spell on its wielder: duration -1 and the item as the caster (ACE's death keeps it: <c>RemoveAllEnchantments</c>, <c>EnchantmentManager.cs</c> 358-365; the reducer's purge keeps it too).</summary>
+    private static void HoldItemSpell(Rig rig, ushort spell = 1511) =>
+        rig.R.Server((p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, new AceEnchantment(spell, 1, 0x20, 0, 1, 0, -1, 0x80000A01, 0f, 0f, 0.0, 0x2000000 | 0x8000 | 0x1000 | 0x2, 1, 10f, 0)));
+
+    /// <summary>A cooldown entry: a spell id above <c>short.MaxValue</c> (ACE's <c>StartCooldown</c>, <c>EnchantmentManager.cs</c> 284-300: <c>SpellCategory_Cooldown</c> 0x8000 plus the item's cooldown id) with the cooldown type bit.</summary>
+    private static void HoldCooldown(Rig rig) =>
+        rig.R.Server((p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, new AceEnchantment(0x8005, 1, 0x8000, 0, 1, 0, 60, 0x80000A01, 0f, 0f, 0.0, EnchantmentRules.CooldownKind, 0, 0f, 0)));
+
+    [Fact]
+    public void A_lasting_item_spell_and_a_cooldown_are_not_buffs_so_a_mage_that_holds_only_them_does_not_suicide()
+    {
+        var rig = new Rig(buffed: false);
+        HoldItemSpell(rig);
+        HoldCooldown(rig);
+        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Den | DeathStages.Unbuff);
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.Null(scenario.Failure);
+        Assert.Equal(0, rig.Suicides);
+        Assert.Equal("none", scenario.UnbuffNote);
+        Assert.Equal(2, CountBuffs(rig)); // both are still in the registry: a death would not remove them, so a suicide could not clear them
+        Assert.Contains(Lines(rig), l => l.StartsWith("unbuff: the mage holds no enchantment a death would purge", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void After_the_suicide_a_lasting_item_spell_that_the_purge_keeps_does_not_fail_the_run()
+    {
+        var rig = new Rig(buffed: true);
+        rig.Damage = 3;
+        HoldItemSpell(rig);
+        var scenario = rig.Scenario(new FakeWalk(), Core);
+
+        var status = rig.Run(scenario);
+        Dump(rig, scenario);
+
+        Assert.Equal(ScenarioStatus.Succeeded, status);
+        Assert.Null(scenario.Failure);
+        Assert.Equal(1, rig.Suicides);
+        Assert.Equal(1, scenario.Suicides);
+        Assert.Equal("suicide", scenario.UnbuffNote);
+        Assert.Equal([1511], rig.R.H.State.Self.Qualities.ActiveEnchantments.Where(e => e.SpellId != 666).Select(e => (int)e.SpellId)); // the two buffs went with the suicide's purge; the item's spell stayed, as on ACE
+        Assert.Contains(Lines(rig), l => l.StartsWith("unbuff: the mage is buffed (2 enchantments)", StringComparison.Ordinal)); // the lasting spell is not counted
+        Assert.Contains(" died=1 suicides=1 ", scenario.VerdictFields(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -702,14 +845,102 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
         Assert.Equal(NearLifestone, scenario.LifestoneGuid);
         Assert.Equal(HoltburgCell, scenario.LifestonePosition?.CellId);
         Assert.Contains(Lines(rig), l => l.Contains("the lifestone's chat line: The lifestone's attune line", StringComparison.Ordinal));
-        Assert.Contains(Lines(rig), l => l.Contains("1 Magic chat line(s) followed the Use", StringComparison.Ordinal));
+        Assert.Contains(Lines(rig), l => l.Contains("the attune line and the stamina halving followed the Use; 1 attune line(s), 0 other Magic line(s) ignored", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_bind_takes_on_the_UseMessage_and_the_stamina_halving_together_in_ACEs_order_with_the_UseDone_last()
+    {
+        var rig = new Rig(buffed: false);
+        var before = rig.R.H.State.Self.Qualities.TryGetVitalLevels(3, out var stamina, out _) ? stamina : 0u;
+        Assert.True(before >= 2);
+        var scenario = rig.Scenario(null, DeathStages.Bind);
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.True(scenario.Bound);
+        Assert.Equal(HoltburgCell, scenario.LifestonePosition?.CellId);
+        Assert.True(rig.R.H.State.Self.Qualities.TryGetVitalLevels(3, out var after, out _));
+        Assert.Equal((uint)Math.Round(before / 2f), after);
+        var lines = Lines(rig).ToList();
+        Assert.Contains(lines, l => l.StartsWith("bind: the stamina halved (" + before.ToString(CultureInfo.InvariantCulture) + " to " + after.ToString(CultureInfo.InvariantCulture) + "): ACE's second attune signal", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Contains("the attune line and the stamina halving followed the Use", StringComparison.Ordinal));
+        // The bound line comes after the UseDone (the rig's order): the scenario never binds on the line and the halving alone.
+        Assert.True(lines.FindIndex(l => l.StartsWith("bound at the lifestone", StringComparison.Ordinal)) > lines.FindIndex(l => l.StartsWith("bind: the stamina halved", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void The_UseMessage_without_the_stamina_halving_does_not_bind_and_the_run_fails_naming_the_missing_signal()
+    {
+        var rig = new Rig(buffed: false);
+        rig.UseStaminaHalving = false;
+        var scenario = rig.Scenario(null, DeathStages.Bind);
+
+        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
+
+        Assert.False(scenario.Bound);
+        Assert.Contains("the bind did not take: the attune line came but the stamina was not halved (ACE halves it in the same action, Lifestone.cs 64-69) within 15 s of the Use (UseDone seen; 0 other Magic line(s) ignored)", scenario.Failure, StringComparison.Ordinal);
+        Assert.DoesNotContain(rig.Places, p => !p.Contains("poi", StringComparison.Ordinal)); // it never left for the den
+    }
+
+    [Fact]
+    public void An_expiry_line_between_the_Use_and_the_attune_does_not_bind_and_the_range_checks_0x0498_still_fails_the_bind()
+    {
+        // The review's case (package 2, finding 5): the UseDone first (the UNCERTAIN order), an item buff's expiry while the Sanctuary motion plays, then ACE's range check fails.
+        var rig = new Rig(buffed: false);
+        rig.UseDoneFirst = true;
+        rig.UseOtherLines.Add("The spell Impenetrability VI on Leather Coat has expired.");
+        rig.UseWeenieError = 0x0498;
+        var scenario = rig.Scenario(null, DeathStages.Bind | DeathStages.Den);
+
+        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
+
+        Assert.False(scenario.Bound);
+        Assert.Contains("the bind did not take: the server answered WeenieError 0x0498 (YouHaveMovedTooFar", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains(Lines(rig), l => l == "bind: ignoring a Magic line that is not the attune: The spell Impenetrability VI on Leather Coat has expired.");
+        Assert.DoesNotContain(rig.Places, p => !p.Contains("poi", StringComparison.Ordinal)); // it never left for the den on the expiry line
+    }
+
+    [Fact]
+    public void The_known_non_attune_Magic_lines_are_ignored_even_with_the_stamina_halved_and_the_timeout_names_the_missing_line()
+    {
+        // ACE's texts: Player_Death.cs 934 and 942, Player_Xp.cs 164, EnchantmentManager.cs 345.
+        var rig = new Rig(buffed: false);
+        rig.UseLine = null; // no UseMessage: the four other Magic lines ACE sends must not stand in for it
+        rig.UseOtherLines.Add("You're no longer protected by the Lifestone's magic!");
+        rig.UseOtherLines.Add("Your actions have dispelled the Lifestone's magic!");
+        rig.UseOtherLines.Add("Your experience has reduced your Vitae penalty!");
+        rig.UseOtherLines.Add("The spell Armor Self VII on Leather Coat has expired.");
+        var scenario = rig.Scenario(null, DeathStages.Bind);
+
+        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
+
+        Assert.False(scenario.Bound);
+        Assert.Contains("the bind did not take: the stamina halving came but no attune line (a Magic chat line) within 15 s of the Use (UseDone seen; 4 other Magic line(s) ignored)", scenario.Failure, StringComparison.Ordinal);
+        Assert.Equal(4, Lines(rig).Count(l => l.StartsWith("bind: ignoring a Magic line that is not the attune: ", StringComparison.Ordinal)));
+    }
+
+    [Theory]
+    [InlineData("The spell Flame Bolt VII on Tusker Slave has expired.", true)]
+    [InlineData("You're no longer protected by the Lifestone's magic!", true)]
+    [InlineData("Your actions have dispelled the Lifestone's magic!", true)]
+    [InlineData("Your experience has reduced your Vitae penalty!", true)]
+    [InlineData("The spell has expired", false)]
+    [InlineData("You have attuned your spirit to this Lifestone. You will resurrect here after you die.", false)]
+    public void The_non_attune_Magic_lines_are_ACEs_exact_texts(string text, bool nonAttune)
+    {
+        Assert.Equal(nonAttune, DeathScenario.IsNonAttuneMagicLine(text));
+        Assert.Equal("You're no longer protected by the Lifestone's magic!", DeathScenario.ProtectionExpiredLine);
+        Assert.Equal("Your actions have dispelled the Lifestone's magic!", DeathScenario.ProtectionDispelledLine);
+        Assert.Equal("Your experience has reduced your Vitae penalty!", DeathScenario.VitaeReducedLine);
     }
 
     [Fact]
     public void The_bind_is_done_on_the_attune_line_not_on_the_UseDone_and_the_den_waits_for_it()
     {
         var rig = new Rig(buffed: false, startCell: DenArrival);
-        rig.UseLineDelay = 6; // ACE ends its action chain (the Sanctuary motion, then the range check) after the UseDone
+        rig.UseDoneFirst = true; // the order the review left UNCERTAIN: the UseDone 1 s after the Use, ACE's lifestone chain (the Sanctuary motion, then the range check) 6 s later
+        rig.UseLineDelay = 6;
         var scenario = rig.Scenario(null, DeathStages.Bind | DeathStages.Den);
 
         var sawWaiting = false;
@@ -785,7 +1016,8 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
     public void An_approach_that_fails_still_sends_the_Use_with_a_warning_and_ACEs_answer_decides()
     {
         var rig = new Rig(buffed: false, startCell: DenArrival);
-        rig.UseLine = null; // blocked and out of range: ACE says nothing
+        rig.UseLine = null; // blocked and out of range: ACE says nothing (neither the line nor the stamina halving)
+        rig.UseStaminaHalving = false;
         var approach = new FakeApproach(rig) { EndsFailed = true };
         var scenario = rig.Scenario(null, DeathStages.Bind, approach: approach);
 
@@ -793,7 +1025,7 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
         Assert.Equal([NearLifestone], rig.Used);
         Assert.Contains(Lines(rig), l => l.Contains("the walk said: the fake approach is blocked", StringComparison.Ordinal));
         Assert.Contains(Lines(rig), l => l.Contains("the player did not reach the stop radius", StringComparison.Ordinal));
-        Assert.Contains("the bind did not take: no Magic chat line within 15 s", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("the bind did not take: no attune line (a Magic chat line) and no stamina halving (0x02E9) within 15 s", scenario.Failure, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -829,10 +1061,11 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
     {
         var rig = new Rig(buffed: false);
         rig.UseLine = null;
+        rig.UseStaminaHalving = false; // ACE sends both in one action: neither comes
         var scenario = rig.Scenario(null, DeathStages.Bind);
 
         Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
-        Assert.Contains("the bind did not take: no Magic chat line within 15 s of the Use", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("the bind did not take: no attune line (a Magic chat line) and no stamina halving (0x02E9) within 15 s of the Use", scenario.Failure, StringComparison.Ordinal);
         Assert.Contains("m from the lifestone", scenario.Failure, StringComparison.Ordinal);
         Assert.False(scenario.Bound);
     }
@@ -924,6 +1157,29 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_death_in_the_middle_of_a_leg_abandons_the_walk_and_the_respawn_is_still_reached_and_judged()
+    {
+        // The tuskers kill the mage while a leg is still running (likely on a second leg, begun after a quiet minute). The walk is abandoned where the death is read, and no later stage ticks it: a walk kept ticking
+        // would drive the dead body (Stuck) and then read the death's teleport as a failure (the player moved more than RouteDriver.TeleportMetres in one frame) and fail the run in respawn, before the respawn was judged.
+        var rig = new Rig(buffed: false);
+        var walk = new FakeWalk { TicksPerLeg = int.MaxValue }; // the leg never arrives: four blows of 7 kill the mage (28 health) at about 16 s, in the middle of it
+        var scenario = rig.Scenario(walk, DeathStages.Den | DeathStages.Death);
+
+        var status = rig.Run(scenario);
+        Dump(rig, scenario);
+
+        Assert.Equal(ScenarioStatus.Succeeded, status);
+        Assert.Null(scenario.Failure);
+        Assert.Equal(1, scenario.Tally.VictimNotices);
+        Assert.Equal(1, walk.Legs);
+        Assert.Equal(1, walk.AbandonsMidLeg); // abandoned at the death, while walking
+        Assert.Equal(0, walk.TicksAfterAbandon); // and never ticked again: respawn, respawn-vitals and the end do not tick the walk
+        Assert.DoesNotContain(Lines(rig), l => l.Contains("the walk failed", StringComparison.Ordinal));
+        Assert.Contains(" died=1 ", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(" respawn=lifestone ", scenario.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_health_share_is_logged_on_each_change_of_ten_percent()
     {
         var rig = new Rig(buffed: false);
@@ -966,6 +1222,33 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void StopAfterHits_in_the_middle_of_a_leg_abandons_it_and_the_stages_after_the_stop_do_not_read_the_abandoned_leg_as_a_failure()
+    {
+        // The first blow lands while the leg is still running. The stop abandons the leg; a walk that kept its driver would answer Failed on its next tick (RouteDriver.Abandon marks the route Failed), so no stage after the stop
+        // may tick it: the regear is skipped when nothing died, and the run goes to leave-den and the end.
+        var rig = new Rig(buffed: false);
+        rig.Lethal = false;
+        rig.Damage = 1;
+        rig.BlowEvery = 20;
+        var walk = new FakeWalk { TicksPerLeg = int.MaxValue };
+        var scenario = rig.Scenario(walk, DeathStages.Den | DeathStages.Death | DeathStages.Regear, new DeathOptions { Seconds = 300, StopAfterHits = true });
+
+        var status = rig.Run(scenario);
+        Dump(rig, scenario);
+
+        Assert.Equal(ScenarioStatus.Succeeded, status);
+        Assert.Null(scenario.Failure);
+        Assert.True(scenario.StoppedAfterHits);
+        Assert.Equal(1, walk.Legs);
+        Assert.Equal(1, walk.AbandonsMidLeg); // the stop abandoned the running leg (the conclusion's second abandon found nothing walking)
+        Assert.Equal(0, walk.TicksAfterAbandon);
+        Assert.Null(scenario.Regear);
+        Assert.DoesNotContain(Lines(rig), l => l.Contains("the walk failed", StringComparison.Ordinal));
+        Assert.Equal("done", scenario.Stage);
+        Assert.NotEqual(0x0105u, rig.R.H.State.Self.Position!.Value.CellId >> 16);
+    }
+
+    [Fact]
     public void A_run_that_fails_in_the_den_places_out_of_it_before_its_log_off_best_effort()
     {
         var rig = new Rig(buffed: false);
@@ -982,6 +1265,69 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
         var kinds = rig.R.H.Net.Kinds();
         Assert.Equal(1, kinds.Count(k => k == FakeSendKind.LogOff));
         Assert.True(kinds.LastIndexOf(FakeSendKind.Talk) < kinds.IndexOf(FakeSendKind.LogOff), "the place goes out before the log off");
+    }
+
+    [Fact]
+    public void A_den_stage_failure_with_the_host_owning_the_session_leaves_the_den_and_only_then_ends_failed()
+    {
+        // endSession: false is the game's leg (DeathLegRunner), which logs off as soon as the scenario returns Failed: a Failed returned in the den logged the unbuffed mage off among the tuskers, and the next login (a gear run,
+        // the next leg) started under attack. The failure is set at once; the run stays Running until the leave is over, and sends no log off of its own.
+        var rig = new Rig(buffed: false);
+        rig.Lethal = false;
+        rig.Damage = 1;
+        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Den | DeathStages.Death, new DeathOptions { Seconds = 6 });
+
+        var status = ScenarioStatus.Running;
+        var failedAt = double.NaN;
+        for (var i = 0; i < 2000 && status == ScenarioStatus.Running; i++)
+        {
+            status = rig.Frame(scenario);
+            if (double.IsNaN(failedAt) && scenario.Failure is not null)
+            {
+                failedAt = rig.Now;
+                Assert.Equal(ScenarioStatus.Running, status); // not Failed in the den: the leave runs first
+            }
+        }
+
+        Dump(rig, scenario);
+        Assert.Equal(ScenarioStatus.Failed, status);
+        Assert.Contains("did not kill the player", scenario.Failure, StringComparison.Ordinal);
+        Assert.Equal(2, rig.Places.Count); // the den, then Holtburg (the rig answers a send on the frame after it goes out)
+        Assert.InRange(rig.Now - failedAt, DenExit.SettleSeconds, DenExit.SettleSeconds + 1); // the rig lands the player at once; then the settle
+        Assert.Single(Lines(rig), l => l.StartsWith("leaving the den before the log off", StringComparison.Ordinal));
+        Assert.Contains(Lines(rig), l => l.StartsWith("left the den: the player is present in cell 0xA9B40019", StringComparison.Ordinal));
+        Assert.Contains("poi", rig.Places[1], StringComparison.Ordinal);
+        Assert.NotEqual(0x0105u, rig.R.H.State.Self.Position!.Value.CellId >> 16);
+        Assert.Empty(rig.R.H.Net.Of(FakeSendKind.LogOff)); // the host logs off, not the scenario
+        Assert.DoesNotContain(Lines(rig), l => l.StartsWith("logging off before the run ends as failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_failed_runs_leave_that_the_server_never_answers_is_a_warning_and_the_run_still_ends_failed()
+    {
+        var rig = new Rig(buffed: false);
+        rig.Lethal = false;
+        rig.Damage = 1;
+        rig.RefusePlaceOutOfDen = true;
+        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Den | DeathStages.Death, new DeathOptions { Seconds = 6 });
+
+        var status = ScenarioStatus.Running;
+        var failedAt = double.NaN;
+        for (var i = 0; i < 4000 && status == ScenarioStatus.Running; i++)
+        {
+            status = rig.Frame(scenario);
+            if (double.IsNaN(failedAt) && scenario.Failure is not null)
+            {
+                failedAt = rig.Now;
+            }
+        }
+
+        Assert.Equal(ScenarioStatus.Failed, status);
+        Assert.Equal(2, rig.Places.Count);
+        Assert.True(rig.Now - failedAt <= DenExit.TeleportSeconds + 1, "the leave is bounded: " + (rig.Now - failedAt).ToString("0.0", CultureInfo.InvariantCulture) + " s");
+        Assert.Contains(Lines(rig), l => l.StartsWith("leaving the den: the place was not confirmed", StringComparison.Ordinal) || l.StartsWith("leaving the den: the player did not arrive", StringComparison.Ordinal));
+        Assert.Equal(0x0105u, rig.R.H.State.Self.Position!.Value.CellId >> 16); // where it stands
+        Assert.Empty(rig.R.H.Net.Of(FakeSendKind.LogOff));
     }
 
     [Fact]
@@ -1017,12 +1363,26 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
         Assert.True(scenario.DiedBeforeStop);
         Assert.False(scenario.StoppedAfterHits);
         Assert.Equal(1, scenario.Tally.VictimNotices);
-        Assert.True(scenario.Tally.HitsTaken >= 1 && scenario.Tally.DamageTaken > 0);
+        Assert.Equal(1, scenario.Tally.Deaths);
         Assert.Null(scenario.Regear);
         Assert.Contains(Lines(rig), l => l.Contains("the mage died before the stop", StringComparison.Ordinal));
+        Assert.Contains(Lines(rig), l => l.StartsWith("death: the tuskers killed the player after", StringComparison.Ordinal) && l.Contains("(victim notices 1, hits 0, evades 0, protected 0)", StringComparison.Ordinal));
         Assert.Contains(Lines(rig), l => l.StartsWith("respawn: elsewhere (report-only under StopAfterHits)", StringComparison.Ordinal));
         Assert.DoesNotContain(Lines(rig), l => l.StartsWith("leaving the den", StringComparison.Ordinal)); // it is already at the lifestone
         Assert.Single(rig.Places);
+
+        // A one-blow death has no 0x01B2: ACE's TakeDamage updates the health and, at 0, calls OnDeath and Die and returns before the DefenderNotification (Player_Combat.cs 507-529), so the tally reads hits_taken=0 and
+        // damage_taken=0 (the 0x01B2 carries the melee damage) while the lethal 0x02E9 is seen (health_min_pct 0) and died=1. D36's judge (hits_taken >= 1, damage_taken > 0) therefore reads false for it, and only for it
+        // here: whether a one-blow death is exempted is the owner's question (package 4, finding 7); the judge is unchanged.
+        Assert.Equal(0, scenario.Tally.HitsTaken);
+        Assert.Equal(0L, scenario.Tally.DamageTaken);
+        Assert.Equal(0.0, scenario.Tally.HealthMinPercent);
+        var outcome = scenario.Outcome();
+        Assert.Contains(" died=1 suicides=0 ", outcome.Line, StringComparison.Ordinal);
+        Assert.Contains(" hits_taken=0 damage_taken=0 ", outcome.Line, StringComparison.Ordinal);
+        Assert.Contains(outcome.Problems, p => p.StartsWith("hits_taken=0 (>= 1 expected, D36)", StringComparison.Ordinal));
+        Assert.Contains(outcome.Problems, p => p.StartsWith("damage_taken=0 (> 0 expected, D36)", StringComparison.Ordinal));
+        Assert.DoesNotContain(outcome.Problems, p => p.StartsWith("died=", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1256,6 +1616,38 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
         Assert.Contains("0xB0B40019", scenario.Failure, StringComparison.Ordinal);
         Assert.Contains(" respawn=elsewhere ", scenario.VerdictFields(), StringComparison.Ordinal);
         Assert.False(scenario.Outcome().Ok);
+    }
+
+    [Fact]
+    public void A_respawn_at_a_lifestone_other_than_the_one_the_bind_used_reads_elsewhere_and_fails_naming_the_bound_cell()
+    {
+        // Bound at Holtburg's lifestone, the death's teleport lands beside the far lifestone (another landblock): a bind that did not hold, whatever lifestone the arrival is near.
+        var rig = new Rig(buffed: false, startCell: DenArrival);
+        rig.RespawnCell = FarCell;
+        var scenario = rig.Scenario(new FakeWalk(), Core);
+
+        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
+
+        Assert.True(scenario.Bound);
+        Assert.Equal(HoltburgCell, scenario.LifestonePosition?.CellId);
+        Assert.Equal(DeathRespawn.Lifestone, DeathLegVerdict.ClassifyRespawn(scenario.Tally, rig.R.H.State.Objects)); // the far lifestone is within 15 m of the arrival: the rule of a run without a bind
+        Assert.Contains("respawn=elsewhere: the player arrived in cell 0xA8B40019 more than 15 m from the lifestone the bind used (cell 0xA9B40019)", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains(" respawn=elsewhere ", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(Lines(rig), l => l.Contains("respawn: elsewhere (arrival cell 0xA8B40019, classified against the lifestone the bind used in cell 0xA9B40019", StringComparison.Ordinal));
+        Assert.False(scenario.Outcome().Ok);
+    }
+
+    [Fact]
+    public void Without_a_bind_in_the_run_the_respawn_is_classified_against_any_lifestone_near_the_arrival_as_before()
+    {
+        var rig = new Rig(buffed: false, startCell: DenArrival);
+        rig.RespawnCell = FarCell;
+        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Den | DeathStages.Death);
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.False(scenario.Bound);
+        Assert.Contains(" respawn=lifestone ", scenario.VerdictFields(), StringComparison.Ordinal); // the rule before the bound-lifestone classification, kept for a run without the bind stage
     }
 
     [Fact]

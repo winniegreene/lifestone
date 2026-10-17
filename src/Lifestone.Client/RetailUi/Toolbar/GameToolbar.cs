@@ -121,7 +121,7 @@ public sealed class GameToolbar : IUiElementListener
         if (message.MessageId == UiMessageIds.ButtonClick && IsCombatButton(message.Element.ElementId))
         {
             CombatPresses++;
-            CombatModeRules.Toggle(_context.Session, _context.Manager.Services.Log, ChatNotice);
+            CombatModeRules.Toggle(_context.Session, _context.Manager, ChatNotice); // null when the press asks nothing (the mode would not change): the toolbar's log says why
             return UiListenResult.Handled;
         }
 

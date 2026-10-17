@@ -7,7 +7,7 @@ namespace Lifestone.Client.Tests.Session;
 
 /// <summary>
 /// <c>Suicide()</c> (GameAction 0x0279, no payload; M3 3.2 s0) and <c>AddSpellFavorite(spell, index, bar)</c> (0x01E3): what each sends, when each completes. ACE answers a suicide with five speech lines 3 s apart and then
-/// the death (<c>Player_Death.cs</c> <c>HandleSuicide</c> 330-345, <c>Die</c> 168-244: the health update 0x02E9 to 0 and the NumDeaths update 0x02CD, in this order), or with WeenieError YoureTooBusy when the player is dead or
+/// the death (<c>Player_Death.cs</c> <c>HandleSuicide</c> 330-345, <c>Die</c> 150-242: the health update 0x02E9 to 0 and the NumDeaths update 0x02CD, in this order), or with WeenieError YoureTooBusy when the player is dead or
 /// teleporting (<c>HandleActionDie</c> 299-319); it answers an AddSpellFavorite with nothing (<c>Player_Character.cs</c> 298-305).
 /// </summary>
 public sealed class DeathTrackerTests

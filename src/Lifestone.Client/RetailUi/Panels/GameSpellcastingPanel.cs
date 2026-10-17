@@ -26,7 +26,9 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// and 0x100005C2), one <see cref="Spellbook.SpellBars"/> bar each; the tab's item list 0x100000B6 shows the bar's spells in slot order, each with its icon and its name from the SpellTable and the tooltip "name, new line,
 /// Double-click to cast this spell". Retail first drops the favourites the character no longer knows from its player module; Lifestone only leaves them out of the list (it writes nothing, <c>TODO(m3-spellcast-unknown-favourite)</c>).
 /// Only the shown tab is built; a tab is built again when its bar (or how many of its spells the character knows) changed since it was built, when its page opens, or when the SpellTable arrives (the list waits for it, never a guess). A build
-/// writes in place (a cell already showing the right spell is left alone) and nothing here runs per frame except the one-shot poll while the SpellTable is missing.
+/// writes in place (a cell already showing the right spell is left alone) and nothing here runs per frame except the one-shot poll while the SpellTable is missing. Readiness is the table's own
+/// (<see cref="IGameSessionView.SpellTableReady"/>), never a favourite's: a known favourite a loaded table lacks (a custom server's spell, the stand-in's probe id) is left out and named once, and the tab builds with the rest
+/// (<c>TODO(m3-spellcast-unknown-spell)</c>; M3 3.2 review finding 9, which probed the bar's first known spell and never built the tab when that spell was the missing one).
 /// </para>
 /// <para>
 /// <b>Selecting and casting</b> (<c>ListenToElementMessage</c>, 11.6096 0x004C86A0 over <c>Cast</c>, 0x004C6C40): a left click on a spell selects it (<c>SpellCastSubMenu::SetSelected</c>, 0x004C66F0: the cell highlights, the name
@@ -97,7 +99,7 @@ public sealed class GameSpellcastingPanel : UiElement
     private IDisposable? _modeSubscription;
     private IDisposable? _qualitySubscription;
     private readonly int[] _builtKnown = new int[TabCount];
-    private uint _probe;
+    private HashSet<uint>? _unknownNamed; // the favourites a loaded table lacked, each named once (allocated at a build, an event)
     private bool _awaitingTable;
     private bool _selectionTodoLogged;
 
@@ -348,19 +350,19 @@ public sealed class GameSpellcastingPanel : UiElement
         return base.ListenToElementMessage(message);
     }
 
-    /// <summary>The one-shot poll while the SpellTable has not loaded: builds the shown tab once a spell answers.</summary>
+    /// <summary>The one-shot poll while the SpellTable has not loaded: builds the shown tab once the table is there (<see cref="IGameSessionView.SpellTableReady"/>, a flag read: nothing is allocated per frame).</summary>
     protected internal override void ListenToGlobalMessage(uint messageId, int data)
     {
         base.ListenToGlobalMessage(messageId, data);
         if (messageId == UiGlobalMessageIds.Frame && _awaitingTable)
         {
-            if (!Visible)
+            if (!Visible || _context is null)
             {
                 _awaitingTable = false;
                 return;
             }
 
-            if (TableReady())
+            if (_context.Session.SpellTableReady)
             {
                 _awaitingTable = false;
                 Refresh();
@@ -432,8 +434,6 @@ public sealed class GameSpellcastingPanel : UiElement
         UpdateCastButton();
     }
 
-    private bool TableReady() => _probe == 0 || (_context?.Session.Spell(_probe) is not null);
-
     // SpellCastSubMenu::UpdateFromPlayerModule (11.6096 0x004C7160) for one tab: the bar's known spells in slot order, written in place.
     private void BuildTab(int tab)
     {
@@ -450,17 +450,8 @@ public sealed class GameSpellcastingPanel : UiElement
             return; // nothing changed since this tab was built
         }
 
-        // The SpellTable decodes on a worker: until a spell answers, the list stays as it is and a one-shot poll waits for it.
-        _probe = 0;
-        foreach (var id in bar)
-        {
-            if (_probe == 0 && book.Knows(id))
-            {
-                _probe = id;
-            }
-        }
-
-        if (_probe != 0 && context.Session.Spell(_probe) is null)
+        // The SpellTable decodes on a worker: until it is published, the list stays as it is and a one-shot poll waits for it (never a guess). The table says when it is there; a spell it then lacks is left out below, named.
+        if (!context.Session.SpellTableReady)
         {
             if (!_awaitingTable)
             {
@@ -482,7 +473,11 @@ public sealed class GameSpellcastingPanel : UiElement
 
             if (context.Session.Spell(id) is not { } info)
             {
-                context.Manager.Services.Log.Warn("retailui", $"gmSpellcastingUI: favourite {id} is not in the SpellTable; it is left out of the bar (TODO(m3-spellcast-unknown-spell))");
+                if ((_unknownNamed ??= []).Add(id))
+                {
+                    context.Manager.Services.Log.Warn("retailui", $"gmSpellcastingUI: favourite {id} is not in the loaded SpellTable; it is left out of the bar (TODO(m3-spellcast-unknown-spell))");
+                }
+
                 continue;
             }
 

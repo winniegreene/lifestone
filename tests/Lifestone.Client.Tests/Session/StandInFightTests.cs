@@ -209,7 +209,7 @@ public sealed class StandInFightTests
         var notice = Array.IndexOf(tags, "01AD");
         Assert.Equal(["F74B", "F755", "F74E", "01AD", "F74C", "02CF", "02CF"], tags[(notice - 3)..(notice + 4)]);
         Assert.Equal(casts, tags.Count(t => t == "F745"));
-        Assert.Equal(casts - 1, tags.Count(t => t == "F7E0")); // no line for the killing blow (SpellProjectile.cs 846-851)
+        Assert.Equal(casts - 1, tags.Count(t => t == "F7E0")); // no line for the killing blow (SpellProjectile.cs 857-861)
         Assert.Equal(casts + 1, tags.Count(t => t == "F747"));
         var noticeAt = fight.Rig.First("01AD");
         Assert.Contains(fight.Rig.Timeline, e => e.Tag == "F747" && Math.Abs(e.At - noticeAt - StandInWorld.DeathAnimationSeconds) < 0.03);

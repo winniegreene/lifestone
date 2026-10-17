@@ -221,8 +221,11 @@ public sealed class GameSession : IGameSessionView, IDisposable
     /// <summary>Completes when the SpellTable's worker has finished (<see cref="UseSpellsFrom"/>; a completed task without it). Until then a cast's kind is Unknown (M3 1.2 fix R5).</summary>
     public Task SpellTableLoaded => _spellHost?.Loaded ?? Task.CompletedTask;
 
-    /// <summary>True once the SpellTable is decoded and published (false while loading, after a failed load, and without <see cref="UseSpellsFrom"/>).</summary>
-    public bool SpellTableReady => _spellHost?.Ready ?? false;
+    /// <summary>
+    /// True once the SpellTable is decoded and published (false while loading, after a failed load, and without <see cref="UseSpellsFrom"/>), or when the Action API was given a table another way (<c>ActionApi.SpellLookup</c>,
+    /// <c>ActionApi.SpellTable</c>: tests and hosts that hold the spells already), so that <see cref="Spell"/> answers from a table whenever this is true (<see cref="IGameSessionView.SpellTableReady"/>).
+    /// </summary>
+    public bool SpellTableReady => _spellHost is { } host ? host.Ready : _actions.SpellLookup is not null || _actions.SpellTable is not null;
 
     private SpellTableHost? _spellHost;
 

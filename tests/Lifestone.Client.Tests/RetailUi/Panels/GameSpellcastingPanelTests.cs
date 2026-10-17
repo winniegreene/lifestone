@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using DatReaderWriter.Enums;
 using Lifestone.Client.Play;
 using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Flow;
@@ -6,6 +7,7 @@ using Lifestone.Client.RetailUi.Input;
 using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Widgets;
+using Lifestone.Client.Session;
 using Lifestone.Client.Session.Actions;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.StandIn;
@@ -16,6 +18,7 @@ using Lifestone.Data.Tests;
 using Lifestone.Net.Dispatch;
 using Lifestone.Net.Messages;
 using Lifestone.Net.Types;
+using Lifestone.Tests.Shared;
 using Lifestone.Tests.Shared.Net;
 
 namespace Lifestone.Client.Tests.RetailUi.Panels;
@@ -222,6 +225,29 @@ public sealed class GameSpellcastingPanelTests(DatSetFixture fixture) : IClassFi
     }
 
     [RequiresLocalDatsFact]
+    public void A_known_favourite_the_loaded_table_lacks_is_left_out_and_named_once_and_the_tab_still_builds()
+    {
+        // M3 3.2 review finding 9: readiness is the table's own, not the bar's first known favourite's. The stand-in's probe book knows 60001 on purpose (StandInPlayerStats.ProbeUnknownSpell); no retail SpellTable holds it.
+        using var g = Enter();
+        var bolt1 = Named("Flame Bolt I");
+        var strength = Named("Strength Self I");
+        const uint unknown = StandInPlayerStats.ProbeUnknownSpell;
+        Assert.False(Table.Spells.ContainsKey(unknown));
+        g.Describe([unknown, bolt1.Id, strength.Id], Bars([unknown, bolt1.Id, strength.Id])); // the unknown spell is the bar's first known favourite
+        g.ChangeMode(CombatMode.Magic);
+
+        Assert.False(g.Cast.AwaitingSpellTable); // the table is loaded: nothing to wait for
+        Assert.Equal(1, g.Cast.Builds);
+        Assert.Equal<uint>([bolt1.Id, strength.Id], g.Cast.ShownSpells(0)); // the known spells, in slot order; the unknown one left out
+        Assert.Equal(1, g.Rig.Log.Lines.Count(l => l.Contains("TODO(m3-spellcast-unknown-spell)", StringComparison.Ordinal) && l.Contains($"favourite {unknown} ", StringComparison.Ordinal)));
+
+        g.Describe([unknown, bolt1.Id, strength.Id], Bars([unknown, strength.Id])); // the bar changed: the tab is built again, the spell is not named a second time
+        Assert.Equal(2, g.Cast.Builds);
+        Assert.Equal<uint>([strength.Id], g.Cast.ShownSpells(0));
+        Assert.Equal(1, g.Rig.Log.Lines.Count(l => l.Contains("TODO(m3-spellcast-unknown-spell)", StringComparison.Ordinal)));
+    }
+
+    [RequiresLocalDatsFact]
     public void The_frame_opens_the_first_tab_whose_bar_holds_spells_by_a_tab_click_and_the_earlier_tab_comes_back()
     {
         // M3 3.2 fix B (3.2-R7): live, BSD Mage's spells sit on bars 1 and 2, so retail's opening tab (the first) is an empty list in the shot.
@@ -419,5 +445,22 @@ public sealed class GameSpellcastingPanelTests(DatSetFixture fixture) : IClassFi
         }
 
         Assert.Equal(baseline, rig.Session.Bus.HandlerCount);
+    }
+
+    [Fact]
+    public void A_session_says_when_its_SpellTable_is_there_whatever_id_is_asked()
+    {
+        // The readiness the window reads (M3 3.2 review finding 9): false without a table, true once the Action API answers from one, and an id that table lacks is null while the table stays ready.
+        using var session = GameSession.Offline(static h => StandInSessions.CharacterSelect(h), new ManualTimeProvider(), new RecordingLogSink());
+        IGameSessionView view = session;
+        Assert.False(view.SpellTableReady);
+        Assert.Null(view.Spell(27));
+
+        var bolt = WorldActionRig.Spell(27, SpellType.Projectile) with { Name = "Flame Bolt I" };
+        session.ActionApi.SpellLookup = id => id == bolt.Id ? bolt : null; // a table given another way than the dats (the stand-in tests' seam)
+        Assert.True(view.SpellTableReady);
+        Assert.Same(bolt, view.Spell(27));
+        Assert.Null(view.Spell(StandInPlayerStats.ProbeUnknownSpell));
+        Assert.True(view.SpellTableReady);
     }
 }

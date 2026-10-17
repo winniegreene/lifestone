@@ -150,7 +150,12 @@ internal sealed class GameFightWalk : IFightWalk
     private static string LeftTheFloorReason(uint cellId) => $"the walk left the den's floor: the player is in cell 0x{cellId:X8}, which is not a floor cell (3.1-R4)";
 
     /// <inheritdoc/>
-    public void Abandon() => _driver?.Abandon();
+    /// <remarks>The driver is dropped too: <see cref="RouteDriver.Abandon"/> marks a running route Failed and its <c>Tick</c> keeps answering that, so a walk that kept it would report an abandoned leg as a failure on its next tick.</remarks>
+    public void Abandon()
+    {
+        _driver?.Abandon();
+        _driver = null;
+    }
 
     /// <inheritdoc/>
     public void Dispose()
@@ -161,6 +166,6 @@ internal sealed class GameFightWalk : IFightWalk
         }
 
         _disposed = true;
-        _driver?.Abandon();
+        Abandon();
     }
 }

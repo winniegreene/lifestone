@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Numerics;
 using DatReaderWriter.Enums;
 using Lifestone.Client.Movement.Routes;
@@ -32,6 +33,7 @@ namespace Lifestone.Client.Tests.Session.Mage;
 public sealed class FightScenarioTests
 {
     private const uint Den = 0x01050375;
+    private const uint HoltburgCell = 0xA9B40019;
     private const uint TuskerSlave = 1628;
     private const uint DeadChestCorner = 0x010502D6;
     private const float PlayerX = 100;
@@ -168,13 +170,14 @@ public sealed class FightScenarioTests
         private double _lastNow = double.NaN;
         private double _manaAcc;
         private readonly Queue<(uint Guid, double Due)> _late = new();
+        private readonly Queue<(uint Spell, uint Target, Shot Shot, double Due)> _lateHits = new();
         private ushort _teleports = 2;
 
-        public Rig(uint mana = 400, uint warRanks = 330, IReadOnlyCollection<uint>? known = null, FightOptions? fight = null, BuffOptions? buff = null)
+        public Rig(uint mana = 400, uint warRanks = 330, IReadOnlyCollection<uint>? known = null, FightOptions? fight = null, BuffOptions? buff = null, float range = 30f)
         {
             R = new WorldActionRig();
             Mana = mana;
-            Table = BuildTable();
+            Table = BuildTable(range);
             R.Spells([.. Table.Values]);
             Fight = fight ?? new FightOptions();
             Buff = buff ?? new BuffOptions();
@@ -201,11 +204,17 @@ public sealed class FightScenarioTests
         /// <summary>When above zero, a killed creature stays in the world this many seconds after the 0x01AD (ACE's death animation): then the Dead motion and the deletion arrive together.</summary>
         public double DeathDelay { get; set; }
 
+        /// <summary>When above zero, the projectile's hit (the damage line, or the kill) comes this many seconds after its CreateObject: the flight (ACE sends the UseDone at the launch, the hit when the bolt lands).</summary>
+        public double HitDelay { get; set; }
+
         /// <summary>When set, the 0x01AD text is this instead of "You have killed &lt;name&gt;!" (a kill that does not name the target).</summary>
         public string? KillText { get; set; }
 
-        /// <summary>When set, a "place" tool request is answered with a teleport to this cell (the den's arrival is 0x01050375).</summary>
+        /// <summary>When set, a "place loc" tool request (the den's arrival through its Places row) is answered with a teleport to this cell (the den's arrival is 0x01050375). A "place poi" (the way out of the den, Holtburg) is always answered with <see cref="HoltburgCell"/>.</summary>
         public uint? ArrivalCell { get; set; }
+
+        /// <summary>The place tool requests, in order.</summary>
+        public List<string> Places { get; } = [];
 
         public double ManaRegenPerSecond { get; set; } = 5;
 
@@ -287,8 +296,17 @@ public sealed class FightScenarioTests
                         CastSpells.Add((uint)send.Index);
                         _pending.Enqueue(((uint)send.Index, send.Guid, now + CastSeconds));
                         break;
-                    case FakeSendKind.Talk when ArrivalCell is { } arrival && send.Text is { } text && text.Contains("place", StringComparison.Ordinal):
-                        Arrive(text, arrival);
+                    case FakeSendKind.Talk when send.Text is { } text && text.Contains("place", StringComparison.Ordinal):
+                        Places.Add(text);
+                        if (text.Contains("poi", StringComparison.Ordinal))
+                        {
+                            Arrive(text, HoltburgCell);
+                        }
+                        else if (ArrivalCell is { } arrival)
+                        {
+                            Arrive(text, arrival);
+                        }
+
                         break;
                     case FakeSendKind.QueryHealth:
                         HealthQueries.Add(send.Guid);
@@ -302,6 +320,12 @@ public sealed class FightScenarioTests
             {
                 var cast = _pending.Dequeue();
                 Answer(cast.Spell, cast.Target);
+            }
+
+            while (_lateHits.Count > 0 && _lateHits.Peek().Due <= now)
+            {
+                var hit = _lateHits.Dequeue();
+                Land(hit.Spell, _creatures[hit.Target], hit.Shot);
             }
 
             while (_late.Count > 0 && _late.Peek().Due <= now)
@@ -331,7 +355,7 @@ public sealed class FightScenarioTests
         private static GearItem GearItemOf(uint wcid, string name, GearKind kind, GearWeenie w) =>
             new(wcid, name, kind, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.Burden);
 
-        private Dictionary<uint, SpellInfo> BuildTable()
+        private static Dictionary<uint, SpellInfo> BuildTable(float range)
         {
             var table = new Dictionary<uint, SpellInfo>();
             foreach (var line in ArenaProfile.Lines.Where(l => l.Role == ProfileRole.WarBolt))
@@ -344,7 +368,7 @@ public sealed class FightScenarioTests
                         School = MagicSchool.WarMagic,
                         Power = spell.Power,
                         BaseMana = 20 + (uint)spell.Position,
-                        BaseRangeConstant = 30f,
+                        BaseRangeConstant = range,
                         BaseRangeMod = 0f,
                     };
                 }
@@ -438,6 +462,22 @@ public sealed class FightScenarioTests
                 return;
             }
 
+            if (HitDelay > 0)
+            {
+                _lateHits.Enqueue((spellId, target, shot, Now + HitDelay)); // the bolt is in flight: the UseDone ends the cast now, the hit lands later
+            }
+            else
+            {
+                Land(spellId, creature, shot);
+            }
+
+            R.UseDone();
+        }
+
+        /// <summary>The bolt lands: the creature's hit, and the kill (0x01AD, the deletion) or the damage line.</summary>
+        private void Land(uint spellId, Creature creature, Shot shot)
+        {
+            var target = creature.Guid;
             creature.Hits++;
             if (shot == Shot.SilentKill || creature.Hits >= creature.HitsToKill)
             {
@@ -460,8 +500,6 @@ public sealed class FightScenarioTests
             {
                 R.Raw(AceWireWriters.ServerMessage($"You scorch {creature.Name} for 40 points with {Table[spellId].Name}.", 7));
             }
-
-            R.UseDone();
         }
 
         private void Projectile()
@@ -495,7 +533,7 @@ public sealed class FightScenarioTests
         Assert.Equal(1, scenario.Tally.Kills);
         Assert.Equal(1, scenario.Tally.TargetKills); // the notice names "Tusker Slave"
         Assert.Equal(2, scenario.Tally.Casts);
-        Assert.Equal(1, scenario.Tally.DamageLinesDealt); // the killing blow has no damage line (SpellProjectile.cs 846-851)
+        Assert.Equal(1, scenario.Tally.DamageLinesDealt); // the killing blow has no damage line (SpellProjectile.cs 857-861)
         Assert.Equal(40, scenario.Tally.DamageDealt);
         Assert.Equal(0, scenario.Tally.Misses);
         Assert.Equal(0, scenario.Walks);
@@ -530,7 +568,8 @@ public sealed class FightScenarioTests
         Assert.Equal(1, scenario.Tally.Kills);
         Assert.Equal(0, scenario.Walks);
         var stages = r.Log.Lines.Where(l => l.Contains("stage ", StringComparison.Ordinal) && l.Contains("[fight]", StringComparison.Ordinal)).Select(l => l[(l.IndexOf("stage ", StringComparison.Ordinal) + 6)..].Trim()).ToArray();
-        Assert.Equal(["buffs", "place", "mode-magic", "fight", "mode-peace"], stages);
+        Assert.Equal(["buffs", "place", "mode-magic", "fight", "mode-peace"], stages); // no leave-den: the host put the player here and keeps it here
+        Assert.Empty(r.Places);
         Assert.Null(scenario.Gear);
         var index = FightScenario.ChooseLevel(options.ArenaSkill, null, r.Buff.CastChance, out _); // the arena-here run reads no spellbook
         Assert.True(index >= 0);
@@ -562,7 +601,61 @@ public sealed class FightScenarioTests
         Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
 
         var stages = r.Log.Lines.Where(l => l.Contains("stage ", StringComparison.Ordinal) && l.Contains("[fight]", StringComparison.Ordinal)).Select(l => l[(l.IndexOf("stage ", StringComparison.Ordinal) + 6)..].Trim()).ToArray();
-        Assert.Equal(["buffs", "place", "mode-magic", "fight", "mode-peace"], stages);
+        Assert.Equal(["buffs", "place", "mode-magic", "fight", "mode-peace", "leave-den"], stages);
+    }
+
+    [Fact]
+    public void A_finished_fight_leaves_the_den_before_it_ends()
+    {
+        // The next run (login-death after login-bsd in the smoke, GearLiveTests after FightLiveTests in the loopback order) must not log BSD Mage in among the tuskers: after mode-peace the run places the player at Holtburg,
+        // settles, and only then ends (done here; the log off in the headless run).
+        var r = new Rig();
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var scenario = r.Scenario(new FakeWalk());
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Null(scenario.Failure);
+        Assert.Equal("done", scenario.Stage);
+        var place = Assert.Single(r.Places);
+        Assert.Contains("poi", place, StringComparison.Ordinal);
+        Assert.Contains("Holtburg", place, StringComparison.Ordinal);
+        Assert.NotEqual(0x0105u, r.R.H.State.Self.Position!.Value.CellId >> 16);
+        Assert.Contains(r.Log.Lines, l => l.Contains("leaving the den before the log off", StringComparison.Ordinal));
+        Assert.Contains(r.Log.Lines, l => l.Contains("left the den: the player is present in cell 0xA9B40019", StringComparison.Ordinal));
+        Assert.Equal([CombatModes.Magic, CombatModes.NonCombat], r.ModesSent);
+        var kinds = r.R.H.Net.Kinds();
+        Assert.True(kinds.LastIndexOf(FakeSendKind.ChangeCombatMode) < kinds.LastIndexOf(FakeSendKind.Talk), "the leave goes out after the return to non-combat");
+    }
+
+    [Fact]
+    public void A_failed_fight_leaves_the_den_and_only_then_ends_failed()
+    {
+        // endSession: false is the game's leg (FightLegRunner), which logs off as soon as the scenario returns Failed; a Failed returned in the den left BSD Mage on the arrival floor for the next login. The failure is set at
+        // once; the run stays Running until the leave is over, and sends no log off of its own.
+        var r = new Rig(fight: new FightOptions { Seconds = 20 });
+        r.Add(0x80001001, 23, 0x01050303, 25, "Virindi"); // nothing to fight: the seconds limit fails the run in the den
+        var scenario = r.Scenario(new FakeWalk());
+
+        var status = ScenarioStatus.Running;
+        var failedAt = double.NaN;
+        for (var i = 0; i < 2000 && status == ScenarioStatus.Running; i++)
+        {
+            status = r.Frame(scenario);
+            if (double.IsNaN(failedAt) && scenario.Failure is not null)
+            {
+                failedAt = r.Now;
+                Assert.Equal(ScenarioStatus.Running, status); // not Failed in the den: the leave runs first
+            }
+        }
+
+        Assert.Equal(ScenarioStatus.Failed, status);
+        Assert.Contains("20 s passed with kills=0 of 1", scenario.Failure, StringComparison.Ordinal);
+        Assert.InRange(r.Now - failedAt, DenExit.SettleSeconds, DenExit.SettleSeconds + 1); // the rig lands the player at once; then the settle
+        var place = Assert.Single(r.Places);
+        Assert.Contains("poi", place, StringComparison.Ordinal);
+        Assert.NotEqual(0x0105u, r.R.H.State.Self.Position!.Value.CellId >> 16);
+        Assert.Empty(r.R.H.Net.Of(FakeSendKind.LogOff)); // the host logs off, not the scenario
     }
 
     [Fact]
@@ -614,6 +707,36 @@ public sealed class FightScenarioTests
         Assert.Equal(1, scenario.Tally.Misses);
         Assert.Equal(3, scenario.Tally.Casts);
         Assert.Contains(r.Log.Lines, l => l.Contains("no damage line or kill came within 3 s", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_target_sixty_metres_away_whose_damage_line_arrives_at_four_seconds_is_a_hit_of_the_first_cast_not_a_miss_and_a_hit_of_the_second()
+    {
+        // The rig's bolt flies at 20 m/s (its CreateObject velocity): 60 m is 3 s of flight, so the hit wait is 5 s and the line at 4 s is cast 1's (package 2, finding 6: at the old fixed 3 s it was a miss, then cast 2's hit).
+        var r = new Rig(range: 75f) { HitDelay = 4 };
+        r.Add(0x80001001, TuskerSlave, 0x01050303, PlayerY + 60);
+        var scenario = r.Scenario(new FakeWalk());
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal(0, scenario.Tally.Misses);
+        Assert.Equal(2, scenario.Tally.Casts);
+        Assert.Equal(1, scenario.Tally.DamageLinesDealt);
+        Assert.Equal(1, scenario.Tally.Kills);
+        Assert.Equal(2, r.Log.Lines.Count(l => l.Contains("the target 0x80001001 60.0 m from it: hit wait 5 s", StringComparison.Ordinal)));
+        Assert.DoesNotContain(r.Log.Lines, l => l.Contains("no damage line or kill came within", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(20.0, 20f, 3.0)] // a close target: the floor
+    [InlineData(60.0, 20f, 5.0)] // the rig's bolt at 60 m: 3 s of flight plus the margin
+    [InlineData(75.0, 15f, 7.0)] // the cast range's cap at a live Flame Bolt's speed
+    [InlineData(75.0, 0.5f, 10.0)] // not a speed to divide by: the cap
+    [InlineData(1000.0, 15f, 10.0)] // past the cap
+    public void The_hit_wait_is_the_flight_time_plus_two_seconds_between_three_and_ten(double distance, float speed, double wait)
+    {
+        Assert.Equal(wait, FightScenario.HitWaitFor(distance, speed), 6);
+        Assert.Equal((3.0, 2.0, 10.0, 1f), (FightScenario.HitWaitSeconds, FightScenario.HitWaitMarginSeconds, FightScenario.HitWaitMaxSeconds, FightScenario.MinProjectileSpeed));
     }
 
     [Fact]
@@ -731,6 +854,30 @@ public sealed class FightScenarioTests
         Assert.All(r.CastSpells.Skip(1), id => Assert.Equal(spells[first - 1].Id, id)); // and no further drop for the second fizzle
         Assert.Equal(2, scenario.Tally.Misses);
         Assert.Equal(1, r.Log.Lines.Count(l => l.Contains("one level down", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void A_fizzle_drops_to_the_next_lower_level_the_spellbook_knows_and_the_range_follows_it()
+    {
+        // A book that knows the chosen level and the one two below it, not the one between (package 2, finding 16): the drop skips the unknown level and takes the lower level's own range.
+        var all = new Rig();
+        var first = FlameBoltIndexFor(all);
+        Assert.True(first >= 2, "the default rig must choose level III or higher for this test");
+        var spells = ArenaProfile.LineNamed("Flame Bolt")!.Spells;
+        var r = new Rig(known: [.. all.Table.Keys.Where(id => id != spells[first - 1].Id)]);
+        r.Table[spells[first - 2].Id] = r.Table[spells[first - 2].Id] with { BaseRangeConstant = 20f }; // the lower level reaches less far
+        r.Add(0x80001001, TuskerSlave, 0x01050303, PlayerY + 15, hitsToKill: 2);
+        r.Script(Shot.Fizzle);
+        var scenario = r.Scenario(new FakeWalk());
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal(spells[first].Id, r.CastSpells[0]);
+        Assert.Equal(spells[first - 2].Id, r.CastSpells[1]); // not the unknown level between
+        Assert.All(r.CastSpells.Skip(1), id => Assert.Equal(spells[first - 2].Id, id));
+        Assert.Equal(20f, scenario.RangeMetres);
+        Assert.Contains(r.Log.Lines, l => l.Contains("one level down, to " + spells[first - 2].Name + " (" + spells[first - 2].Id.ToString(CultureInfo.InvariantCulture) + "), the next lower level the spellbook knows; range 20 m", StringComparison.Ordinal));
+        Assert.Contains(" level=" + new[] { "I", "II", "III", "IV", "V", "VI", "VII" }[first - 2] + " range_m=20 ", scenario.VerdictFields(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -886,8 +1033,11 @@ public sealed class FightScenarioTests
         }
 
         walk.LeaveFloor = "the walker left the den's floor: it is in cell 0x01050341";
-        Assert.Equal(ScenarioStatus.Failed, r.Frame(scenario));
-        Assert.Contains("the walker left the den's floor", scenario.Failure, StringComparison.Ordinal);
+        var status = r.Frame(scenario);
+        Assert.Contains("the walker left the den's floor", scenario.Failure, StringComparison.Ordinal); // the failure is set in that frame
+        Assert.Equal(ScenarioStatus.Running, status); // and the run leaves the den before it ends Failed
+        Assert.Equal(ScenarioStatus.Failed, r.Run(scenario, 30));
+        Assert.Single(r.Places);
         Assert.Equal(0, scenario.Walks);
     }
 

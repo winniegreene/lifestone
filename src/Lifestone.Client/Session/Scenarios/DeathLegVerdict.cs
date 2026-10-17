@@ -1,5 +1,6 @@
 using System.Globalization;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Tools;
 using Lifestone.Data.World;
 
 namespace Lifestone.Client.Session.Scenarios;
@@ -10,10 +11,10 @@ public enum DeathRespawn
     /// <summary>No arrival was seen after the death's teleport (the death did not happen, or the leg ended first).</summary>
     None,
 
-    /// <summary>The arrival is within <see cref="DeathLegVerdict.LifestoneRadiusMetres"/> of an object with <see cref="WorldObjectTable.LifestoneFlag"/>.</summary>
+    /// <summary>The arrival is within <see cref="DeathLegVerdict.LifestoneRadiusMetres"/> of the lifestone the run bound at, or, when the run did not bind, of an object with <see cref="WorldObjectTable.LifestoneFlag"/>.</summary>
     Lifestone,
 
-    /// <summary>The player arrived somewhere with no lifestone near.</summary>
+    /// <summary>The player arrived away from the bound lifestone (or, when the run did not bind, somewhere with no lifestone near).</summary>
     Elsewhere,
 }
 
@@ -37,7 +38,7 @@ public enum DeathRespawn
 /// <param name="Evades">The 0x01B4 notices (<c>evades</c>, report-only).</param>
 /// <param name="HealthMinPercent">The lowest health share seen (<c>health_min_pct</c>, report-only), or null/NaN.</param>
 /// <param name="DeathSeconds">How long the unbuffed fight lasted until the death (<c>death_s</c>, report-only), or null.</param>
-/// <param name="DeathFrameMaxMs">The slowest frame from the Dead motion to the first frame after the arrival (<c>death_frame_max_ms</c>, report-only: a new judge, section 5), or null.</param>
+/// <param name="DeathFrameMaxMs">The slowest frame from the Dead motion, through portal space and the arrival's load, to the first frame after the player is present again (<c>death_frame_max_ms</c>, report-only: a new judge, section 5), or null.</param>
 /// <param name="FightFrameMaxMs">The slowest frame of the unbuffed fight (<c>fight_frame_max_ms</c>, report-only here), or null.</param>
 /// <param name="CorpsesStale">The corpses of the player that came outside a death's window, the den's older ones (<c>corpses_stale</c>, report-only; <c>corpse</c> counts the death's own only: review R1).</param>
 /// <param name="VitaePaid">The experience the vitae stage paid to clear the vitae (<c>vitae_paid</c>, report-only; D37), or null when the stage did not run (<c>n/a</c>); 0 when there was none to pay.</param>
@@ -107,7 +108,7 @@ public static class DeathLegVerdict
 
         if (measures.Respawn != DeathRespawn.Lifestone)
         {
-            problems.Add("respawn=" + RespawnText(measures.Respawn) + " (lifestone expected: an arrival within " + LifestoneRadiusMetres.ToString("0", inv) + " m of a lifestone object)");
+            problems.Add("respawn=" + RespawnText(measures.Respawn) + " (lifestone expected: an arrival within " + LifestoneRadiusMetres.ToString("0", inv) + " m of the lifestone the bind used, or of a lifestone object when the run did not bind)");
         }
 
         if (!measures.GearRestored)
@@ -138,12 +139,24 @@ public static class DeathLegVerdict
     }
 
     /// <summary>
-    /// Where the player arrived after the death: <see cref="DeathRespawn.None"/> when the tally saw no arrival, <see cref="DeathRespawn.Lifestone"/> when an object with <see cref="WorldObjectTable.LifestoneFlag"/> is within
-    /// <see cref="LifestoneRadiusMetres"/> of it (the table must hold the objects the arrival created), else <see cref="DeathRespawn.Elsewhere"/>.
+    /// Where the player arrived after the death, against any lifestone object: <see cref="DeathRespawn.None"/> when the tally saw no arrival, <see cref="DeathRespawn.Lifestone"/> when an object with
+    /// <see cref="WorldObjectTable.LifestoneFlag"/> is within <see cref="LifestoneRadiusMetres"/> of it (the table must hold the objects the arrival created), else <see cref="DeathRespawn.Elsewhere"/>. The rule of a run
+    /// that did not bind (the stand-in's death check, a <c>--death-stages</c> run without the bind); a run that bound passes its lifestone to the other overload.
     /// </summary>
     /// <param name="tally">The death tally.</param>
     /// <param name="objects">The session's object table.</param>
-    public static DeathRespawn ClassifyRespawn(DeathTally tally, WorldObjectTable objects)
+    public static DeathRespawn ClassifyRespawn(DeathTally tally, WorldObjectTable objects) => ClassifyRespawn(tally, objects, null);
+
+    /// <summary>
+    /// Where the player arrived after the death: <see cref="DeathRespawn.None"/> when the tally saw no arrival; with <paramref name="boundLifestone"/> (the position of the lifestone this run bound at),
+    /// <see cref="DeathRespawn.Lifestone"/> when the arrival is within <see cref="LifestoneRadiusMetres"/> of it (3D, ACE's global frame) and <see cref="DeathRespawn.Elsewhere"/> otherwise, another lifestone near the arrival
+    /// included (a mage bound elsewhere by an earlier run respawns there, and that must not read as this run's bind holding: M3 3.2 review, package 2 finding 5); without it, the other overload's rule against any lifestone
+    /// object in the table. Allocation-free.
+    /// </summary>
+    /// <param name="tally">The death tally.</param>
+    /// <param name="objects">The session's object table.</param>
+    /// <param name="boundLifestone">The position of the lifestone the run's bind used, or null when the run did not bind.</param>
+    public static DeathRespawn ClassifyRespawn(DeathTally tally, WorldObjectTable objects, CellFrame? boundLifestone)
     {
         ArgumentNullException.ThrowIfNull(tally);
         ArgumentNullException.ThrowIfNull(objects);
@@ -153,6 +166,11 @@ public static class DeathLegVerdict
         }
 
         var arrival = new CellFrame(tally.ArrivalCell, tally.ArrivalFrame);
+        if (boundLifestone is { } bound)
+        {
+            return PositionAgreement.DistanceMetres(in arrival, in bound) <= LifestoneRadiusMetres ? DeathRespawn.Lifestone : DeathRespawn.Elsewhere;
+        }
+
         return objects.NearestWithFlags(WorldObjectTable.LifestoneFlag, in arrival, LifestoneRadiusMetres, out _) ? DeathRespawn.Lifestone : DeathRespawn.Elsewhere;
     }
 
@@ -168,7 +186,8 @@ public static class DeathLegVerdict
     /// <param name="deathSeconds">How long the unbuffed fight lasted until the death, or null.</param>
     /// <param name="deathFrameMaxMs">The slowest frame of the death, or null.</param>
     /// <param name="fightFrameMaxMs">The slowest frame of the unbuffed fight, or null.</param>
-    public static DeathLegMeasures Measure(DeathTally tally, WorldObjectTable objects, int suicides, bool gearRestored, int worn, double? deathSeconds, double? deathFrameMaxMs, double? fightFrameMaxMs)
+    /// <param name="boundLifestone">The position of the lifestone the run's bind used, or null when the run did not bind (the respawn is then classified against any lifestone object).</param>
+    public static DeathLegMeasures Measure(DeathTally tally, WorldObjectTable objects, int suicides, bool gearRestored, int worn, double? deathSeconds, double? deathFrameMaxMs, double? fightFrameMaxMs, CellFrame? boundLifestone = null)
     {
         ArgumentNullException.ThrowIfNull(tally);
         return new DeathLegMeasures(
@@ -176,7 +195,7 @@ public static class DeathLegVerdict
             suicides,
             tally.Deaths,
             tally.VitaePercent,
-            ClassifyRespawn(tally, objects),
+            ClassifyRespawn(tally, objects, boundLifestone),
             tally.CorpsesSeen,
             tally.Purges,
             tally.ProtectedHits,

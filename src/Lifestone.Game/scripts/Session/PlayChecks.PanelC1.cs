@@ -90,7 +90,8 @@ public sealed partial class PlayChecks
     }
 
     // Saves the combat window's and the power bar's review frames (PanelFramesPlan.WindowFrames) under <frames dir>/panels/: the window's mode notice, the shot, the mode put back. The power bar is begun by hand at
-    // WindowFrame.PowerBarLevel, a placeholder: nothing in M3 charges a bar.
+    // WindowFrame.PowerBarLevel, a placeholder the frame's log line says (WindowFrame.Placeholder), and its frame hides the combat window as the AdvancedCombatUI option does: retail begins an advanced-mode bar only with that
+    // option on, so it never draws the basic combat window and the bar together (M3 3.2 review finding 10).
     private async Task<int> SaveWindowFramesAsync(GamePlayScreen shell, GameCombatPanel combat, GamePowerBar bar, string directory)
     {
         var folder = PanelFramesPlan.FolderFor(ShellFramesPlan.FolderFor(directory, _framesSize.X, _framesSize.Y));
@@ -99,6 +100,11 @@ public sealed partial class PlayChecks
         foreach (var frame in PanelFramesPlan.WindowFrames)
         {
             combat.SetCombatMode(frame.CombatMode);
+            if (frame.HideCombatWindow)
+            {
+                combat.SetVisible(false); // what the AdvancedCombatUI option does in every mode; the floaty follows the window's visibility message
+            }
+
             if (frame.DrivePowerBar)
             {
                 bar.Begin(PowerBarMode.Advanced, frame.CombatMode);
@@ -107,13 +113,14 @@ public sealed partial class PlayChecks
 
             await Frames(8);
             var window = shell.Root?.GetChildRecursive(frame.WindowId);
-            if (window?.IsShown == true && SaveCheckedFrame($"{folder}/{PanelFramesPlan.FileName(frame)}", frame.Name))
+            var staged = !frame.HideCombatWindow || !combat.IsShown; // a frame that would draw both windows is a state retail never draws: not saved
+            if (window?.IsShown == true && staged && SaveCheckedFrame($"{folder}/{PanelFramesPlan.FileName(frame)}", frame.Name, frame.Placeholder))
             {
                 captured++;
             }
             else
             {
-                FrameFailed($"{frame.Name}: the window did not show (shown={window?.IsShown})");
+                FrameFailed($"{frame.Name}: the window did not show, or the combat window did not hide (shown={window?.IsShown} combat_shown={combat.IsShown})");
             }
 
             if (frame.DrivePowerBar)

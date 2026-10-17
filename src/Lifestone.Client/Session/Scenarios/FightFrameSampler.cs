@@ -12,12 +12,20 @@ namespace Lifestone.Client.Session.Scenarios;
 /// ends, and any window a frame flagged as skipped fell in, is not counted). Frames outside the den are not in a window, and a frame that leaves the den drops the window it was in.</item>
 /// </list>
 /// A frame flagged <c>skip</c> (the one after a review frame was saved: the read-back stalls it) is left out of all three, as the buff leg leaves it out of <c>cast_frame_max_ms</c>.
+/// <para><b>The flags are the previous call's.</b> The delta is the previous frame's whole time, and the flags are read after this frame's events were applied (the runners step after play mode), so each delta
+/// is judged against the flags the call before it brought (package 2 review, finding 11): the frame that applied a projectile's F747 or opened the cast window counts in that window, the frame before it does not,
+/// and the first call's delta (the frame before the first sample) is judged against nothing open, outside the fight and the den. <c>skip</c> names this call's delta and is read as given.</para>
 /// </remarks>
 public sealed class FightFrameSampler
 {
     /// <summary>The length of one fps window, in seconds.</summary>
     public const double WindowSeconds = 1.0;
 
+    private bool _castWindowOpen;
+    private bool _projectileWindowOpen;
+    private bool _targetEngaged;
+    private bool _fighting;
+    private bool _inDen;
     private double _castMaxMs = double.NaN;
     private double _fightMaxMs = double.NaN;
     private double _minFps = double.NaN;
@@ -45,16 +53,19 @@ public sealed class FightFrameSampler
     /// <summary>The fps windows that completed.</summary>
     public long Windows => _windows;
 
-    /// <summary>Takes one frame.</summary>
+    /// <summary>Takes one frame. The five flags are read as they stand after this frame's events; they judge the next call's delta (the remarks).</summary>
     /// <param name="deltaSeconds">The engine's delta, in seconds: the previous frame's whole time.</param>
     /// <param name="castWindowOpen">The cast window is open.</param>
     /// <param name="projectileWindowOpen">A projectile is alive (the projectile window is open).</param>
     /// <param name="targetEngaged">The loop has a target (or is waiting on a bolt).</param>
     /// <param name="fighting">The scenario is in its fight stage (the top-up's casts and the walk to the den are not the fight's frames).</param>
     /// <param name="inDen">The player is present in the Black Spawn Den.</param>
-    /// <param name="skip">True for a frame to leave out (the one after a saved review frame).</param>
+    /// <param name="skip">True for a frame to leave out (the one after a saved review frame): this call's delta.</param>
     public void Step(double deltaSeconds, bool castWindowOpen, bool projectileWindowOpen, bool targetEngaged, bool fighting, bool inDen, bool skip)
     {
+        // The delta is the previous frame's: it is judged against the flags of the call before this one, and this call's flags are kept for the next (value tuples: no allocation).
+        var (castOpen, projectileOpen, engaged, inFight, den) = (_castWindowOpen, _projectileWindowOpen, _targetEngaged, _fighting, _inDen);
+        (_castWindowOpen, _projectileWindowOpen, _targetEngaged, _fighting, _inDen) = (castWindowOpen, projectileWindowOpen, targetEngaged, fighting, inDen);
         if (skip || deltaSeconds <= 0 || double.IsNaN(deltaSeconds))
         {
             _windowSeconds = 0;
@@ -64,17 +75,17 @@ public sealed class FightFrameSampler
 
         _frames++;
         var ms = deltaSeconds * 1000.0;
-        if (castWindowOpen && (double.IsNaN(_castMaxMs) || ms > _castMaxMs))
+        if (castOpen && (double.IsNaN(_castMaxMs) || ms > _castMaxMs))
         {
             _castMaxMs = ms;
         }
 
-        if (fighting && (castWindowOpen || projectileWindowOpen || targetEngaged) && (double.IsNaN(_fightMaxMs) || ms > _fightMaxMs))
+        if (inFight && (castOpen || projectileOpen || engaged) && (double.IsNaN(_fightMaxMs) || ms > _fightMaxMs))
         {
             _fightMaxMs = ms;
         }
 
-        if (!inDen)
+        if (!den)
         {
             _windowSeconds = 0;
             _windowFrames = 0;

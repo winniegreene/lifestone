@@ -24,7 +24,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// Magic line of any other shape (a resist, a cast notice, a buff expiry) is counted in <see cref="UnparsedMagicLines"/>
 /// and otherwise ignored, never guessed.</para>
 /// <para><b>The killing blow has no line.</b> When a projectile kills, ACE calls <c>OnDeath</c> instead of writing the
-/// damage line (<c>SpellProjectile.cs</c> 846-851), so <see cref="DamageDealt"/> is the damage of the blows that did not
+/// damage line (<c>SpellProjectile.cs</c> 857-861), so <see cref="DamageDealt"/> is the damage of the blows that did not
 /// kill; the kill itself is the 0x01AD notice. <see cref="DamageTaken"/> adds the melee damage of the 0x01B2 notices to
 /// the spell damage taken (<see cref="SpellDamageTaken"/>); <see cref="HitsTaken"/> counts the 0x01B2 notices only.</para>
 /// <para><b>Parser.</b> A hand parser over spans (no Regex, no allocation per line): it finds " points with " (or

@@ -10,7 +10,7 @@ using Lifestone.Tests.Shared.Net;
 namespace Lifestone.Client.Tests.Session;
 
 /// <summary>
-/// <see cref="DeathTally"/> (M3 3.2 s0) over ACE's order (<c>Player_Death.cs</c> <c>OnDeath</c> 34-90, <c>Die</c> 168-244, <c>ThreadSafeTeleportOnDeath</c> 249-292): a tusker's kill (the victim notice first, then the Dead
+/// <see cref="DeathTally"/> (M3 3.2 s0) over ACE's order (<c>Player_Death.cs</c> <c>OnDeath</c> 34-93, <c>Die</c> 150-242, <c>ThreadSafeTeleportOnDeath</c> 247-292): a tusker's kill (the victim notice first, then the Dead
 /// motion, health 0x02E9 to 0, NumDeaths 0x02CD, the vitae 0x02C2, the purge 0x02C6, the corpse F745, the teleport F751 and the arrival, the lifestone protection, the vitals at 75%), a suicide (no victim notice) and the
 /// respawn. The messages go through the real reducer, so the tally reads what the reducer publishes.
 /// </summary>
@@ -373,6 +373,23 @@ public sealed class DeathTallyTests
         Assert.Equal(0, _tally.Deaths);
         NumDeaths(6);
         Assert.Equal(1, _tally.Deaths);
+    }
+
+    [Fact]
+    public void A_NumDeaths_update_before_the_description_is_the_baseline_not_a_death()
+    {
+        _h.EnterWorld();
+        _tally.Start(new View(_h));
+        NumDeaths(57); // the character's lifetime count, arriving before the PlayerDescription: the baseline, as FightTally takes its first total experience
+        Assert.Equal(0, _tally.Deaths);
+        Corpse(0x80000730, "Corpse of Tester"); // no death signal was noted: a corpse coming into view is stale, not this run's
+        Assert.Equal(0, _tally.CorpsesSeen);
+        Assert.Equal(1, _tally.StaleCorpses);
+
+        NumDeaths(58);
+        Assert.Equal(1, _tally.Deaths);
+        Corpse(0x80000731, "Corpse of Tester"); // the death's own
+        Assert.Equal(1, _tally.CorpsesSeen);
     }
 
     [Fact]

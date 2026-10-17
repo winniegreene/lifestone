@@ -2,8 +2,10 @@ using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Interiors;
+using Lifestone.Client.Session.Actions.Trackers;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Tools;
 using Lifestone.Data.Magic;
 using Lifestone.Net.Session;
 using Lifestone.Net.Types;
@@ -41,17 +43,21 @@ public enum FightStages
 /// <remarks>
 /// <para><b>Stages</b> (<see cref="Stage"/>, each logged once on entry as <c>[fight] stage &lt;name&gt;</c>): <c>start</c>, <c>gear</c> (login, entering and the gear are <see cref="GearScenario"/>'s), <c>buffs</c> (the top-up, or the
 /// logged skip), <c>place</c> and <c>teleporting</c> and <c>settle</c> (<c>PlayerTools.Place</c> to the den's Places row through <see cref="TeleportCatalog"/>; settled as <see cref="RoutePlay"/> does: the player is present, then
-/// <see cref="SettleSeconds"/>), <c>mode-magic</c>, <c>fight</c>, <c>mode-peace</c>, <c>logging-off</c>, <c>quitting</c>, <c>done</c>. With <c>endSession: false</c> (the game's leg, the tests) it ends at <c>done</c> in the world.</para>
+/// <see cref="SettleSeconds"/>), <c>mode-magic</c>, <c>fight</c>, <c>mode-peace</c>, <c>leave-den</c> (the way out of the den before the end, <see cref="DenExit"/>; not in the arena-here run, where the host owns where the player
+/// stands), <c>logging-off</c>, <c>quitting</c>, <c>done</c>. With <c>endSession: false</c> (the game's leg, the tests) it ends at <c>done</c> in the world.</para>
 /// <para><b>The buff top-up</b> runs <see cref="BuffCycle"/> itself (the scenario's engine) with a re-buff margin of <see cref="TopUpSeconds"/>, not <see cref="BuffScenario"/>: that would run the gear a second time and cast
 /// its forced re-buff pass for nothing. It is skipped, and logged, when every one of the profile's 24 lines has at least <see cref="TopUpSeconds"/> left.</para>
 /// <para><b>The fight</b> (D10, D12, D21): the Flame Bolt level is the highest of levels I-VII the spellbook holds whose ACE cast chance from the buffed War Magic skill (<see cref="GearCasts.TryCurrentSkill"/>,
 /// <see cref="GearCasts.Chance"/>, the buff cycle's code) reaches <see cref="BuffOptions.CastChance"/>; a fizzle drops one level once. The target is
 /// <c>WorldObjectTable.NearestCreature</c> over <see cref="ArenaProfile.TargetWcids"/> on <see cref="BlackSpawnDen.IsFloorCell"/>'s cells within the cast's range: ACE's
 /// <c>min(BaseRangeConstant + (Init + Ranks) * BaseRangeMod, MaxRadarRange_Outdoors)</c> (<c>Player_Magic.cs</c> 495-505, which reads the skill's start level plus its ranks, not the buffed value; beyond it ACE answers UseDone
-/// <c>MissileOutOfRange</c> 0x0550). Each cast is a miss unless it is Confirmed (the projectile exists) <i>and</i> a damage line or the kill follows within <see cref="HitWaitSeconds"/>; <see cref="MissesBeforeWalking"/> misses in
+/// <c>MissileOutOfRange</c> 0x0550). Each cast is a miss unless it is Confirmed (the projectile exists) <i>and</i> a damage line or the kill follows within the hit wait (<see cref="HitWaitFor(double, float)"/>: the projectile's
+/// flight to the target at its CreateObject velocity plus <see cref="HitWaitMarginSeconds"/>, at least <see cref="HitWaitSeconds"/> and at most <see cref="HitWaitMaxSeconds"/>); <see cref="MissesBeforeWalking"/> misses in
 /// a row, an out-of-range answer, or no target in range send the player along the floor to the next waypoint (<see cref="IFightWalk"/>). ACE turns the caster to a targeted spell's target itself (<c>Player_Magic.cs</c> about 827,
 /// <c>CreateTurnToChain2</c>), so the scenario never turns the player to cast. A cast that needs more mana than the player has waits for regeneration (it counts against <see cref="FightOptions.Seconds"/>).</para>
-/// <para><b>Failure</b> is loud and logs off first in the world (as the buff scenario): the player's death, the seconds limit (with the counts), a walk that cannot be planned or fails, an unreadable skill or spellbook.</para>
+/// <para><b>Failure</b> is loud: in the world the run leaves the den first (<see cref="DenExit"/>, whatever <c>endSession</c> is: the game's leg logs off as soon as the scenario returns Failed, and a mage logged off in the den meets
+/// the tuskers at its next login), then logs off (<c>endSession: true</c>, as the buff scenario) or ends Failed where it stands. The causes: the player's death, the seconds limit (with the counts), a walk that cannot be planned or
+/// fails, an unreadable skill or spellbook.</para>
 /// <para>Per-step code allocates nothing but log lines on events: the cell filter is one cached delegate, the death and projectile handlers are subscribed once.</para>
 /// </remarks>
 public sealed class FightScenario : IScenario, IDisposable
@@ -71,8 +77,20 @@ public sealed class FightScenario : IScenario, IDisposable
     /// <summary>The limit on the teleport, in seconds (portal space takes 5 s or more).</summary>
     public const double TeleportSeconds = RoutePlay.TeleportSeconds;
 
-    /// <summary>The seconds a confirmed projectile may take to produce a damage line or a kill before the cast is a miss.</summary>
+    /// <summary>The least seconds a confirmed projectile may take to produce a damage line or a kill before the cast is a miss: the floor of the hit wait (a target beside the player, and the damage line's own trip).</summary>
     public const double HitWaitSeconds = 3.0;
+
+    /// <summary>Added to the projectile's flight time in the hit wait (<see cref="HitWaitFor(double, float)"/>): ACE's collision at the target, the damage line's trip to the client and a target that steps back.</summary>
+    public const double HitWaitMarginSeconds = 2.0;
+
+    /// <summary>
+    /// The cap of the hit wait. A Flame Bolt flies at the weenie's MaximumVelocity (<c>WorldObject_Magic.cs</c> 1898-1920), about 15 m/s live (session.md section 31), so the farthest target (<see cref="MaxRange"/>) is hit after
+    /// 5 s; twice that bounds a velocity the table read low, so one bad read cannot hold the loop for the run (a wait past the cap would be judged at the cap and logged as such).
+    /// </summary>
+    public const double HitWaitMaxSeconds = 10.0;
+
+    /// <summary>A projectile velocity under this, in m/s, is not a speed to divide by (a CreateObject with a zero or placeholder velocity): the hit wait is then <see cref="HitWaitMaxSeconds"/>, and the log says so.</summary>
+    public const float MinProjectileSpeed = 1f;
 
     /// <summary>The seconds after a target's death (its Dead motion or its deletion) the kill notice may take before the target is left.</summary>
     public const double KillNoticeSeconds = 2.0;
@@ -124,6 +142,8 @@ public sealed class FightScenario : IScenario, IDisposable
     private IDisposable? _diedSubscription;
     private IDisposable? _createdSubscription;
     private IDisposable? _movedSubscription;
+    private readonly DenExit _exit;
+    private bool _failLeave;
     private bool _failLogOff;
     private bool _subscribed;
     private bool _disposed;
@@ -133,6 +153,7 @@ public sealed class FightScenario : IScenario, IDisposable
     private int _level = -1;
     private bool _fizzleDropped;
     private float _range;
+    private uint _initPlusRanks;
     private uint _manaNeeded;
     private bool _manaLogged;
     private uint _target;
@@ -148,6 +169,7 @@ public sealed class FightScenario : IScenario, IDisposable
     private double _stageStart;
     private double _fightStart;
     private double _awaitSince;
+    private double _hitWait = HitWaitSeconds;
     private double _settleUntil = double.NaN;
     private double _deadSince;
     private bool _died;
@@ -192,6 +214,7 @@ public sealed class FightScenario : IScenario, IDisposable
         _cellFilter = fight.ArenaHere ? null : BlackSpawnDen.IsFloorCell;
         _buffOptions = buff with { RebuffMarginSeconds = TopUpSeconds };
         _gear = (stages & FightStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) : null;
+        _exit = new DenExit(log, LogCategory);
         var line = ArenaProfile.LineNamed(ArenaProfile.WarLineName) ?? throw new InvalidOperationException("the profile has no " + ArenaProfile.WarLineName + " line");
         for (var i = 0; i < Levels; i++)
         {
@@ -249,6 +272,16 @@ public sealed class FightScenario : IScenario, IDisposable
 
     /// <summary>The cycle of the buff top-up (null until the top-up needed one).</summary>
     public BuffCycle? Cycle => _cycle;
+
+    /// <summary>
+    /// The hit wait of a confirmed cast: the projectile's flight time, <paramref name="distanceMetres"/> over <paramref name="speedMetresPerSecond"/>, plus <see cref="HitWaitMarginSeconds"/>, clamped to <see cref="HitWaitSeconds"/>
+    /// and <see cref="HitWaitMaxSeconds"/>; a speed under <see cref="MinProjectileSpeed"/> gives the cap (M3 3.2 review, package 2 finding 6: the fixed 3 s was shorter than a bolt's flight past about 45 m, so a hit at range was a
+    /// miss credited to the next cast).
+    /// </summary>
+    /// <param name="distanceMetres">The distance from the projectile's origin to the target, in metres.</param>
+    /// <param name="speedMetresPerSecond">The projectile's speed from its CreateObject velocity, in m/s.</param>
+    public static double HitWaitFor(double distanceMetres, float speedMetresPerSecond) =>
+        speedMetresPerSecond < MinProjectileSpeed || double.IsNaN(distanceMetres) ? HitWaitMaxSeconds : Math.Clamp((distanceMetres / speedMetresPerSecond) + HitWaitMarginSeconds, HitWaitSeconds, HitWaitMaxSeconds);
 
     /// <summary>ACE's cast range for <paramref name="spell"/> at the skill's start level plus ranks <paramref name="initPlusRanks"/> (see the class remarks).</summary>
     /// <param name="spell">The spell.</param>
@@ -331,6 +364,11 @@ public sealed class FightScenario : IScenario, IDisposable
         _lastClock = session.Clock.Now;
         if (Failure is not null)
         {
+            if (_failLeave)
+            {
+                return FailLeaveStep(session);
+            }
+
             if (_failLogOff && _pending is { Outcome: { } left })
             {
                 _pending = null;
@@ -338,7 +376,13 @@ public sealed class FightScenario : IScenario, IDisposable
                 _log.Info(LogCategory, "the failed run logged off: " + left.Kind + (left.Detail is null ? string.Empty : ": " + left.Detail));
             }
 
-            return _failLogOff ? ScenarioStatus.Running : ScenarioStatus.Failed;
+            if (_failLogOff)
+            {
+                return ScenarioStatus.Running;
+            }
+
+            Dispose();
+            return ScenarioStatus.Failed;
         }
 
         if (Stage == "done")
@@ -433,6 +477,9 @@ public sealed class FightScenario : IScenario, IDisposable
                 }
 
                 break;
+
+            case "leave-den":
+                return LeaveDenStep(session, clock);
 
             case "logging-off":
                 if (_pending is { Outcome: { } loggedOff })
@@ -651,6 +698,7 @@ public sealed class FightScenario : IScenario, IDisposable
             return Fail(session, "fight: the read model has no War Magic skill");
         }
 
+        _initPlusRanks = initPlusRanks;
         _range = CastRange(info, initPlusRanks);
         _manaNeeded = GearCasts.ManaCeiling(info, 0);
         _tally.Start(session);
@@ -829,8 +877,10 @@ public sealed class FightScenario : IScenario, IDisposable
         _pending = null;
         if (outcome.Kind == ActionOutcomeKind.Confirmed)
         {
-            // The projectile exists. A hit shows as a damage line, a kill as the 0x01AD notice, within HitWaitSeconds (the marks were taken when the cast was sent: a close target can be hit in the frame the outcome arrives).
+            // The projectile exists. A hit shows as a damage line, a kill as the 0x01AD notice, within the hit wait: the bolt's flight to the target at its CreateObject velocity plus a margin (the marks were taken when the
+            // cast was sent: a close target can be hit in the frame the outcome arrives).
             _awaitSince = clock;
+            _hitWait = HitWaitFor(session, in outcome);
             _phase = Phase.Hit;
             return ScenarioStatus.Running;
         }
@@ -841,7 +891,7 @@ public sealed class FightScenario : IScenario, IDisposable
         _log.Info(LogCategory, $"miss: the cast was not confirmed: {reason} (misses in a row {_missesInARow})");
         if (outcome.Kind == ActionOutcomeKind.ServerError && outcome.Code == FizzleCode && !_fizzleDropped)
         {
-            DropOneLevel();
+            DropOneLevel(session);
         }
 
         if (outcome.Kind == ActionOutcomeKind.ServerError && outcome.Code == MissileOutOfRange)
@@ -885,11 +935,11 @@ public sealed class FightScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
-        if (clock - _awaitSince > HitWaitSeconds)
+        if (clock - _awaitSince > _hitWait)
         {
             _tally.NoteMiss();
             _missesInARow++;
-            _log.Info(LogCategory, $"miss: the projectile was confirmed but no damage line or kill came within {HitWaitSeconds:0.#} s (misses in a row {_missesInARow})");
+            _log.Info(LogCategory, $"miss: the projectile was confirmed but no damage line or kill came within {_hitWait:0.#} s (misses in a row {_missesInARow})");
             if (_missesInARow >= MissesBeforeWalking)
             {
                 return StartWalk(session, clock, $"{_missesInARow} misses in a row");
@@ -899,6 +949,37 @@ public sealed class FightScenario : IScenario, IDisposable
         }
 
         return ScenarioStatus.Running;
+    }
+
+    /// <summary>
+    /// The hit wait of the cast just confirmed, once per cast: the projectile the tracker took (its guid is the outcome's detail, <see cref="CastTracker.TryReadProjectile"/>), its velocity and position from the object table
+    /// and the target's position give <see cref="HitWaitFor(double, float)"/>; the floor applies, logged, when the projectile or a position is not in the table. Allocates the one log line.
+    /// </summary>
+    private double HitWaitFor(IGameSessionView session, in ActionOutcome outcome)
+    {
+        var objects = session.State.Objects;
+        if (!CastTracker.TryReadProjectile(in outcome, out var guid) || !objects.TryGet(guid, out var bolt))
+        {
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"hit wait: the confirmed cast names no projectile in the object table ({outcome.Detail}); the floor of {HitWaitSeconds:0.#} s applies"));
+            return HitWaitSeconds;
+        }
+
+        var from = bolt.Position ?? session.State.Self.Position;
+        if (from is not { } origin || !objects.TryGet(_target, out var victim) || victim.Position is not { } at)
+        {
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"hit wait: the projectile 0x{guid:X8} or the target 0x{_target:X8} has no position in the object table; the floor of {HitWaitSeconds:0.#} s applies"));
+            return HitWaitSeconds;
+        }
+
+        var speed = bolt.Velocity.Length();
+        var distance = PositionAgreement.DistanceMetres(in origin, in at);
+        var wait = HitWaitFor(distance, speed);
+        _log.Info(
+            LogCategory,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"cast confirmed: projectile 0x{guid:X8} at {speed:0.0} m/s, the target 0x{_target:X8} {distance:0.0} m from it: hit wait {wait:0.#} s (flight plus {HitWaitMarginSeconds:0.#} s, at least {HitWaitSeconds:0.#}, at most {HitWaitMaxSeconds:0.#}{(speed < MinProjectileSpeed ? "; the velocity is not a speed to divide by, so the cap" : string.Empty)})"));
+        return wait;
     }
 
     /// <summary>
@@ -940,22 +1021,29 @@ public sealed class FightScenario : IScenario, IDisposable
         return ScenarioStatus.Running;
     }
 
-    /// <summary>A fizzle drops one level once (D10, as the buff cycle's retry): the next lower level the spellbook holds.</summary>
-    private void DropOneLevel()
+    /// <summary>
+    /// A fizzle drops one level once (D10, as the buff cycle's retry): the next lower level the spellbook holds (as <see cref="ChooseLevel(uint, Spellbook?, double, out string)"/> reads it; the arena-here run has no book
+    /// and knows them all) and the SpellTable has, with the range (<see cref="CastRange"/>) and the mana ceiling recomputed for it (M3 3.2 review, package 2 finding 16: the drop read the SpellTable alone and kept the
+    /// higher level's range).
+    /// </summary>
+    private void DropOneLevel(IGameSessionView session)
     {
         _fizzleDropped = true;
+        var book = _options.ArenaHere ? null : session.State.Self.Spellbook;
         for (var i = _level - 1; i >= 0; i--)
         {
-            if (_spells.TryGetValue(_levelIds[i], out var info))
+            if ((book is null || book.Knows(_levelIds[i])) && _spells.TryGetValue(_levelIds[i], out var info))
             {
+                var from = _level;
                 _level = i;
+                _range = CastRange(info, _initPlusRanks);
                 _manaNeeded = GearCasts.ManaCeiling(info, 0);
-                _log.Info(LogCategory, $"a fizzle: one level down, to {info.Name} ({info.Id})");
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"a fizzle: one level down, to {info.Name} ({info.Id}){(from - i > 1 ? ", the next lower level the spellbook knows" : string.Empty)}; range {_range:0.#} m, mana up to {_manaNeeded}"));
                 return;
             }
         }
 
-        _log.Warn(LogCategory, "a fizzle on the lowest level; there is no level to drop to");
+        _log.Warn(LogCategory, "a fizzle on the lowest known level; there is no level to drop to");
     }
 
     private void LogHealth(IGameSessionView session)
@@ -1026,7 +1114,22 @@ public sealed class FightScenario : IScenario, IDisposable
             new LogField("velocity", o.Velocity));
     }
 
+    /// <summary>After <c>mode-peace</c>: out of the den (<see cref="DenExit"/>, best effort; not in the arena-here run, where the host put the player and keeps it there), then the end.</summary>
     private ScenarioStatus Conclude(IGameSessionView session)
+    {
+        var clock = session.Clock.Now;
+        Subscribe(session); // the leave reads the player's own teleport positions
+        if (!_options.ArenaHere && _exit.Begin(session, clock, _selfTeleports))
+        {
+            Enter("leave-den", clock);
+            return ScenarioStatus.Running;
+        }
+
+        return Finish(session, clock);
+    }
+
+    /// <summary>The end: <c>done</c> in the world when the host owns the session, else the log off and the quit.</summary>
+    private ScenarioStatus Finish(IGameSessionView session, double clock)
     {
         if (!_endSession)
         {
@@ -1037,7 +1140,38 @@ public sealed class FightScenario : IScenario, IDisposable
         }
 
         _pending = session.Actions.LogOff(ActionSource.Host);
-        Enter("logging-off", session.Clock.Now);
+        Enter("logging-off", clock);
+        return ScenarioStatus.Running;
+    }
+
+    /// <summary>The conclusion's leave: waits for it, then the end.</summary>
+    private ScenarioStatus LeaveDenStep(IGameSessionView session, double clock) =>
+        _exit.Tick(session, clock, _selfTeleports) ? Finish(session, clock) : ScenarioStatus.Running;
+
+    /// <summary>The failed run's leave, whatever <c>endSession</c> is: waits for it, then the log off (<c>endSession: true</c>) or the end as Failed (the host logs off).</summary>
+    private ScenarioStatus FailLeaveStep(IGameSessionView session)
+    {
+        if (!_exit.Tick(session, session.Clock.Now, _selfTeleports))
+        {
+            return ScenarioStatus.Running;
+        }
+
+        _failLeave = false;
+        return FailInWorld(session);
+    }
+
+    /// <summary>The failed run's end in the world, out of the den: the log off when the scenario owns the session (as the buff scenario's failure, so the next login is not refused as CharacterInWorld), else Failed at once (the game's leg logs off itself).</summary>
+    private ScenarioStatus FailInWorld(IGameSessionView session)
+    {
+        if (!_endSession)
+        {
+            Dispose();
+            return ScenarioStatus.Failed;
+        }
+
+        _log.Info(LogCategory, "logging off before the run ends as failed");
+        _pending = session.Actions.LogOff(ActionSource.Host);
+        _failLogOff = true;
         return ScenarioStatus.Running;
     }
 
@@ -1048,13 +1182,18 @@ public sealed class FightScenario : IScenario, IDisposable
         _walk?.Abandon();
         _log.Error(LogCategory, why);
         _log.Info(LogCategory, "verdict " + VerdictFields());
-        if (_endSession && session.State.Phase == SessionPhase.InWorld && Stage is not ("logging-off" or "quitting"))
+        if (session.State.Phase == SessionPhase.InWorld && Stage is not ("logging-off" or "quitting"))
         {
-            // As the buff scenario's failure: leave the world before the run ends as failed, so the next login is not refused as CharacterInWorld.
-            _log.Info(LogCategory, "logging off before the run ends as failed");
-            _pending = session.Actions.LogOff(ActionSource.Host);
-            _failLogOff = true;
-            return ScenarioStatus.Running;
+            // Out of the den first, whatever endSession is (best effort, DenExit; not in the arena-here run): a mage left in the den by this run, logged off by it or by the game's leg as soon as this returns Failed, meets the
+            // tuskers at its next login. The run stays Running until the leave is over, then logs off (endSession: true) or ends Failed where it stands.
+            Subscribe(session);
+            if (!_options.ArenaHere && _exit.Begin(session, session.Clock.Now, _selfTeleports))
+            {
+                _failLeave = true;
+                return ScenarioStatus.Running;
+            }
+
+            return FailInWorld(session);
         }
 
         Dispose();

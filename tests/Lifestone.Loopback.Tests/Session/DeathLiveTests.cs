@@ -91,11 +91,11 @@ internal static class DeathLive
 /// </summary>
 /// <remarks>
 /// <para><b>What it proves</b> (each assertion names the ACE behaviour it relies on).
-/// (a) <c>died == 1</c>: exactly one GameEvent 0x01AC VictimNotification, the tuskers' death (<c>Player_Death.cs</c> 34-90); a suicide sends none (299-345).
+/// (a) <c>died == 1</c>: exactly one GameEvent 0x01AC VictimNotification, the tuskers' death (<c>Player_Death.cs</c> 34-93); a suicide sends none (299-345).
 /// (b) <c>vitae &gt; 0</c> in the verdict, whose measures were frozen when the scenario concluded (spell 666 on the player after a death, <c>EnchantmentManager.cs</c> 391-443; the level is not asserted, D35). The vitae stage (D37) then pays it
 /// back with the <c>xp</c> verb, so the tally reads 0 at the end: <c>vitae_paid &gt; 0</c> and <c>vitae_after=0</c> are asserted instead of the tally.
 /// (c) <c>respawn=lifestone</c>: the death's teleport (F751 and the position) ended within 15 m of a <c>BF_LIFESTONE</c> object (<c>Player_Death.cs</c> 247-292: the sanctuary the bind set, <c>Lifestone.cs</c> 55-75).
-/// (d) The death's own corpse of the player ("Corpse of &lt;name&gt;", F745, <c>Creature_Death.cs</c> 428-477) was created: <c>CorpsesSeen</c> counts a corpse only between a death signal and that death's arrival, so the den's older corpses
+/// (d) The death's own corpse of the player ("Corpse of &lt;name&gt;", F745, <c>Creature_Death.cs</c> 428-496) was created: <c>CorpsesSeen</c> counts a corpse only between a death signal and that death's arrival, so the den's older corpses
 /// (re-created for the client at every arrival, <c>corpses_stale=</c>) cannot satisfy it (review R1).
 /// (e) <c>gear_restored=yes</c>: after the death the gear scenario found the kit short and the wand and the five pieces are wielded again (the corpse is not looted, D8).
 /// (f) <c>purged &gt;= 1</c> on a run that took the suicide (0x02C6 removed the buffs, <c>Player_Death.cs</c> 211-216); an unbuffed death's purge removes nothing and is not counted (<c>TODO(m3-purge-empty)</c>).

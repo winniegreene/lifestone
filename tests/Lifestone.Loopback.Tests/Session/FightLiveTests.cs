@@ -23,7 +23,7 @@ namespace Lifestone.Loopback.Tests.Session;
 /// <remarks>
 /// <para><b>What it proves</b> (each assertion names the ACE behaviour it relies on).
 /// (a) <c>kills&gt;=1 damage_dealt&gt;0</c> from <see cref="FightTally"/>: the 0x01AD KillerNotification named a kill and at least one spell-damage line (<c>SpellProjectile.cs</c> 810-845, Magic chat) preceded it (the killing
-/// blow has no line, 846-851).
+/// blow has no line, 857-861).
 /// (b) The war cast's outcome is Confirmed by its projectile: <c>projectiles&gt;=1</c> (a Missile-state CreateObject during the fight, which is what confirms a war cast in the Action API) and at least one
 /// cast was not logged as a miss. This is the live check of <c>TODO(m3-cast-projectile-attribution)</c> (decision D21): the log lines <c>[fight] projectile created</c> carry each projectile's create position (cell and
 /// local origin), velocity and Setup id; they are printed so the attribution rule (the first Missile object that started within 5 m of the player and flies away from it along the aim) can be read off the real values.

@@ -23,16 +23,19 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <para><b>Stages</b> (<see cref="Stage"/>, each logged once on entry as <c>[death] stage &lt;name&gt;</c>; <see cref="DeathStages"/> masks the groups): <c>start</c>; <c>gear</c> (<see cref="GearScenario"/>'s steps) and <c>bars</c>
 /// (bar 1: for each of the arena profile's lines the highest of its first seven spells the spellbook holds; bar 2: Flame Bolt I to VII, ids 27, 81 to 85 and 2128; only what <see cref="Spellbook.SpellBars"/> lacks is sent,
 /// <c>bars=set:&lt;n&gt;</c> or <c>bars=ok</c>); <c>bind-place</c>, <c>bind-teleporting</c>, <c>bind-settle</c>, <c>bind-use</c>, <c>bind-line</c> (the Holtburg point of interest through <c>PlayerTools.Place</c>, the nearest
-/// <see cref="WorldObjectTable.LifestoneFlag"/> object within <see cref="LifestoneSearchMetres"/>, <c>IActionApi.Use</c>; ACE's <c>Lifestone.cs</c> 55-75: the Sanctuary motion, the weenie's UseMessage as a Magic chat line, half the
-/// stamina; done on the Use's success, the line logged as the world database wrote it); <c>den-place</c>, <c>den-teleporting</c>, <c>den-settle</c> (the floor rule of D12: a settle off the floor fails); <c>unbuff</c>,
+/// <see cref="WorldObjectTable.LifestoneFlag"/> object within <see cref="LifestoneSearchMetres"/>, <c>IActionApi.Use</c>; ACE's <c>Lifestone.cs</c> 55-75: the Sanctuary motion, then in one action the weenie's UseMessage as a
+/// Magic chat line and the stamina halved by a 0x02E9; done when that line, that halving and the UseDone all followed the Use, the line logged as the world database wrote it; the known Magic lines that are not the attune, an
+/// enchantment's expiry among them, are ignored and counted); <c>den-place</c>, <c>den-teleporting</c>, <c>den-settle</c> (the floor rule of D12: a settle off the floor fails); <c>unbuff</c>,
 /// <c>unbuff-dying</c>, <c>unbuff-arrival</c>, <c>unbuff-vitals</c> (the suicide, its death, the death's teleport, the arrival and ACE's 3 s of vitals; then the den stages again); <c>death-mode</c>, <c>death-wait</c> (non-combat among
-/// the tuskers; <see cref="IFightWalk"/> walks to the nearest tusker cell first and on to the next tour cell when no blow came in <see cref="IdleLegSeconds"/> s); <c>respawn</c>, <c>respawn-vitals</c>; <c>regear</c>; <c>logging-off</c>,
-/// <c>quitting</c>, <c>done</c>. With <c>endSession: false</c> (the game's leg, the tests) it ends at <c>done</c> in the world.</para>
+/// the tuskers; <see cref="IFightWalk"/> walks to the nearest tusker cell first and on to the next tour cell when no blow came in <see cref="IdleLegSeconds"/> s; the walk is ticked from <c>den-teleporting</c> to <c>death-wait</c>
+/// and nowhere else, and a leg still running when the death or the StopAfterHits stop comes is abandoned); <c>respawn</c>, <c>respawn-vitals</c>; <c>regear</c>; <c>logging-off</c>, <c>quitting</c>, <c>done</c>. With
+/// <c>endSession: false</c> (the game's leg, the tests) it ends at <c>done</c> in the world.</para>
 /// <para><b>What counts.</b> <c>died</c> is the 0x01AC victim notices: a suicide sends none (<c>Player_Death.cs</c> 299-345), so the suicide's death is <c>suicides=1</c>, in <c>deaths</c> (the NumDeaths delta) and, through its
 /// purge, in <c>purged</c>. The tally is not reset after the suicide, so every counter is the run's; <c>respawn</c> reads the last arrival.</para>
-/// <para><b>Failure</b> is loud and logs off first in the world (as the fight scenario): a lifestone that is not near, a settle off the floor, a suicide that is refused or leaves enchantments, a walk that fails, the
-/// <see cref="DeathOptions.Seconds"/> limit (with the hits, evades and the lowest health share, D17), no teleport within <see cref="ArrivalSeconds"/> s of the death, an arrival with no lifestone near (<c>respawn=elsewhere</c>, the
-/// arrival cell named) and a re-gear that leaves the kit not wielded.</para>
+/// <para><b>Failure</b> is loud: in the world the run leaves the den first (<see cref="DenExit"/>, whatever <c>endSession</c> is: the game's leg logs off as soon as the scenario returns Failed, and a mage logged off in the den
+/// meets the tuskers at its next login), then logs off (<c>endSession: true</c>, as the fight scenario) or ends Failed where it stands. The causes: a lifestone that is not near, a settle off the floor, a suicide that is refused
+/// or leaves enchantments, a walk that fails, the <see cref="DeathOptions.Seconds"/> limit (with the hits, evades and the lowest health share, D17), no teleport within <see cref="ArrivalSeconds"/> s of the death, an arrival
+/// away from the lifestone the bind used (or, when the run did not bind, with no lifestone near: <c>respawn=elsewhere</c>, the arrival cell named) and a re-gear that leaves the kit not wielded.</para>
 /// <para>Per-step code allocates nothing but log lines on events: the handlers are subscribed once and the health share is formatted only when it crosses a 10% step.</para>
 /// </remarks>
 public sealed class DeathScenario : IScenario, IDisposable
@@ -56,8 +59,10 @@ public sealed class DeathScenario : IScenario, IDisposable
     public const double BindUseSeconds = 60;
 
     /// <summary>
-    /// The limit on the attune line after the Use is sent, in seconds of session time. ACE answers the UseDone before its action chain ends (<c>Lifestone.cs</c> 44-75: the stance change, the sound, the Sanctuary motion, THEN the
-    /// within-use-radius check that sets the sanctuary and sends the UseMessage as a Magic chat line, or WeenieError YouHaveMovedTooFar 0x0498), so the bind is done on that line, not on the UseDone.
+    /// The limit on the attune after the Use is sent, in seconds of session time. ACE's lifestone chain (<c>Lifestone.cs</c> 44-75) is the stance change, the sound, the Sanctuary motion, THEN the within-use-radius check that
+    /// sets the sanctuary, sends the UseMessage as a Magic chat line and halves the stamina (<c>UpdateVital(Stamina, current / 2)</c>, a 0x02E9), or sends WeenieError YouHaveMovedTooFar 0x0498. The UseDone's own timer
+    /// (<c>Player_Use.cs</c> 235-238, <c>TryUseItem</c>) runs for the same stance and motion time, so the UseDone can come before or after that action; the bind is done on the line and the halving together, never on the
+    /// UseDone alone, and a Magic line that is one of ACE's other Magic lines (<see cref="IsNonAttuneMagicLine"/>) is not the attune.
     /// </summary>
     public const double BindLineSeconds = 15;
 
@@ -132,6 +137,7 @@ public sealed class DeathScenario : IScenario, IDisposable
     private ActionHandle? _pending;
     private IDisposable? _movedSubscription;
     private IDisposable? _chatSubscription;
+    private IDisposable? _qualitiesSubscription;
     private IGameSessionView? _view;
     private bool _failLogOff;
     private bool _subscribed;
@@ -147,6 +153,9 @@ public sealed class DeathScenario : IScenario, IDisposable
     private int _teleportMark;
     private int _deathTeleportBase;
     private int _bindLines;
+    private int _bindNoise;
+    private bool _staminaHalved;
+    private uint _staminaBefore;
     private int _blowMark;
     private int _healthBucket = -1;
     private int _legs;
@@ -164,10 +173,8 @@ public sealed class DeathScenario : IScenario, IDisposable
     private DeathLegMeasures? _frozen;
     private bool _vitaeDone;
     private bool _enteredHere;
-    private bool _leftDen;
+    private readonly DenExit _exit;
     private bool _failLeave;
-    private double _leaveSettle = double.NaN;
-    private double _failLeaveStart;
     private bool _vitaeSent;
     private long? _vitaePaid;
     private int? _vitaeAfter;
@@ -226,7 +233,8 @@ public sealed class DeathScenario : IScenario, IDisposable
         (_kit, _spells, _options, _walk, _endSession, _stages, _arrivalSeconds, _log) = (kit, spells, death, walk, endSession, stages, arrivalSeconds, log);
         _approach = approach;
         _gear = (stages & DeathStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) : null;
-        _holtburg = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
+        _exit = new DenExit(log, LogCategory);
+        _holtburg = _exit.Destination;
     }
 
     /// <inheritdoc/>
@@ -251,7 +259,7 @@ public sealed class DeathScenario : IScenario, IDisposable
     /// <summary>The suicides that were seen complete (0 or 1).</summary>
     public int Suicides => _suicides;
 
-    /// <summary>True once the Use on the lifestone succeeded (D34).</summary>
+    /// <summary>True once the bind took (D34): the lifestone's UseMessage line, the stamina halving and the UseDone all followed the Use.</summary>
     public bool Bound => _bound;
 
     /// <summary>The guid of the lifestone the bind used, or 0.</summary>
@@ -259,6 +267,9 @@ public sealed class DeathScenario : IScenario, IDisposable
 
     /// <summary>The position the lifestone had when the bind used it, or null.</summary>
     public CellFrame? LifestonePosition => _lifestonePosition;
+
+    /// <summary>The position of the lifestone this run bound at, or null when the run did not bind (the bind stage was off or has not taken): what <c>respawn=</c> is classified against.</summary>
+    public CellFrame? BoundLifestone => _bound ? _lifestonePosition : null;
 
     /// <summary>True when the re-gear left the wand and the five pieces wielded (<c>gear_restored=yes</c>).</summary>
     public bool GearRestored => _gearRestored;
@@ -342,7 +353,7 @@ public sealed class DeathScenario : IScenario, IDisposable
         var seconds = double.IsNaN(_deathStart) ? (double?)null : DeathSeconds;
         var measures = _view is null
             ? new DeathLegMeasures(_tally.VictimNotices, _suicides, _tally.Deaths, _tally.VitaePercent, DeathRespawn.None, _tally.CorpsesSeen, _tally.Purges, _tally.ProtectedHits, null, _gearRestored, worn, _tally.HitsTaken, _tally.DamageTaken, _tally.Evades, null, seconds, deathFrameMaxMs, fightFrameMaxMs, _tally.StaleCorpses, _tally.Protection, _vitaePaid, _vitaeAfter)
-            : DeathLegVerdict.Measure(_tally, _view.State.Objects, _suicides, _gearRestored, worn, seconds, deathFrameMaxMs, fightFrameMaxMs);
+            : DeathLegVerdict.Measure(_tally, _view.State.Objects, _suicides, _gearRestored, worn, seconds, deathFrameMaxMs, fightFrameMaxMs, BoundLifestone);
         if (_respawn is { } kept)
         {
             measures = measures with { Respawn = kept }; // the respawn stage's classification stands (it was taken at the arrival plus the vitals wait, in the world)
@@ -352,9 +363,9 @@ public sealed class DeathScenario : IScenario, IDisposable
     }
 
     /// <summary>
-    /// Once, in the world: if a re-measure now would classify the respawn differently from the respawn stage, say so and why (the tally's arrival cell overwritten by a later position, or no lifestone object within
-    /// <see cref="DeathLegVerdict.LifestoneRadiusMetres"/> of the arrival in the object table). Only called in the world: after the log off the table is empty by <c>LeaveWorld</c>, so the check would always differ. The
-    /// verdict uses the stage's classification either way.
+    /// Once, in the world: if a re-measure now would classify the respawn differently from the respawn stage, say so and why (the tally's arrival cell overwritten by a later position, or, when the run did not bind, no
+    /// lifestone object within <see cref="DeathLegVerdict.LifestoneRadiusMetres"/> of the arrival in the object table). Only called in the world: after the log off the table is empty by <c>LeaveWorld</c>, so the check
+    /// would always differ. The verdict uses the stage's classification either way.
     /// </summary>
     private void LogLateRespawnDifference(IGameSessionView session)
     {
@@ -363,7 +374,7 @@ public sealed class DeathScenario : IScenario, IDisposable
             return;
         }
 
-        var now = DeathLegVerdict.ClassifyRespawn(_tally, session.State.Objects);
+        var now = DeathLegVerdict.ClassifyRespawn(_tally, session.State.Objects, BoundLifestone);
         if (now == kept)
         {
             return;
@@ -416,8 +427,10 @@ public sealed class DeathScenario : IScenario, IDisposable
             _approach!.Tick(session, now); // follows the server's positions (the teleport places the walker); the leg is ticked by its own stage
         }
 
-        var walkStatus = _subscribed ? _walk?.Tick(session, now) ?? FightWalkStatus.Idle : FightWalkStatus.Idle;
-        if (walkStatus == FightWalkStatus.Failed && Stage is not ("logging-off" or "quitting"))
+        // The walk is ticked in the den stages only (WalksTheDen): a tick after a death's teleport would drive the dead body, or the respawned one at Holtburg, and read a leg's Stuck or Failed as the run's failure in
+        // respawn; a tick after the StopAfterHits stop would read the abandoned leg's status. Every exit from the den stages abandons the leg first (DeathWaitStep, UnbuffDyingStep, Fail).
+        var walkStatus = _subscribed && WalksTheDen(Stage) ? _walk?.Tick(session, now) ?? FightWalkStatus.Idle : FightWalkStatus.Idle;
+        if (walkStatus == FightWalkStatus.Failed)
         {
             return Fail(session, "the walk failed: " + _walk!.Failure);
         }
@@ -594,6 +607,7 @@ public sealed class DeathScenario : IScenario, IDisposable
         _tally.Dispose();
         _movedSubscription?.Dispose();
         _chatSubscription?.Dispose();
+        _qualitiesSubscription?.Dispose();
         _approach?.Dispose();
         _walk?.Dispose();
     }
@@ -885,6 +899,9 @@ public sealed class DeathScenario : IScenario, IDisposable
         _useAt = clock;
         _bindError = 0;
         _bindLines = 0;
+        _bindNoise = 0;
+        _staminaHalved = false;
+        _staminaBefore = session.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out _) ? stamina : 0;
         _useDone = false;
         _pending = session.Actions.Use(_lifestone, ActionSource.Host);
         Enter("bind-use", clock);
@@ -892,9 +909,10 @@ public sealed class DeathScenario : IScenario, IDisposable
     }
 
     /// <summary>
-    /// Waits for the attune line (any Magic chat line from the server after the Use) up to <see cref="BindLineSeconds"/> s, and for the UseDone; a WeenieError after the Use (YouHaveMovedTooFar 0x0498 is ACE's own, <c>Lifestone.cs</c> 66)
-    /// or the timeout fails loudly. ACE moves a player who is out of the use radius itself (<c>Player_Use.cs</c> <c>CreateMoveToChain</c>) before it calls the lifestone's <c>ActOnUse</c>, but a player it cannot move (a client that does
-    /// not follow its MoveToObject) is the case the timeout names, with the distance at the Use and now.
+    /// Waits for ACE's two attune signals, the UseMessage line (a Magic chat line that is not one of <see cref="IsNonAttuneMagicLine"/>'s) and the stamina halving (a stamina 0x02E9 that drops the current to about half:
+    /// <c>Lifestone.cs</c> 64-69 sends both in one action), up to <see cref="BindLineSeconds"/> s, and for the UseDone; a WeenieError after the Use (YouHaveMovedTooFar 0x0498 is ACE's own, <c>Lifestone.cs</c> 72) or the timeout
+    /// fails loudly, the timeout naming which signal came. ACE moves a player who is out of the use radius itself (<c>Player_Use.cs</c> <c>CreateMoveToChain</c>) before it calls the lifestone's <c>ActOnUse</c>, but a player it
+    /// cannot move (a client that does not follow its MoveToObject) is the case the timeout names, with the distance at the Use and now.
     /// </summary>
     private ScenarioStatus BindUseStep(IGameSessionView session, double clock)
     {
@@ -918,18 +936,24 @@ public sealed class DeathScenario : IScenario, IDisposable
             return Fail(session, string.Create(CultureInfo.InvariantCulture, $"bind: the bind did not take: the server answered WeenieError 0x{_bindError:X4}{(_bindError == YouHaveMovedTooFar ? " (YouHaveMovedTooFar: the player was outside the lifestone's use radius when ACE checked)" : string.Empty)} after the Use; the player is {Distance(session):0.0} m from the lifestone"));
         }
 
-        if (_bindLines > 0 && _useDone)
+        var attuned = _bindLines > 0 && _staminaHalved;
+        if (attuned && _useDone)
         {
             _bound = true;
             _approachLive = false;
             _approach?.Dispose();
-            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"bound at the lifestone 0x{_lifestone:X8} after {clock - _useAt:0.0} s ({_bindLines} Magic chat line(s) followed the Use; the player is {Distance(session):0.0} m from it)"));
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"bound at the lifestone 0x{_lifestone:X8} after {clock - _useAt:0.0} s (the attune line and the stamina halving followed the Use; {_bindLines} attune line(s), {_bindNoise} other Magic line(s) ignored; the player is {Distance(session):0.0} m from it)"));
             return Begin(DeathStages.Den, session, clock);
         }
 
-        if (_bindLines == 0 && clock - _useAt > BindLineSeconds)
+        if (!attuned && clock - _useAt > BindLineSeconds)
         {
-            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"bind: the bind did not take: no Magic chat line within {BindLineSeconds:0} s of the Use (UseDone {(_useDone ? "seen" : "not seen")}); the player is {Distance(session):0.0} m from the lifestone (ACE sets the sanctuary only when the player is within the use radius after the Sanctuary motion, Lifestone.cs 44-75; it moves a player only when the client follows its MoveToObject)"));
+            var missing = _bindLines == 0 && !_staminaHalved
+                ? "no attune line (a Magic chat line) and no stamina halving (0x02E9)"
+                : _bindLines == 0
+                    ? "the stamina halving came but no attune line (a Magic chat line)"
+                    : "the attune line came but the stamina was not halved (ACE halves it in the same action, Lifestone.cs 64-69)";
+            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"bind: the bind did not take: {missing} within {BindLineSeconds:0} s of the Use (UseDone {(_useDone ? "seen" : "not seen")}; {_bindNoise} other Magic line(s) ignored); the player is {Distance(session):0.0} m from the lifestone (ACE sets the sanctuary only when the player is within the use radius after the Sanctuary motion, Lifestone.cs 44-75; it moves a player only when the client follows its MoveToObject)"));
         }
 
         return clock - _stageStart > BindUseSeconds
@@ -985,7 +1009,7 @@ public sealed class DeathScenario : IScenario, IDisposable
         if (buffs == 0)
         {
             _unbuffNote = "none";
-            _log.Info(LogCategory, "unbuff: the mage holds no enchantment but the vitae; no suicide");
+            _log.Info(LogCategory, "unbuff: the mage holds no enchantment a death would purge (the vitae, an item's lasting spell and a cooldown stay); no suicide");
             return Begin(DeathStages.Death, session, clock);
         }
 
@@ -1001,10 +1025,11 @@ public sealed class DeathScenario : IScenario, IDisposable
     {
         if (_tally.VictimNotices > 0)
         {
-            // The tuskers were quicker than the suicide's five lines (ACE's 15 s, Player_Death.cs 330-345): their kill removes every enchantment as a suicide's death does (211-216), so it is the run's death and the suicide is
+            // The tuskers were quicker than the suicide's five lines (ACE's 15 s, Player_Death.cs 330-345): their kill purges the enchantments as a suicide's death does (211-216), so it is the run's death and the suicide is
             // not waited for (ACE refuses it as YoureTooBusy while the player is dead or teleporting). The wait among the tuskers is skipped; the respawn is read as usual.
             _unbuffNote = "killed";
             _pending = null;
+            _walk?.Abandon(); // no leg runs before the wait, but the walk is left with nothing to drive through the respawn
             _deathStart = _stageStart;
             _deathEnd = clock;
             _log.Warn(LogCategory, "unbuff: the tuskers killed the buffed mage before the suicide completed; their kill purges the enchantments and is the run's death (died=1)");
@@ -1039,7 +1064,7 @@ public sealed class DeathScenario : IScenario, IDisposable
         var left = CountBuffs(session.State.Self.Qualities);
         if (left != 0)
         {
-            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"unbuff: {left} enchantments remain after the suicide's death (ACE's death removes every enchantment, Player_Death.cs 211-216)"));
+            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"unbuff: {left} enchantments that a death purges remain after the suicide's death (ACE's RemoveAllEnchantments, EnchantmentManager.cs 358-365, keeps only the lasting item spells and the cooldowns)"));
         }
 
         _unbuffNote = "suicide";
@@ -1048,14 +1073,19 @@ public sealed class DeathScenario : IScenario, IDisposable
         return Begin(DeathStages.Den, session, clock);
     }
 
-    /// <summary>The enchantments in the registry that are not the vitae (spell 666).</summary>
+    /// <summary>
+    /// The enchantments in the registry that a death's purge removes. ACE's <c>Die</c> sends the 0x02C6 and calls <c>RemoveAllEnchantments</c> (<c>Player_Death.cs</c> 211-216; <c>EnchantmentManager.cs</c> 358-365), which
+    /// keeps every entry with a duration of -1 (an item's spell on its wielder; the vitae, spell 666, is one) and every spell id above <c>short.MaxValue</c> (a cooldown: <c>StartCooldown</c> 284-300 numbers it from
+    /// <c>SpellCategory_Cooldown</c> 0x8000); the reducer keeps the same on 0x02C6 (<see cref="EnchantmentRules.Purge"/>). Counting one of those would send a suicide that cannot clear it and then fail the run.
+    /// </summary>
     private static int CountBuffs(PlayerQualities q)
     {
         var active = q.ActiveEnchantments;
         var n = 0;
         for (var i = 0; i < active.Length; i++)
         {
-            if (active[i].SpellId != DeathTally.VitaeSpell)
+            var entry = active[i];
+            if (entry.SpellId != DeathTally.VitaeSpell && !entry.IsPermanent && entry.SpellId <= short.MaxValue)
             {
                 n++;
             }
@@ -1119,12 +1149,16 @@ public sealed class DeathScenario : IScenario, IDisposable
 
     private int Blows() => _tally.HitsTaken + _tally.Evades + _tally.ProtectedHits;
 
+    /// <summary>The stages that tick the walk: from the den's teleport (the teleport's position places the headless walker) to the end of the wait among the tuskers. No other stage reads a leg, and none may drive one.</summary>
+    private static bool WalksTheDen(string stage) => stage is "den-teleporting" or "den-settle" or "unbuff" or "unbuff-dying" or "death-mode" or "death-wait";
+
     private ScenarioStatus DeathWaitStep(IGameSessionView session, double clock, FightWalkStatus walkStatus)
     {
         var elapsed = clock - _deathStart;
         LogHealth(session.State.Self.Qualities);
         if (_tally.VictimNotices > 0 || _tally.Deaths > _suicides)
         {
+            _walk?.Abandon(); // a leg still running drives a dead body: its keys are released here, and the respawn stages never tick it (a death in the middle of a leg is not a walk failure)
             _deathEnd = clock;
             _diedEarly = _options.StopAfterHits;
             if (_diedEarly)
@@ -1236,14 +1270,15 @@ public sealed class DeathScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
-        var respawn = DeathLegVerdict.ClassifyRespawn(_tally, session.State.Objects);
+        var bound = BoundLifestone;
+        var respawn = DeathLegVerdict.ClassifyRespawn(_tally, session.State.Objects, bound);
         _respawn = respawn; // the verdict keeps this classification and this arrival: a later re-measure never replaces it (the tally's arrival can be overwritten by a later position; after the log off the object table is empty)
         _respawnCell = _tally.ArrivalCell;
         _log.Info(
             LogCategory,
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"respawn: {respawn.ToString().ToLowerInvariant()} (arrival cell 0x{_tally.ArrivalCell:X8}, vitae {_tally.VitaePercent}%, vitals {_tally.VitalsAfterArrivalPercent:0}%, corpses {_tally.CorpsesSeen}, purges {_tally.Purges}, protected {_tally.ProtectedHits})"));
+                $"respawn: {respawn.ToString().ToLowerInvariant()} (arrival cell 0x{_tally.ArrivalCell:X8}, classified against {(bound is { } b ? "the lifestone the bind used in cell 0x" + b.CellId.ToString("X8", CultureInfo.InvariantCulture) : "any lifestone object: this run did not bind")}, vitae {_tally.VitaePercent}%, vitals {_tally.VitalsAfterArrivalPercent:0}%, corpses {_tally.CorpsesSeen}, purges {_tally.Purges}, protected {_tally.ProtectedHits})"));
         if (_diedEarly)
         {
             _log.Info(LogCategory, "respawn: " + respawn.ToString().ToLowerInvariant() + " (report-only under StopAfterHits)");
@@ -1252,7 +1287,7 @@ public sealed class DeathScenario : IScenario, IDisposable
 
         if (respawn != DeathRespawn.Lifestone)
         {
-            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"respawn: respawn={respawn.ToString().ToLowerInvariant()}: the player arrived in cell 0x{_tally.ArrivalCell:X8} with no lifestone object within {DeathLegVerdict.LifestoneRadiusMetres:0} m (the bind to Holtburg's lifestone did not hold, D34)"));
+            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"respawn: respawn={respawn.ToString().ToLowerInvariant()}: the player arrived in cell 0x{_tally.ArrivalCell:X8} {(bound is { } at ? "more than " + DeathLegVerdict.LifestoneRadiusMetres.ToString("0", CultureInfo.InvariantCulture) + " m from the lifestone the bind used (cell 0x" + at.CellId.ToString("X8", CultureInfo.InvariantCulture) + ")" : "with no lifestone object within " + DeathLegVerdict.LifestoneRadiusMetres.ToString("0", CultureInfo.InvariantCulture) + " m")} (the bind to Holtburg's lifestone did not hold, D34)"));
         }
 
         return Begin(DeathStages.Regear, session, clock);
@@ -1347,12 +1382,8 @@ public sealed class DeathScenario : IScenario, IDisposable
     /// <summary>After the freeze: out of the den, then the vitae stage, then the end.</summary>
     private ScenarioStatus AfterMeasures(IGameSessionView session, double clock)
     {
-        if (!_leftDen && InDen(session))
+        if (_exit.Begin(session, clock, _selfTeleports))
         {
-            _leftDen = true;
-            _log.Info(LogCategory, "leaving the den before the log off (the next login must not start among the tuskers)");
-            _leaveSettle = double.NaN;
-            SendLeave(session);
             Enter("leave-den", clock);
             return ScenarioStatus.Running;
         }
@@ -1368,80 +1399,31 @@ public sealed class DeathScenario : IScenario, IDisposable
 
     // ------------------------------------------------------------------------------------------------ out of the den
 
-    /// <summary>True when the player is in the world in the Black Spawn Den's landblock (0x0105): no run of this scenario logs off there, the unbuffed mage would meet the tuskers at the next login.</summary>
-    private static bool InDen(IGameSessionView session) =>
-        session.State.Phase == SessionPhase.InWorld && session.State.Self.Position is { } here && (here.CellId >> 16) == 0x0105;
+    /// <summary>The conclusion's leave (<see cref="DenExit"/>, best effort): waits for it, then goes on to the vitae stage and the end.</summary>
+    private ScenarioStatus LeaveDenStep(IGameSessionView session, double clock) =>
+        _exit.Tick(session, clock, _selfTeleports) ? AfterMeasures(session, clock) : ScenarioStatus.Running;
 
-    private void SendLeave(IGameSessionView session)
-    {
-        _teleportMark = _selfTeleports;
-        _pending = session.Tools.Place(_holtburg, ActionSource.Host);
-    }
-
-    /// <summary>Waits for the Holtburg place to land and settle; best effort, a refusal or a timeout is a warning and the run goes on to its end.</summary>
-    private ScenarioStatus LeaveDenStep(IGameSessionView session, double clock)
-    {
-        if (_pending is { Outcome: { } placed })
-        {
-            _pending = null;
-            if (placed.Kind != ActionOutcomeKind.Confirmed)
-            {
-                _log.Warn(LogCategory, "leaving the den: the place was not confirmed (" + Describe(placed) + "); the run ends where it stands");
-                return AfterMeasures(session, clock);
-            }
-        }
-
-        if (_pending is null && _selfTeleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present)
-        {
-            if (double.IsNaN(_leaveSettle))
-            {
-                _leaveSettle = clock + SettleSeconds;
-            }
-
-            return clock >= _leaveSettle ? AfterMeasures(session, clock) : ScenarioStatus.Running;
-        }
-
-        if (clock - _stageStart > TeleportSeconds)
-        {
-            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"leaving the den: the player did not arrive within {TeleportSeconds:0.#} s (travel {session.State.Self.Travel}); the run ends where it stands"));
-            return AfterMeasures(session, clock);
-        }
-
-        return ScenarioStatus.Running;
-    }
-
-    /// <summary>The failed run's way out of the den (best effort), then its log off.</summary>
+    /// <summary>The failed run's leave, whatever <c>endSession</c> is: waits for it, then the log off (<c>endSession: true</c>) or the end as Failed (the host logs off).</summary>
     private ScenarioStatus FailLeaveStep(IGameSessionView session)
     {
-        var clock = session.Clock.Now;
-        var done = false;
-        if (_pending is { Outcome: { } placed })
-        {
-            _pending = null;
-            if (placed.Kind != ActionOutcomeKind.Confirmed)
-            {
-                _log.Warn(LogCategory, "leaving the den (failed run): the place was not confirmed (" + Describe(placed) + ")");
-                done = true;
-            }
-        }
-
-        if (!done && _pending is null && _selfTeleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present)
-        {
-            done = true;
-        }
-
-        if (!done && clock - _failLeaveStart > TeleportSeconds)
-        {
-            _log.Warn(LogCategory, "leaving the den (failed run): the player did not arrive in time");
-            done = true;
-        }
-
-        if (!done)
+        if (!_exit.Tick(session, session.Clock.Now, _selfTeleports))
         {
             return ScenarioStatus.Running;
         }
 
         _failLeave = false;
+        return FailInWorld(session);
+    }
+
+    /// <summary>The failed run's end in the world, out of the den: the log off when the scenario owns the session (as the fight scenario's failure, so the next login is not refused as CharacterInWorld), else Failed at once (the game's leg logs off itself).</summary>
+    private ScenarioStatus FailInWorld(IGameSessionView session)
+    {
+        if (!_endSession)
+        {
+            Dispose();
+            return ScenarioStatus.Failed;
+        }
+
         _log.Info(LogCategory, "logging off before the run ends as failed");
         _pending = session.Actions.LogOff(ActionSource.Host);
         _failLogOff = true;
@@ -1592,24 +1574,18 @@ public sealed class DeathScenario : IScenario, IDisposable
         _log.Error(LogCategory, why);
         FreezeMeasures(session);
         _log.Info(LogCategory, "verdict " + VerdictFields());
-        if (_endSession && session.State.Phase == SessionPhase.InWorld && Stage is not ("logging-off" or "quitting"))
+        if (session.State.Phase == SessionPhase.InWorld && Stage is not ("logging-off" or "quitting"))
         {
-            // As the fight scenario's failure: leave the world before the run ends as failed, so the next login is not refused as CharacterInWorld.
-            if (!_leftDen && InDen(session))
+            // Out of the den first, whatever endSession is (best effort, DenExit): a mage logged off in the den, by this scenario or by the game's leg as soon as this returns Failed, meets the tuskers at its next login. The
+            // run stays Running until the leave is over, then logs off (endSession: true) or ends Failed where it stands.
+            Subscribe(session); // the leave reads the player's own teleport positions: a failure before the first place (in a den a previous run left the mage in) has not subscribed yet
+            if (_exit.Begin(session, session.Clock.Now, _selfTeleports))
             {
-                // Out of the den first (best effort): a mage logged off there meets the tuskers at the next login.
-                _leftDen = true;
-                _log.Info(LogCategory, "leaving the den before the log off (the next login must not start among the tuskers)");
                 _failLeave = true;
-                _failLeaveStart = session.Clock.Now;
-                SendLeave(session);
                 return ScenarioStatus.Running;
             }
 
-            _log.Info(LogCategory, "logging off before the run ends as failed");
-            _pending = session.Actions.LogOff(ActionSource.Host);
-            _failLogOff = true;
-            return ScenarioStatus.Running;
+            return FailInWorld(session);
         }
 
         Dispose();
@@ -1628,6 +1604,29 @@ public sealed class DeathScenario : IScenario, IDisposable
         _tally.Start(session);
         _movedSubscription = session.Events.Subscribe<ObjectMoved>(OnMoved);
         _chatSubscription = session.Events.Subscribe<ChatReceived>(OnChat);
+        _qualitiesSubscription = session.Events.Subscribe<QualitiesChanged>(OnQualities);
+    }
+
+    /// <summary>
+    /// The bind's second signal: a stamina 0x02E9 after the Use that drops the current to about half of it (ACE's <c>UpdateVital(Stamina, Math.Round(current / 2f))</c>, <c>Lifestone.cs</c> 68-69; <c>Player_Vitals.cs</c> 130-139 sends it
+    /// only when the value changed). "About": at most half of the last value seen plus one point, since a regeneration tick may be in flight. A rise (regeneration) only moves the comparison value on.
+    /// </summary>
+    private void OnQualities(in QualitiesChanged e)
+    {
+        if (Stage is not ("bind-use" or "bind-line") || e.Change != QualityChange.VitalCurrent || e.Key is not (MageTemplate.MaxStamina or MageTemplate.MaxStamina + 1) || _view is null
+            || !_view.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out _))
+        {
+            return;
+        }
+
+        if (!_staminaHalved && stamina < _staminaBefore && 2 * stamina <= _staminaBefore + 2)
+        {
+            _staminaHalved = true;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"bind: the stamina halved ({_staminaBefore} to {stamina}): ACE's second attune signal (Lifestone.cs 68-69)"));
+            return;
+        }
+
+        _staminaBefore = stamina;
     }
 
     private void OnMoved(in ObjectMoved e)
@@ -1666,12 +1665,48 @@ public sealed class DeathScenario : IScenario, IDisposable
             return;
         }
 
+        if (IsNonAttuneMagicLine(e.Line.Text))
+        {
+            _bindNoise++;
+            _log.Info(LogCategory, "bind: ignoring a Magic line that is not the attune: " + e.Line.Text);
+            return;
+        }
+
         _bindLines++;
         _log.Info(LogCategory, "bind: the lifestone's chat line: " + e.Line.Text);
     }
 
     /// <summary>The chat type of ACE's Magic lines (<c>ChatMessageType.Magic</c> 0x07), which the lifestone's UseMessage uses.</summary>
     private const uint MagicChatType = 7;
+
+    /// <summary>ACE's line when an enchantment runs out, <c>EnchantmentManager.cs</c> 345: <c>The spell {spell.Name} on {WorldObject.Name} has expired.</c> (a Magic line; an item buff's expiry during the bind is one).</summary>
+    public const string ExpiredLineStart = "The spell ";
+
+    /// <summary>The end of <see cref="ExpiredLineStart"/>'s line.</summary>
+    public const string ExpiredLineEnd = " has expired.";
+
+    /// <summary>ACE's line when the lifestone protection runs out (<c>Player_Death.cs</c> 934, a Magic line).</summary>
+    public const string ProtectionExpiredLine = "You're no longer protected by the Lifestone's magic!";
+
+    /// <summary>ACE's line when the player's own action dispels the lifestone protection (<c>Player_Death.cs</c> 942, a Magic line).</summary>
+    public const string ProtectionDispelledLine = "Your actions have dispelled the Lifestone's magic!";
+
+    /// <summary>ACE's line when earned experience lowers the vitae (<c>Player_Xp.cs</c> 164, a Magic line).</summary>
+    public const string VitaeReducedLine = "Your experience has reduced your Vitae penalty!";
+
+    /// <summary>
+    /// True for the Magic chat lines ACE sends that are not a lifestone's UseMessage and can fall between the Use and the attune: an enchantment's expiry (<see cref="ExpiredLineStart"/>), the two lifestone-protection
+    /// lines and the vitae line. Any other Magic line is taken for the attune (the UseMessage is the world database's text for the lifestone, not a fixed string). Allocation-free.
+    /// </summary>
+    /// <param name="text">The line's text.</param>
+    public static bool IsNonAttuneMagicLine(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return (text.StartsWith(ExpiredLineStart, StringComparison.Ordinal) && text.EndsWith(ExpiredLineEnd, StringComparison.Ordinal))
+            || string.Equals(text, ProtectionExpiredLine, StringComparison.Ordinal)
+            || string.Equals(text, ProtectionDispelledLine, StringComparison.Ordinal)
+            || string.Equals(text, VitaeReducedLine, StringComparison.Ordinal);
+    }
 
     private void Enter(string stage, double clock)
     {

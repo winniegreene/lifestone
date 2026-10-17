@@ -142,7 +142,8 @@ public sealed partial class PlayMode
     }
 
     // M3 3.2 pa and pb: after the pages, the floaty windows that are not host pages (PanelFramesPlan.AllWindowFrames: c1-combat, c1-powerbar, c2-spellcasting). Each is shown by the UI's own mode notice (never a session action: a live run's character
-    // keeps its mode), the power bar begun by hand at a placeholder level (nothing in M3 charges a bar), the shot taken, the notice put back. True while frames remain.
+    // keeps its mode), the combat window hidden for the power bar's frame as the AdvancedCombatUI option hides it (retail never draws the basic combat window and an advanced-mode bar together: M3 3.2 review finding 10), the power bar
+    // begun by hand at a placeholder level (nothing in M3 charges a bar; the frame's log line says so, WindowFrame.Placeholder), the shot taken, the notice put back. True while frames remain.
     private bool StepWindowShots(GamePlayScreen shell, string directory)
     {
         var frames = PanelFramesPlan.AllWindowFrames; // pa's two, then pb's c2-spellcasting
@@ -168,6 +169,11 @@ public sealed partial class PlayMode
             case PanelShotPhase.Open:
                 _panelShotRestoreMode = combat.Mode;
                 combat.SetCombatMode(frame.CombatMode);
+                if (frame.HideCombatWindow)
+                {
+                    combat.SetVisible(false); // what the AdvancedCombatUI option does in every mode; the floaty follows the window's visibility message
+                }
+
                 spells.SetCombatMode(frame.CombatMode); // M3 3.2 pb: the spellcasting window shows in Magic mode only (the UI's notice, never a session action)
                 if (frame.WindowId == GameSpellcastingPanel.WindowId)
                 {
@@ -202,9 +208,11 @@ public sealed partial class PlayMode
                     break;
                 }
 
-                var shown = shell.Root?.GetChildRecursive(frame.WindowId)?.IsShown == true;
+                var shown = shell.Root?.GetChildRecursive(frame.WindowId)?.IsShown == true && (!frame.HideCombatWindow || !combat.IsShown); // both windows at once is a state retail never draws: not saved
                 var path = System.IO.Path.Combine(directory, PanelFramesPlan.FileName(frame));
-                var saved = shown && ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", "play-panel-shots"), ("window", frame.Name), ("developer_hud", "hidden"));
+                var saved = shown && (frame.Placeholder is { } placeholder
+                    ? ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", "play-panel-shots"), ("window", frame.Name), ("developer_hud", "hidden"), ("placeholder", placeholder))
+                    : ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", "play-panel-shots"), ("window", frame.Name), ("developer_hud", "hidden")));
                 RestoreDeveloperHud();
                 if (saved)
                 {
@@ -214,7 +222,7 @@ public sealed partial class PlayMode
                 else
                 {
                     _panelShotFailures++;
-                    Log.Error(LogCategory, "panel shot failed", ("window", frame.Name), ("shown", shown));
+                    Log.Error(LogCategory, "panel shot failed", ("window", frame.Name), ("shown", shown), ("combat_shown", combat.IsShown));
                 }
 
                 if (frame.DrivePowerBar)

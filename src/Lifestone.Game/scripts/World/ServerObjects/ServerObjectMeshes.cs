@@ -85,13 +85,21 @@ public sealed class ServerObjectMeshes : IDisposable
     }
 
     /// <summary>
+    /// The key <see cref="Warm(uint, string)"/> files the plain mesh of <paramref name="gfxObjId"/> under in this set (<see cref="ActorMeshLibrary.Key"/> with the set's lighting rule). A caller that polls many
+    /// meshes (the projectile warm-up) makes the keys once and keeps them in its plan, so a poll every few frames builds no string. Any thread: it reads only the set's lighting rule.
+    /// </summary>
+    public string WarmKey(uint gfxObjId) => ActorMeshLibrary.Key(gfxObjId, _lighting);
+
+    /// <summary>
     /// Prepares the plain mesh of <paramref name="gfxObjId"/> (no texture swap, no palette: the key a Setup's own parts have, <see cref="PartAppearance.VariantKey"/> "") on a worker and keeps it
     /// resident (M3 3.1 lane fc, the projectile warm-up): <see cref="Sweep"/> never releases a warmed mesh, so a bolt created a minute later still finds its part ready on the frame its create is applied.
     /// Main thread. Returns true when the mesh is ready now (already attached), false when it is queued.
     /// </summary>
-    public bool Warm(uint gfxObjId)
+    public bool Warm(uint gfxObjId) => Warm(gfxObjId, WarmKey(gfxObjId));
+
+    /// <summary>As <see cref="Warm(uint)"/>, with the key <see cref="WarmKey"/> gave for <paramref name="gfxObjId"/> made beforehand (a poll that repeats builds no string; package 2 review, finding 12).</summary>
+    public bool Warm(uint gfxObjId, string key)
     {
-        var key = ActorMeshLibrary.Key(gfxObjId, _lighting);
         if (_entries.TryGetValue(key, out var entry))
         {
             entry.Pinned = true;

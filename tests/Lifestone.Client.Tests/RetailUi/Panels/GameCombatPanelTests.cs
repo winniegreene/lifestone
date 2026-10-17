@@ -8,13 +8,16 @@ using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Toolbar;
 using Lifestone.Client.RetailUi.Widgets;
+using Lifestone.Client.Session;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Client.Tests.RetailUi.Screens;
+using Lifestone.Client.Tests.RetailUi.TestSupport;
 using Lifestone.Client.Tests.Session;
 using Lifestone.Data.Tests;
 using Lifestone.Data.Ui;
 using Lifestone.Net.Dispatch;
+using Lifestone.Tests.Shared;
 using Lifestone.Tests.Shared.Net;
 using Lifestone.Net.Messages;
 using Lifestone.Net.Types;
@@ -30,7 +33,7 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
     private const uint Player = 0x50000001;
     private static readonly InboundContext Context = new(0, MessageQueue.SmartBox, 0);
 
-    private static PlayerDescriptionMsg Description(bool recklessnessTrained = false) => new()
+    private static PlayerDescriptionMsg Description(bool recklessnessTrained = false, EquippedDesc[]? equipped = null) => new()
     {
         Options1 = StandInPlayerStats.AceDefaultOptions1,
         Options2 = PlayerOptionTable.DefaultWord2,
@@ -45,6 +48,7 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
         Skills = recklessnessTrained ? [new SkillDesc(GameCombatPanel.RecklessnessSkill, 0, 0, 2, 0, 0, 0, 0)] : [],
         Enchantments = [],
         EnchantmentMask = 0,
+        Equipped = [.. equipped ?? []],
     };
 
     private sealed record Setup(LoginRig Rig, GamePlayScreen Screen, IInboundMessageHandler Handler, int BaselineHandlers) : IDisposable
@@ -80,7 +84,7 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
         public void Dispose() => Rig.Dispose();
     }
 
-    private Setup Enter(bool recklessnessTrained = false)
+    private Setup Enter(bool recklessnessTrained = false, EquippedDesc[]? equipped = null)
     {
         IInboundMessageHandler? handler = null;
         var rig = new LoginRig(fixture, h =>
@@ -97,7 +101,7 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
         var screen = Assert.IsType<GamePlayScreen>(rig.Flow.CurrentScreen);
         handler!.OnPlayerCreate(Context, new PlayerCreateMsg(Player));
         handler.OnCreateObject(Context, ReducerHarness.Create(Player, ReducerHarness.Stamps(), ReducerHarness.Position(0x860201AD), state: PhysicsState.Hidden | PhysicsState.Gravity, name: "Tester"), isUpdate: false);
-        handler.OnPlayerDescription(Context, new GameEventHeader(1, 1, 0x0013), Description(recklessnessTrained));
+        handler.OnPlayerDescription(Context, new GameEventHeader(1, 1, 0x0013), Description(recklessnessTrained, equipped));
         rig.Frame();
 
         // The spellcasting window (pb's, 0x10000061) shares the floaty; the layout shows it and its controller hides it in every mode but magic (M3 3.2 pb).
@@ -168,6 +172,105 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
     }
 
     [RequiresLocalDatsFact]
+    public void A_wielded_item_the_object_table_lacks_is_named_once_and_a_press_asks_nothing()
+    {
+        // M3 3.2 review finding 13: the description says a melee weapon is wielded, but its CreateObject never came (an F747 alone, the case ReleaseDeletedHeld fixed, is another way there).
+        const uint sword = 0x80000777;
+        using var s = Enter(equipped: [new EquippedDesc(sword, (uint)EquipMask.MeleeWeapon, 0)]);
+        Assert.False(s.Session.State.Objects.TryGet(sword, out _));
+        Assert.Equal(CombatMode.NonCombat, CombatModeRules.DefaultMode(s.Session.State, out var blocked, out var missing));
+        Assert.Null(blocked);
+        Assert.Equal(sword, missing);
+
+        var actions = s.Rig.Session.ActionLog.Count;
+        s.Press(0x10000192);
+        s.Press(0x10000192); // a second press: the TODO is not named again
+        s.Rig.Run(2.0); // long enough for any action asked to complete and reach the log
+        Assert.Equal(2, s.Toolbar.CombatPresses);
+        Assert.Equal(actions, s.Rig.Session.ActionLog.Count); // nothing was asked of the Action API: no SetCombatMode for the mode the player is in
+        Assert.Equal(1, s.Rig.Log.Lines.Count(l => l.Contains(CombatModeRules.MissingObjectTodo, StringComparison.Ordinal)));
+        Assert.Contains(s.Rig.Log.Lines, l => l.Contains(CombatModeRules.MissingObjectTodo, StringComparison.Ordinal) && l.Contains("0x80000777", StringComparison.Ordinal));
+        Assert.True(OnlyButtonShown(s, 0x10000192)); // still in peace
+        Assert.False(s.Combat.Visible);
+    }
+
+    [Fact]
+    public void A_toggle_whose_default_mode_is_the_mode_the_player_is_in_asks_nothing_and_names_a_missing_object_once()
+    {
+        // M3 3.2 review finding 13 without the layout: an offline session whose description says a melee weapon is wielded that the object table never gets, then a held item that forbids combat, then nothing wielded.
+        const uint sword = 0x80000777;
+        const uint lockpick = 0x80000778;
+        IInboundMessageHandler? handler = null;
+        var visit = new StandInVisit { EnterAfter = 0.2, UnhideAfter = 1.0 };
+        var time = new ManualTimeProvider();
+        using var session = GameSession.Offline(
+            h =>
+            {
+                handler = h;
+                StandInSessions.CharacterSelect(h);
+                StandInSessions.PlayerVisits(h, visit);
+                StandInSessions.AnswerWorld(h, visit);
+            },
+            time,
+            new RecordingLogSink());
+        void Run(double seconds)
+        {
+            for (var t = 0.0; t < seconds; t += 0.1)
+            {
+                time.Advance(TimeSpan.FromSeconds(0.1));
+                session.Tick(session.Clock.Now);
+            }
+        }
+
+        void NoModeChangeAsked()
+        {
+            for (var i = 0; i < session.ActionLog.Count; i++)
+            {
+                Assert.NotEqual(ActionKind.SetCombatMode, session.ActionLog[i].Kind);
+            }
+        }
+
+        Run(2.0);
+        var player = session.State.Self.Guid;
+        Assert.NotEqual(0u, player);
+        Assert.True(session.State.Self.Qualities.CombatMode is 0 or CombatModes.NonCombat, "the stand-in's player starts in peace");
+        handler!.OnPlayerDescription(Context, new GameEventHeader(player, 7, GameEventTypes.PlayerDescription), new PlayerDescriptionMsg { Equipped = [new EquippedDesc(sword, (uint)EquipMask.MeleeWeapon, 0)] });
+        Assert.False(session.State.Objects.TryGet(sword, out _));
+        Assert.Equal(CombatMode.NonCombat, CombatModeRules.DefaultMode(session.State, out var blocked, out var missing));
+        Assert.Null(blocked);
+        Assert.Equal(sword, missing);
+
+        var scene = new UiScene([]);
+        var chat = new List<string>();
+        Assert.Null(CombatModeRules.Toggle(session, scene.Manager, chat.Add));
+        Assert.Null(CombatModeRules.Toggle(session, scene.Manager, chat.Add)); // a second press
+        Run(3.0);
+        NoModeChangeAsked();
+        Assert.Empty(chat);
+        Assert.Equal(1, scene.Log.Lines.Count(l => l.Contains(CombatModeRules.MissingObjectTodo, StringComparison.Ordinal) && l.Contains("0x80000777", StringComparison.Ordinal)));
+
+        // A held item that forbids combat (not a caster): retail's chat line, and nothing asked either.
+        handler.OnPlayerDescription(Context, new GameEventHeader(player, 8, GameEventTypes.PlayerDescription), new PlayerDescriptionMsg { Equipped = [new EquippedDesc(lockpick, (uint)EquipMask.Held, 0)] });
+        handler.OnCreateObject(Context, ReducerHarness.Create(lockpick, ReducerHarness.Stamps(), null, name: "Lockpick"), isUpdate: false);
+        Assert.Equal(CombatMode.NonCombat, CombatModeRules.DefaultMode(session.State, out blocked, out missing));
+        Assert.Equal("Lockpick", blocked);
+        Assert.Equal(0u, missing);
+        Assert.Null(CombatModeRules.Toggle(session, scene.Manager, chat.Add));
+        Assert.Equal(["You can't enter combat mode while wielding the Lockpick"], chat);
+        Run(3.0);
+        NoModeChangeAsked();
+        Assert.Equal(1, scene.Log.Lines.Count(l => l.Contains(CombatModeRules.MissingObjectTodo, StringComparison.Ordinal))); // the earlier item's line, no new one
+
+        // Nothing wielded: the press asks for melee, as before.
+        handler.OnPlayerDescription(Context, new GameEventHeader(player, 9, GameEventTypes.PlayerDescription), new PlayerDescriptionMsg());
+        var melee = CombatModeRules.Toggle(session, scene.Manager, chat.Add);
+        Assert.NotNull(melee);
+        Assert.Equal(ActionKind.SetCombatMode, melee.Kind);
+        Assert.Equal(ActionSource.Ui, melee.Source);
+        Assert.Contains("mode=2", melee.Summary, StringComparison.Ordinal);
+    }
+
+    [RequiresLocalDatsFact]
     public void The_floaty_shows_while_one_of_its_panel_windows_does()
     {
         using var s = Enter();
@@ -218,6 +321,30 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
         using var trained = Enter(recklessnessTrained: true);
         trained.ChangeMode(CombatMode.Melee);
         Assert.True(trained.Combat.RecklessnessField!.Visible);
+    }
+
+    [RequiresLocalDatsFact]
+    public void Melee_to_missile_hides_the_recklessness_field_and_a_slider_move_in_missile_does_not_show_it()
+    {
+        // M3 3.2 review finding 14: RecvNotice_SetCombatMode (11.6096 0x004CD210) shows the field in melee only; the power slider's move must not bring it back in missile mode.
+        using var s = Enter(recklessnessTrained: true);
+        s.ChangeMode(CombatMode.Melee);
+        var field = s.Combat.RecklessnessField!;
+        Assert.True(field.Visible);
+
+        s.ChangeMode(CombatMode.Missile);
+        Assert.False(field.Visible);
+        var slider = Assert.IsAssignableFrom<UiScrollbar>(s.Combat.GetChildRecursive(GameCombatPanel.SliderId));
+        slider.SetScrollbarPosition(0.8f);
+        Assert.Equal(0.8f, s.Combat.RequestedPower, 3);
+        Assert.False(field.Visible); // the slider re-reads the rule: not melee, not shown
+
+        s.ChangeMode(CombatMode.Melee);
+        Assert.True(field.Visible);
+        slider.SetScrollbarPosition(0.3f);
+        Assert.True(field.Visible);
+        s.ChangeMode(CombatMode.NonCombat);
+        Assert.False(field.Visible);
     }
 
     [RequiresLocalDatsFact]
@@ -343,5 +470,15 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal([0x1000005Cu, 0x10000044u], PanelFramesPlan.WindowFrames.Select(f => f.WindowId).ToArray());
         Assert.Equal([true], PanelFramesPlan.WindowFrames.Select(f => f.DrivePowerBar).Where(static d => d).ToArray());
         Assert.Equal([0x10000192u, 0x10000193u, 0x10000194u, 0x10000195u], GameToolbar.CombatButtonIds.ToArray());
+
+        // M3 3.2 review finding 10: an advanced-mode bar is drawn only with the AdvancedCombatUI option on, which hides the combat window, so the power bar's frame hides it too, and says its placeholder; the other frames have none.
+        Assert.All(PanelFramesPlan.AllWindowFrames, static f => Assert.Equal(f.DrivePowerBar, f.HideCombatWindow));
+        Assert.All(PanelFramesPlan.AllWindowFrames, static f => Assert.Equal(f.DrivePowerBar, f.Placeholder is not null));
+        var powerBar = Assert.Single(PanelFramesPlan.WindowFrames, static f => f.DrivePowerBar);
+        Assert.Equal(WindowFrame.PowerBarPlaceholder, powerBar.Placeholder);
+        Assert.Contains("begun by hand at 0.6", WindowFrame.PowerBarPlaceholder, StringComparison.Ordinal);
+        Assert.Contains("nothing in M3 begins it", WindowFrame.PowerBarPlaceholder, StringComparison.Ordinal);
+        Assert.Equal(0.6f, WindowFrame.PowerBarLevel);
+        Assert.False(PanelFramesPlan.SpellcastingFrame.HideCombatWindow);
     }
 }

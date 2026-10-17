@@ -135,7 +135,15 @@ public sealed partial class PlayChecks
         {
             var folder = PanelFramesPlan.FolderFor(ShellFramesPlan.FolderFor(directory, _framesSize.X, _framesSize.Y));
             var frame = PanelFramesPlan.SpellcastingFrame;
+            var combat = root.GetChildRecursive(GameCombatPanel.WindowId) as GameCombatPanel;
+            if (combat is null)
+            {
+                Log.Warn(LogCategory, "the gameplay layout has no combat window 0x1000005C: the frame cannot stage the toolbar's magic button (TODO(m3-combat-window-missing))");
+            }
+
+            var restoreCombat = combat?.Mode ?? 0;
             var restore = window.Mode;
+            combat?.SetCombatMode(frame.CombatMode); // the combat window's notice drives the toolbar's button for the mode (and hides itself in Magic), as the panel shots stage the frame (M3 3.2 review finding 10)
             window.SetCombatMode(frame.CombatMode); // the UI's own mode notice, as pa's frames do (the session's character keeps its mode)
             var earlierTab = window.OpenTab;
             var choice = PanelFramesPlan.OpenSpellcastingFrameTab(window); // M3 3.2 fix B (3.2-R7): the first tab whose bar holds spells, a tab click
@@ -149,6 +157,7 @@ public sealed partial class PlayChecks
 
             window.OpenTabByClick(earlierTab);
             window.SetCombatMode(restore);
+            combat?.SetCombatMode(restoreCombat);
             await Frames(2);
             Log.Info(LogCategory, $"spellcasting frame done captured={(shot ? 1 : 0)}/1");
         }

@@ -29,6 +29,8 @@ public sealed class ProjectileWarmUp
     private readonly ServerObjectMeshes _indoor;
     private readonly long _started = Stopwatch.GetTimestamp();
     private uint[] _gfxObjs = [];
+    private string[] _outdoorKeys = [];
+    private string[] _indoorKeys = [];
     private int _setups;
     private int _tables;
     private bool _handedOver;
@@ -36,8 +38,8 @@ public sealed class ProjectileWarmUp
     private int _frames;
     private Task<Plan>? _plan;
 
-    /// <summary>The worker's result: what to warm.</summary>
-    private sealed record Plan(uint[] Setups, uint[] GfxObjs, uint[] Tables, uint[] DefaultScripts);
+    /// <summary>The worker's result: what to warm, with each GfxObj's mesh key under both lighting rules (made once here, so a poll builds no string; package 2 review, finding 12).</summary>
+    private sealed record Plan(uint[] Setups, uint[] GfxObjs, string[] OutdoorKeys, string[] IndoorKeys, uint[] Tables, uint[] DefaultScripts);
 
     public ProjectileWarmUp(GameServices services, ServerObjectMeshes outdoor, ServerObjectMeshes indoor)
     {
@@ -74,6 +76,7 @@ public sealed class ProjectileWarmUp
         }
 
         var meshes = _services.GfxObjMeshes;
+        var (outdoor, indoor) = (_outdoor, _indoor);
         _plan = _services.Workers.RunSync(_ =>
         {
             var setups = ProjectileSetups();
@@ -103,12 +106,22 @@ public sealed class ProjectileWarmUp
             }
 
             gfx.Remove(0);
-            return new Plan(setups, gfx.ToArray(), ProjectileTables(), scripts.ToArray());
+            var ids = gfx.ToArray();
+            var outdoorKeys = new string[ids.Length];
+            var indoorKeys = new string[ids.Length];
+            for (var i = 0; i < ids.Length; i++)
+            {
+                outdoorKeys[i] = outdoor.WarmKey(ids[i]);
+                indoorKeys[i] = indoor.WarmKey(ids[i]);
+            }
+
+            return new Plan(setups, ids, outdoorKeys, indoorKeys, ProjectileTables(), scripts.ToArray());
         });
     }
 
     /// <summary>
-    /// Main thread, every frame (cheap: a flag test once done; a poll every <see cref="PollEveryFrames"/> frames while meshes are queued). Hands the worker's plan over, then logs the warm-up once, when every mesh is attached.
+    /// Main thread, every frame (cheap: a flag test once done; a poll every <see cref="PollEveryFrames"/> frames while meshes are queued, with the plan's keys, so it builds no string). Hands the worker's plan over,
+    /// then logs the warm-up once, when every mesh is attached.
     /// </summary>
     public void Poll()
     {
@@ -134,6 +147,8 @@ public sealed class ProjectileWarmUp
 
             var plan = _plan.Result;
             _gfxObjs = plan.GfxObjs;
+            _outdoorKeys = plan.OutdoorKeys;
+            _indoorKeys = plan.IndoorKeys;
             _setups = plan.Setups.Length;
             _tables = plan.Tables.Length;
             foreach (var table in plan.Tables)
@@ -142,10 +157,10 @@ public sealed class ProjectileWarmUp
             }
 
             ServerObjectParticles.PrepareScripts(_services, plan.DefaultScripts);
-            foreach (var id in _gfxObjs)
+            for (var i = 0; i < _gfxObjs.Length; i++)
             {
-                _outdoor.Warm(id);
-                _indoor.Warm(id);
+                _outdoor.Warm(_gfxObjs[i], _outdoorKeys[i]);
+                _indoor.Warm(_gfxObjs[i], _indoorKeys[i]);
             }
 
             _handedOver = true;
@@ -158,9 +173,9 @@ public sealed class ProjectileWarmUp
         }
 
         var ready = true;
-        foreach (var id in _gfxObjs)
+        for (var i = 0; i < _gfxObjs.Length; i++)
         {
-            ready &= _outdoor.Warm(id) & _indoor.Warm(id);
+            ready &= _outdoor.Warm(_gfxObjs[i], _outdoorKeys[i]) & _indoor.Warm(_gfxObjs[i], _indoorKeys[i]); // the plan's keys: no string built in the poll
         }
 
         // 3.1-R9: the line also waits for the particle models of the tables and default scripts to be resolved and queued for their meshes (a few a frame, PumpPending), which came after it before.

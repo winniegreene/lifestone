@@ -46,6 +46,13 @@ public interface IGameSessionView
     /// <param name="id">The spell id.</param>
     Lifestone.Data.Magic.SpellInfo? Spell(uint id) => null;
 
+    /// <summary>
+    /// True once the SpellTable <see cref="Spell"/> reads is loaded: a null <see cref="Spell"/> then means the table lacks the id, and a panel leaves that spell out and names it. False while the table decodes on its worker,
+    /// for a session without dats (the default here) and after a load that failed: a panel waits for it (a one-shot poll) and shows nothing meanwhile, never a guess. Readiness is the table's own, never a spell's (M3 3.2
+    /// review finding 9: a favourite the table lacks must not keep a tab from building).
+    /// </summary>
+    bool SpellTableReady => false;
+
     /// <summary>The XpTable (dat 0x0E000018: the experience a rank of an attribute, a vital or a skill costs), or null until the host gave the session its dats (<c>GameSession.UseSpellsFrom</c>). The skills and attributes pages price their raise buttons by it.</summary>
     Lifestone.Data.CharacterCreation.XpTableData? XpTable => null;
 

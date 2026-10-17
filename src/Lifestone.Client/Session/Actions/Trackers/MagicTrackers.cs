@@ -177,9 +177,25 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
         Resolve(new ActionOutcome(
             ActionOutcomeKind.Confirmed,
             0,
-            "projectile " + ActionText.Hex(e.Guid) + " created (TODO(m3-cast-projectile-attribution): the wire does not name the caster; taken for ours by its origin within "
+            ProjectileDetailPrefix + e.Guid.ToString("X8", CultureInfo.InvariantCulture) + " created (TODO(m3-cast-projectile-attribution): the wire does not name the caster; taken for ours by its origin within "
             + ActionText.Count((long)ProjectileRangeMetres) + " m of the player, its velocity away from the player and within " + ActionText.Count((long)ProjectileAimToleranceDegrees)
             + " degrees of the aim, and its Setup where the spell's is known; not proved: a missile another creature launched from the same spot along the same line)"));
+    }
+
+    /// <summary>The start of a projectile cast's Confirmed detail, <c>projectile 0x&lt;guid&gt; created (...)</c>: the outcome is where the tracker names the Missile object it took, and <see cref="TryReadProjectile"/> reads it back.</summary>
+    internal const string ProjectileDetailPrefix = "projectile 0x";
+
+    /// <summary>Reads the projectile's guid from a projectile cast's Confirmed outcome (<see cref="ProjectileDetailPrefix"/>); false for any other outcome. Allocation-free (a span parse).</summary>
+    /// <param name="outcome">The cast's outcome.</param>
+    /// <param name="guid">The projectile's guid.</param>
+    internal static bool TryReadProjectile(in ActionOutcome outcome, out uint guid)
+    {
+        guid = 0;
+        return outcome.Kind == ActionOutcomeKind.Confirmed
+            && outcome.Detail is { } detail
+            && detail.Length >= ProjectileDetailPrefix.Length + 8
+            && detail.StartsWith(ProjectileDetailPrefix, StringComparison.Ordinal)
+            && uint.TryParse(detail.AsSpan(ProjectileDetailPrefix.Length, 8), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out guid);
     }
 
     /// <summary>

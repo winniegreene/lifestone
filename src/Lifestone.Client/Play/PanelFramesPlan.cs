@@ -39,13 +39,15 @@ public static class PanelFramesPlan
 
     /// <summary>
     /// The review frames of the floaty windows that are not host pages (M3 3.2 pa): the combat window and the power bar, each taken in melee mode, named <c>c1-combat</c> and <c>c1-powerbar</c> (the spellcasting window's
-    /// <c>c2-...</c> frame is pb's, after these). The caller changes the mode (the UI notice, not a session action, so a live run's character is not touched), drives the power bar (<see cref="WindowFrame.DrivePowerBar"/>: M3 has no attack to
-    /// begin it, so the frame shows it begun by hand at <see cref="WindowFrame.PowerBarLevel"/>, a placeholder), takes the shot and puts the mode back.
+    /// <c>c2-...</c> frame is pb's, after these). The caller changes the mode (the UI notice, not a session action, so a live run's character is not touched), hides the combat window for the power bar's frame
+    /// (<see cref="WindowFrame.HideCombatWindow"/>: retail draws an advanced-mode bar only with the AdvancedCombatUI option on, which hides the combat window in every mode), drives the power bar
+    /// (<see cref="WindowFrame.DrivePowerBar"/>: M3 has no attack to begin it, so the frame shows it begun by hand at <see cref="WindowFrame.PowerBarLevel"/>, a placeholder the saved frame's log line says,
+    /// <see cref="WindowFrame.Placeholder"/>), takes the shot and puts the mode back.
     /// </summary>
     public static IReadOnlyList<WindowFrame> WindowFrames { get; } =
     [
         new("c1-combat", 0x1000005C, 2, false),
-        new("c1-powerbar", 0x10000044, 2, true),
+        new("c1-powerbar", 0x10000044, 2, true, HideCombatWindow: true, Placeholder: WindowFrame.PowerBarPlaceholder),
     ];
 
     /// <summary>
@@ -195,10 +197,19 @@ public sealed record PanelFrame(PanelPage Page, uint TabButton, char Letter, str
 /// <param name="WindowId">The window's element id in the gameplay layout; the frame is taken when it shows.</param>
 /// <param name="CombatMode">The combat mode (<c>CombatModes</c>: 2 melee) the window is shown in.</param>
 /// <param name="DrivePowerBar">True when the frame begins the power bar by hand first (an advanced-mode bar at <see cref="PowerBarLevel"/>) and finishes it after.</param>
-public sealed record WindowFrame(string Name, uint WindowId, int CombatMode, bool DrivePowerBar)
+/// <param name="HideCombatWindow">
+/// True when the frame hides the combat window after its mode notice, as the AdvancedCombatUI option does in every mode (<c>gmCombatUI::RecvNotice_SetCombatMode</c>, 11.6096 0x004CD210): retail begins the power bar's
+/// advanced-mode bar (mode 2) only with that option on, so it never draws the basic combat window and that bar together (M3 3.2 review finding 10). The option itself is not set for the frame: it is a player option nothing
+/// in M3 honours (ghosted), and the frames change only the UI's notices.
+/// </param>
+/// <param name="Placeholder">What the frame shows that nothing in M3 produces, written as the <c>placeholder</c> field of the saved frame's log line (CLAUDE.md, Placeholders); null when the frame shows no placeholder.</param>
+public sealed record WindowFrame(string Name, uint WindowId, int CombatMode, bool DrivePowerBar, bool HideCombatWindow = false, string? Placeholder = null)
 {
     /// <summary>The level the power bar shows in its frame (a placeholder: nothing in M3 charges a bar).</summary>
     public const float PowerBarLevel = 0.6f;
+
+    /// <summary>The power bar frame's <see cref="Placeholder"/>: the bar is begun by hand at <see cref="PowerBarLevel"/>, nothing in M3 begins it (no melee or missile attack, no jump: <c>TODO(m3-melee-attack)</c>), and the combat window is hidden as the AdvancedCombatUI option hides it.</summary>
+    public const string PowerBarPlaceholder = "the power bar is begun by hand at 0.6 (WindowFrame.PowerBarLevel); nothing in M3 begins it (no melee or missile attack, no jump: TODO(m3-melee-attack)); the combat window is hidden as the AdvancedCombatUI option hides it";
 }
 
 /// <summary>The tab the spellcasting frame shows (<see cref="PanelFramesPlan.OpenSpellcastingFrameTab"/>).</summary>

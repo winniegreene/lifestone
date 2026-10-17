@@ -39,23 +39,47 @@ public sealed class FightLegRunnerTests
     public void The_fight_frame_needs_the_fight_stage_and_a_cast_window_a_projectile_or_a_target()
     {
         var s = new FightFrameSampler();
+        s.Step(0.010, true, false, false, fighting: false, inDen: true, skip: false); // the top-up's cast window opened this frame: the delta is the frame before it
         s.Step(0.090, true, false, false, fighting: false, inDen: true, skip: false); // the top-up's cast: a cast frame, not a fight frame
-        s.Step(0.080, false, false, false, fighting: true, inDen: true, skip: false); // the fight stage, nothing engaged
+        s.Step(0.080, false, false, false, fighting: true, inDen: true, skip: false); // the fight stage began this frame; the delta is the top-up's last frame (its cast window was open): a cast frame, not a fight frame
+        s.Step(0.020, false, false, false, true, true, false); // the fight stage, nothing engaged
         Assert.Null(s.FightFrameMaxMs);
 
-        s.Step(0.011, false, true, false, true, true, false); // a projectile alive
-        s.Step(0.013, false, false, true, true, true, false); // a target engaged
-        s.Step(0.012, true, false, false, true, true, false); // a cast window
+        s.Step(0.011, false, true, false, true, true, false); // a projectile alive from this frame: the delta is the frame before it
+        s.Step(0.011, false, false, true, true, true, false); // the projectile's frame; a target engaged from this frame
+        s.Step(0.013, true, false, false, true, true, false); // the target's frame; a cast window from this frame
+        s.Step(0.012, false, false, false, true, true, false); // the cast window's frame
 
         Assert.Equal(13.0, s.FightFrameMaxMs!.Value, 6);
         Assert.Equal(90.0, s.CastFrameMaxMs!.Value, 6);
     }
 
     [Fact]
+    public void A_delta_is_judged_by_the_flags_of_the_call_before_it_so_the_frame_that_opened_a_window_counts_and_the_frame_before_it_does_not()
+    {
+        // The engine's delta is the previous frame's whole time, and the flags are read after this frame's events were applied (the runners step after play mode):
+        // the flags that held while the delta's frame ran are the previous call's. A window that opens and closes within two frames is the case that shows it.
+        var s = new FightFrameSampler();
+        s.Step(0.010, false, false, false, fighting: true, inDen: true, skip: false); // the frame before the first sample: nothing open
+        s.Step(0.012, false, false, false, true, true, false); // the frame before the F747: nothing open
+        s.Step(0.040, false, true, false, true, true, false); // the call that saw the projectile's F747: its delta is the frame before the window opened, not a fight frame
+        s.Step(0.030, false, false, false, true, true, false); // the bolt exploded this frame: the delta is the F747 frame's own time, inside the projectile window
+
+        Assert.Equal(30.0, s.FightFrameMaxMs!.Value, 6);
+        Assert.Null(s.CastFrameMaxMs);
+
+        s.Step(0.015, true, false, false, true, true, false); // the call that saw the cast window open: its delta is the frame before it, not a cast frame
+        s.Step(0.022, false, false, false, true, true, false); // the window closed this frame: the delta is the open frame's time
+
+        Assert.Equal(22.0, s.CastFrameMaxMs!.Value, 6);
+        Assert.Equal(30.0, s.FightFrameMaxMs!.Value, 6);
+    }
+
+    [Fact]
     public void A_skipped_frame_is_left_out_of_every_field()
     {
         var s = new FightFrameSampler();
-        s.Step(0.200, true, true, true, true, true, skip: true); // the frame after a saved review frame
+        s.Step(0.200, true, true, true, true, true, skip: true); // the frame after a saved review frame (its flags still stand for the next delta)
         s.Step(0.014, true, true, true, true, true, false);
 
         Assert.Equal(14.0, s.CastFrameMaxMs!.Value, 6);
@@ -67,6 +91,7 @@ public sealed class FightLegRunnerTests
     public void The_lowest_one_second_window_in_the_den_is_the_min_fps()
     {
         var s = new FightFrameSampler();
+        s.Step(1.0 / 64.0, false, false, false, false, true, false); // the call that saw the player in the den: its delta is the frame before, outside any window
         for (var i = 0; i < 64; i++)
         {
             s.Step(1.0 / 64.0, false, false, false, false, true, false); // a second at 64 fps (powers of two: the sums are exact)
@@ -103,10 +128,10 @@ public sealed class FightLegRunnerTests
             s.Step(0.030, false, false, false, false, true, false); // half a slow window ...
         }
 
-        s.Step(Frame, false, false, false, false, inDen: false, skip: false); // ... dropped when the player leaves the den
-        for (var i = 0; i < 64; i++)
+        s.Step(Frame, false, false, false, false, inDen: false, skip: false); // the call that saw the player leave: its delta is the last den frame, still in the window ...
+        for (var i = 0; i < 65; i++)
         {
-            s.Step(1.0 / 64.0, false, false, false, false, true, false);
+            s.Step(1.0 / 64.0, false, false, false, false, true, false); // ... which the next call drops (its delta is the frame outside); then a second at 64 fps
         }
 
         Assert.Equal(1, s.Windows);
@@ -355,7 +380,8 @@ public sealed class FightLegRunnerTests
     public void The_verdict_judges_the_tallys_kills_and_damage_and_reports_the_samplers_fields()
     {
         var s = new FightFrameSampler();
-        s.Step(0.0334, true, true, true, true, true, false);
+        s.Step(Frame, true, true, true, true, true, false); // the windows opened this frame
+        s.Step(0.0334, true, true, true, true, true, false); // their first frame
         for (var i = 0; i < 60; i++)
         {
             s.Step(Frame, false, false, false, true, true, false);

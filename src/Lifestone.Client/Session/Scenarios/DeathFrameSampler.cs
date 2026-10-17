@@ -3,20 +3,23 @@ using Lifestone.Client.Session.Contracts;
 namespace Lifestone.Client.Session.Scenarios;
 
 /// <summary>
-/// The death leg's frame measure (<c>--login-check=bsd-death</c>, M3 3.2 dd; plan section 5, "The fight's frames"): <c>death_frame_max_ms</c>, the worst frame from the player's Dead motion to the first frame after the death's
-/// arrival, portal space included (report-only: a new judge). One call per frame, no allocation, no clock of its own (the engine's delta is the previous frame's whole time). It also keeps the order of the death's own messages
-/// that the review frames need and a per-frame counter cannot see: <see cref="CorpseBeforePortal"/> (ACE creates the corpse, then sends the teleport, <c>Player_Death.cs</c> 247-292, both in one tick) and the arrivals.
+/// The death leg's frame measure (<c>--login-check=bsd-death</c>, M3 3.2 dd; plan section 5, "The fight's frames"): <c>death_frame_max_ms</c>, the worst frame from the player's Dead motion to the first frame after the player
+/// is present again at the death's arrival: the Dead animation, portal space, the arrival landblock's load and the materialise burst (report-only: a new judge). One call per frame, no allocation, no clock of its own (the
+/// engine's delta is the previous frame's whole time). It also keeps the order of the death's own messages that the review frames need and a per-frame counter cannot see: <see cref="CorpseBeforePortal"/> (ACE creates the
+/// corpse, then sends the teleport, <c>Player_Death.cs</c> 247-292, both in one tick) and the arrivals.
 /// </summary>
 /// <remarks>
 /// <para><b>The window.</b> It opens in the frame the player's own F74C carries the Dead motion (<see cref="DeadMotions"/> rises; that frame's own time comes in the next call's delta, so the first delta counted is the next
-/// call's) and closes <see cref="TailFrames"/> calls after the call that saw the arrival (the position after the death's F751): that call's delta is the last frame of portal space, the next call's the arrival frame's time, and
-/// the one after it the first frame after the arrival. A second death (the suicide of the unbuff, then the tuskers) opens the window again; the maximum is over all of them. A frame flagged <c>skip</c> (the one after a saved review frame, the
-/// read-back stalls it) is left out.</para>
+/// call's) and closes <see cref="TailFrames"/> calls after the call that saw the player present (<see cref="SelfTravel.Present"/> after the death's arrival): that call's delta is the last frame of portal space, the next
+/// call's the frame the player materialised in, and the one after it the first frame after the arrival. The arrival itself (the <see cref="PositionVerdict.SelfTeleport"/> position after the death's F751) is counted, not
+/// waited for: ACE sends the F751 and that position in one call (<c>Player_Location.cs</c> 686-696, a placeholder position so the client starts loading), so portal space begins there and ends only when ACE clears Hidden
+/// after the client's LoginComplete, the signal the scenario's own respawn wait reads (<c>DeathScenario.ArrivalStep</c>). A second death (the suicide of the unbuff, then the tuskers) opens the window again; the maximum is
+/// over all of them. A frame flagged <c>skip</c> (the one after a saved review frame, the read-back stalls it) is left out.</para>
 /// <para><b>Fed from the bus</b>, not the tally, because the order matters: the tally counts the corpse and the teleport, this class says which came first and counts the arrivals (a self teleport after a death's F751).</para>
 /// </remarks>
 public sealed class DeathFrameSampler : IDisposable
 {
-    /// <summary>The calls kept after the one that saw the arrival: the arrival frame's own time and the first frame after it.</summary>
+    /// <summary>The calls kept after the one that saw the player present: the frame the player materialised in and the first frame after it.</summary>
     public const int TailFrames = 2;
 
     private const string CorpsePrefix = "Corpse of ";
@@ -25,6 +28,7 @@ public sealed class DeathFrameSampler : IDisposable
     private IGameSessionView? _view;
     private bool _awaitingPortal;
     private bool _awaitingArrival;
+    private bool _awaitingPresent;
     private bool _open;
     private int _tail;
     private bool _fresh;
@@ -72,6 +76,7 @@ public sealed class DeathFrameSampler : IDisposable
         _subscriptions.Add(view.Events.Subscribe<ObjectMotionChanged>(OnMotion));
         _subscriptions.Add(view.Events.Subscribe<PlayerTeleportAnnounced>(OnTeleport));
         _subscriptions.Add(view.Events.Subscribe<ObjectMoved>(OnMoved));
+        _subscriptions.Add(view.Events.Subscribe<SelfTravelChanged>(OnTravel));
         _subscriptions.Add(view.Events.Subscribe<ObjectCreated>(OnCreated));
     }
 
@@ -125,6 +130,7 @@ public sealed class DeathFrameSampler : IDisposable
         DeadMotions++;
         _awaitingPortal = true;
         _awaitingArrival = false;
+        _awaitingPresent = false;
         if (!_open)
         {
             _windows++;
@@ -155,8 +161,19 @@ public sealed class DeathFrameSampler : IDisposable
         }
 
         _awaitingArrival = false;
+        _awaitingPresent = true; // the position came with the F751 (one ACE call): portal space runs on until the player is present
         Arrivals++;
-        _tail = TailFrames + 1; // the call that saw the arrival counts (its delta is the last frame of portal space), then the arrival frame's own and the first frame after it
+    }
+
+    private void OnTravel(in SelfTravelChanged e)
+    {
+        if (!_awaitingPresent || e.Travel != SelfTravel.Present)
+        {
+            return;
+        }
+
+        _awaitingPresent = false;
+        _tail = TailFrames + 1; // the call that saw the player present counts (its delta is the last frame of portal space), then the frame the player materialised in and the first frame after it
     }
 
     private void OnCreated(in ObjectCreated e)

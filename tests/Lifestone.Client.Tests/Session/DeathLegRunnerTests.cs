@@ -157,6 +157,7 @@ public sealed class DeathLegRunnerTests
     private ushort _movement = 1;
     private ushort _position = 1;
     private ushort _teleport = 1;
+    private ushort _state = 1;
 
     private void Started()
     {
@@ -177,24 +178,32 @@ public sealed class DeathLegRunnerTests
 
     private void Arrive() => _h.Reducer.OnUpdatePosition(_h.Context, ReducerHarness.Move(Player, instance: 1, position: ++_position, teleport: _teleport, forcePosition: 1, cell: Holtburg, x: 80));
 
+    /// <summary>ACE's SetState that clears Hidden once the client's LoginComplete arrives after the teleport (<c>Player.OnTeleportComplete</c>): the player is present, portal space is over.</summary>
+    private void Present() => _h.Reducer.OnSetState(_h.Context, new SetStateMsg(Player, PhysicsState.Gravity | PhysicsState.EdgeSlide, 1, ++_state));
+
     [Fact]
-    public void The_window_runs_from_the_dead_motion_to_the_first_frame_after_the_arrival_and_keeps_the_worst_frame()
+    public void The_window_runs_from_the_dead_motion_through_portal_space_to_the_first_frame_after_the_player_is_present_and_keeps_the_worst_frame()
     {
         Started();
         Assert.False(_sampler.Step(0.090, skip: false)); // before the death: not a death frame
         DeadMotion();
         Assert.False(_sampler.Step(0.100, skip: false)); // the call that saw the motion: its delta is the frame before it
         Assert.True(_sampler.Step(0.020, skip: false)); // the Dead motion's own frame
-        Teleport();
-        Assert.True(_sampler.Step(0.040, skip: false)); // portal space is in the window
         Corpse(0x80000500, "Corpse of Tester");
-        Arrive();
-        Assert.False(_sampler.Step(0.030, skip: false)); // the call that saw the arrival: its delta is the frame before it, which counts
-        Assert.True(_sampler.Step(0.060, skip: false)); // the arrival's frame
+        Teleport();
+        Arrive(); // ACE sends the F751 and the destination position in one call (Player_Location.cs 686-696): one pump
+        Assert.True(_sampler.Step(0.040, skip: false)); // the call that saw the F751 and the position: its delta is the frame before them (the Dead animation), which counts
+        Assert.True(_sampler.Step(0.045, skip: false)); // portal space: the tunnel's frames count
+        Assert.True(_sampler.Step(0.070, skip: false)); // the landblock load, still in the tunnel
+        Assert.False(_sampler.Step(0.030, skip: false)); // the tunnel lasts as long as it lasts: a fourth frame of it counts too
+        Present(); // the SetState that clears Hidden: the end of portal space
+        Assert.False(_sampler.Step(0.035, skip: false)); // the call that saw the player present: its delta is the last frame of portal space, which counts
+        Assert.True(_sampler.Step(0.080, skip: false)); // the frame the player materialised in: the arrival burst, the worst frame
         Assert.False(_sampler.Step(0.025, skip: false)); // the first frame after the arrival: the last one counted
         Assert.False(_sampler.Step(0.200, skip: false)); // the window is closed
 
-        Assert.Equal(60.0, _sampler.DeathFrameMaxMs!.Value, 6);
+        Assert.Equal(80.0, _sampler.DeathFrameMaxMs!.Value, 6);
+        Assert.Equal(8, _sampler.Frames);
         Assert.Equal(1, _sampler.DeadMotions);
         Assert.Equal(1, _sampler.Portals);
         Assert.Equal(1, _sampler.Arrivals);
@@ -210,6 +219,7 @@ public sealed class DeathLegRunnerTests
         _sampler.Step(0.500, skip: true); // the frame after a saved review frame
         Teleport();
         Arrive();
+        Present();
         _sampler.Step(0.016, skip: false);
         _sampler.Step(0.016, skip: false);
         _sampler.Step(0.016, skip: false);
