@@ -100,7 +100,8 @@ public static class ChatLineText
     /// <summary>
     /// The text type and text of <paramref name="line"/>; false for the mod's machine lines (<see cref="ChatTextTypes.MachineChannelPrefix"/>). Speech and
     /// tells carry a speaker, and retail composes "Name says, ..." from its string table; Lifestone writes the English literal
-    /// (<c>TODO(g4-chat-format)</c>: the table's ids are not read yet). A type outside 0 to 33 becomes System.
+    /// (<c>TODO(g4-chat-format)</c>: the table's ids are not read yet). A type outside 0 to 33 becomes System; type 0 is valid (retail's colour table leaves it at its default).
+    /// A WeenieError line shows <see cref="WeenieErrorText"/>'s text in the type retail's <c>HandleFailureEvent</c> (11.6096 0x00572760) gives it.
     /// </summary>
     public static bool TryFormat(in ChatLine line, uint selfGuid, out int textType, out string text)
     {
@@ -126,8 +127,17 @@ public static class ChatLineText
                 textType = ChatTextTypes.Emote;
                 text = line.Text.StartsWith(name, StringComparison.Ordinal) ? line.Text : $"{name} {line.Text}";
                 break;
-            case ChatKind.System or ChatKind.ToolReply:
+            case ChatKind.System:
+                textType = Valid(line.ChatType, ChatTextTypes.System, allowZero: true);
+                break;
+            case ChatKind.ToolReply:
                 textType = Valid(line.ChatType, ChatTextTypes.System);
+                break;
+            case ChatKind.Notice:
+                textType = Valid(line.ChatType, ChatTextTypes.System); // a client-composed line ("<spell> has expired.", chat type 7); a notice with no type stays System
+                break;
+            case ChatKind.WeenieError:
+                WeenieErrorText.TryFormat(line.ChatType, line.Text, out textType, out text);
                 break;
             default:
                 break;
@@ -136,5 +146,6 @@ public static class ChatLineText
         return true;
     }
 
-    private static int Valid(uint chatType, int fallback) => chatType is > 0 and < ChatTextTypes.Count ? (int)chatType : fallback;
+    /// <summary>The type when it is 0 to 33 (type 0 only where <paramref name="allowZero"/>: a speech or tell with no type keeps its own), else <paramref name="fallback"/>.</summary>
+    private static int Valid(uint chatType, int fallback, bool allowZero = false) => chatType < ChatTextTypes.Count && (allowZero || chatType > 0) ? (int)chatType : fallback;
 }

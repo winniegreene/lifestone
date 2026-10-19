@@ -81,6 +81,12 @@ public sealed class PlayerQualities
     /// </summary>
     public const uint VividTargetingIndicatorOption = 0x8000;
 
+    /// <summary>The option bit <c>PlayerModule::AutoTarget</c> (11.6096 0x005D3E90) tests: bit 13 of the options word (<c>PlayerOptionTable</c>'s "AutoTarget", 0x2000).</summary>
+    public const uint AutoTargetOption = 0x2000;
+
+    /// <summary>True when the character's options ask for the auto-target (<see cref="AutoTargetOption"/>); false until a PlayerDescription arrives.</summary>
+    public bool AutoTarget => (CharacterOptions1 & AutoTargetOption) != 0;
+
     /// <summary>True when the character's options ask for the vivid target indicator (<see cref="VividTargetingIndicatorOption"/>); false until a PlayerDescription arrived.</summary>
     public bool VividTargetingIndicator => (CharacterOptions1 & VividTargetingIndicatorOption) != 0;
 

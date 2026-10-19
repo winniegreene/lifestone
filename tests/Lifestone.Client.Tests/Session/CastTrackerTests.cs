@@ -241,14 +241,42 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Contains("without the enchantment", cast.Outcome.Value.Detail, StringComparison.Ordinal);
         Assert.DoesNotContain("not in the magic combat mode", cast.Outcome.Value.Detail, StringComparison.Ordinal);
 
+        // --retail-cast-any-mode: the guard is off, the cast goes out as retail's client sends it and ACE's bare UseDone names the mode.
         r.CombatModeIs(CombatModes.NonCombat);
-        var wrong = r.Api.Cast(FlameBolt, Target, ActionSource.Ui);
+        r.Api.RetailCastAnyMode = true; // this rig's session only
+        {
+            var wrong = r.Api.Cast(FlameBolt, Target, ActionSource.Ui);
+            r.Tick();
+            r.UseDone();
+            r.Tick();
+            Assert.Equal(ActionOutcomeKind.ServerError, wrong.Outcome!.Value.Kind);
+            Assert.Contains("without a projectile", wrong.Outcome.Value.Detail, StringComparison.Ordinal);
+            Assert.Contains("not in the magic combat mode", wrong.Outcome.Value.Detail, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void A_cast_outside_the_magic_mode_is_refused_at_once_with_a_named_reason_and_nothing_is_sent_and_the_retail_switch_sends_it()
+    {
+        var r = Rig();
+        r.CombatModeIs(CombatModes.NonCombat);
+        var refused = r.Api.Cast(StrengthSelf, ActionSource.Ui);
         r.Tick();
-        r.UseDone();
+        Assert.Equal(ActionOutcomeKind.Refused, refused.Outcome!.Value.Kind);
+        Assert.Equal(StanceGuards.CastRefusal, refused.Outcome.Value.Detail);
+        Assert.Contains("not in the magic combat mode", refused.Outcome.Value.Detail, StringComparison.Ordinal);
+        Assert.Empty(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        var targeted = r.Api.Cast(FlameBolt, Target, ActionSource.Host);
         r.Tick();
-        Assert.Equal(ActionOutcomeKind.ServerError, wrong.Outcome!.Value.Kind);
-        Assert.Contains("without a projectile", wrong.Outcome.Value.Detail, StringComparison.Ordinal);
-        Assert.Contains("not in the magic combat mode", wrong.Outcome.Value.Detail, StringComparison.Ordinal);
+        Assert.Equal(ActionOutcomeKind.Refused, targeted.Outcome!.Value.Kind);
+        Assert.Empty(r.H.Net.Of(FakeSendKind.CastTargetedSpell));
+
+        r.Api.RetailCastAnyMode = true; // --retail-cast-any-mode, this rig's session only
+        {
+            r.Api.Cast(StrengthSelf, ActionSource.Ui);
+            r.Tick();
+            Assert.Single(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        }
     }
 
     [Fact]
@@ -267,6 +295,7 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
     public void Without_a_spell_table_the_enchantment_or_a_projectile_confirms_and_UseDone_alone_is_Sent_with_a_named_TODO()
     {
         var r = new WorldActionRig();
+        r.CombatModeIs(CombatModes.Magic); // the stance guard (M3 4.2 p3) refuses a cast outside magic mode
         var first = r.Api.Cast(StrengthSelf, ActionSource.Ui);
         r.Tick();
         r.Enchant((ushort)StrengthSelf);
@@ -286,7 +315,7 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
         r.UseDone();
         r.Tick();
         Assert.Equal(ActionOutcomeKind.Sent, third.Outcome!.Value.Kind);
-        Assert.Contains("TODO(m3-cast-spell-table-host)", third.Outcome.Value.Detail, StringComparison.Ordinal);
+        Assert.Contains("TODO(m3-cast-no-spell-table)", third.Outcome.Value.Detail, StringComparison.Ordinal);
     }
 
     [Fact]

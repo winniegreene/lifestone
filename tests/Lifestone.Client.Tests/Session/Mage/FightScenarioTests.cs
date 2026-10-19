@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Numerics;
 using DatReaderWriter.Enums;
 using Lifestone.Client.Movement.Routes;
+using Lifestone.Client.Options;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Bus;
 using Lifestone.Client.Session.Contracts;
@@ -11,6 +12,7 @@ using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Tools;
 using Lifestone.Data.Magic;
 using Lifestone.Data.Terrain;
+using Lifestone.Data.World;
 using Lifestone.Data.Tests;
 using Lifestone.Data.World.Cells;
 using Lifestone.Net.Diagnostics;
@@ -76,6 +78,17 @@ public sealed class FightScenarioTests
 
         public string? Failure { get; private set; }
 
+        /// <summary>When set, <see cref="HasClearLine"/> is false for a target in this cell until a leg has arrived (the wall between the arrival and that plaza).</summary>
+        public uint BlockedCell { get; set; }
+
+        public int LineQueries { get; private set; }
+
+        public bool HasClearLine(in CellFrame from, in CellFrame to)
+        {
+            LineQueries++;
+            return BlockedCell == 0 || to.CellId != BlockedCell;
+        }
+
         public void Prepare(IGameSessionView session, double now) => Prepared++;
 
         public bool BeginLeg(IGameSessionView session, double now, out string description)
@@ -112,6 +125,7 @@ public sealed class FightScenarioTests
             }
 
             _walking = false;
+            BlockedCell = 0;
             return FightWalkStatus.Arrived;
         }
 
@@ -132,6 +146,15 @@ public sealed class FightScenarioTests
 
         /// <summary>The projectile exists but no damage line follows.</summary>
         Dud,
+
+        /// <summary>The projectile exists, stops (zero velocity) 0.2 s later short of the target and no damage line follows: a wall.</summary>
+        Wall,
+
+        /// <summary>A tusker that ran at the mage: the bolt stops 0.2 s later where the target now stands, and "X resists your spell" arrives, with no damage line (4.2 R2).</summary>
+        Resist,
+
+        /// <summary>The target ran at the mage and the bolt stops beside it with no resist line and no damage line: still not a wall (4.2 R2, the distance rule alone).</summary>
+        RanIn,
 
         /// <summary>WeenieError 0x0402 then UseDone.</summary>
         Fizzle,
@@ -170,6 +193,7 @@ public sealed class FightScenarioTests
         private double _lastNow = double.NaN;
         private double _manaAcc;
         private readonly Queue<(uint Guid, double Due)> _late = new();
+        private readonly Queue<(uint Guid, double Due)> _stops = new();
         private readonly Queue<(uint Spell, uint Target, Shot Shot, double Due)> _lateHits = new();
         private ushort _teleports = 2;
 
@@ -322,6 +346,11 @@ public sealed class FightScenarioTests
                 Answer(cast.Spell, cast.Target);
             }
 
+            while (_stops.Count > 0 && _stops.Peek().Due <= now)
+            {
+                R.H.R.Reducer.OnVectorUpdate(R.H.R.Context, new VectorUpdateMsg(_stops.Dequeue().Guid, Vector3.Zero, Vector3.Zero, 1, 100));
+            }
+
             while (_lateHits.Count > 0 && _lateHits.Peek().Due <= now)
             {
                 var hit = _lateHits.Dequeue();
@@ -454,8 +483,30 @@ public sealed class FightScenarioTests
 
             Mana = Mana >= ManaPerCast ? Mana - ManaPerCast : 0;
             SendMana();
-            Projectile();
+            var boltId = Projectile();
             var creature = _creatures[target];
+            if (shot is Shot.Resist or Shot.RanIn)
+            {
+                // The bolt flew 0.2 s at 20 m/s (4 m) and met the target, which had run to 6 m from the bolt's origin.
+                var at = ReducerHarness.Position(R.H.R.State.Objects.TryGet(target, out var t) && t.Position is { } p ? p.CellId : Den, PlayerX, PlayerY + 6, 30);
+                R.H.R.Reducer.OnUpdatePosition(R.H.R.Context, new UpdatePositionMsg(target, PositionFlags.Grounded, at, null, null, 1, 50, 1, 1));
+                _stops.Enqueue((boltId, Now + 0.2));
+                if (shot == Shot.Resist)
+                {
+                    R.Raw(AceWireWriters.ServerMessage($"{creature.Name} resists your spell", 7));
+                }
+
+                R.UseDone();
+                return;
+            }
+
+            if (shot == Shot.Wall)
+            {
+                _stops.Enqueue((boltId, Now + 0.2));
+                R.UseDone();
+                return;
+            }
+
             if (shot == Shot.Dud)
             {
                 R.UseDone();
@@ -502,13 +553,14 @@ public sealed class FightScenarioTests
             }
         }
 
-        private void Projectile()
+        private uint Projectile()
         {
             var id = _nextProjectile++;
             R.H.R.Reducer.OnCreateObject(
                 R.H.R.Context,
                 ReducerHarness.Create(id, ReducerHarness.Stamps(), ReducerHarness.Position(Den, PlayerX, PlayerY, 30), state: PhysicsState.Missile | PhysicsState.Gravity, velocity: new Vector3(0, 20, 0)),
                 isUpdate: false);
+            return id;
         }
     }
 
@@ -678,6 +730,102 @@ public sealed class FightScenarioTests
         Assert.Equal(3, lines.Count(l => l.Contains("miss: the cast was not confirmed", StringComparison.Ordinal)));
         Assert.Contains(lines, l => l.Contains("walking: 3 misses in a row; fake leg 1", StringComparison.Ordinal));
         Assert.Contains(lines, l => l.Contains("the leg is done", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_blocked_target_is_not_cast_at_the_loop_walks_at_once_with_no_miss()
+    {
+        var r = new Rig();
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var walk = new FakeWalk { BlockedCell = 0x01050303 };
+        var scenario = r.Scenario(walk);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal((1, 0, 1), (scenario.Tally.BlockedPicks, scenario.Tally.Misses, walk.Legs));
+        Assert.Equal(2, scenario.Tally.Casts); // the two hits of the kill, after the leg: none before it
+        Assert.Contains(r.Log.Lines, l => l.Contains("walking: no tusker has a clear line", StringComparison.Ordinal));
+        Assert.Contains(r.Log.Lines, l => l.Contains("blocked: no clear line to 0x80001001", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_next_nearest_tusker_with_a_clear_line_is_cast_at_and_the_blocked_nearer_one_is_skipped()
+    {
+        var r = new Rig();
+        var near = r.Add(0x80001001, TuskerSlave, 0x01050303, 30);
+        var far = r.Add(0x80001002, TuskerSlave, 0x01050310, 40);
+        var walk = new FakeWalk { BlockedCell = 0x01050303 };
+        var scenario = r.Scenario(walk);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal(0, walk.Legs);
+        Assert.All(r.CastTargets, t => Assert.Equal(far.Guid, t));
+        Assert.False(near.Dead);
+        Assert.True(scenario.Tally.BlockedPicks >= 1);
+    }
+
+    [Fact]
+    public void Fight_ignore_line_restores_the_nearest_pick()
+    {
+        var r = new Rig(fight: new FightOptions { IgnoreLine = true });
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var walk = new FakeWalk { BlockedCell = 0x01050303 };
+        var scenario = r.Scenario(walk);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal((0, 0, 0), (scenario.Tally.BlockedPicks, walk.LineQueries, walk.Legs));
+    }
+
+    [Fact]
+    public void A_bolt_that_stops_short_of_the_target_with_no_damage_line_is_a_wall_hit_and_walks_on_the_first_one()
+    {
+        var r = new Rig();
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        r.Script(Shot.Wall);
+        var walk = new FakeWalk();
+        var scenario = r.Scenario(walk);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal((1, 1, 1), (scenario.Tally.WallHits, scenario.Tally.Misses, walk.Legs));
+        Assert.Contains(r.Log.Lines, l => l.Contains("walking: a bolt hit a wall", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_resisted_bolt_at_a_target_that_ran_at_the_mage_is_a_miss_not_a_wall_hit() => BoltBesideTarget(Shot.Resist, 1);
+
+    [Fact]
+    public void A_bolt_that_stops_beside_a_target_that_ran_at_the_mage_with_no_resist_line_is_a_miss_not_a_wall_hit() => BoltBesideTarget(Shot.RanIn, 0);
+
+    private static void BoltBesideTarget(Shot shot, int resists)
+    {
+        var r = new Rig();
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        r.Script(shot, Shot.Normal, Shot.Normal);
+        var walk = new FakeWalk();
+        var scenario = r.Scenario(walk);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal((0, 1, 0, resists), (scenario.Tally.WallHits, scenario.Tally.Misses, walk.Legs, scenario.Tally.Resists));
+        Assert.DoesNotContain(r.Log.Lines, l => l.Contains("a bolt hit a wall", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(20.0, 20.0, 0.2, true)] // the first-cast wall: 16 m short
+    [InlineData(6.0, 20.0, 0.2, false)] // the target ran in: 2 m short, inside the radius and the margin
+    [InlineData(20.0, 20.0, 1.0, false)] // flew all the way
+    [InlineData(20.0, 20.0, 0.75, true)] // 5 m short: a wall, however the share is read
+    public void The_wall_rule_is_the_stop_distance_from_the_target(double toTarget, double speed, double seconds, bool wall) =>
+        Assert.Equal(wall, FightScenario.StoppedShortOfTarget(toTarget, speed, seconds));
+
+    [Fact]
+    public void The_fight_ignore_line_option_parses()
+    {
+        Assert.False(new FightOptions().IgnoreLine);
+        Assert.True(FightOptions.FromArguments([new CommandLineArgument("--fight-ignore-line", "--fight-ignore-line", string.Empty, false)]).IgnoreLine);
     }
 
     [Fact]

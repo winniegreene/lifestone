@@ -4,8 +4,9 @@
 scoping memo (Shape A, "polished combat, not automation"), the ACE research pack, the testing-loop measurements and
 the independent review of M3's items 3.1 and 3.2 (the lead files the three under `cache/m4/`). The plan of record
 (the read map, the seams, the waves, the slice tables, the gates, the decisions, the "as run" record) will be
-`m4-plan.md`; the local planner writes it. M3 ([m3-lights-and-sound.md](m3-lights-and-sound.md)) is in wave 4
-(lights, then its doc pass, which retitles it "fights and sound" in prose only; the file names stay). M2
+`m4-plan.md`; the local planner writes it. M3 ([m3-lights-and-sound.md](m3-lights-and-sound.md)) is complete
+(2026-10-19; its item 4.2 was the end, with the polish pass, D39-D43; the milestone is "fights and sound" in prose and
+the file names stay). M2
 ([m2-log-in.md](m2-log-in.md)) is complete on master.
 
 ## 1. Goal
@@ -154,9 +155,12 @@ and new spells; arenas beyond the two hunt grounds; lockpicking and keys; window
 
 ### 3.3 What M3 leaves to M4
 
+M3 is complete. Its testing-loop cuts landed in M3 4.2 (D41). The open TODO rows that M3 hands to M4 are placed in
+[m3-plan.md](m3-plan.md) §9 (each "Placed" reads "M4 (<area>)"); the table below is the list M4 planned from.
+
 | From | What | Where in M4 |
 |---|---|---|
-| M3 2.1 (D26, the owner) | the testing loop takes very long (the loopback suite about 15 minutes, the Soak expiry 31): cut it down | item 1.1 (DoD 1) |
+| M3 2.1 (D26, the owner) | the testing loop takes very long (the loopback suite about 15 minutes, the Soak expiry 31): cut it down | done in M3 4.2 as its polish item P5 (D41: the default filter excludes Exhaustive, the loopback suite 31 tests in 20.7 min, the full smoke 19.2 min); item 1.1 (DoD 1) is answered there |
 | M3 2.1 review R8 | the session's `[net]` lines log the account name at login, in gitignored logs only | item 1.1 with the loop note |
 | the independent 3.1/3.2 review (2026-10-17) | no blocker; nine should-fix findings (a report-only field that does not read what it names, four robustness defects that fail a live leg or leave the mage in the den, two verdict fields that can misread, a test pinning an order ACE does not use, two dormant defects) and nine nits | item 1.1 (DoD 1), as a group |
 | M3 3.2 (`GameCombatPanel.cs:369`) | the combat window's attack buttons answer `NotInM3`, `TODO(m3-melee-attack)`; the power bar is begun by hand | DoD 3, 5 |
@@ -183,11 +187,16 @@ item moves (corpse and chest opening, pick up, drop, split, give); **2.2** inven
 the death loop; **3.1** recovery (kits, potions) and the hunt loop near Holtburg; **3.2** vendors (buy, sell,
 appraise); **4.1** auto-buff, the cut candidate; **4.2** the end: the audit, the doc pass. About $1,165 against the
 $1,250 ceiling (M3 D5's rule: a lead asks before exceeding its item's estimate by 20%). The hunt loop and the death
-loop with its corpse are the acceptance tests of the milestone.
+loop with its corpse are the acceptance tests of the milestone. Each wave's first slice reads its rows of
+[docs/research/openac-m4-map.md](../research/openac-m4-map.md) before the wire.
 
 ## 5. Research (2026-10-17, read-only)
 
-ACE is read at 95ef426d (v1.78.4816); citations are `<path under Source/>:<lines>`, with `W/` for
+ACE is read at 95ef426d (v1.78.4816), and OpenAC at v0.1.25 @6db05a2 is the second source (read 2026-10-19,
+[docs/research/openac-m4-map.md](../research/openac-m4-map.md)): a message whose OpenAC codec exists is ported under
+docs/third-party/net.md's N-process and checked against ACE's writer; a semantic rule is read in OpenAC's `Runtime`
+and re-expressed with ACE's cite; an OpenAC `Retail*` file is re-expressed with the retail function and address, never
+pasted (foundation-openac.md §6.2). ACE citations are `<path under Source/>:<lines>`, with `W/` for
 `ACE.Server/WorldObjects/`, `A/` for `ACE.Server/Network/GameAction/Actions/`, `V/` for
 `ACE.Server/Network/GameEvent/Events/`, `N/` for `ACE.Server/Network/`, `E/` for `ACE.Server/Entity/`, `M/` for
 `ACE.Server/Managers/`; a bare number in a paragraph is a line of the file last named. "Lifestone today" is master
@@ -555,6 +564,8 @@ D19, D26, D34, D35, D37).
 | Q4 | Vendors: which of buy, sell and appraise land, and whether the healer's kits are the first purchase | 3.2, 2.2 | all three on the Action API (the open tracker and the stock model are shared); the panel's buy and sell; the examine panel over the appraisal model | **all three on the Action API; the panel's buy and sell; the examine panel if 3.2's estimate holds, else `NotInM4` with the model built.** The first purchase is a Handy Healing Kit 628 from Thelnoth Cort (715): the recovery item's input, at a price predictable from the 0062 (SellPrice 1.35 × Value), so one buy proves the whole chain; the first sale is the hunt's loot to Renald the Elder (718), whose mask covers weapons, armour, clothing and misc |
 | Q5 | The testing-loop rule changes (M3 D26 filed "cut the testing loop down" under M4; nothing changed in M3) | 1.1 | which of the thirteen cuts the owner approves (§5.1 names the measured order 13, 10, 3, 11, 12, 9; the dat-tier split of Data.Tests; skipping PNG and WAV in the secret scan was **not** proposed, it loosens the scan); and the live-gate rule: today `-Only login-check,login` three times and the full smoke twice per item (G-A and the live gate), proposed **one `-Only login-check,login,<the item's legs>` backend run at the gate**, the worst-of-three kept only after an arrival-path change (the probe already covers those), the full `-Backend require` smoke once per wave | approve 13, 10, 3, 11 and 12 (structural, each with its text test and a before-and-after); 9 only after the first four are measured; adopt the one-run live gate with the worst-of-three kept for arrival-path items and the frame judges unchanged; every cut is report-only in its first gate by the rule |
 | Q6 | LAN out | every item | the servers stay on 127.0.0.1 only; the memo's Shape B (automation, LAN) is not this milestone | **out**; goals.md §4 and the loopback policy stand; `LoopbackOnlyTests` keep failing any wildcard bind |
+| Q7 | OpenAC's M4 codecs (docs/research/openac-m4-map.md §1: attack, cancel, drop, split, give, buy, sell, appraise, AttackDone, ViewContents, ApproachVendor) | 1.2, 2.1, 3.2 | (a) port under net.md's N-process at pin @6db05a2, each checked against ACE's writer or reader; (b) write every codec from ACE alone | **(a)**: the layouts are already read once by a client that plays against ACE, and M2's ports found four OpenAC defects by the same checks, so the N-process is the safeguard either way. `tests/Lifestone.Net.Tests/Hygiene/NetProvenanceTests.cs` then accepts a second OpenAC pin (a constant and the `Scopes` table), a small test change in the first net slice. Upstream's head is unsigned (only its GitHub merge commits are signed); the tree hash is checked against the API instead (foundation-openac.md §6.1) |
+| Q8 | Test traits from OpenAC's lanes (foundation-openac.md §6.5) | the polish pass P5 | (a) `Tier=Timing` for tests whose outcome depends on load, out of the default filter and run alone by the lead, and `Status=KnownFailure` for a test written against an open TODO row, never in the green total; (b) neither | **(a)**, decided in P5 with the measurements, not here: both extend the existing `Tier` filter, and the frame-time rule already says rerun once then report |
 
 ### 6.2 Carried rules
 

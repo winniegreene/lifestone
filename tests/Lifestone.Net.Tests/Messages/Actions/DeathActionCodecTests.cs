@@ -46,6 +46,21 @@ public sealed class DeathActionCodecTests
     }
 
     [Fact]
+    public void RemoveSpellFavorite_is_0x01E4_then_the_spell_and_the_bar_and_no_index()
+    {
+        // ACE GameActionRemoveSpellFavorite reads the spell id, then the bar id: two ReadUInt32 (retail CM_Character::Event_RemoveSpellFavorite, 11.6096 0x006A26B0).
+        var body = Build(w => MagicActionCodecs.WriteRemoveSpellFavorite(w, 4, 0x0B4F, 1));
+
+        Assert.Equal(Convert.FromHexString("B1F70000" + "04000000" + "E4010000" + "4F0B0000" + "01000000"), body);
+        var (sequence, type, fields) = ReadAce(body, 2);
+        Assert.Equal((4u, 0x01E4u), (sequence, type));
+        Assert.Equal(new uint[] { 0x0B4F, 1 }, fields);
+        Assert.Equal(0x01E4u, GameActionTypes.RemoveSpellFavorite);
+        var different = Build(w => MagicActionCodecs.WriteRemoveSpellFavorite(w, 0x01020304, 0xAABBCCDD, 7));
+        Assert.Equal(new uint[] { 0xAABBCCDD, 7 }, ReadAce(different, 2).Fields); // spell, then bar: ACE's order
+    }
+
+    [Fact]
     public void The_opcodes_are_the_values_ACE_and_retail_use()
     {
         // GameActionType.Suicide = 0x0279 and AddSpellFavorite = 0x01E3 (ACE GameActionType.cs); CM_Character::Event_Suicide and Event_AddSpellFavorite put the same values in the type word.

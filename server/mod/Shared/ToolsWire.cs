@@ -42,7 +42,7 @@ public static class ToolsWire
     public const string ChatPrefix = "Lifestone: ";
 
     /// <summary>The usage line: every verb and its arguments.</summary>
-    public const string Usage = "status | where | net | places | xp <amount> | place poi \"<name>\" | place loc <cell> <x> <y> <z> [<qw> <qx> <qy> <qz>] | quest stamp <name> | quest erase <name> | quest has <name> | char purge \"<name>\" | spell learn <id>[,<id>...] | item <wcid> [<stack>]  [#id]";
+    public const string Usage = "status | where | net | places | xp <amount> | place poi \"<name>\" | place loc <cell> <x> <y> <z> [<qw> <qx> <qy> <qz>] | quest stamp <name> | quest erase <name> | quest has <name> | char purge \"<name>\" | spell learn <id>[,<id>...] | item <wcid> [<stack>] [palette=<n>] [shade=<f>]  [#id]";
 
     /// <summary>
     /// The longest reply text: 65,534 characters. ACE writes it as a String16L, whose length is a u16 (WriteString16L

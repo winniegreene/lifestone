@@ -76,7 +76,6 @@ public sealed class FightTallyTests
     }
 
     [Theory]
-    [InlineData("Tusker Slave resists your spell")]
     [InlineData("You cast Flame Bolt VII on Tusker Slave")]
     [InlineData("Your movement disrupted spell casting!")]
     [InlineData("The spell Strength Self VII on Mage has expired.")]
@@ -93,6 +92,42 @@ public sealed class FightTallyTests
         Assert.Equal(0, tally.SpellDamageTaken);
         Assert.Equal(0, tally.DrainDealt);
         Assert.Equal(0, tally.DrainTaken);
+    }
+
+    [Theory]
+    [InlineData("Tusker Slave resists your spell")]
+    [InlineData("You resist the spell cast by Tusker Slave")]
+    public void A_resist_line_is_counted_as_a_resist_and_not_as_unparsed(string line)
+    {
+        Assert.Equal(MagicLineKind.Resist, FightTally.Classify(line, out var amount, out _));
+        Assert.Equal(0, amount);
+
+        var (h, tally) = Started();
+        Magic(h, line);
+        Assert.Equal((1, 0), (tally.Resists, tally.UnparsedMagicLines));
+        tally.Reset();
+        Assert.Equal(0, tally.Resists);
+    }
+
+    [Theory]
+    [InlineData(" resists your spell")]
+    [InlineData("You resist the spell cast by ")]
+    [InlineData("Someone resists your spells")]
+    public void A_line_that_only_looks_like_a_resist_stays_unparsed(string line)
+    {
+        Assert.Equal(MagicLineKind.Unparsed, FightTally.Classify(line, out _, out _));
+    }
+
+    [Fact]
+    public void A_line_the_client_composed_is_not_read_as_the_servers_magic_line()
+    {
+        var (h, tally) = Started();
+        h.Reducer.OnServerMessage(h.Context, new ServerMessageMsg("x", 7)); // a server line that matches nothing: counted
+        Assert.Equal(1, tally.UnparsedMagicLines);
+        // The reducer's expiry notice is ChatKind.Notice in type 7: the tally ignores it (ReducerEnchantmentTests pins that the line is made).
+        var before = tally.UnparsedMagicLines;
+        h.Bus.Publish(new ChatReceived(new ChatLine(0, ChatKind.Notice, 7, null, 0, "Strength Self VII has expired.")));
+        Assert.Equal(before, tally.UnparsedMagicLines);
     }
 
     [Fact]

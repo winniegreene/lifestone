@@ -1,3 +1,4 @@
+using Lifestone.Client.Diagnostics;
 using System.Globalization;
 using System.Collections.Frozen;
 using Lifestone.Client.Session.Contracts;
@@ -14,8 +15,9 @@ namespace Lifestone.Client.Session.StandIn;
 /// <param name="Guid">The new object's id (a server object's: 0x80000000 and up).</param>
 /// <param name="Wcid">The weenie class id.</param>
 /// <param name="Name">The item's name.</param>
+/// <param name="Worn">The piece's dressing (ClothingBase, own Setup, palette, shade), or null for an item that is not clothing.</param>
 /// <param name="Stack">The stack size it was created with.</param>
-internal readonly record struct StandInPackEntry(uint Guid, uint Wcid, string Name, int Stack);
+internal readonly record struct StandInPackEntry(uint Guid, uint Wcid, string Name, int Stack, StandInWorn? Worn = null);
 
 /// <summary>
 /// A weenie of the gear kit (M3 1.4 s0, <c>TODO(m3-standin-weenies)</c> answered for the kit): what the world database holds for it, so an <c>item</c> request for the wand, a piece of the leather set or a spell component creates the
@@ -25,7 +27,11 @@ internal readonly record struct StandInPackEntry(uint Guid, uint Wcid, string Na
 /// <param name="ItemType">ACE's <c>ItemType</c>.</param>
 /// <param name="ValidLocations">The <c>EquipMask</c> bits the item can occupy (0 for a component).</param>
 /// <param name="UnitBurden">The burden of one item.</param>
-internal sealed record StandInKitWeenie(StandInItemKind Kind, uint ItemType, uint ValidLocations, int UnitBurden);
+/// <param name="ClothingBase">The ClothingTable (0x10xxxxxx) the piece wears through, or 0.</param>
+/// <param name="Palette">The weenie's own palette template, or null.</param>
+/// <param name="Shade">The weenie's own shade, or null.</param>
+/// <param name="SetupId">The art the created item carries: the weenie's own Setup, or the placeholder human Setup when the stand-in does not know it.</param>
+internal sealed record StandInKitWeenie(StandInItemKind Kind, uint ItemType, uint ValidLocations, int UnitBurden, uint SetupId = StandInWorld.PlaceholderItemSetup, uint ClothingBase = 0, int? Palette = null, double? Shade = null);
 
 /// <summary>
 /// The stand-in's answers to the server mod's <c>spell learn</c> and <c>item</c> requests (M3 1.1 s2b), in the replies' own bytes (ToolsWire / <see cref="SpellLearnData"/> /
@@ -51,6 +57,21 @@ internal sealed partial class StandInWorld
     internal const double CreateObjectLagSeconds = 0.05;
 
     /// <summary>
+    /// The kit's art by class id (the pinned ACE world database 0.9.296, D43 of the M3 plan): the weenie's Setup (<c>weenie_properties_d_i_d</c> type 1), its ClothingBase (type 7), and the palette template and
+    /// shade the weenie carries (Healer's Heart none; Olthoi Helm 13 at 0.66; the Amuli coat 21 and leggings 18 at 0.3; the platemail gauntlets and the sollerets template 20 with the shade not read:
+    /// <c>TODO(q7-weenie-shades)</c>, so 0 as ACE does for a weenie with none).
+    /// </summary>
+    private static readonly Dictionary<uint, (uint Setup, uint ClothingBase, int? Palette, double? Shade)> KitArt = new()
+    {
+        [8552] = (WandSetup, 0x10000249, null, null),
+        [3715] = (0x020000DA, 0x1000002C, 13, 0.66),
+        [6600] = (0x02000126, 0x100001A1, 21, 0.3),
+        [6606] = (0x02000128, 0x100001A0, 18, 0.3),
+        [57] = (0x020000D8, 0x10000011, 20, null),
+        [107] = (0x020000DE, 0x10000054, 20, null),
+    };
+
+    /// <summary>
     /// The kit's weenies by class id: the wand and the leather set (<see cref="GearKit.Wand"/>, <see cref="GearKit.Armour"/>) and every component of <see cref="ComponentWeenies.All"/>. A class id the visit's own <c>Items</c> does not hold is looked up here
     /// before it answers <c>unknown-wcid</c>; every other class id behaves as before.
     /// </summary>
@@ -61,7 +82,8 @@ internal sealed partial class StandInWorld
         var table = new Dictionary<uint, StandInKitWeenie>();
         foreach (var w in new[] { GearKit.Wand }.Concat(GearKit.Armour))
         {
-            table[w.Wcid] = new StandInKitWeenie(new StandInItemKind(w.Name, null), w.ItemType, (uint)w.ValidLocations, w.Burden);
+            var art = KitArt.TryGetValue(w.Wcid, out var a) ? a : (Setup: PlaceholderItemSetup, ClothingBase: 0u, Palette: (int?)null, Shade: (double?)null);
+            table[w.Wcid] = new StandInKitWeenie(new StandInItemKind(w.Name, null), w.ItemType, (uint)w.ValidLocations, w.Burden, art.Setup, art.ClothingBase, art.Palette, art.Shade);
         }
 
         foreach (var c in ComponentWeenies.All)
@@ -77,6 +99,7 @@ internal sealed partial class StandInWorld
 
     private readonly Dictionary<uint, HashSet<uint>> _knownSpells = [];
     private readonly List<StandInPackEntry> _pack = [];
+    private readonly HashSet<uint> _placeholderSetupLogged = [];
     private uint _nextItemGuid = FirstItemGuid;
 
     /// <summary>The items the stand-in has created in the pack, in order.</summary>
@@ -160,13 +183,19 @@ internal sealed partial class StandInWorld
         }
         else
         {
+            if ((kit?.SetupId ?? PlaceholderItemSetup) == PlaceholderItemSetup && _placeholderSetupLogged.Add(request.Wcid))
+            {
+                Log?.Info(SessionLog.Category, "TODO(m3-standin-unknown-item-setup): weenie " + wcid + " (" + kind.Name + ") has no Setup in the stand-in; it wears the placeholder small item model 0x" + PlaceholderItemSetup.ToString("X8", CultureInfo.InvariantCulture));
+            }
+
             var (stack, clamped) = ResolveStack(request.Stack, kind.MaxStack);
             var guid = _nextItemGuid++;
             var placement = (uint)_pack.Count;
-            _pack.Add(new StandInPackEntry(guid, request.Wcid, kind.Name, stack));
+            var worn = kit is { ClothingBase: not 0 } ? new StandInWorn(kit.ClothingBase, kit.SetupId, request.Palette ?? kit.Palette ?? 0, request.Shade ?? kit.Shade ?? 0.0) : (StandInWorn?)null;
+            _pack.Add(new StandInPackEntry(guid, request.Wcid, kind.Name, stack, worn));
             data = new ItemData(guid, request.Wcid, kind.Name, stack, request.Stack, kind.MaxStack, clamped);
             var owner = _reducer.State.Self.Guid;
-            var created = CreatedItem(guid, owner, request.Wcid, kind, stack, kit);
+            var created = CreatedItem(guid, owner, request.Wcid, kind, stack, kit, worn is { } w && _visit.Dresser is { } dresser ? StandInHumanLook.FromObjDesc(dresser.Item(w)) : ModelData.Empty);
             // ACE's wire order (M3 1.2 live-gate fix): the UIQueue bundle (0022, the burden's 02CD, the mod's reply line) goes out first and the item's CreateObject (SmartboxQueue) in a later
             // bundle (NetworkSession.cs:192-250 sends the groups in enum order and waits 5 ms between bundles), so a client sees the item in its pack, and the reply, before its world object.
             Later(sink =>
@@ -195,7 +224,13 @@ internal sealed partial class StandInWorld
     /// The CreateObject ACE sends for a created pack item (<c>GameMessageCreateObject</c>): no position, the player as the container, the stack size and its maximum for an item that stacks. The
     /// object's art, ItemType (Money for Pyreal, Misc otherwise), icon and value are placeholders (<c>TODO(m3-standin-weenies)</c>: the stand-in has no weenie database).
     /// </summary>
-    private static CreateObjectMsg CreatedItem(uint guid, uint owner, uint wcid, StandInItemKind kind, int stack, StandInKitWeenie? kit)
+    /// <summary>The art every created item gets unless its kit weenie names one: the Pyreal coin's small Setup (0x02000B77, read from the dats; <c>TODO(m3-standin-unknown-item-setup)</c>, logged once per class id). Never a human Setup: a held item drawn with the player's showed a second body in the hand (M3 4.1 A2; again after D43 moved the caster to weenie 8552).</summary>
+    internal const uint PlaceholderItemSetup = 0x02000B77;
+
+    /// <summary>The caster's own Setup: weenie 8552 "The Healer's Heart" (M3 4.2 P7, D43), <c>weenie_properties_d_i_d</c> type 1 (Setup) = 0x020009AD (ACE world database 0.9.296; the old wand 2472 was 0x020000FC).</summary>
+    internal const uint WandSetup = 0x020009AD;
+
+    private static CreateObjectMsg CreatedItem(uint guid, uint owner, uint wcid, StandInItemKind kind, int stack, StandInKitWeenie? kit, ModelData model)
     {
         var header = WeenieHeaderFlags.Container;
         if (kit is not null)
@@ -222,7 +257,7 @@ internal sealed partial class StandInWorld
         {
             Flags = PhysicsDescFlags.CSetup,
             State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal,
-            SetupId = 0x02000001,
+            SetupId = kit?.SetupId ?? PlaceholderItemSetup,
             Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1),
         };
         var weenie = new WeenieDesc
@@ -240,6 +275,6 @@ internal sealed partial class StandInWorld
             ValidLocations = kit is { ValidLocations: not 0 } ? kit.ValidLocations : null,
             Burden = kit is not null ? (ushort)Math.Min(kit.UnitBurden * stack, ushort.MaxValue) : null,
         };
-        return new CreateObjectMsg(guid, ModelData.Empty, physics, weenie);
+        return new CreateObjectMsg(guid, model, physics, weenie);
     }
 }

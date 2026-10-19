@@ -7,6 +7,7 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Tools;
 using Lifestone.Data.Magic;
+using Lifestone.Data.World;
 using Lifestone.Net.Session;
 using Lifestone.Net.Types;
 
@@ -95,6 +96,18 @@ public sealed class FightScenario : IScenario, IDisposable
     /// <summary>The seconds after a target's death (its Dead motion or its deletion) the kill notice may take before the target is left.</summary>
     public const double KillNoticeSeconds = 2.0;
 
+    /// <summary>The most nearest-tusker candidates the clear-line rule tries before it walks on.</summary>
+    public const int MaxLinePicks = 6;
+
+    /// <summary>The seconds a bolt may sit stopped before the damage line must have come (ACE sends the Explode and the zero velocity before the damage line), else the stop is a wall hit.</summary>
+    public const double WallGraceSeconds = 0.6;
+
+    /// <summary>
+    /// How far short of the target's current position the bolt's stop must be, in metres, to count as a wall hit (4.2 fix A, R2): the target's radius (<c>TODO(fight-target-radius)</c>: the scenario has no Setup of the target, a tusker's is
+    /// about 1 m) plus a margin for the cast's confirmation latency (about 0.15 s at 20 m/s). A stop nearer the target than this is a resisted spell or an evade, whatever the target did while the bolt flew.
+    /// </summary>
+    public const double WallStopShortMetres = 4.0;
+
     /// <summary>The misses in a row that send the player to the next waypoint.</summary>
     public const int MissesBeforeWalking = 3;
 
@@ -159,6 +172,12 @@ public sealed class FightScenario : IScenario, IDisposable
     private uint _target;
     private bool _damageWaitLogged;
     private int _missesInARow;
+    private uint _boltGuid;
+    private double _boltSpeed = double.NaN;
+    private CellFrame _boltOrigin;
+    private int _resistMark;
+    private double _boltStopAt = double.NaN;
+    private readonly List<uint> _pickExcluded = [];
     private int _walks;
     private int _selfTeleports;
     private int _teleportMark;
@@ -354,7 +373,7 @@ public sealed class FightScenario : IScenario, IDisposable
         var seconds = FightSeconds;
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{Token(_gearFields, "gear")} {Token(_gearFields, "worn")} buffs={_buffsNote} kills={_tally.Kills} damage_dealt={_tally.DamageDealt} spells_cast={_tally.Casts} misses={_tally.Misses} xp_gained={_tally.XpGained} damage_taken={_tally.DamageTaken} hits_taken={_tally.HitsTaken} evades={_tally.Evades} level={Level} range_m={_range:0.#} projectiles={_projectiles} walks={_walks} fight_s={(double.IsNaN(seconds) ? "n/a" : seconds.ToString("0", CultureInfo.InvariantCulture))} target_kills={_tally.TargetKills}");
+            $"{Token(_gearFields, "gear")} {Token(_gearFields, "worn")} buffs={_buffsNote} kills={_tally.Kills} damage_dealt={_tally.DamageDealt} spells_cast={_tally.Casts} misses={_tally.Misses} blocked_picks={_tally.BlockedPicks} wall_hits={_tally.WallHits} xp_gained={_tally.XpGained} damage_taken={_tally.DamageTaken} hits_taken={_tally.HitsTaken} evades={_tally.Evades} level={Level} range_m={_range:0.#} projectiles={_projectiles} walks={_walks} fight_s={(double.IsNaN(seconds) ? "n/a" : seconds.ToString("0", CultureInfo.InvariantCulture))} target_kills={_tally.TargetKills}");
     }
 
     /// <inheritdoc/>
@@ -822,9 +841,28 @@ public sealed class FightScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
-        if (!session.State.Objects.NearestCreature(ArenaProfile.TargetWcids, in here, _range, _cellFilter, _killed, out var guid))
+        var guid = 0u;
+        var found = false;
+        _pickExcluded.Clear();
+        _pickExcluded.AddRange(_killed);
+        for (var tries = 0; tries < MaxLinePicks; tries++)
         {
-            return StartWalk(session, clock, "no tusker is in range on the floor");
+            found = session.State.Objects.NearestCreature(ArenaProfile.TargetWcids, in here, _range, _cellFilter, _pickExcluded, out guid);
+            if (!found || _options.IgnoreLine || LineIsClear(session, in here, guid))
+            {
+                break;
+            }
+
+            // TODO(m3-fight-los-approximation): the line is a sphere sweep through the collision, not the bolt's own transition. The pick is the loop's judgement: retail checks no line (CastSpell 0x00568DE0).
+            _tally.NoteBlockedPick();
+            _log.Info(LogCategory, $"blocked: no clear line to 0x{guid:X8} (pick {tries + 1})");
+            _pickExcluded.Add(guid);
+            found = false;
+        }
+
+        if (!found)
+        {
+            return StartWalk(session, clock, _pickExcluded.Count > _killed.Count ? "no tusker has a clear line" : "no tusker is in range on the floor");
         }
 
         if (guid != _target)
@@ -843,11 +881,16 @@ public sealed class FightScenario : IScenario, IDisposable
         _damageMark = _tally.DamageLinesDealt;
         _killMark = _tally.Kills;
         _targetKillMark = _tally.TargetKills;
+        _resistMark = _tally.Resists;
         _pending = session.Actions.Cast(_levelIds[_level], _target, ActionSource.Host);
         _tally.NoteCast();
         _phase = Phase.Cast;
         return ScenarioStatus.Running;
     }
+
+    /// <summary>True when the walker finds the line from the player to creature <paramref name="guid"/> clear (true when there is no walker or a position is unknown).</summary>
+    private bool LineIsClear(IGameSessionView session, in CellFrame here, uint guid) =>
+        _walk is null || !session.State.Objects.TryGet(guid, out var o) || o.Position is not { } at || _walk.HasClearLine(in here, in at);
 
     /// <summary>True (and logs once) while the read model's mana is under what the cast can cost.</summary>
     private bool ManaShort(IGameSessionView session)
@@ -935,6 +978,15 @@ public sealed class FightScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
+        if (WallHit(session, clock))
+        {
+            _tally.NoteMiss();
+            _tally.NoteWallHit();
+            _missesInARow++;
+            _log.Info(LogCategory, $"wall hit: the bolt stopped {clock - _awaitSince:0.0#} s after the cast, short of the target, with no damage line");
+            return StartWalk(session, clock, "a bolt hit a wall");
+        }
+
         if (clock - _awaitSince > _hitWait)
         {
             _tally.NoteMiss();
@@ -952,12 +1004,44 @@ public sealed class FightScenario : IScenario, IDisposable
     }
 
     /// <summary>
+    /// True when the confirmed bolt has stopped (its velocity went to zero: ACE's <c>ProjectileImpact</c> sends the Explode, then the zero velocity, then the damage) for <see cref="WallGraceSeconds"/> with no damage line,
+    /// and its stop point (the bolt's origin plus its speed times the seconds it flew) is more than <see cref="WallStopShortMetres"/> short of the target's position now: a bolt that dies short of its target hit the world. A stop
+    /// at the target is a resist or an evade, and so is any stop with an "X resists your spell" line since the cast (4.2 R2: a tusker that ran at the mage met the bolt early and resisted it).
+    /// </summary>
+    private bool WallHit(IGameSessionView session, double clock)
+    {
+        if (_options.IgnoreLine || _boltGuid == 0 || double.IsNaN(_boltSpeed) || !session.State.Objects.TryGet(_boltGuid, out var bolt) || bolt.Velocity.Length() >= MinProjectileSpeed)
+        {
+            return false;
+        }
+
+        if (double.IsNaN(_boltStopAt))
+        {
+            _boltStopAt = clock;
+        }
+
+        if (clock - _boltStopAt < WallGraceSeconds || _tally.Resists > _resistMark || !session.State.Objects.TryGet(_target, out var victim) || victim.Position is not { } at)
+        {
+            return false;
+        }
+
+        var toTarget = PositionAgreement.DistanceMetres(in _boltOrigin, in at);
+        return !double.IsNaN(toTarget) && StoppedShortOfTarget(toTarget, _boltSpeed, _boltStopAt - _awaitSince);
+    }
+
+    /// <summary>The bolt's stop judged on its own, for the tests: see <see cref="WallHit"/>.</summary>
+    internal static bool StoppedShortOfTarget(double distanceToTarget, double speed, double flightSeconds) => distanceToTarget - speed * flightSeconds > WallStopShortMetres;
+
+    /// <summary>
     /// The hit wait of the cast just confirmed, once per cast: the projectile the tracker took (its guid is the outcome's detail, <see cref="CastTracker.TryReadProjectile"/>), its velocity and position from the object table
     /// and the target's position give <see cref="HitWaitFor(double, float)"/>; the floor applies, logged, when the projectile or a position is not in the table. Allocates the one log line.
     /// </summary>
     private double HitWaitFor(IGameSessionView session, in ActionOutcome outcome)
     {
         var objects = session.State.Objects;
+        _boltGuid = 0;
+        _boltSpeed = double.NaN;
+        _boltStopAt = double.NaN;
         if (!CastTracker.TryReadProjectile(in outcome, out var guid) || !objects.TryGet(guid, out var bolt))
         {
             _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"hit wait: the confirmed cast names no projectile in the object table ({outcome.Detail}); the floor of {HitWaitSeconds:0.#} s applies"));
@@ -974,6 +1058,11 @@ public sealed class FightScenario : IScenario, IDisposable
         var speed = bolt.Velocity.Length();
         var distance = PositionAgreement.DistanceMetres(in origin, in at);
         var wait = HitWaitFor(distance, speed);
+        if (speed >= MinProjectileSpeed && !double.IsNaN(distance))
+        {
+            (_boltGuid, _boltSpeed, _boltOrigin) = (guid, speed, origin);
+        }
+
         _log.Info(
             LogCategory,
             string.Create(

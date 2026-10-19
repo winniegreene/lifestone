@@ -33,6 +33,12 @@ public sealed class UiStagedRoot
     /// <summary>The units of work done so far (an element made and attached, an initialize or a post-init).</summary>
     public int Units { get; private set; }
 
+    /// <summary>The phase the staged work last announced (report-only).</summary>
+    public string Phase { get; internal set; } = "start";
+
+    /// <summary>The phase the longest unit ended in (report-only).</summary>
+    public string LongestUnitPhase { get; private set; } = string.Empty;
+
     /// <summary>The longest single unit so far, in milliseconds (a host budgets by it: a unit cannot be split).</summary>
     public double LongestUnitMilliseconds { get; private set; }
 
@@ -44,10 +50,17 @@ public sealed class UiStagedRoot
     {
         while (!Done)
         {
+            var gcBefore = GC.CollectionCount(0) + GC.CollectionCount(1) + GC.CollectionCount(2);
             var started = _timestamp();
             var more = _work.MoveNext();
             var ended = _timestamp();
-            LongestUnitMilliseconds = Math.Max(LongestUnitMilliseconds, (ended - started) * 1000.0 / Stopwatch.Frequency);
+            var unitMilliseconds = (ended - started) * 1000.0 / Stopwatch.Frequency;
+            if (unitMilliseconds > LongestUnitMilliseconds)
+            {
+                LongestUnitMilliseconds = unitMilliseconds;
+                LongestUnitPhase = Phase + ((GC.CollectionCount(0) + GC.CollectionCount(1) + GC.CollectionCount(2)) != gcBefore ? " (a GC ran in it)" : string.Empty); // report-only: what the slowest unit was doing (the unit ended at the phase set before its yield)
+            }
+
             Units++;
             if (!more)
             {
@@ -89,7 +102,7 @@ public sealed partial class UiElementManager
     private IEnumerator<bool> StageRoot(UiStagedRoot staged, UiLayout layout, UiElementDesc desc)
     {
         var made = new StagedElement();
-        var work = StageElement(layout, desc, made);
+        var work = StageElement(staged, layout, desc, made);
         while (work.MoveNext())
         {
             yield return true;
@@ -101,11 +114,14 @@ public sealed partial class UiElementManager
             yield break;
         }
 
+        staged.Phase = "root made";
         yield return true;
         element.Initialize();
         element.SetShouldOwnObject(true);
         element.SetIsRootElement(true);
+        staged.Phase = "root initialized";
         yield return true;
+        staged.Phase = "root post-init";
         element.PostInit();
         _roots.Add(element);
         if (element.IsShown)
@@ -118,7 +134,7 @@ public sealed partial class UiElementManager
     }
 
     // CreateElementRecursiveFromPartialDesc / FromFullDesc, one yield per element made and per child attached.
-    private IEnumerator<bool> StageElement(UiLayout layout, UiElementDesc desc, StagedElement result)
+    private IEnumerator<bool> StageElement(UiStagedRoot staged, UiLayout layout, UiElementDesc desc, StagedElement result)
     {
         var resolved = Services.Descs.InqFullDesc(desc);
         if (!resolved.Succeeded)
@@ -135,11 +151,12 @@ public sealed partial class UiElementManager
         }
 
         _elements.Add(element);
+        staged.Phase = $"made {element.GetType().Name} {desc.ElementId:X8}"; // report-only: names the element whose construction was the unit
         yield return true;
         foreach (var childDesc in full.Children.Values)
         {
             var made = new StagedElement();
-            var work = StageElement(layout, childDesc, made);
+            var work = StageElement(staged, layout, childDesc, made);
             while (work.MoveNext())
             {
                 yield return true;
@@ -149,6 +166,7 @@ public sealed partial class UiElementManager
             {
                 child.Initialize();
                 child.SetParent(element);
+                staged.Phase = $"attached {child.GetType().Name} to {element.GetType().Name} {desc.ElementId:X8}";
                 yield return true;
             }
         }

@@ -246,6 +246,8 @@ internal sealed class StandInResponder
 
         public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => owner.Record(GameActionTypes.AddSpellFavorite, spellId, index, bar).AddSpellFavorite(spellId, index, bar);
 
+        public OutboundTicket SendRemoveSpellFavorite(uint spellId, uint bar) => owner.Record(GameActionTypes.RemoveSpellFavorite, spellId, bar, 0).RemoveSpellFavorite(spellId, bar);
+
         public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => owner.Record(GameActionTypes.GetAndWieldItem, item, equipMask, 0).GetAndWield(item, equipMask);
 
         public OutboundTicket SendPutItemInContainer(uint item, uint container, uint placement) => owner.Record(GameActionTypes.PutItemInContainer, item, container, placement).PutInContainer(item, container, placement);

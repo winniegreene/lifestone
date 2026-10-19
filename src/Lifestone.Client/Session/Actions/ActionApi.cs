@@ -43,6 +43,9 @@ internal sealed class ActionApi : IActionApi, IDisposable
     /// <summary>How long after an action ended without its UseDone a UseDone is still taken for that action's (session-clock seconds; M3 1.2 fix R1).</summary>
     internal const double OwedUseDoneWindowSeconds = 5;
 
+    /// <summary>True for <c>--retail-cast-any-mode</c>: the cast guard is off for this session (<see cref="Trackers.StanceGuards"/>). Default false.</summary>
+    internal bool RetailCastAnyMode { get; set; }
+
     private readonly GameStateReducer _reducer;
     private readonly EventBus _bus;
     private readonly ActionLog _actionLog;
@@ -189,12 +192,15 @@ internal sealed class ActionApi : IActionApi, IDisposable
     /// <summary>The session's state.</summary>
     internal GameState State => _reducer.State;
 
+    /// <summary>The reducer, for a tracker that updates the read model as it sends (the favourite spell bars).</summary>
+    internal GameStateReducer Reducer => _reducer;
+
     /// <summary>The session clock.</summary>
     internal SessionClock Clock => _reducer.Clock;
 
     /// <summary>
     /// The SpellTable (0x0E00000E) the cast tracker classifies a spell by (a projectile spell, a self enchantment, anything else); the host sets it from the dats
-    /// (<c>SpellTableData.Load</c>). Null: a cast's kind is unknown and the tracker accepts either the enchantment or a projectile (<c>TODO(m3-cast-spell-table-host)</c>).
+    /// (<c>SpellTableData.Load</c>). Null: a cast's kind is unknown and the tracker accepts either the enchantment or a projectile (<c>TODO(m3-cast-no-spell-table)</c>).
     /// </summary>
     internal Lifestone.Data.Magic.SpellTableData? SpellTable { get; set; }
 
@@ -426,6 +432,15 @@ internal sealed class ActionApi : IActionApi, IDisposable
     {
         CheckThread("IActionApi.Suicide");
         return Accept(new SuicideTracker(NewHandle(ActionKind.Suicide, source, "Suicide")));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle RemoveSpellFavorite(uint spellId, int bar, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.RemoveSpellFavorite");
+        var handle = NewHandle(ActionKind.RemoveSpellFavorite, source, "RemoveSpellFavorite spell=" + spellId + " bar=" + bar);
+        var problem = spellId == 0 ? "no spell to remove" : bar is < 0 or > 7 ? "the bar must be 0 to 7" : null;
+        return Accept(new RemoveSpellFavoriteTracker(handle, spellId, bar), problem is null ? null : Refused(problem));
     }
 
     /// <inheritdoc/>

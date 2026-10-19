@@ -124,6 +124,11 @@ public partial class Main : Node3D
         var play = playChecks || ((options.Session.Play || loginCheck != LoginCheckKind.None) && options.Checks is GameCheckSuite.None);
         if (play)
         {
+            if (playChecks)
+            {
+                PlayChecks.SupplyHumanLooks(_services);
+            }
+
             sessionHost = playChecks ? SessionHost.InstallStandIn(this, _services, PlayChecks.Visit, PlayChecks.ReplayVisit) : SessionHost.Install(this, _services);
             if (sessionHost.Session is null)
             {
@@ -211,6 +216,12 @@ public partial class Main : Node3D
         if (Diagnostics.CleanHud.Requested())
         {
             Diagnostics.CleanHud.Attach(this); // --clean-hud: no diagnostic text over the world, for videos
+        }
+
+        Diagnostics.VideoOptions.ApplyHideFloaties(); // --video-hide-floaties, for videos
+        if (Diagnostics.VideoSyncMarker.Requested())
+        {
+            Diagnostics.VideoSyncMarker.Attach(this, _services); // --video-sync-marker: a white frame and a click, for measuring a take's sound-to-picture offset
         }
 
         // --- M1 sky track: time of day, sky objects, time/teleport panels, golden viewpoints (World/Sky/SkyTrack.cs) ---

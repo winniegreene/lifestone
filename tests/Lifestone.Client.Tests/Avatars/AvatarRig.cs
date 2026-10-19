@@ -40,6 +40,8 @@ internal static class AvatarRig
     public const uint WalkToReady = 0x03FF0006;
     public const uint TurnAnim = 0x03FF0007;
     public const uint LampAnim = 0x03FF0008;
+    public const uint FallToDeadAnim = 0x03FF0009;
+    public const uint DeadAnim = 0x03FF000A;
 
     /// <summary>The one PhysicsScriptTable: Hidden → <see cref="HiddenScript"/>, UnHide → <see cref="UnHideScript"/>.</summary>
     public const uint ScriptTable = 0x34FF0001;
@@ -79,7 +81,9 @@ internal static class AvatarRig
             .Add(ReadyToWalk, 3, parts: 3)
             .Add(WalkToReady, 3, parts: 3)
             .Add(TurnAnim, 4, parts: 3)
-            .Add(LampAnim, 6, parts: 2, partStepX: 0.1f);
+            .Add(LampAnim, 6, parts: 2, partStepX: 0.1f)
+            .Add(FallToDeadAnim, 20, parts: 3)
+            .Add(DeadAnim, 2, parts: 3);
         var setups = new Dictionary<uint, ModelAssembly>
         {
             [Human] = HumanSetup(),
@@ -178,10 +182,11 @@ internal static class AvatarRig
         table.Cycles[Key(style, MotionCommands.WalkForward)] = Data(WalkAnim);
         table.Cycles[Key(style, MotionCommands.RunForward)] = Data(RunAnim);
         table.Cycles[Key(style, MotionCommands.Falling)] = Data(FallAnim);
+        table.Cycles[Key(style, MotionCommands.Dead)] = Data(DeadAnim);
         table.Cycles[Key(style, MotionCommands.TurnRight)] = Data(TurnAnim, omega: new Vector3(0, 0, -MathF.PI / 2f));
         table.Links[Key(style, MotionCommands.Ready)] = new DatMotionCommandData
         {
-            MotionData = { [unchecked((int)MotionCommands.WalkForward)] = Data(ReadyToWalk) },
+            MotionData = { [unchecked((int)MotionCommands.WalkForward)] = Data(ReadyToWalk), [unchecked((int)MotionCommands.Dead)] = Data(FallToDeadAnim) },
         };
         table.Links[Key(style, MotionCommands.WalkForward)] = new DatMotionCommandData
         {

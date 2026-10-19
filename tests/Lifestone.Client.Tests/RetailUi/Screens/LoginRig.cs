@@ -57,7 +57,7 @@ internal sealed class LoginRig : IDisposable
     private readonly DatUiImageSource _images;
     private double _now;
 
-    public LoginRig(DatSetFixture fixture, Action<IInboundMessageHandler>? standIn = null, bool retailDisconnect = false, uint? startMode = null, int window = 800, bool charGen = true, bool throneOfDestiny = true, int seed = 7, UiRetailGlitches glitches = UiRetailGlitches.None, bool view3D = false, ICg3DViewHost? viewHost = null, bool liveGame = false, int? windowHeight = null, bool stageShell = false)
+    public LoginRig(DatSetFixture fixture, Action<IInboundMessageHandler>? standIn = null, bool retailDisconnect = false, uint? startMode = null, int window = 800, bool charGen = true, bool throneOfDestiny = true, int seed = 7, UiRetailGlitches glitches = UiRetailGlitches.None, bool view3D = false, ICg3DViewHost? viewHost = null, bool liveGame = false, int? windowHeight = null, bool stageShell = false, Func<IUiImageSource, IUiImageSource>? wrapImages = null)
     {
         Fixture = fixture;
         Log = new RecordingLogSink();
@@ -76,7 +76,7 @@ internal sealed class LoginRig : IDisposable
                 Descs = UiDescSource.From(new UiLayouts(fixture.Dats)),
                 Fonts = new UiFontsSource(fixture.Dats, Log),
                 Strings = new UiStringsSource(new UiStrings(new UiStringTables(fixture.Dats)), UiLanguageInfo.Load(fixture.Dats)),
-                Images = _images,
+                Images = wrapImages is null ? _images : wrapImages(_images),
                 EnumMaps = fixture.Dats.EnumMaps,
                 Log = Log,
                 RetailGlitches = glitches,

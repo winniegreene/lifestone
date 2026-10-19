@@ -69,6 +69,22 @@ public sealed class GamePanelsTests(DatSetFixture fixture) : IClassFixture<DatSe
         }
     }
 
+    /// <summary>
+    /// Every page a shell without extra registrations answers NotInM3 for, as a literal list (the panel ids of <see cref="GamePanelHost.Pages"/>): a page a slice builds or drops moves this list and is seen here, where the check above
+    /// derives its expectation from <c>RegisteredPages</c> and cannot see it. M4 and later items shrink the list as they build pages.
+    /// </summary>
+    private static readonly uint[] NotInM3Pages = [1, 2, 8, 9, 12, 14, 16, 25]; // abuse report, books, link status, mini-games, fellowship/allegiance/friends, customer assistance, map, contracts/journal/quests
+
+    [RequiresLocalDatsFact]
+    public void The_pages_that_answer_NotInM3_are_exactly_the_pinned_list()
+    {
+        using var rig = new LoginRig(fixture, liveGame: true);
+        var screen = EnterGame(rig);
+        var notBuilt = GamePanelHost.Pages.Where(page => screen.PanelHost!.KindOf(page.PanelId) == PanelPageKind.NotInM3).Select(page => page.PanelId).Order().ToArray();
+
+        Assert.Equal(string.Join(",", NotInM3Pages.Order()), string.Join(",", notBuilt));
+    }
+
     [RequiresLocalDatsFact]
     public void A_page_with_a_controller_opens_as_a_page_and_calls_OnShown_Step_and_OnHidden()
     {

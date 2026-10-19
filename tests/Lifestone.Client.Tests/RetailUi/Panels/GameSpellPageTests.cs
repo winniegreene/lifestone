@@ -4,6 +4,7 @@ using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Dialogs;
 using Lifestone.Client.RetailUi.Flow;
 using Lifestone.Client.RetailUi.Panels;
+using Lifestone.Client.RetailUi.Rendering;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Text;
 using Lifestone.Client.RetailUi.Widgets;
@@ -93,7 +94,7 @@ public sealed class GameSpellPageTests(DatSetFixture fixture, ITestOutputHelper 
         public void Dispose() => rig.Dispose();
     }
 
-    private Game Enter(bool tables = true, bool describe = true, IEnumerable<uint>? spells = null, uint filters = 0x3FFF, ImmutableArray<DesiredComponentDesc> desired = default, IEnumerable<uint>? packed = null)
+    private Game Enter(bool tables = true, bool describe = true, IEnumerable<uint>? spells = null, uint filters = 0x3FFF, ImmutableArray<DesiredComponentDesc> desired = default, IEnumerable<uint>? packed = null, Func<IUiImageSource, IUiImageSource>? wrapImages = null)
     {
         IInboundMessageHandler? handler = null;
         var rig = new LoginRig(fixture, h =>
@@ -101,7 +102,7 @@ public sealed class GameSpellPageTests(DatSetFixture fixture, ITestOutputHelper 
             handler = h;
             StandInSessions.DataCheckThenCharacterSelect(h, TimeSpan.FromSeconds(2));
             StandInSessions.AnswerLocally(h, TimeSpan.FromSeconds(0.6));
-        }, liveGame: true);
+        }, liveGame: true, wrapImages: wrapImages);
         if (tables)
         {
             rig.Session.UseSpellsFrom(fixture.Dats);
@@ -410,6 +411,69 @@ public sealed class GameSpellPageTests(DatSetFixture fixture, ITestOutputHelper 
         Assert.Equal(ExpectedOrder(chosen, 0x3FFF), [.. book.ShownSpells]);
         Assert.Equal(247, book.List.OccupiedCount);
         Assert.Equal(247, book.List.CellCount); // no cell beyond the 247 the book needs
+    }
+
+    /// <summary>The game's image source decodes on a worker: every DID in <see cref="Held"/> answers pending until it is released.</summary>
+    private sealed class HoldingImages(IUiImageSource inner) : IUiImageSource
+    {
+        public HashSet<uint> Held { get; } = [];
+
+        public UiImageLookup TryGetImage(uint did, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out UiImage? image)
+        {
+            if (Held.Contains(did))
+            {
+                image = null;
+                return UiImageLookup.Pending;
+            }
+
+            return inner.TryGetImage(did, out image);
+        }
+    }
+
+    [RequiresLocalDatsFact]
+    public void The_first_frame_after_open_paints_the_page_and_no_cell_is_written_ahead_of_its_icon()
+    {
+        // m3-spellbook-first-paint: the compositor withholds a surface while an image in its dirty area is pending, so a cell written before its icon decoded left the previous page on screen.
+        // The fill now writes a cell only when its icon is ready: with every icon still decoding, the page is open and its frame is built (the list is there, shown, empty) and no cell holds an undecoded icon.
+        var chosen = Listable().Take(60).ToList();
+        HoldingImages? images = null;
+        using var g = Enter(spells: chosen.Select(static s => s.Id), wrapImages: inner => images = new HoldingImages(inner));
+        Assert.NotNull(images);
+        foreach (var spell in chosen)
+        {
+            images.Held.Add(spell.IconId);
+        }
+
+        Assert.True(g.Rig.Click(g.Button));
+        g.Rig.Frame();
+        Assert.Equal(13u, g.Host.CurrentPanel);
+        Assert.True(g.Panel.Visible); // the page area shows the spellbook's frame from the first frame
+        Assert.True(g.Book.List.Visible);
+        Assert.True(g.Book.IsFilling);
+        g.Frames(5);
+        Assert.Equal(0, g.Book.List.OccupiedCount); // nothing is written while its icon is pending
+        Assert.Equal(0, g.Book.List.CellCount);
+
+        // The icons decode a few at a time: the fill follows them, never ahead.
+        var released = 0;
+        while (released < chosen.Count)
+        {
+            for (var i = 0; i < 5 && released < chosen.Count; i++)
+            {
+                images.Held.Remove(chosen[released++].IconId);
+            }
+
+            g.Frames(1);
+            foreach (var shown in g.Book.ShownSpells)
+            {
+                var icon = chosen.First(c => c.Id == shown).IconId;
+                Assert.DoesNotContain(icon, images.Held);
+            }
+        }
+
+        g.Frames(20);
+        Assert.False(g.Book.IsFilling);
+        Assert.Equal(ExpectedOrder(chosen, 0x3FFF), [.. g.Book.ShownSpells]);
     }
 
     [RequiresLocalDatsFact]

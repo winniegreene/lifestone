@@ -64,8 +64,8 @@ internal sealed partial class StandInWorld
     /// <summary>The first guid the stand-in gives a projectile.</summary>
     internal const uint FirstProjectileGuid = 0x80020000;
 
-    /// <summary>The Setup the projectile placeholder wears (a human, scaled small: <c>TODO(m3-standin-projectile-model)</c>).</summary>
-    private const uint PlaceholderProjectileSetup = 0x02000001;
+    /// <summary>The Setup the projectile placeholder wears (the small item model of <see cref="PlaceholderItemSetup"/>, never a human: <c>TODO(m3-standin-projectile-model)</c>).</summary>
+    private const uint PlaceholderProjectileSetup = PlaceholderItemSetup;
 
     private const float PlaceholderProjectileScale = 0.1f;
 
@@ -377,12 +377,16 @@ internal sealed partial class StandInWorld
             return;
         }
 
+        StandInWorn? worn = null;
         if (_pack.FindIndex(e => e.Guid == item) is >= 0 and var at)
         {
             _wielded[item] = _pack[at];
+            worn = _pack[at].Worn;
             _pack.RemoveAt(at);
         }
 
+        ParentEventNow(sink, item, mask); // ACE broadcasts the parent event first (M3 4.1 fix A, R6)
+        SendLook(sink, worn); // then the ObjDescEvent (Creature_Equipment.cs 365)
         Zeros(sink, item);
         AnswerLog.Add("0023");
         sink.OnWieldObject(Context(sink), new GameEventHeader(self.Guid, 0, 0x0023), new WieldObjectEvent(item, mask));
@@ -406,6 +410,7 @@ internal sealed partial class StandInWorld
         if (_wielded.Remove(item, out var entry))
         {
             _pack.Add(entry);
+            SendLook(sink, entry.Worn); // TryDequipObjectWithNetworking: the ObjDescEvent after the dequip (Creature_Equipment.cs 438)
         }
 
         var count = self.Inventory.ItemsIn(container).Count - (from.Container == container && from.Kind != InventoryPlaceKind.Equipped ? 1 : 0);

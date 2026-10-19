@@ -102,6 +102,7 @@ public sealed class StandInStatsTests
         public Rig(XpTableData? table, bool answerWorld = true, long availableXp = 1_000)
         {
             var visit = Visit(table, availableXp);
+            Log = new RecordingLogSink();
             Session = GameSession.Offline(
                 h =>
                 {
@@ -113,8 +114,10 @@ public sealed class StandInStatsTests
                     }
                 },
                 _time,
-                new RecordingLogSink());
+                Log);
         }
+
+        public RecordingLogSink Log { get; }
 
         public GameSession Session { get; }
 
@@ -174,6 +177,27 @@ public sealed class StandInStatsTests
         Assert.Equal(ActionOutcomeKind.Confirmed, rig.Do(partial).Kind);
         Assert.True(rig.Q.TryGetAttribute(Strength, out var a3));
         Assert.Equal((2u, 350u), (a3.Ranks, a3.Experience));
+    }
+
+    [Fact]
+    public void The_raise_chat_placeholder_is_logged_once_where_the_stand_in_leaves_the_line_out()
+    {
+        using var rig = InWorld();
+        Assert.Equal(ActionOutcomeKind.Confirmed, rig.Do(rig.Session.Actions.RaiseAttribute(Strength, 100, ActionSource.Ui)).Kind);
+        Assert.Equal(ActionOutcomeKind.Confirmed, rig.Do(rig.Session.Actions.RaiseAttribute(Strength, 200, ActionSource.Ui)).Kind);
+
+        Assert.Single(rig.Log.Lines, line => line.Contains("TODO(m3-standin-raise-chat)", StringComparison.Ordinal));
+        Assert.DoesNotContain(rig.Log.Lines, line => line.Contains("TODO(m3-standin-skill-names)", StringComparison.Ordinal)); // an attribute is named, not an id
+    }
+
+    [Fact]
+    public void The_skill_names_placeholder_is_logged_once_when_a_skill_is_named_by_its_id()
+    {
+        using var rig = InWorld();
+        Assert.Equal(ActionOutcomeKind.Confirmed, rig.Do(rig.Session.Actions.RaiseSkill(WarMagic, 10, ActionSource.Ui)).Kind);
+        rig.Do(rig.Session.Actions.TrainSkill(LifeMagic, 1, ActionSource.Ui)); // already trained: the refusal line names the skill by its id
+
+        Assert.Single(rig.Log.Lines, line => line.Contains("TODO(m3-standin-skill-names)", StringComparison.Ordinal));
     }
 
     [Fact]

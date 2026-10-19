@@ -1,6 +1,7 @@
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Dialogs;
+using Lifestone.Client.RetailUi.Rendering;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Widgets;
 using Lifestone.Client.Session.Contracts;
@@ -17,7 +18,7 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// <b>Retail.</b> <c>gmSpellbookUI::UpdateFromPlayerDesc</c> (11.6096 0x0048BDD0) empties the list, asks the description for the spell ids (<c>CACQualities::TranscribeSpells</c>), adds each with
 /// <c>AddSpell</c> (0x0048BA80: the spell's base from the SpellTable, dropped when <c>IsFilteredOut</c> (0x0048B190) says so, otherwise inserted at <c>GetSortedInsertionPlace</c> (0x0048B720): before the first cell whose
 /// spell has a greater display order) and resets the filter buttons (<c>ResetFilterButtons</c>, 0x0048B270: button state 6, highlight, when the filter's bit is set, else 1). <c>IsFilteredOut</c> shows a spell when the
-/// word has its school's bit (creature 1, item 2, life 4, war 8, void 0x2000) and the bit of its level by <c>CSpellBase::InqSpellLevelByRoughHeuristic</c> (levels 1 to 9: 0x10 up to 0x800, then 0x1000); a spell whose
+/// word has its school's bit (creature 1, item 2, life 4, war 8, void 0x2000) and the bit of its level by <c>CSpellBase::InqSpellLevelByRoughHeuristic</c> (11.6096 0x005981D0) (levels 1 to 9: 0x10 up to 0x800, then 0x1000); a spell whose
 /// level the heuristic does not give (a first component that is no scarab) is filtered out. A click on a filter button (<c>ListenToElementMessage</c>, 0x0048C2B0 over <c>UpdateFilter</c>, 0x0048B8C0) sets or clears the
 /// bit, sends it to the server (<c>CM_Character::Event_SpellbookFilterEvent</c>), rebuilds the list and scrolls to its top. A new spell (<c>RecvNotice_SpellAdded</c>, 0x0048BBB0) is added, selected
 /// (<c>SetSelected</c>, 0x0048B820) and scrolled into view. The delete button (<c>DeleteSpell</c>, 0x0048C030) asks the server to forget the selected spell.
@@ -214,7 +215,7 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
         return levelBit == 0 || (word & levelBit) == 0;
     }
 
-    /// <summary><see cref="IsFilteredOut(uint, uint, int)"/> for a SpellTable spell (its school and <c>InqSpellLevelByRoughHeuristic</c>).</summary>
+    /// <summary><see cref="IsFilteredOut(uint, uint, int)"/> for a SpellTable spell (its school and <c>InqSpellLevelByRoughHeuristic</c>, 11.6096 0x005981D0).</summary>
     public static bool IsFilteredOut(uint filters, SpellInfo spell)
     {
         ArgumentNullException.ThrowIfNull(spell);
@@ -359,10 +360,35 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
         _filling = true;
     }
 
-    /// <summary>Writes the next spells of the plan into the list now (one frame's worth; <see cref="Step"/> calls it).</summary>
+    /// <summary>
+    /// Writes the next spells of the plan into the list now (one frame's worth; <see cref="Step"/> calls it).
+    /// <c>TODO(m3-spellbook-first-paint)</c> (4.2 x4, from the code; the live frame is the lead's check): the compositor paints a window's surface only when every image in its dirty area is decoded
+    /// (<c>UiCompositor.ImagesReady</c>), and the game's image source decodes on a worker, so cells written ahead of their icons kept the surface unpainted and the previous page on screen for as long as the fill
+    /// kept adding undecoded icons (247 spells, 8 a frame). A cell is now written only once its icon has decoded: the next batch's icons are requested ahead, the fill stops at the first one still pending
+    /// and goes on next frame, so the page area paints (its frame, then the spells as they come) from the first frame it is open.
+    /// </summary>
     public void FillSome()
     {
-        var end = Math.Min(_plan.Count, _fillIndex + SpellsPerFrame);
+        var limit = Math.Min(_plan.Count, _fillIndex + SpellsPerFrame);
+        var look = Math.Min(_plan.Count, limit + SpellsPerFrame);
+        var end = _fillIndex;
+        var stalled = false;
+        for (var i = _fillIndex; i < look; i++)
+        {
+            var pending = IconPending(_plan[i].IconId); // also asks the source to start decoding it
+            if (i < limit && !stalled)
+            {
+                if (pending)
+                {
+                    stalled = true;
+                }
+                else
+                {
+                    end = i + 1;
+                }
+            }
+        }
+
         var written = 0;
         if (end > _fillIndex)
         {
@@ -496,6 +522,10 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
         _subscription.Dispose();
         _list.ItemSelected -= OnSpellSelected;
     }
+
+    /// <summary>True while the image source is still decoding <paramref name="iconId"/> (never when the page has no source, as in a host that decodes at once).</summary>
+    private bool IconPending(uint iconId) =>
+        iconId != 0 && _context.Manager.Services.Images is { } images && images.TryGetImage(iconId, out _) == UiImageLookup.Pending;
 
     /// <summary>The table answers null for every id until it has loaded; probe with the first id the book held when it was planned (no enumerator per frame).</summary>
     private bool TableReady() => _probe == 0 || _context.Session.Spell(_probe) is not null;

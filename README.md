@@ -3,8 +3,9 @@
 **A faithful, single-player rebuild of Asheron's Call: a new Godot client for your own game files and a local
 ACEmulator server.**
 
-> **Early development: there is no gameplay yet.** Milestone 1 is done: you can fly and walk through all of Dereth,
-> rendered from your own game files. Logging in and playing against the local server (M2) comes next. See
+> **Early development: there is little gameplay yet.** Milestones 1 and 2 are done: you can fly and walk through all of
+> Dereth, rendered from your own game files, and log in to the bundled local server in the retail interface. Lights,
+> sound and a mage's fight (M3) are in progress. See
 > [Status and roadmap](#status-and-roadmap).
 
 <!--
@@ -34,7 +35,7 @@ What Lifestone is not:
 | Milestone | State | What it brings |
 |---|---|---|
 | **M1: Explore Dereth** | **Done** | The whole world, rendered from your dats, to fly and walk through |
-| **[M2: Log in](docs/milestones/m2-log-in.md)** | In progress | Log in to the local ACE server, in the retail interface and through retail portal space: your character, movement, server-spawned objects |
+| **[M2: Log in](docs/milestones/m2-log-in.md)** | **Done** | Log in to the local ACE server, in the retail interface and through retail portal space: your character, movement, server-spawned objects |
 | Core gameplay | Planned | Combat, magic, inventory, NPCs, vendors and quests, with ACE as the authority and their retail panels |
 | Built-in automation | Planned | Auto-buffing, then AFK dungeon hunting and looting ([automation vision](docs/automation-vision.md)) |
 | Polish | Planned | Audio, the remaining UI, packaging |
@@ -209,7 +210,7 @@ flowchart LR
         data["Lifestone.Data<br/>dat decoding, retail algorithms"]
         client["Lifestone.Client<br/>engine-agnostic client logic"]
         game["Lifestone.Game<br/>Godot presentation"]
-        net["Lifestone.Net (M2, in progress)<br/>protocol and session"]
+        net["Lifestone.Net<br/>protocol and session"]
     end
     subgraph server ["Local server (from M2)"]
         ace["ACEmulator<br/>game rules"]
@@ -235,7 +236,7 @@ flowchart LR
 - **Lifestone.Game** (`src/Lifestone.Game`, Godot 4.7.2 .NET) is presentation only: nodes, meshes, materials, shaders
   and panels. AC's Z-up world becomes Godot's Y-up world in exactly one place, `scripts/Core/AcToGodot.cs`, which also
   reverses the triangle winding.
-- **Lifestone.Net** (M2, in progress) will hold the AC network protocol: the transport, the login session and the
+- **Lifestone.Net** (from M2) holds the AC network protocol: the transport, the login session and the
   message codecs, again with no engine dependency ([protocol](docs/protocol.md)). The game-state model that the UI,
   the automation and the tests drive goes in Lifestone.Client, which uses Lifestone.Net's records but opens no
   sockets.
@@ -270,8 +271,8 @@ global.json             .NET SDK pin
 NuGet.config            packages from nuget.org only
 src/Lifestone.Data/     dat decoding and retail algorithms (no engine)
 src/Lifestone.Client/   engine-agnostic client logic and, from M2, the game-state session layer (no engine, no file I/O)
-src/Lifestone.Net/      the AC network protocol: transport, session, message codecs (M2, in progress)
-src/Lifestone.Headless/ a console host that plays a session without Godot (M2, in progress)
+src/Lifestone.Net/      the AC network protocol: transport, session, message codecs (from M2)
+src/Lifestone.Headless/ a console host that plays a session without Godot (from M2)
 src/Lifestone.Game/     the Godot project: scenes, scripts, shaders
 tests/                  xUnit tests: Data, Client, Net, the server mod, and the loopback tests that need the local server
 server/                 the localhost ACE and MariaDB backend (setup, start, stop)
@@ -294,7 +295,7 @@ $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = 'false'; $env:DOTNET_GENERATE_ASPNET_CERT
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'; $env:DOTNET_NOLOGO = '1'
 
 dotnet build Lifestone.slnx --disable-build-servers
-dotnet test Lifestone.slnx --disable-build-servers --filter "Category!=Loopback&Tier!=Soak"
+dotnet test Lifestone.slnx --disable-build-servers --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive"
 ```
 
 Or in Git Bash:
@@ -303,7 +304,7 @@ Or in Git Bash:
 export DOTNET_ROOT="$(cygpath -u "$LOCALAPPDATA")/Microsoft/dotnet"; export PATH="$DOTNET_ROOT:$PATH"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_ADD_GLOBAL_TOOLS_TO_PATH=false DOTNET_GENERATE_ASPNET_CERTIFICATE=false
 dotnet build Lifestone.slnx --disable-build-servers
-dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&Tier!=Soak'
+dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive'
 ```
 
 - The build treats every warning as an error, with the analysers pinned to the .NET 10 defaults. Packages come from

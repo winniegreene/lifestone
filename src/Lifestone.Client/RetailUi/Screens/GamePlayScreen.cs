@@ -165,6 +165,8 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
     private readonly long _buildStart;
     private long _rootMade;
     private UiStagedRoot? _staged;
+    private int _wiringUnitIndex;
+    private int _longestWiringUnitIndex;
     private IEnumerator<bool>? _wiring;
     private bool? _showRequested;
     private double _wiringMilliseconds;
@@ -339,7 +341,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             UiElementManager.Category,
             _staged is null
                 ? $"the in-game shell was built: root {rootMilliseconds:0.0} ms, wiring {wiringMilliseconds:0.0} ms"
-                : $"the in-game shell was built over {BuildFrames} frames (budget {BuildBudgetMilliseconds:0.0} ms a frame): root {rootMilliseconds:0.0} ms, wiring {wiringMilliseconds:0.0} ms, longest frame {LongestBuildFrameMilliseconds:0.0} ms, longest unit {LongestBuildUnitMilliseconds:0.0} ms, {System.Diagnostics.Stopwatch.GetElapsedTime(_buildStart).TotalMilliseconds:0} ms from the start");
+                : $"the in-game shell was built over {BuildFrames} frames (budget {BuildBudgetMilliseconds:0.0} ms a frame): root {rootMilliseconds:0.0} ms, wiring {wiringMilliseconds:0.0} ms, longest frame {LongestBuildFrameMilliseconds:0.0} ms, longest unit {LongestBuildUnitMilliseconds:0.0} ms (staged unit ended in '{_staged?.LongestUnitPhase}'; wiring unit #{_longestWiringUnitIndex} took {_longestWiringUnit:0.0} ms; slowest controller {PanelControllers?.LongestControllerName} {PanelControllers?.LongestControllerMilliseconds:0.0} ms), {System.Diagnostics.Stopwatch.GetElapsedTime(_buildStart).TotalMilliseconds:0} ms from the start");
         if (_placeholders.Count > 0)
         {
             manager.LogOnce(
@@ -379,13 +381,23 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
                 }
 
                 _wiring = Wire();
+                if (System.Diagnostics.Stopwatch.GetTimestamp() >= deadline)
+                {
+                    break; // M3 4.2 fixb: the root's last unit spent the frame (7.9 ms seen), so the first wiring unit waits for the next; no composite runs before IsBuilt (RetailUiLayer.Step's builtThisFrame)
+                }
             }
 
             var unit = System.Diagnostics.Stopwatch.GetTimestamp();
             var more = _wiring.MoveNext();
             var ended = System.Diagnostics.Stopwatch.GetTimestamp();
             var unitMilliseconds = System.Diagnostics.Stopwatch.GetElapsedTime(unit, ended).TotalMilliseconds;
-            _longestWiringUnit = Math.Max(_longestWiringUnit, unitMilliseconds);
+            _wiringUnitIndex++;
+            if (unitMilliseconds > _longestWiringUnit)
+            {
+                _longestWiringUnit = unitMilliseconds;
+                _longestWiringUnitIndex = _wiringUnitIndex; // report-only: the Nth Wire() yield (1-based) was the slowest
+            }
+
             _wiringMilliseconds += unitMilliseconds;
             if (!more)
             {

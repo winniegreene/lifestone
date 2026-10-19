@@ -61,6 +61,39 @@ public sealed class WorldObjectTable
         return added;
     }
 
+    /// <summary>
+    /// Finds the object named <paramref name="name"/> (ordinal) with a position nearest to <paramref name="centre"/>, skipping <paramref name="exclude"/>. Allocates nothing.
+    /// The auto-target uses it because the wire's attacker notices carry only a name (<c>TODO(m3-autotarget-attacker-id)</c>).
+    /// </summary>
+    /// <param name="name">The name to match.</param>
+    /// <param name="centre">Where to measure from.</param>
+    /// <param name="exclude">An id to skip (the player), or 0.</param>
+    /// <param name="guid">The nearest match's id, or 0.</param>
+    /// <returns>True when one was found.</returns>
+    public bool NearestNamed(string name, in CellFrame centre, uint exclude, out uint guid)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var origin = centre.ToGlobal();
+        var best = double.MaxValue;
+        guid = 0;
+        foreach (var o in _objects.Values)
+        {
+            if (o.Guid == exclude || o.Position is not { } p || !string.Equals(o.Name, name, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var d = p.ToGlobal().DistanceTo(origin);
+            if (d < best)
+            {
+                best = d;
+                guid = o.Guid;
+            }
+        }
+
+        return guid != 0;
+    }
+
     /// <summary>The CreateObject description flag of a lifestone (<c>BF_LIFESTONE</c>, 0x4000; ACE <c>ObjectDescriptionFlag.LifeStone</c>), as <c>WorldContentCensus</c> reads it.</summary>
     public const uint LifestoneFlag = 0x4000;
 

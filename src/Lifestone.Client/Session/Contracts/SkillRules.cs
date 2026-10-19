@@ -18,8 +18,9 @@ namespace Lifestone.Client.Session.Contracts;
 /// floored at 0 (retail <c>CEnchantmentRegistry::EnchantSkill</c>, 11.6096 0x00595620, keeps 0 below 0.5). A skill enchantment counts when the skill kind bit (0x10) is set and either it names several stats,
 /// has the skill's key, or belongs to the attack or defence group the key is in (<see cref="EnchantmentRules.AffectsKey"/>, which closes <c>TODO(g4-enchantment-affects-skills)</c>); of the enchantments of
 /// one spell category only the strongest counts (higher power level, at equal power the later start, on a tie the first of the registry).</para>
-/// <para><b>Not modelled:</b> retail's augmentation bonuses in <c>InqSkill</c> (the +10 of the specialisation augmentations, PropertyInt 300 to 302; the credit augmentation, PropertyInt 365; Jack of All Trades, 326, +5
-/// when buffed; the luminance augmentation of a specialised skill, 344, x2): <c>TODO(m3-skill-aug-bonus)</c> (review 1.4-R12; BSD Mage has none).</para>
+/// <para><b>The augmentation bonuses</b> (4.2 x4, closing <c>TODO(m3-skill-aug-bonus)</c>) are ACE's <c>CreatureSkill.GetAugBonus_Base</c> and <c>GetAugBonus_Current</c> (<c>CreatureSkill.cs</c> 154-195 and the
+/// two methods below <c>Current</c>), read from the description's int qualities (<see cref="AugBonusBase"/>, <see cref="AugBonusCurrent"/>). Retail folds them into <c>CACQualities::InqSkill</c> (11.6096 0x00592AF0; the
+/// 11.6096 table has no separate names for them). The base bonus joins the base and is scaled by the multipliers and the vitae; the current bonus is added after the vitae. BSD Mage has none, so its numbers do not change.</para>
 /// <para><b>No allocation.</b> The skill enchantments are walked in place (the strongest-of-a-category test is a scan of the registry, which holds a few dozen entries at most). The one allocation left is the
 /// two enchanted attributes' (<see cref="EnchantmentRules.EnchantAttribute"/> builds a short list while the registry holds an enchantment), which is outside this class.</para>
 /// </remarks>
@@ -68,7 +69,7 @@ public static class SkillRules
             }
         }
 
-        value = part + skill.Init + skill.Ranks;
+        value = part + skill.Init + skill.Ranks + AugBonusBase(q, skillId, skill.AdvancementClass);
         return true;
     }
 
@@ -109,9 +110,70 @@ public static class SkillRules
 
         Modifiers(q.Enchantments, skillId, out var product, out var additive);
         var vitae = q.TryGetVitae(out var v) ? v.Enchantment.StatModValue : (double?)null;
-        value = Compose(part, skill.Init + skill.Ranks, product, vitae, additive);
+        value = Compose(part, skill.Init + skill.Ranks + AugBonusBase(q, skillId, skill.AdvancementClass), product, vitae, additive + (int)AugBonusCurrent(q, skill.AdvancementClass));
         return true;
     }
+
+    /// <summary>PropertyInt 365 (ACE <c>LumAugAllSkills</c>): added to every skill's base.</summary>
+    public const uint LumAugAllSkillsProperty = 365;
+
+    /// <summary>PropertyInt 300, 301, 302 (ACE <c>AugmentationSkilledMelee</c>, <c>Missile</c>, <c>Magic</c>): +10 per level on the skills of that group.</summary>
+    public const uint AugSkilledMeleeProperty = 300, AugSkilledMissileProperty = 301, AugSkilledMagicProperty = 302;
+
+    /// <summary>PropertyInt 326 (ACE <c>AugmentationJackOfAllTrades</c>): +5 per level on every skill, after the vitae.</summary>
+    public const uint JackOfAllTradesProperty = 326;
+
+    /// <summary>PropertyInt 344 (ACE <c>LumAugSkilledSpec</c>): +2 per level on a specialised skill, after the vitae.</summary>
+    public const uint LumAugSkilledSpecProperty = 344;
+
+    /// <summary>PropertyInt 390 (ACE <c>Enlightenment</c>): +1 per level on a trained or specialised skill.</summary>
+    public const uint EnlightenmentProperty = 390;
+
+    /// <summary>ACE <c>CreatureSkill.GetAugBonus_Base</c> (<c>CreatureSkill.cs</c> 198-228): the bonuses that join the skill's base.</summary>
+    public static uint AugBonusBase(PlayerQualities q, uint skillId, uint advancementClass)
+    {
+        uint total = Level(q, LumAugAllSkillsProperty);
+        if (Level(q, AugSkilledMeleeProperty) > 0 && IsMelee(skillId))
+        {
+            total += Level(q, AugSkilledMeleeProperty) * 10;
+        }
+        else if (Level(q, AugSkilledMissileProperty) > 0 && IsMissile(skillId))
+        {
+            total += Level(q, AugSkilledMissileProperty) * 10;
+        }
+        else if (Level(q, AugSkilledMagicProperty) > 0 && IsMagic(skillId))
+        {
+            total += Level(q, AugSkilledMagicProperty) * 10;
+        }
+
+        if (advancementClass >= TrainedClass)
+        {
+            total += Level(q, EnlightenmentProperty);
+        }
+
+        return total;
+    }
+
+    /// <summary>ACE <c>CreatureSkill.GetAugBonus_Current</c> (<c>CreatureSkill.cs</c> 230-243): the bonuses added after the vitae.</summary>
+    public static uint AugBonusCurrent(PlayerQualities q, uint advancementClass)
+    {
+        var total = Level(q, JackOfAllTradesProperty) * 5;
+        if (advancementClass == SpecializedClass)
+        {
+            total += Level(q, LumAugSkilledSpecProperty) * 2;
+        }
+
+        return total;
+    }
+
+    private static uint Level(PlayerQualities q, uint property) => q.TryGetInt(property, out var v) && v > 0 ? (uint)v : 0;
+
+    // ACE Player.MeleeSkills, MissileSkills and MagicSkills (Player_Skills.cs 554-590), by Skill id.
+    private static bool IsMelee(uint id) => id is 1 or 4 or 5 or 9 or 10 or 11 or 13 or 41 or 44 or 45 or 46 or 49;
+
+    private static bool IsMissile(uint id) => id is 2 or 3 or 8 or 12 or 47;
+
+    private static bool IsMagic(uint id) => id is 31 or 32 or 33 or 34 or 43;
 
     /// <summary>
     /// The arithmetic of <see cref="TryCurrent"/> over plain numbers: <paramref name="formulaPart"/> plus <paramref name="initPlusRanks"/>, scaled by <paramref name="product"/> (the multiplicative skill
@@ -218,7 +280,7 @@ public static class SkillRules
 
     /// <summary>
     /// Experience to raise a trained or specialised skill by one rank (<c>gmSkillUI::GetCostToRaise</c>, 11.6096 0x0049B8F0): the XpTable's cumulative experience for rank + 1 less the experience spent
-    /// (<c>ExperienceSystem::ExperienceToSkillLevel</c>); 0 when the skill is not trained or specialised or is at its rank cap (the list's length less one).
+    /// (<c>ExperienceSystem::ExperienceToSkillLevel</c>, 11.6096 0x005C93B0); 0 when the skill is not trained or specialised or is at its rank cap (the list's length less one).
     /// </summary>
     /// <param name="xp">The XpTable.</param>
     /// <param name="skill">The skill as the read model has it.</param>

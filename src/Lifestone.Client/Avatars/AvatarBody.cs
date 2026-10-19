@@ -907,6 +907,27 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         Active = true;
     }
 
+    /// <summary>
+    /// Moves a flying projectile into the cell its new position falls in (<c>CPhysicsObj::UpdateObjectInternal</c>, 11.6096 0x005161B0, through <c>CObjCell::find_cell_list</c>; see <see cref="ProjectileCellFollower"/>):
+    /// only a projectile with a follower, and only within one landblock (the outdoor cell change across a landblock edge is <see cref="SetFrame"/>'s). The parts keep their anchor frame, so nothing is re-posed.
+    /// </summary>
+    private void FollowCell(in CellFrame old)
+    {
+        if (!IsProjectile || CellFollower is not { } follower || Position.CellId == 0 || (old.CellId >> 16) != (Position.CellId >> 16) || old.Origin == Position.Origin)
+        {
+            return;
+        }
+
+        var cell = follower.Follow(Position.CellId, old.Origin, Position.Origin);
+        if (cell != Position.CellId)
+        {
+            Position = Position with { CellId = cell };
+        }
+    }
+
+    /// <summary>The cell lookup a flying projectile uses (set by <see cref="AvatarSet.CellFollower"/> when the body is made), or null: it keeps its creation cell.</summary>
+    internal IAvatarCellFollower? CellFollower { get; set; }
+
     private void UpdateObjectInternal(double quantum, double time, in AvatarStep step)
     {
         if (Active)
@@ -950,6 +971,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
             }
 
             SetFrame(newFrame, probe);
+            FollowCell(old);
             Targets.HandleTargetting(time);
             Movement?.UseTime();
             Parts?.HandleMovement();

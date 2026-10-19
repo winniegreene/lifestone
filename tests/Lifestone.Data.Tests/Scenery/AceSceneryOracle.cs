@@ -47,8 +47,8 @@ internal sealed class AceSceneryOracle(DatSet dats, bool useRetailUnitScale = fa
     private const float TileLength = 24.0f;     // Landblock.TileLength
 
     private readonly double _unit = useRetailUnitScale ? 1.0 / 4294967296.0 : 2.3283064e-10;
-    private readonly Dictionary<uint, Scene> _scenes = [];
-    private readonly Dictionary<uint, AceObject> _objects = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<uint, Scene> _scenes = new(); // concurrent: the sweeps run the oracle in parallel (C2)
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<uint, AceObject> _objects = new();
 
     private sealed record AceObject(bool HasPhysicsBsp, Vector3 SortCenter, float SortRadius, (Vector3 Low, float Radius)[] CylSpheres, int NumSphere);
 

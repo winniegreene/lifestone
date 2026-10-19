@@ -333,6 +333,35 @@ public sealed class BuffCycle
         _options = options;
         _log = log;
 
+        var lines = OrderedLines;
+        _order = new WantedLine[lines.Count];
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            var infos = InfosOf(line, spells);
+            _order[i] = new WantedLine(i, line, ShortNames.GetValueOrDefault(line.Name) ?? line.Name.Replace(" ", string.Empty, StringComparison.Ordinal), infos, line.Role == ProfileRole.ItemBuffArmor);
+            for (var s = 0; s < line.Spells.Count; s++)
+            {
+                _spellOf[line.Spells[s].Id] = (i, s);
+            }
+        }
+
+        _transferLine = ArenaProfile.LineNamed(TransferLineName) ?? throw new InvalidOperationException("the profile has no line " + TransferLineName);
+        _boostLine = ArenaProfile.LineNamed(BoostLineName) ?? throw new InvalidOperationException("the profile has no line " + BoostLineName);
+        _transferInfos = InfosOf(_transferLine, spells);
+        _boostInfos = InfosOf(_boostLine, spells);
+        _transferRows = new TransferRow?[_transferInfos.Length];
+        for (var i = 0; i < _transferRows.Length; i++)
+        {
+            _transferRows[i] = _transferInfos[i] is { } info ? BuffStatMods.TransferOf(info.Id) : null; // looked up once: the lookup allocates
+        }
+    }
+
+    /// <summary>The buff lines in the order the cycle casts them: Focus, Willpower and Creature Enchantment Mastery first, then the other Mastery lines, then the rest in the profile's order (the owner's dependency order; the spell bars use it too).</summary>
+    public static IReadOnlyList<ProfileLine> OrderedLines { get; } = BuildOrder();
+
+    private static List<ProfileLine> BuildOrder()
+    {
         var lines = new List<ProfileLine>();
         foreach (var name in new[] { "Focus Self", "Willpower Self", "Creature Enchantment Mastery Self" })
         {
@@ -355,27 +384,7 @@ public sealed class BuffCycle
             }
         }
 
-        _order = new WantedLine[lines.Count];
-        for (var i = 0; i < lines.Count; i++)
-        {
-            var line = lines[i];
-            var infos = InfosOf(line, spells);
-            _order[i] = new WantedLine(i, line, ShortNames.GetValueOrDefault(line.Name) ?? line.Name.Replace(" ", string.Empty, StringComparison.Ordinal), infos, line.Role == ProfileRole.ItemBuffArmor);
-            for (var s = 0; s < line.Spells.Count; s++)
-            {
-                _spellOf[line.Spells[s].Id] = (i, s);
-            }
-        }
-
-        _transferLine = ArenaProfile.LineNamed(TransferLineName) ?? throw new InvalidOperationException("the profile has no line " + TransferLineName);
-        _boostLine = ArenaProfile.LineNamed(BoostLineName) ?? throw new InvalidOperationException("the profile has no line " + BoostLineName);
-        _transferInfos = InfosOf(_transferLine, spells);
-        _boostInfos = InfosOf(_boostLine, spells);
-        _transferRows = new TransferRow?[_transferInfos.Length];
-        for (var i = 0; i < _transferRows.Length; i++)
-        {
-            _transferRows[i] = _transferInfos[i] is { } info ? BuffStatMods.TransferOf(info.Id) : null; // looked up once: the lookup allocates
-        }
+        return lines;
     }
 
     /// <summary>Where the cycle is (one of the <c>Stage...</c> constants).</summary>

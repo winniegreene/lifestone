@@ -75,6 +75,9 @@ public sealed class GameVitaePage : IGamePanel, IDisposable
     /// <summary>How many times the text was written.</summary>
     public int Updates { get; private set; }
 
+    /// <summary><c>--video-hide-floaties</c> (video capture only, off by default): a worse vitae does not open the page by itself (the toolbar still opens it). Set once at start-up by the main scene.</summary>
+    public static bool HideForVideo { get; set; }
+
     /// <summary>The vitae multiplier the page last read (1 for none).</summary>
     public float Vitae => _vitae;
 
@@ -128,7 +131,10 @@ public sealed class GameVitaePage : IGamePanel, IDisposable
         {
             _vitae = value;
             _dirty = true;
-            _host.SetPanelVisibility(Page, true);
+            if (!HideForVideo)
+            {
+                _host.SetPanelVisibility(Page, true);
+            }
         }
     }
 

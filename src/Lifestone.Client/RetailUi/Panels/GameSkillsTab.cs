@@ -32,7 +32,7 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// <para><b>The header.</b> The page header (name, level, total experience, the experience to the next level and its meter: <c>gmStatManagementUI::UpdateCharacterInfo</c> 0x004F1400 and <c>UpdateExperience</c> 0x004F1700)
 /// is written by <see cref="StatHeader"/>, the helper this tab shares with the attributes tab, each time the tab redraws.</para>
 /// <para><b>Placeholders.</b> The header's heritage line and kill status are the helper's (<c>TODO(m3-attribute-heritage)</c>, <c>TODO(m3-pk-status)</c>); a row has no tooltip (<c>SkillInfoRegion::GetTooltip</c> 0x004F2C40, <c>TODO(m3-skill-tooltips)</c>).
-/// The augmentation bonuses are not in the value (<c>TODO(m3-skill-aug-bonus)</c>, <see cref="SkillRules"/>).</para>
+/// The augmentation bonuses are in the value (<see cref="SkillRules.AugBonusBase"/>, <see cref="SkillRules.AugBonusCurrent"/>; ACE <c>CreatureSkill.cs</c>).</para>
 /// </remarks>
 public sealed class GameSkillsTab : IGamePanel, IUiElementListener, IDisposable
 {

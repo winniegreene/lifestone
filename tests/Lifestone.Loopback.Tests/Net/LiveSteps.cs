@@ -151,6 +151,10 @@ internal static class LiveSteps
     public static float Distance(WhereData where, AcPosition position) =>
         Vector3.Distance(new Vector3(where.X, where.Y, where.Z), position.Origin);
 
+    /// <summary>True when a <c>where</c> reply is in <paramref name="start"/>'s cell and within 0.5 m of it (the bar <c>ReturnToStart</c> asserts after a teleport).</summary>
+    public static bool IsAtStart(WhereData where, AcPosition start) =>
+        ToolsWire.TryParseCell(where.Cell, out var cell) && cell == start.CellId && Distance(where, start) <= 0.5f;
+
     /// <summary>The landblock half (the high 16 bits) of a cell the mod printed (<c>0xAAAABBBB</c>).</summary>
     public static uint LandblockOf(string cell) =>
         ToolsWire.TryParseCell(cell, out var id) ? id >> 16 : throw new InvalidOperationException($"'{cell}' is not a cell id");

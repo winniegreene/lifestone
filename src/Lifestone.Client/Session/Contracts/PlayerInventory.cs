@@ -58,7 +58,7 @@ public readonly record struct InventoryPlace(InventoryPlaceKind Kind, uint Conta
 /// with values that do not always agree with the final state (its wield sends Wielder 0 and CurrentWieldedLocation 0 before 0x0023 names
 /// the location), so those two only update the item's qualities.</para>
 /// <para>Burden is read from the player's <c>EncumbranceVal</c> quality (int 5; <see cref="PlayerQualities"/>), never computed. The
-/// capacity is not sent by the server (<c>TODO(m3-burden-capacity)</c>: retail derives it from Strength and augmentations).</para>
+/// capacity is not sent by the server: retail derives it from Strength and augmentations, and the character panel computes it (<c>GameCharacterInfo.LoadOf</c>; <c>TODO(m3-burden-capacity)</c> closed).</para>
 /// </remarks>
 public sealed class PlayerInventory
 {

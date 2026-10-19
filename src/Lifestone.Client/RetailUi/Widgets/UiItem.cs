@@ -10,7 +10,7 @@ using Lifestone.Data.Ui;
 namespace Lifestone.Client.RetailUi.Widgets;
 
 /// <summary>
-/// What a cell needs to draw one item's icon (the fields of the object's CreateObject WeenieDesc that retail's <c>IconData::RenderIcons</c>, 11.6096 0x0058E200, reads): the icon, the custom underlay and overlay
+/// What a cell needs to draw one item's icon (the fields of the object's CreateObject WeenieDesc that retail's <c>IconData::RenderIcons</c>, 11.6096 0x0058DFB0, reads): the icon, the custom underlay and overlay
 /// (DIDs, 0 for none), the item type (the background by type) and the UI effects word (the magical glow), plus the stack size and the names the tooltip uses. The owner builds one per item; the cell keeps nothing of the object.
 /// </summary>
 /// <param name="IconId">The icon (<c>WeenieDesc.IconId</c>, a RenderSurface DID).</param>
@@ -38,7 +38,7 @@ public readonly record struct UiItemIcon(uint IconId, uint UnderlayId, uint Over
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The icon</b> (<c>UIElement_UIItem::UIItem_SetIcon</c> 11.6096 0x004E2D10, <c>UIItem_Update</c> 0x004E2E60, <c>IconData::RenderIcons</c> 0x0058E200 over the object's icon data, 0x0058EC60): an item's picture is composed once
+/// <b>The icon</b> (<c>UIElement_UIItem::UIItem_SetIcon</c> 11.6096 0x004E2D10, <c>UIItem_Update</c> 0x004E2E60, <c>IconData::RenderIcons</c> 0x0058DFB0 over the object's icon data, 0x0058EC60): an item's picture is composed once
 /// into 32 by 32 pixels. First the icon is copied and the custom overlay alpha-blended over it (four-channel alpha); then every pure white pixel of that is replaced by the pixel at the same place of the UI-effects
 /// texture (<c>SurfaceWindow::ReplaceColor</c>, 11.4186 0x004415B0: enum group 0x10000005 by the lowest set bit of the effects plus one, entry 33 when the effects are 0 or the entry is missing: this is the magical glow). The cell's
 /// picture is the type background (enum group 0x10000004 by the lowest set bit of the item type plus one, entry 33 for type 0) copied, the custom underlay blended over it (three-channel alpha), and that composite blended over
@@ -455,7 +455,7 @@ public class UiItem : UiField
     }
 }
 
-/// <summary>The icon composition of <see cref="UiItem"/> (retail's <c>IconData::RenderIcons</c>, 11.6096 0x0058E200; see the cell's remarks).</summary>
+/// <summary>The icon composition of <see cref="UiItem"/> (retail's <c>IconData::RenderIcons</c>, 11.6096 0x0058DFB0; see the cell's remarks).</summary>
 internal static class UiItemIcons
 {
     private const int Size = 32;

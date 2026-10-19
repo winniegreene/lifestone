@@ -158,6 +158,45 @@ public sealed class SkillRulesTests(DatSetFixture fixture) : IClassFixture<DatSe
     }
 
     [Fact]
+    public void The_augmentation_bonuses_join_the_base_and_the_current_as_ACE_adds_them()
+    {
+        // m3-skill-aug-bonus: ACE CreatureSkill.GetAugBonus_Base (LumAugAllSkills 365, the melee/missile/magic augmentations 300-302 at +10 a level on their group, Enlightenment 390 on a trained skill) joins the base and is
+        // scaled; GetAugBonus_Current (Jack of All Trades 326 at +5 a level, LumAugSkilledSpec 344 at +2 a level on a specialised skill) is added after the vitae. The plain value here is (90 + 80) / 3 = 57, + 10 + 20 ranks = 87.
+        const uint LightWeapons = 45;
+        var plain = Character([], skill: LightWeapons);
+        Assert.Equal(87u, Current(plain, LightWeapons));
+
+        var q = Character([], skill: LightWeapons);
+        q.Ints[SkillRules.AugSkilledMeleeProperty] = 2;
+        Assert.True(SkillRules.TryBase(q, LightWeapons, MeleeFormula, 2, out var baseValue));
+        Assert.Equal(107u, baseValue);
+        Assert.Equal(107u, Current(q, LightWeapons));
+
+        // A skill outside the group gets none of it.
+        var defence = Character([]);
+        defence.Ints[SkillRules.AugSkilledMeleeProperty] = 2;
+        Assert.Equal(87u, Current(defence));
+
+        // The credit augmentation counts for every skill; Enlightenment only from Trained up.
+        var all = Character([], skill: LightWeapons);
+        all.Ints[SkillRules.LumAugAllSkillsProperty] = 3;
+        all.Ints[SkillRules.EnlightenmentProperty] = 2;
+        Assert.Equal(92u, Current(all, LightWeapons));
+        var untrained = Character([], advancementClass: SkillRules.UntrainedClass, skill: LightWeapons);
+        untrained.Ints[SkillRules.LumAugAllSkillsProperty] = 3;
+        untrained.Ints[SkillRules.EnlightenmentProperty] = 2;
+        Assert.Equal(10u + 20u + 3u, Current(untrained, LightWeapons)); // no formula part below Trained, no Enlightenment
+
+        // The current bonuses come after the enchantments' product and add to the additive ones; the base is not touched.
+        var late = Character([Make(902, 30, 200, AdditiveSkill, LightWeapons, 40f, EnchantmentBucket.Additive)], advancementClass: SkillRules.SpecializedClass, skill: LightWeapons);
+        late.Ints[SkillRules.JackOfAllTradesProperty] = 2;
+        late.Ints[SkillRules.LumAugSkilledSpecProperty] = 3;
+        Assert.Equal(87u + 40u + 10u + 6u, Current(late, LightWeapons));
+        Assert.True(SkillRules.TryBase(late, LightWeapons, MeleeFormula, 2, out var lateBase));
+        Assert.Equal(87u, lateBase);
+    }
+
+    [Fact]
     public void The_registry_walk_allocates_nothing()
     {
         var q = Character([Make(902, 30, 200, AdditiveSkill, MeleeDefense, 40f, EnchantmentBucket.Additive), Make(904, 32, 100, EnchantmentRules.Multiplicative | SkillKind, MeleeDefense, 1.1f, EnchantmentBucket.Multiplicative)]);

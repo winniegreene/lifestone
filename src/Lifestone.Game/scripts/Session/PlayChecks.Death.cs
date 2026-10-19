@@ -229,6 +229,8 @@ public sealed partial class PlayChecks
             return;
         }
 
+        // M3 4.2 p5b C5: the live scenario's den teleport dispels the protection of the earlier death (Player_Location.cs 702); this one has none, so the stand-in does it here.
+        server.DispelProtectionAsATeleportDoes();
         var shell = _ui?.Screens?.Flow.CurrentScreen as GamePlayScreen;
         var watch = new DeathWatch { PlayerSetup = avatars.Player?.Body.Setup.Id ?? 0 };
         using var scenario = new DeathScenario(table.Spells, "stand-in-death-loop", new DeathOptions { Seconds = DeathLoopWaitSeconds }, new StandInStillWalk(), GodotLogSink.Instance, endSession: false, stages: stages);

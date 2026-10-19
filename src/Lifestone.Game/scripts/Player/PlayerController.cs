@@ -179,6 +179,9 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
     /// </summary>
     public CellFrame DrawPosition { get; private set; }
 
+    /// <summary>The move from the physics step's body frame to the interpolated one the player is drawn at (D26); the server-objects layer applies it to the player's held items (M3 4.1 fix A, R6).</summary>
+    public DrawInterpolation.Offset DrawOffset => _drawOffset;
+
     /// <summary>The streaming focus: the player's position with the dungeon rule (<see cref="PlayerStreamingFocus"/>).</summary>
     public StreamingFocus StreamingFocus => _focus.Of(Position);
 

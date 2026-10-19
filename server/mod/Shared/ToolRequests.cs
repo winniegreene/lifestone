@@ -213,14 +213,16 @@ public sealed record SpellLearnRequest(IReadOnlyList<uint> SpellIds, string? Id 
 }
 
 /// <summary>
-/// <c>@lifestone item &lt;wcid&gt; [&lt;stack&gt;]</c>: creates an item in the calling player's own pack, as ACE's <c>@ci</c> does (AdminCommands.HandleCI:
+/// <c>@lifestone item &lt;wcid&gt; [&lt;stack&gt;] [palette=&lt;n&gt;] [shade=&lt;f&gt;]</c>: creates an item in the calling player's own pack, as ACE's <c>@ci</c> does (AdminCommands.HandleCI:
 /// the weenie, one new world object, its stack size, TryCreateInInventoryWithNetworking). Like <c>@ci</c>, a stack above the item's
 /// maximum is clamped to it, and a stack for an item that does not stack is ignored (one item is created); the reply says what was created.
 /// </summary>
 /// <param name="Wcid">The weenie class id: a whole number from 0 to 4,294,967,295 (the world database decides whether it exists).</param>
 /// <param name="Stack">The stack size asked for: 1 to <see cref="ToolRequestParser.MaxItemStack"/> (@ci's own limit), or null for the weenie's own.</param>
 /// <param name="Id">The correlation id, or null.</param>
-public sealed record ItemRequest(uint Wcid, int? Stack = null, string? Id = null) : ToolRequest(Id)
+/// <param name="Palette">The <c>PaletteTemplate</c> to give the object (ACE's <c>@ci</c> sets <c>obj.PaletteTemplate</c> before it gives the item, AdminCommands.cs:2559-2560), 1 to <see cref="ToolRequestParser.MaxItemPalette"/>, or null for the weenie's own.</param>
+/// <param name="Shade">The shade (<c>obj.Shade</c>, AdminCommands.cs:2562-2563), 0 to 1, or null for the weenie's own.</param>
+public sealed record ItemRequest(uint Wcid, int? Stack = null, string? Id = null, int? Palette = null, double? Shade = null) : ToolRequest(Id)
 {
     /// <inheritdoc/>
     public override string Verb => ToolVerbs.Item;

@@ -35,7 +35,7 @@ The moved helpers keep the namespaces they had (`Lifestone.Data.Tests`, `Lifesto
 - Tests that talk to the localhost backend are `[LoopbackFact]` or `[LoopbackTheory]`. Their class carries
   `[Trait("Category", "Loopback")]` and `[Collection(LoopbackCollection.Name)]`, and they live in
   `tests/Lifestone.Loopback.Tests/<Track>/`. A reflection test enforces this. Default runs exclude them with
-  `--filter "Category!=Loopback&Tier!=Soak"`.
+  `--filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive"`; the Exhaustive tier (76 tests, the dat sweeps) has its own slice-check stage (`-Exhaustive`).
 - Loopback classes have no `IClassFixture` (and the Loopback collection no `ICollectionFixture`): xUnit builds fixtures
   before the gate takes the lock and re-probes the backend, even when every test skips. Per-class shared state (one
   login for several tests) is created lazily from inside a test body, after the gate, never in a fixture constructor.

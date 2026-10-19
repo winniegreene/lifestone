@@ -118,6 +118,7 @@ internal sealed class FakeActions : IActionApi
     public ActionHandle Suicide(ActionSource source = ActionSource.Host) => throw Unexpected();
 
     public ActionHandle AddSpellFavorite(uint spellId, int index, int bar, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle RemoveSpellFavorite(uint spellId, int bar, ActionSource source = ActionSource.Host) => throw Unexpected();
 
     public ActionHandle Talk(string text, ActionSource source) => throw Unexpected();
 

@@ -4,7 +4,10 @@ using System.Text;
 using Godot;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Interiors;
+using Lifestone.Data.Animation;
+using Lifestone.Data.World;
 using Lifestone.Game.Core;
+using Lifestone.Game.Diagnostics;
 using Lifestone.Game.Player;
 
 namespace Lifestone.Game.World.Interiors;
@@ -43,6 +46,10 @@ public partial class InteriorTourRunner : Node
     private long _maxDrawCalls;
     private int _maxCells;
     private double _startHeading;
+    private readonly DynamicLightList _lights = new() { ViewerLightEnabled = true };
+    private readonly DynamicLightFrame _lightFrame = new();
+    private readonly PipelineCompilationWatch _pipelines = new();
+    private ulong _foregroundPipelines;
 
     private enum Phase
     {
@@ -61,6 +68,8 @@ public partial class InteriorTourRunner : Node
         _mainThread = mainThread;
         _directory = directory;
         _camera.InputEnabled = false;
+        _lights.ViewerLightEnabled = LightOptions.Parse(OS.GetCmdlineUserArgs()).ViewerLight; // --viewer-light=on|off: the glow as play shows it, so the tour measures what play draws
+        _controller.DynamicLights.Source = _lightFrame;
         ProcessPriority = -10; // before the camera, so a turn applies this frame
     }
 
@@ -70,6 +79,14 @@ public partial class InteriorTourRunner : Node
         var frameMs = _lastTimestamp == 0 ? 0.0 : (now - _lastTimestamp) * 1000.0 / Stopwatch.Frequency;
         _lastTimestamp = now;
         var all = InteriorLocations.All;
+        FillViewerLight();
+        _pipelines.Step();
+        if (_pipelines.Last.Foreground > 0)
+        {
+            _foregroundPipelines += _pipelines.Last.Foreground;
+            Log.Info("interiors", "tour pipeline compiled in a measured phase", ("location", all[Math.Max(0, _index)].Key), ("phase", _phase), ("frame_ms", frameMs), ("pipelines_surface", _pipelines.Last.Surface), ("pipelines_mesh", _pipelines.Last.Mesh), ("pipelines_draw", _pipelines.Last.Draw), ("lights", _lightFrame.Count));
+        }
+
         switch (_phase)
         {
             case Phase.Next:
@@ -222,6 +239,17 @@ public partial class InteriorTourRunner : Node
         Log.Info("interiors", "tour", ("result", line));
     }
 
+    /// <summary>The viewer light as play makes it (<c>AvatarSet.Advance</c>): the list's update at the camera's cell and position, then the frame the table reads.</summary>
+    private void FillViewerLight()
+    {
+        var eye = _camera.WorldPosition;
+        var cell = _controller.Tracker.CellId;
+        var origin = Lifestone.Client.World.AcCoordinates.LandblockOrigin(Lifestone.Data.Terrain.LandblockCoord.FromId(cell));
+        var local = new System.Numerics.Vector3((float)(eye.X - origin.X), (float)(eye.Y - origin.Y), (float)eye.Z);
+        _lights.Update(new CellFrame(cell, new AcFrame(local, System.Numerics.Quaternion.Identity)), null);
+        _lightFrame.Fill(_lights);
+    }
+
     /// <summary>The shared screenshot rule (<see cref="Diagnostics.ScreenshotWriter"/>: repository-relative, never inside src/ or tests/).</summary>
     private void SaveScreenshot(string path) => Diagnostics.ScreenshotWriter.Save(GetViewport(), path, "interiors");
 
@@ -233,7 +261,7 @@ public partial class InteriorTourRunner : Node
             sb.Append(line).Append('\n');
         }
 
-        Log.Info("interiors", "tour done", ("locations", InteriorLocations.All.Count));
+        Log.Info("interiors", "tour done", ("locations", InteriorLocations.All.Count), ("foreground_pipelines_in_measured_phases", _foregroundPipelines), ("dyn_light_cells_peak", _controller.DynLightCellsPeak));
         Log.FlushFile();
         GetTree().Quit(0);
     }

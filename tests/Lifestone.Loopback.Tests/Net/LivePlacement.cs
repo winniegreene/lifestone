@@ -50,8 +50,20 @@ internal static class LivePlacement
         try
         {
             EnterReadyAtStart(client, output);
-            var arrival = ReturnToStart(client, AcademyStart);
-            output.WriteLine($"the character is at {arrival.Where.Cell} ({arrival.Where.X:F2}, {arrival.Where.Y:F2}) after {arrival.Teleports} teleport(s)");
+
+            // M3 4.2 p5b C10 (PACKAGE-3 cut 12 change B): the teleport only when the character is not at its start already (cell and 0.5 m,
+            // not just the landblock: a character left in another room of the Academy's landblock is still sent back).
+            var where = AskData<WhereData>(client, new WhereRequest(NextId()));
+            if (IsAtStart(where, AcademyStart))
+            {
+                output.WriteLine($"the character is at {where.Cell} ({where.X:F2}, {where.Y:F2}): at its start, no teleport");
+            }
+            else
+            {
+                var arrival = ReturnToStart(client, AcademyStart);
+                output.WriteLine($"the character is at {arrival.Where.Cell} ({arrival.Where.X:F2}, {arrival.Where.Y:F2}) after {arrival.Teleports} teleport(s)");
+            }
+
             beforeLeaving?.Invoke(client);
         }
         finally

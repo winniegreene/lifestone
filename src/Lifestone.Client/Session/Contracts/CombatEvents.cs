@@ -114,3 +114,11 @@ public static class DeathPairing
     /// <summary>How long after one death message the other (0x01AC or 0x019E) is still taken as the same death (session-clock seconds).</summary>
     public const double PairWindowSeconds = 5.0;
 }
+
+/// <summary>
+/// The player was attacked (0x01B2 or 0x01B4) in melee or missile combat mode with the AutoTarget option on:
+/// <c>ClientCombatSystem::AutoTarget</c> (11.6096 0x0056C9D0) wants the attacker selected when nothing is. The selection listens
+/// (<c>ObjectSelection.Attach</c>); the reducer does not know the selection.
+/// </summary>
+/// <param name="Attacker">The attacker's object id, or 0 when no object of the notice's name is known (retail then selects the closest compass item: <c>TODO(m3-autotarget-selectnext)</c>).</param>
+public readonly record struct AutoTargetRequested(uint Attacker) : IGameEvent;

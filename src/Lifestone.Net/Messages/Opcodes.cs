@@ -298,6 +298,9 @@ public static class GameActionTypes
     /// <summary>AddSpellFavorite {u32 spell, u32 index, u32 bar} (ACE <c>GameActionAddSpellFavorite</c>, retail <c>CM_Character::Event_AddSpellFavorite</c>, 11.6096 0x006A1D90).</summary>
     public const uint AddSpellFavorite = 0x01E3;
 
+    /// <summary>RemoveSpellFavorite {u32 spell, u32 bar} (ACE <c>GameActionRemoveSpellFavorite</c>, retail <c>CM_Character::Event_RemoveSpellFavorite</c>, 11.4186 0x006A1890, 11.6096 0x006A26B0).</summary>
+    public const uint RemoveSpellFavorite = 0x01E4;
+
     /// <summary>Jump (56 bytes, retail <c>JumpPack</c>).</summary>
     public const uint Jump = 0xF61B;
 

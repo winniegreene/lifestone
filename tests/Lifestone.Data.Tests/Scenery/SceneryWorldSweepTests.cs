@@ -19,8 +19,20 @@ public sealed class SceneryWorldSweepTests(DatSetFixture fixture, ITestOutputHel
         var objectIds = new HashSet<uint>();
         var digest = new HashCode();
 
-        for (var x = 0; x <= 0xFE; x++)
+        // C2 (q5): one landblock row (fixed x) per work item. The generator and its data source are thread-safe
+        // (concurrent scene/bounds caches, dat reads under DatSet's lock; the parallel half below already relies on it).
+        // Counters merge per row; the digest folds the rows in x, y order afterwards, so it equals the sequential one.
+        var rows = new List<ScenePlacement>[0xFF];
+        var rowTotals = new long[0xFF][];
+        var rowSetups = new long[0xFF];
+        var rowBaseZ = new long[0xFF];
+        var rowObjects = new HashSet<uint>[0xFF];
+        ParallelSweep.For(0xFF, x =>
         {
+            var row = new List<ScenePlacement>();
+            var totalsHere = new long[totals.Length];
+            var objectsHere = new HashSet<uint>();
+            long setupsHere = 0, baseZHere = 0;
             for (var y = 0; y <= 0xFE; y++)
             {
                 var coord = new LandblockCoord((byte)x, (byte)y);
@@ -29,7 +41,7 @@ public sealed class SceneryWorldSweepTests(DatSetFixture fixture, ITestOutputHel
                 var result = generator.Generate(landblock);
                 foreach (var stage in Enum.GetValues<SceneryStage>())
                 {
-                    totals[(int)stage] += result.Funnel[stage];
+                    totalsHere[(int)stage] += result.Funnel[stage];
                 }
 
                 if (result.Placements.Count == 0)
@@ -41,30 +53,52 @@ public sealed class SceneryWorldSweepTests(DatSetFixture fixture, ITestOutputHel
                 var buildingCells = generator.BuildingCells(landblock);
                 foreach (var p in result.Placements)
                 {
-                    placed++;
-                    objectIds.Add(p.ObjectId);
-                    setups += p.IsSetup ? 1 : 0;
-                    digest.Add(p);
+                    row.Add(p);
+                    objectsHere.Add(p.ObjectId);
+                    setupsHere += p.IsSetup ? 1 : 0;
 
                     // In the block, in the stated cell, not in a building cell, off the road.
                     Assert.InRange(p.Origin.X, 0f, 191.99999f);
                     Assert.InRange(p.Origin.Y, 0f, 191.99999f);
                     Assert.Equal(TerrainSampler.CellIndexOf(p.Origin.X), p.CellX);
                     Assert.Equal(TerrainSampler.CellIndexOf(p.Origin.Y), p.CellY);
-                    Assert.False(buildingCells[p.CellIndex]);
-                    Assert.False(SceneryRoad.OnRoad(landblock.Terrain, p.Origin.X, p.Origin.Y));
+                    Assert.False(buildingCells[p.CellIndex], $"landblock {coord}: placement in a building cell");
+                    Assert.False(SceneryRoad.OnRoad(landblock.Terrain, p.Origin.X, p.Origin.Y), $"landblock {coord}: placement on the road");
 
                     // z is exactly the terrain plane height (never ground + BaseLoc.Z).
                     Assert.Equal(sampler.GetHeight(p.Origin.X, p.Origin.Y), p.Origin.Z);
                     var obj = data.GetScene(p.SceneId)!.Objects[p.ObjectIndex];
-                    withBaseZ += obj.BaseOrigin.Z != 0f ? 1 : 0;
+                    baseZHere += obj.BaseOrigin.Z != 0f ? 1 : 0;
 
                     // Slope window, scale range, unit orientation.
-                    Assert.True(SceneryGenerator.CheckSlope(obj, sampler.GetNormal(p.Origin.X, p.Origin.Y).Z));
+                    Assert.True(SceneryGenerator.CheckSlope(obj, sampler.GetNormal(p.Origin.X, p.Origin.Y).Z), $"landblock {coord}: slope window");
                     Assert.InRange(p.Scale, Math.Min(obj.MinScale, obj.MaxScale) * 0.99999f, Math.Max(obj.MinScale, obj.MaxScale) * 1.00001f);
                     Assert.InRange(p.Orientation.Length(), 0.999f, 1.001f);
                     Assert.Equal(p.ObjectId, obj.ObjectId);
                 }
+            }
+
+            rows[x] = row;
+            rowTotals[x] = totalsHere;
+            rowSetups[x] = setupsHere;
+            rowBaseZ[x] = baseZHere;
+            rowObjects[x] = objectsHere;
+        });
+
+        for (var x = 0; x < rows.Length; x++)
+        {
+            for (var st = 0; st < totals.Length; st++)
+            {
+                totals[st] += rowTotals[x][st];
+            }
+
+            setups += rowSetups[x];
+            withBaseZ += rowBaseZ[x];
+            objectIds.UnionWith(rowObjects[x]);
+            placed += rows[x].Count;
+            foreach (var p in rows[x])
+            {
+                digest.Add(p);
             }
         }
 

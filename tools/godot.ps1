@@ -40,6 +40,12 @@
     Point APPDATA/LOCALAPPDATA of the Godot process at <repo>\cache\godot\ so user:// data, logs and shader caches
     stay inside the repo (gitignored). Useful for automated runs.
 
+.PARAMETER UserDataSlot
+    With -IsolateUserData: a short name (a-z, 0-9, at most 8) that moves the isolated user data to <repo>\cache\godot\slot-<name>
+    instead of <repo>\cache\godot\. Two Godot runs at once need two slots: the game's log file (user://logs) is opened
+    exclusively, so a second process in the same folder would lose its file log (smoke -Parallel, M3 4.2 p5a). The default
+    (no slot) is unchanged, and a frame-judged run keeps it.
+
 .PARAMETER Offscreen
     With -Run: open the game window far off-screen (--position -20000,-20000) so automated runs (screenshots,
     fly-path measurements) render normally without popping up on the user's desktop. Use it for every automated run.
@@ -118,6 +124,8 @@ param(
     [string] $Resolution = '',
     [string] $DatDir = '',
     [switch] $IsolateUserData,
+    [ValidatePattern('^[a-z0-9]{0,8}$')]
+    [string] $UserDataSlot = '',
     [switch] $Offscreen,
     [switch] $Audio,
     [int] $TimeoutSeconds = 0,
@@ -199,8 +207,9 @@ foreach ($key in $childEnv.Keys) { $godotEnv[$key] = $childEnv[$key] }
 # calling shell cannot change a measurement silently.
 $godotEnv['DOTNET_gcServer'] = if ($WorkstationGC) { '0' } else { '1' }
 if ($IsolateUserData) {
-    $roaming = Join-Path $repoRoot 'cache\godot\roaming'
-    $local = Join-Path $repoRoot 'cache\godot\local'
+    $dataRoot = if ($UserDataSlot) { Join-Path $repoRoot "cache\godot\slot-$UserDataSlot" } else { Join-Path $repoRoot 'cache\godot' }
+    $roaming = Join-Path $dataRoot 'roaming'
+    $local = Join-Path $dataRoot 'local'
     New-Item -ItemType Directory -Force -Path $roaming, $local | Out-Null
     $godotEnv['APPDATA'] = $roaming
     $godotEnv['LOCALAPPDATA'] = $local

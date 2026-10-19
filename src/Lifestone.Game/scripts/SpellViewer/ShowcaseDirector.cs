@@ -30,6 +30,7 @@ public sealed class ShowcaseDirector
     private int _index = -1;
     private double _elapsed;
     private int _frame;
+    private int _litProjectilesPeak;
     private bool _started;
     private Shot _current;
 
@@ -75,11 +76,13 @@ public sealed class ShowcaseDirector
 
             _started = true;
             Log.Info("spellviewer", "showcase starts", ("frame", _frame), ("entries", _entries.Count));
+            Log.Warn("spellviewer", "TODO(m3-showcase-lights): the spell viewer draws no dynamic light; lit_projectiles counts stage projectiles with their lights on, not lights");
             Next();
             return;
         }
 
         _elapsed += step;
+        CountDynamicLights();
         var entry = _entries[_index];
         if (_elapsed >= Duration(entry))
         {
@@ -98,6 +101,26 @@ public sealed class ShowcaseDirector
         Apply(_current);
     }
 
+    /// <summary>
+    /// Report-only (M3 4.1 fix A, R4): the peak number of stage projectiles drawn with their lights on (the <c>lit_projectiles</c> field; it counts projectiles, not lights: TODO(m3-showcase-lights), the spell viewer draws no dynamic light). The stage owns no
+    /// <c>AvatarSet</c>, so no list is kept here; the Setup's own light is not checked (the projectile Setups all carry one, <c>ModelAssemblyTests</c>).
+    /// </summary>
+    private void CountDynamicLights()
+    {
+        var actors = _viewer.Stage.Actors;
+        var n = 0;
+        for (var i = 0; i < actors.Count; i++)
+        {
+            var a = actors[i];
+            if (a.Role == Lifestone.Client.Effects.StageRole.Projectile && !a.Hidden && a.Actor.Effects.Visual.LightsOn)
+            {
+                n++;
+            }
+        }
+
+        _litProjectilesPeak = Math.Max(_litProjectilesPeak, n);
+    }
+
     private void Next()
     {
         _index++;
@@ -105,7 +128,7 @@ public sealed class ShowcaseDirector
         {
             Finished = true;
             ExitCode = _viewer.Exceptions == 0 ? 0 : 1;
-            Log.Info("spellviewer", "showcase done", ("frame", _frame), ("exceptions", _viewer.Exceptions));
+            Log.Info("spellviewer", "showcase done", ("frame", _frame), ("exceptions", _viewer.Exceptions), ("lit_projectiles", _litProjectilesPeak));
             return;
         }
 

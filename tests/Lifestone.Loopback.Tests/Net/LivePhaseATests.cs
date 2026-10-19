@@ -128,15 +128,15 @@ public sealed class LivePhaseATests(ITestOutputHelper output)
     /// <summary>
     /// dod-1-2-12-13-4: the 20 s silence watchdog (<see cref="SessionTimeouts.Silence"/>, owner decision D18; retail waits 140 s) must not
     /// trip on a character list the player is just reading. ACE's own TimeSync (every 20 s) and its ack-only packets are what keep the link
-    /// from being silent; this proves it on the real backend with the product's timeouts: 45 s in CharacterSelect, nothing done, and the
+    /// from being silent; this proves it on the real backend with the product's timeouts: 30 s (the 20 s watchdog plus 10 s; M3 4.2 p5b C10, was 45 s) in CharacterSelect, nothing done, and the
     /// phase is still CharacterSelect with no failure. If it fails, the lead hands the fix (count the client's own acks as activity, or raise the
     /// watchdog while in CharacterSelect) to the owner, because D18 is the owner's.
     /// </summary>
     [LoopbackFact]
     [LiveStep(3)]
-    public void Idling_in_the_character_list_for_45_seconds_does_not_trip_the_silence_watchdog()
+    public void Idling_in_the_character_list_past_the_silence_watchdog_does_not_trip_it()
     {
-        var idle = TimeSpan.FromSeconds(45);
+        var idle = SessionTimeouts.Default.Silence + TimeSpan.FromSeconds(10); // 30 s: ACE sends a TimeSync every 20 s, so any 30 s window holds one (C10)
         Assert.True(SessionTimeouts.Default.Silence < idle, "the default watchdog is not shorter than the idle time: the test would prove nothing");
 
         using var dats = DatSet.Open();
@@ -145,8 +145,11 @@ public sealed class LivePhaseATests(ITestOutputHelper output)
         Assert.Equal(SessionPhase.CharacterSelect, client.Session.Phase);
 
         // Pumps (and so runs the watchdog) for the whole time; any phase change ends the wait early.
+        var timeSyncsBefore = client.Sink.Events.Count(e => e.Kind == SessionEventKind.ServerTime);
         var changed = client.PumpUntil(() => client.Session.Phase != SessionPhase.CharacterSelect, idle);
         output.WriteLine($"after {idle.TotalSeconds:0} s idle: phase {client.Session.Phase}, changed early: {changed}");
+        var timeSyncs = client.Sink.Events.Count(e => e.Kind == SessionEventKind.ServerTime) - timeSyncsBefore;
+        output.WriteLine($"TimeSync (ServerTime events) during the idle: {timeSyncs} (report-only in its first gate: the lead reads it before it is asserted >= 1)");
         Assert.False(changed, "the session left CharacterSelect while idle: " + client.Describe());
         Assert.Equal(SessionPhase.CharacterSelect, client.Session.Phase);
         Assert.Null(client.Session.Failure);

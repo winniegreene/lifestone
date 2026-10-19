@@ -100,13 +100,15 @@ public sealed class SceneryOracleTests(DatSetFixture fixture, ITestOutputHelper 
         var ace = new AceSceneryOracle(fixture.Dats, useRetailUnitScale: false);
         var retail = new AceSceneryOracle(fixture.Dats, useRetailUnitScale: true);
         var compared = 0;
-        foreach (var coord in Region(0x00, 0xFE, 0x00, 0xFE))
+        var all = Region(0x00, 0xFE, 0x00, 0xFE).ToArray();
+        ParallelSweep.For(all.Length, i =>
         {
+            var coord = all[i];
             var a = ace.GetLandScenes(coord);
             var r = retail.GetLandScenes(coord);
             Assert.Equal(a.Select(c => (c.VertexX, c.VertexY, c.ObjectIndex, c.Stage)), r.Select(c => (c.VertexX, c.VertexY, c.ObjectIndex, c.Stage)));
-            compared += a.Count;
-        }
+            Interlocked.Add(ref compared, a.Count);
+        });
 
         Assert.Equal(5912342, compared);
     }
@@ -151,18 +153,54 @@ public sealed class SceneryOracleTests(DatSetFixture fixture, ITestOutputHelper 
         return passed;
     }
 
-    private Summary Compare(IEnumerable<LandblockCoord> coords)
+    /// <summary>
+    /// C2 (q5): one landblock per work item, in parallel; the generator and the oracle are thread-safe (concurrent
+    /// caches, dat reads under DatSet's lock), and the per-landblock summaries merge in coordinate order so the stage
+    /// differences list is the sequential run's.
+    /// </summary>
+    private Summary Compare(IEnumerable<LandblockCoord> coordinates)
     {
+        var coords = coordinates.ToArray();
         var generator = SceneryGenerator.FromDats(fixture.Dats);
         // ACE with its 2.3283064e-10 replaced by retail's 2^-32, so displaced x/y are bit-identical; the separate
         // test below shows the constant alone never changes a decision.
         var oracle = new AceSceneryOracle(fixture.Dats, useRetailUnitScale: true);
+        var parts = new Summary[coords.Length];
+        ParallelSweep.For(coords.Length, i => parts[i] = CompareOne(generator, oracle, coords[i]));
+
+        var totals = new int[Enum.GetValues<SceneryStage>().Length];
+        var stageDifferences = new List<string>();
+        int landblocks = 0, candidates = 0, afterRoad = 0, placed = 0, positionDifferences = 0, tilted = 0, scaleDifferences = 0, snapped = 0;
+        var maxPosition = 0f;
+        foreach (var part in parts)
+        {
+            landblocks += part.Landblocks;
+            candidates += part.Candidates;
+            afterRoad += part.AfterRoad;
+            placed += part.Placed;
+            for (var s = 0; s < totals.Length; s++)
+            {
+                totals[s] += part.StageTotals[s];
+            }
+
+            stageDifferences.AddRange(part.StageDifferences);
+            positionDifferences += part.PositionDifferences;
+            maxPosition = Math.Max(maxPosition, part.MaxPositionDifference);
+            tilted += part.TiltedOrientationDifferences;
+            scaleDifferences += part.ScaleDifferences;
+            snapped += part.SnappedToZeroByAce;
+        }
+
+        return new Summary(landblocks, candidates, afterRoad, placed, totals, stageDifferences, positionDifferences, maxPosition, tilted, scaleDifferences, snapped);
+    }
+
+    private static Summary CompareOne(SceneryGenerator generator, AceSceneryOracle oracle, LandblockCoord coord)
+    {
         var totals = new int[Enum.GetValues<SceneryStage>().Length];
         var stageDifferences = new List<string>();
         int landblocks = 0, candidates = 0, afterRoad = 0, placed = 0, positionDifferences = 0, tilted = 0, scaleDifferences = 0, snapped = 0;
         var maxPosition = 0f;
 
-        foreach (var coord in coords)
         {
             landblocks++;
             var result = generator.Generate(coord, includeCandidates: true);

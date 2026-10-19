@@ -146,10 +146,29 @@ public sealed class WaveLevelsTests
         Assert.Equal("server:1,hooks:199,footsteps:3,footsteps_sounded:n/a,ui:0,ambient:n/a,server_handed:n/a,hooks_handed:n/a", sources);
         var line = WaveLevels.LevelsLine("cache/x/record-audio.wav", levels, sources);
         Assert.Equal(
-            "audio recording levels file=cache/x/record-audio.wav seconds=1.00 peak_dbfs=-6.0 rms_dbfs=-9.0 active_windows=20 sources=server:1,hooks:199,footsteps:3,footsteps_sounded:n/a,ui:0,ambient:n/a,server_handed:n/a,hooks_handed:n/a windows=20",
+            "audio recording levels file=cache/x/record-audio.wav seconds=1.00 peak_dbfs=-6.0 rms_dbfs=-9.0 active_windows=20 sources=server:1,hooks:199,footsteps:3,footsteps_sounded:n/a,ui:0,ambient:n/a,server_handed:n/a,hooks_handed:n/a windows=20 clipped_samples=0",
             line);
         Assert.EndsWith(" muted=true", WaveLevels.LevelsLine("a.wav", levels, sources, muted: true), StringComparison.Ordinal);
         Assert.EndsWith(" muted=false", WaveLevels.LevelsLine("a.wav", levels, sources, muted: false), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Samples_at_full_scale_are_counted_across_channels_and_the_line_prints_them()
+    {
+        // 100 frames of stereo: 3 frames hold 32767 on the left and -32768 on the right, one holds 32766 (not clipped), the rest are quiet.
+        var interleaved = new short[200];
+        for (var f = 0; f < 3; f++)
+        {
+            interleaved[f * 2] = 32767;
+            interleaved[(f * 2) + 1] = -32768;
+        }
+
+        interleaved[6] = 32766;
+        var levels = WaveLevels.Analyze(Wav16(interleaved));
+
+        Assert.Equal(6, levels.ClippedSamples);
+        Assert.Contains(" clipped_samples=6", WaveLevels.LevelsLine("a.wav", levels, "server:n/a"), StringComparison.Ordinal);
+        Assert.Equal(0, WaveLevels.Analyze(Wav16(Stereo(1.0, 0.0))).ClippedSamples);
     }
 
     [Fact]

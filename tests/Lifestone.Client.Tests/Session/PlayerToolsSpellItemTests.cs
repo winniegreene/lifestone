@@ -1,6 +1,7 @@
 using System.Globalization;
 using Lifestone.Client.Session.Actions;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Mage;
 using Lifestone.ServerTools;
 
 namespace Lifestone.Client.Tests.Session;
@@ -219,6 +220,25 @@ public sealed class PlayerToolsSpellItemTests
         h.Tick(0.5);
         Assert.Equal(ActionOutcomeKind.Refused, item.Outcome!.Value.Kind);
         Assert.Equal(ItemOutcome.Failed, ItemOutcomes.Of(item));
+        Assert.Equal(sent, h.Net.ToolRequests().Count);
+    }
+
+    [Fact]
+    public void An_item_asks_for_a_palette_and_shade_as_the_mods_words_and_an_out_of_range_one_is_refused_at_once()
+    {
+        var h = Ready();
+        var gold = h.Api.Tools.SpawnItem(57, null, ActionSource.Host, GearKit.PaletteGold);
+        h.Tick();
+        Assert.Equal("@lifestone item 57 palette=21 #" + IdOf(gold), h.Net.ToolRequests()[^1]);
+
+        var both = h.Api.Tools.SpawnItem(107, 1, ActionSource.Host, 21, 0.66);
+        h.Tick(0.5);
+        Assert.Equal("@lifestone item 107 1 palette=21 shade=0.66 #" + IdOf(both), h.Net.ToolRequests()[^1]);
+
+        var sent = h.Net.ToolRequests().Count;
+        var bad = new[] { h.Api.Tools.SpawnItem(57, null, ActionSource.Host, 0), h.Api.Tools.SpawnItem(57, null, ActionSource.Host, 94), h.Api.Tools.SpawnItem(57, null, ActionSource.Host, 21, 1.5), h.Api.Tools.SpawnItem(57, null, ActionSource.Host, 21, -0.1) };
+        h.Tick(0.5);
+        Assert.All(bad, b => Assert.Equal(ActionOutcomeKind.Refused, b.Outcome!.Value.Kind));
         Assert.Equal(sent, h.Net.ToolRequests().Count);
     }
 

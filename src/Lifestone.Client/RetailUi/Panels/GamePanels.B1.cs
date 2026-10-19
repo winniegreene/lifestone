@@ -21,6 +21,15 @@ public sealed partial class GamePanels
     // The inventory page (panel 7): one controller, built when the shell is wired; it draws when the page first shows.
     private partial void QueueB1()
     {
-        Queue(static p => GameInventoryPage.Create(p.Context, p.Host));
+        Queue(static p =>
+        {
+            var page = GameInventoryPage.Create(p.Context, p.Host);
+            if (page is not null && p.Screen.Chat is { } chat)
+            {
+                page.HoldNotice = chat.Local; // AutoWieldIsLegal's "Cannot hold ... while in combat" line
+            }
+
+            return page;
+        });
     }
 }

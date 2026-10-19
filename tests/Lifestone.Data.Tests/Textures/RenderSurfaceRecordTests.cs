@@ -65,16 +65,22 @@ public sealed class RenderSurfaceRecordTests(DatSetFixture fixture, ITestOutputH
             .Concat(TextureTestSupport.RenderSurfaceIds(Dats, highRes: true))
             .Distinct()
             .ToArray();
-        var failures = new List<string>();
+
+        // C2 (q5): parallel over the id list. TextureLoader is thread-safe by construction (every dat read goes through
+        // DatSet's lock, the caches are ConcurrentDictionary/locked LRU; its class remarks), so one loader is shared
+        // (TODO(q5-loader-thread-safety) resolved: no per-worker loader needed). Failures are keyed by the id's index
+        // so the report is the same lowest-index ids as the sequential run, each with its id in the message.
+        var failures = new System.Collections.Concurrent.ConcurrentBag<(int Index, string Message)>();
         var timer = Stopwatch.StartNew();
-        foreach (var id in ids)
+        Parallel.For(0, ids.Length, index =>
         {
+            var id = ids[index];
             // The loader reads high-res first, as ReadRenderSurface does.
             var rs = loader.ReadRenderSurface(id, out _);
             if (rs is null)
             {
-                failures.Add($"0x{id:X8}: unreadable");
-                continue;
+                failures.Add((index, $"0x{id:X8}: unreadable"));
+                return;
             }
 
             try
@@ -93,19 +99,19 @@ public sealed class RenderSurfaceRecordTests(DatSetFixture fixture, ITestOutputH
                             || actual.HasAlpha != expected.HasAlpha || actual.SourceFormat != expected.SourceFormat || actual.SourceId != id
                             || !actual.Data.AsSpan().SequenceEqual(expected.Data))
                         {
-                            failures.Add($"0x{id:X8} {rs.Format} {mode}: {actual} differs from {expected}");
+                            failures.Add((index, $"0x{id:X8} {rs.Format} {mode}: {actual} differs from {expected}"));
                         }
                     }
                 }
             }
             catch (Exception ex) when (ex is not Xunit.Sdk.XunitException)
             {
-                failures.Add($"0x{id:X8} {rs.Format}: {ex.Message}");
+                failures.Add((index, $"0x{id:X8} {rs.Format}: {ex.Message}"));
             }
-        }
+        });
 
         output.WriteLine($"{ids.Length} RenderSurfaces compared in {timer.Elapsed.TotalSeconds:F1} s");
-        Assert.Empty(failures.Take(20));
+        Assert.Empty(failures.OrderBy(f => f.Index).Select(f => f.Message).Take(20));
     }
 
     private static byte[] Header(PixelFormat format, int length)

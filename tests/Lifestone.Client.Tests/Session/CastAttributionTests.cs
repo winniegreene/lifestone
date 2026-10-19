@@ -203,6 +203,7 @@ public sealed class CastAttributionTests
     public void Without_a_spell_table_an_untargeted_or_self_targeted_cast_is_never_confirmed_by_a_projectile()
     {
         var r = new WorldActionRig();
+        r.CombatModeIs(Lifestone.Client.Session.Contracts.CombatModes.Magic);
         var untargeted = r.Api.Cast(Heal, ActionSource.Ui);
         r.Tick();
         r.Create(Own, 10, y: 21);

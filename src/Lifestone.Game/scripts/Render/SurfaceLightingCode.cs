@@ -105,6 +105,64 @@ public static class SurfaceLightingCode
     /// <summary>True for the lighting rules of moving objects, whose per-instance values come from <c>INSTANCE_CUSTOM</c>.</summary>
     public static bool IsDynamic(SurfaceLighting lighting) => lighting is SurfaceLighting.DynamicObject or SurfaceLighting.DynamicCellObject;
 
+    /// <summary>
+    /// Global sampler2D: the dynamic lights of the frame, <see cref="DynamicLightTexels.Width"/> x 1 RGBA32F texels
+    /// (<see cref="DynamicLightTexels"/>): for light i, texel 2i = (position in Godot world space, reach in metres; 0 ends the list)
+    /// and texel 2i + 1 = (colour times intensity, 0). Written every frame by <c>DynamicLightTable</c>; read per vertex by the
+    /// EnvCell and CellObject variants (<see cref="DynamicLightFunction"/>).
+    /// </summary>
+    public const string DynamicLights = "ac_dynamic_lights";
+
+    /// <summary>
+    /// The global declaration and the function of the cell glow: every dynamic light as a hardware point light on the cell's polygons
+    /// (<c>Render::minimize_envcell_lighting</c> 0x0054CD80; <c>PrimD3DRender::config_hardware_light</c> 0x0059BD40: colour times
+    /// intensity, range falloff times 1.5, attenuation 1/d), summed per vertex like <see cref="ObjectLightSum"/>:
+    /// <c>min(1, sum of colour x intensity x max(0, N.L) / d)</c> over the lights within reach. A texture narrower than the table
+    /// (the global before anything bound it) has no lights.
+    /// </summary>
+    public static string DynamicLightFunction
+    {
+        get
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(FormattableString.Invariant($"global uniform sampler2D {DynamicLights};"));
+            sb.AppendLine("vec3 ac_dynamic_light_sum(vec3 p, vec3 n) {");
+            sb.AppendLine("\tvec3 sum = vec3(0.0);");
+            sb.AppendLine(FormattableString.Invariant($"\tif (textureSize({DynamicLights}, 0).x < {DynamicLightTexels.Width}) {{"));
+            sb.AppendLine("\t\treturn sum;");
+            sb.AppendLine("\t}");
+            sb.AppendLine(FormattableString.Invariant($"\tfor (int i = 0; i < {DynamicLightTexels.MaxLights}; i++) {{"));
+            sb.AppendLine(FormattableString.Invariant($"\t\tvec4 at = texelFetch({DynamicLights}, ivec2(i * {DynamicLightTexels.TexelsPerLight}, 0), 0);"));
+            sb.AppendLine("\t\tif (at.w <= 0.0) {");
+            sb.AppendLine("\t\t\tbreak;");
+            sb.AppendLine("\t\t}");
+            sb.AppendLine("\t\tvec3 to = at.xyz - p;");
+            sb.AppendLine("\t\tfloat d = length(to);");
+            sb.AppendLine("\t\tif (d > at.w || d < 1e-6) {");
+            sb.AppendLine("\t\t\tcontinue;");
+            sb.AppendLine("\t\t}");
+            sb.AppendLine("\t\tfloat c = dot(n, to / d);");
+            sb.AppendLine("\t\tif (c > 0.0) {");
+            sb.AppendLine(FormattableString.Invariant($"\t\t\tsum += texelFetch({DynamicLights}, ivec2(i * {DynamicLightTexels.TexelsPerLight} + 1, 0), 0).rgb * (c / d);"));
+            sb.AppendLine("\t\t}");
+            sb.AppendLine("\t}");
+            sb.AppendLine("\treturn clamp(sum, 0.0, 1.0);");
+            sb.AppendLine("}");
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>
+    /// The <c>vertex()</c> lines that set <c>ac_dyn</c>, the dynamic lights' per-vertex sum at this vertex in Godot world space
+    /// (a zero normal, CUSTOM0.x, gets no diffuse term, as in <see cref="ObjectLightSum"/>).
+    /// </summary>
+    public const string DynamicLightVertexTerm =
+        "\t// The dynamic lights (the cell glow): every one a hardware point light on the cell's polygons, summed per vertex.\n" +
+        "\tvec3 ac_dyn = vec3(0.0);\n" +
+        "\tif (CUSTOM0.x < 0.5) {\n" +
+        "\t\tac_dyn = ac_dynamic_light_sum((MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz, normalize(MODEL_NORMAL_MATRIX * NORMAL));\n" +
+        "\t}\n";
+
     /// <summary>vec3 global: creature mode's ambient light (<c>CreatureMode::CreatureMode</c>: 0.3 white), raw colour units.</summary>
     public const string CreatureAmbient = "ac_cm_ambient";
 
@@ -157,6 +215,7 @@ public static class SurfaceLightingCode
         else
         {
             sb.AppendLine(World.Objects.CellObjectLodShader.Declaration); // objects track (M1 wave 3)
+            sb.Append(DynamicLightFunction); // M3 4.1: the cell glow (EnvCell and CellObject variants)
         }
 
         sb.AppendLine("varying flat ivec2 v_ac_doorways; // doorway rows clipping this cell (-1 = none; a valid row is always in .x)");
@@ -320,13 +379,15 @@ public static class SurfaceLightingCode
         switch (lighting)
         {
             case SurfaceLighting.EnvCell:
-                sb.AppendLine("\t// EnvCell: emissive = burned-in static lights (CUSTOM1.rgb), no sun (PView::DrawCells, SetStaticLightingVertexColors).");
-                sb.AppendLine("\tv_light = clamp(CUSTOM1.rgb + world_ambient * diffuse, 0.0, 1.0);");
+                sb.Append(DynamicLightVertexTerm);
+                sb.AppendLine("\t// EnvCell: emissive = burned-in static lights (CUSTOM1.rgb), no sun (PView::DrawCells, SetStaticLightingVertexColors); plus the dynamic lights.");
+                sb.AppendLine("\tv_light = clamp(CUSTOM1.rgb + ac_dyn + world_ambient * diffuse, 0.0, 1.0);");
                 break;
             case SurfaceLighting.CellObject:
                 sb.AppendLine("\t// Object inside a cell: no sun (PView::DrawCells); CUSTOM1.rgb = its hardware static lights' clamped sum");
                 sb.AppendLine("\t// (minimize_object_lighting, computed per part on the CPU; 0 where no light reaches).");
-                sb.AppendLine("\tv_light = clamp(vec3(luminosity) + world_ambient * diffuse + CUSTOM1.rgb, 0.0, 1.0);");
+                sb.Append(DynamicLightVertexTerm);
+                sb.AppendLine("\tv_light = clamp(vec3(luminosity) + world_ambient * diffuse + CUSTOM1.rgb + ac_dyn, 0.0, 1.0);");
                 break;
             case SurfaceLighting.DynamicCellObject:
                 sb.Append(ObjectLightSum);

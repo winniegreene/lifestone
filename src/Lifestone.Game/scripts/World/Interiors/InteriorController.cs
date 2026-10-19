@@ -79,6 +79,8 @@ public partial class InteriorController : Node
     private ViewKey _lastKey;
     private InteriorHud? _hud;
     private int _lights;
+    private DynamicLightTable? _dynamicLights;
+    private int _dynLightCellsPeak;
     private uint _viewerCellId;
     private uint _playerCellId;
     private long _truncatedCones;
@@ -87,6 +89,21 @@ public partial class InteriorController : Node
     public InteriorRegistry Registry { get; } = new();
 
     public CellTracker Tracker { get; private set; } = null!;
+
+    /// <summary>
+    /// The global dynamic-light table (M3 4.1 r2, the cell glow): bind <see cref="DynamicLightTable.Source"/> to the session's
+    /// <c>AvatarSet.DynamicLightFrame</c>; the cell shaders then add every dynamic light to the cells' polygons per vertex.
+    /// </summary>
+    public DynamicLightTable DynamicLights => _dynamicLights ?? throw new InvalidOperationException("Initialize first.");
+
+    /// <summary>
+    /// <c>dyn_light_cells</c> (report-only): the shown cells with at least one dynamic light in reach this frame (the light's reach reaches the
+    /// cell mesh's bounding box), as of the last <c>_Process</c>.
+    /// </summary>
+    public int DynLightCells { get; private set; }
+
+    /// <summary>The most <see cref="DynLightCells"/> any frame had.</summary>
+    public int DynLightCellsPeak => _dynLightCellsPeak;
 
     /// <summary>The view drawn this frame.</summary>
     public InteriorView View { get; private set; } = InteriorView.Outdoors;
@@ -147,6 +164,7 @@ public partial class InteriorController : Node
     {
         _services = services;
         _world = world;
+        _dynamicLights = new DynamicLightTable(world.ToRender); // M3 4.1 r2: the global exists before any cell shader is made
         _camera = camera;
         _worldEnvironment = environment;
         _cameraCullMask = camera.Camera.CullMask;
@@ -536,11 +554,49 @@ public partial class InteriorController : Node
         }
 
         FlushStates();
+        CountDynamicLightCells();
+    }
+
+    private void CountDynamicLightCells()
+    {
+        var count = 0;
+        var lights = _dynamicLights;
+        if (lights is { Count: > 0 })
+        {
+            foreach (var id in _shown)
+            {
+                if (FindNode(id) is not { } node)
+                {
+                    continue;
+                }
+
+                var box = node.GlobalTransform * node.GetAabb();
+                var min = new System.Numerics.Vector3(box.Position.X, box.Position.Y, box.Position.Z);
+                var max = new System.Numerics.Vector3(box.End.X, box.End.Y, box.End.Z);
+                for (var i = 0; i < lights.Count; i++)
+                {
+                    var p = lights.PositionOf(i);
+                    if (DynamicLightTexels.ReachesBox(new System.Numerics.Vector3(p.X, p.Y, p.Z), lights.ReachOf(i), min, max))
+                    {
+                        count++;
+                        break;
+                    }
+                }
+            }
+        }
+
+        DynLightCells = count;
+        if (count > _dynLightCellsPeak)
+        {
+            _dynLightCellsPeak = count;
+            Log.Info("interiors", "dyn_light_cells peak", ("dyn_light_cells", count), ("lights", lights?.Count ?? 0));
+        }
     }
 
     public override void _ExitTree()
     {
         SetIndoorAmbient(false);
+        _dynamicLights?.Dispose();
         Log.Info(
             "interiors",
             "summary",
@@ -553,6 +609,7 @@ public partial class InteriorController : Node
             ("cell_nodes", AttachedCellNodes),
             ("slots_peak", _slots.Peak),
             ("slots_exhausted", _slots.Exhausted),
+            ("dyn_light_cells_peak", _dynLightCellsPeak),
             ("truncated_cones", _truncatedCones),
             ("own_mesh_mb", OwnMeshBytes / (1024.0 * 1024.0)),
             ("gen2_gcs", GC.CollectionCount(2)),

@@ -105,6 +105,11 @@ public sealed partial class FightLegRunner : Node
 
     // The frames: the sampler, the previous frame's parts (the engine's delta is the previous frame's whole time) and the parts of the slowest fight frame.
     private readonly FightFrameSampler _sampler = new();
+    private readonly LightFrameSampler _lights = new(); // M3 4.1 lane c: bolt_light, dyn_lights_max, viewer_light (report-only here)
+    private bool _inDenNow;
+    private bool _movingNow;
+    private System.Numerics.Vector3 _lastPosition;
+    private bool _havePosition;
     private AvatarSet? _avatars;
     private long _shownBefore;
     private bool _skipNextFrame;
@@ -511,6 +516,15 @@ public sealed partial class FightLegRunner : Node
         var before = _sampler.FightFrameMaxMs;
         _sampler.Step(delta, avatars?.CastWindowOpen == true, avatars?.ProjectileWindowOpen == true, fighting && scenario.Target != 0, fighting, inDen, _skipNextFrame);
         _skipNextFrame = false;
+        _inDenNow = inDen;
+        var here = self.Position is { } p ? p.Frame.Origin : default;
+        _movingNow = !_havePosition || (here - _lastPosition).LengthSquared() > 0.0025f; // more than 5 cm since the last frame
+        (_lastPosition, _havePosition) = (here, self.Position is not null);
+        if (avatars is not null)
+        {
+            _lights.Step(avatars);
+        }
+
         if (_sampler.FightFrameMaxMs is { } now && now != before)
         {
             (_worstFightAt, _worstFightMs, _worstParts) = (_runSeconds, now, _previousParts);
@@ -535,18 +549,23 @@ public sealed partial class FightLegRunner : Node
         {
             HideDeveloperHud();
         }
+        else if (_hudHidden && _plan.Owed)
+        {
+            // Something drew the HUD again while a frame is owed (the arrival's own UI): hide it again, once per frame at most, so the saved frame has none.
+            HideDeveloperHud();
+        }
 
         var stats = avatars.Stats;
-        var due = _plan.Step(_runSeconds, stats.ProjectilesCreated, stats.ProjectileExplodes, scenario.Tally.DamageLinesDealt, scenario.Tally.Kills);
+        var due = _plan.Step(_runSeconds, stats.ProjectilesCreated, stats.ProjectileExplodes, scenario.Tally.DamageLinesDealt, scenario.Tally.Kills, avatars.ProjectileWindowOpen, _inDenNow, scenario.Walks >= 1, _movingNow);
         if (due < 0)
         {
             return;
         }
 
         var path = FightShotPlan.ShotPath(_shotPath, due);
-        var saved = ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", "bsd-fight-" + FightShotPlan.Names[due]), ("after_trigger_s", FightShotPlan.DelaysSeconds[due]), ("cast_window_open", avatars.CastWindowOpen), ("projectile_window_open", avatars.ProjectileWindowOpen), ("developer_hud", "hidden"));
+        var saved = ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", "bsd-fight-" + FightShotPlan.Names[due]), ("after_trigger_s", FightShotPlan.DelaysSeconds[due]), ("trigger", FightShotPlan.Triggers[due]), ("cast_window_open", avatars.CastWindowOpen), ("projectile_window_open", avatars.ProjectileWindowOpen), ("dyn_lights", avatars.DynamicLightFrame.Count), ("viewer_light", _lights.ViewerLight ? "on" : "off"), ("developer_hud", HudShowing() ? "VISIBLE" : "hidden"));
         _skipNextFrame = true;
-        Log.Info(LogCategory, (saved ? "fight: review frame " : "fight: the review frame could not be saved: ") + FightShotPlan.Names[due] + " at its trigger + " + FightShotPlan.DelaysSeconds[due].ToString("0.00", CultureInfo.InvariantCulture) + " s: " + path);
+        Log.Info(LogCategory, (saved ? "fight: review frame " : "fight: the review frame could not be saved: ") + FightShotPlan.Names[due] + " at its trigger (" + FightShotPlan.Triggers[due] + ") + " + FightShotPlan.DelaysSeconds[due].ToString("0.00", CultureInfo.InvariantCulture) + " s: " + path);
         if (saved)
         {
             _plan.MarkTaken(due);
@@ -557,24 +576,56 @@ public sealed partial class FightLegRunner : Node
         }
     }
 
+    /// <summary>True when any of the developer HUD's nodes is drawn now (read from the nodes, not assumed).</summary>
+    private bool HudShowing()
+    {
+        foreach (var (node, _) in _shotHidden)
+        {
+            if (IsInstanceValid(node) && node is CanvasItem { Visible: true } item && item.IsVisibleInTree())
+            {
+                return true;
+            }
+
+            if (IsInstanceValid(node) && node is CanvasLayer { Visible: true })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void HideDeveloperHud()
     {
         _hudHidden = true;
-        _shotHidden.Clear();
         foreach (var name in PlayMode.PlayShotDeveloperHudNames)
         {
             switch (GetTree().Root.FindChild(name, recursive: true, owned: false))
             {
                 case CanvasLayer layer:
-                    _shotHidden.Add((layer, layer.Visible));
+                    NoteHidden(layer, layer.Visible);
                     layer.Visible = false;
                     break;
                 case CanvasItem item:
-                    _shotHidden.Add((item, item.Visible));
+                    NoteHidden(item, item.Visible);
                     item.Visible = false;
                     break;
             }
         }
+    }
+
+    // The first time a node is hidden its visibility is kept for the restore; hiding it again (the check on an owed frame) must not overwrite that with false.
+    private void NoteHidden(Node node, bool wasVisible)
+    {
+        foreach (var (known, _) in _shotHidden)
+        {
+            if (ReferenceEquals(known, node))
+            {
+                return;
+            }
+        }
+
+        _shotHidden.Add((node, wasVisible));
     }
 
     private void RestoreDeveloperHud()
@@ -701,6 +752,8 @@ public sealed partial class FightLegRunner : Node
         var scenario = _scenario;
         var tally = scenario?.Tally;
         var stats = _avatars?.Stats;
+        _lights.Finish();
+        var sampled = _avatars is not null && _lights.Frames > 0;
         var measures = new FightLegMeasures(
             tally?.Kills ?? 0,
             tally?.DamageDealt ?? 0,
@@ -714,7 +767,12 @@ public sealed partial class FightLegRunner : Node
             _sampler.CastFrameMaxMs,
             _sampler.FightFrameMaxMs,
             _sampler.BsdMinFps,
-            scenario is null || double.IsNaN(scenario.FightSeconds) ? null : scenario.FightSeconds);
+            scenario is null || double.IsNaN(scenario.FightSeconds) ? null : scenario.FightSeconds,
+            sampled && _lights.FlightsJudged > 0 ? _lights.BoltLight : null, // n/a: no flight long enough to judge is not a dark bolt (M3 4.2)
+            sampled ? _lights.DynamicLightsMax : null,
+            sampled ? _lights.ViewerLight : null,
+            tally?.BlockedPicks ?? 0,
+            tally?.WallHits ?? 0);
         var outcome = FightLegVerdict.Compose(_failure ?? why ?? scenario?.Failure ?? (_scenarioEnded ? null : "the fight did not finish"), measures);
         if (!outcome.Ok)
         {
@@ -735,6 +793,12 @@ public sealed partial class FightLegRunner : Node
             ("projectile_windows", stats?.ProjectileWindows ?? 0L),
             ("cast_windows", stats?.CastWindows ?? 0L),
             ("frames", _sampler.Frames),
+            ("light_flights_judged", _lights.FlightsJudged),
+            ("light_flights_lit", _lights.FlightsLit),
+            ("light_short_flights", _lights.ShortFlights),
+            ("light_state_off_flights", _lights.StateOffFlights),
+            ("light_flights_alive_lit", _lights.FlightsText()),
+            ("light_untracked", _lights.Untracked),
             ("den_frames", _sampler.DenFrames),
             ("fps_windows", _sampler.Windows),
             ("worst_fight_frame_at_s", _worstFightAt),

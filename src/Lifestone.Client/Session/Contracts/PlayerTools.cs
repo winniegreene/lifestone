@@ -227,17 +227,19 @@ public sealed class PlayerTools
     /// <param name="wcid">The weenie class id.</param>
     /// <param name="stack">The stack size, or null for the item's default.</param>
     /// <param name="source">Who asked.</param>
+    /// <param name="palette">The <c>PaletteTemplate</c> to give the item (<c>item ... palette=&lt;1 to 93&gt;</c>, as ACE's <c>@ci</c> palette argument), or null for the weenie's own; outside 1 to 93 it is refused at once and never sent.</param>
+    /// <param name="shade">The shade (0 to 1; <c>shade=&lt;f&gt;</c>), or null for the weenie's own; outside 0 to 1 it is refused at once.</param>
     /// <returns>The request's handle.</returns>
-    public ToolHandle<ItemResult> SpawnItem(uint wcid, int? stack, ActionSource source) =>
+    public ToolHandle<ItemResult> SpawnItem(uint wcid, int? stack, ActionSource source, int? palette = null, double? shade = null) =>
         Request(
             ActionKind.ToolItem,
             source,
-            id => new ItemRequest(wcid, stack, id),
-            string.Create(CultureInfo.InvariantCulture, $"Lifestone: asking the server for item {wcid}{(stack is { } n ? $" x {n:N0}" : string.Empty)}..."),
+            id => new ItemRequest(wcid, stack, id, palette, shade),
+            string.Create(CultureInfo.InvariantCulture, $"Lifestone: asking the server for item {wcid}{(stack is { } n ? $" x {n:N0}" : string.Empty)}{(palette is { } p ? $" in palette {p}" : string.Empty)}..."),
             silent: false,
             ToolResultReader.Item,
             observe: null,
-            "ToolItem wcid=" + ActionText.Count(wcid) + (stack is { } count ? " stack=" + ActionText.Count(count) : string.Empty));
+            "ToolItem wcid=" + ActionText.Count(wcid) + (stack is { } count ? " stack=" + ActionText.Count(count) : string.Empty) + (palette is { } pal ? " palette=" + ActionText.Count(pal) : string.Empty));
 
     /// <summary>The gear spawn still under way, if any: a second <see cref="SpawnGear"/> returns it instead of counting an inventory that its grants have not finished changing.</summary>
     private GearSpawn? _gear;
@@ -317,7 +319,7 @@ public sealed class PlayerTools
         foreach (var (item, missing) in wanted)
         {
             int? stack = item.Kind == GearKind.Component ? missing : null;
-            var handle = SpawnItem(item.Wcid, stack, source);
+            var handle = SpawnItem(item.Wcid, stack, source, item.Palette, item.Shade);
             var grant = new GearGrant(item, stack, handle);
             grants.Add(grant);
             if (handle.IsCompleted)

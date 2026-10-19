@@ -536,6 +536,7 @@ internal sealed class ScriptedAceSession : IAcSession
     }
 
     /// <inheritdoc/>
+    public OutboundTicket SendRemoveSpellFavorite(uint spellId, uint bar) => WorldAction(GameActionTypes.RemoveSpellFavorite, spellId, bar, 0, 2);
     public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => WorldAction(GameActionTypes.AddSpellFavorite, spellId, index, bar, 3);
 
     /// <inheritdoc/>

@@ -750,6 +750,29 @@ public sealed partial class PlayChecks : Node
             drawn && layerNow is { Active: true, BatchCount: > 0 },
             $"drawn={layerNow?.DrawnObjects} waiting={layerNow?.Waiting} max_waiting={layerNow?.MaxWaiting} batches={layerNow?.BatchCount} uploads={layerNow?.Uploads} meshes_built={(layerNow?.Meshes is { } m ? m.Outdoor.Built + m.Indoor.Built : 0)}");
 
+        // M3 4.2 p6, report-only in its first gate: every human the stand-in made (the player and the human-Setup placeholders) wears clothing (StandInHumanLook.IsDressed: a texture change on a body part other than the head; a face alone is not clothing), as a real server's CreateObject does; the bare base body was the naked figure of the Holtburg frames.
+        var humans = 0;
+        var dressed = 0;
+        if (_mode.Avatars is { } humanSet)
+        {
+            if (humanSet.Player is { } me)
+            {
+                humans++;
+                dressed += session.State.Objects.TryGet(me.Guid, out var self) && StandInHumanLook.IsDressed(self.Model) ? 1 : 0;
+            }
+
+            foreach (var standIn in Visit.Objects)
+            {
+                if (standIn.Setup == StandInVisit.HumanSetup && humanSet.TryGet(standIn.Guid, out var figure))
+                {
+                    humans++;
+                    dressed += session.State.Objects.TryGet(figure.Guid, out var made) && StandInHumanLook.IsDressed(made.Model) ? 1 : 0;
+                }
+            }
+        }
+
+        Log.Info(LogCategory, $"humans_dressed={dressed}/{humans}", ("report_only", true));
+
         var gameScreen = await WaitFor(() => ui?.Flow?.Flow.CurrentMode == UiModes.GamePlay, 10.0);
         var shell = ui?.Screens?.Flow.CurrentScreen as GamePlayScreen;
         await WaitFor(() => shell is { ShellPainted: true }, 10.0);
@@ -1109,9 +1132,23 @@ public sealed partial class PlayChecks : Node
         await PanelChecksAsync(shell);
         await ToolsPanelWhereAndXpAsync(session, ui); // G7 lane A: Where am I and Add XP through the panel, and its review frame
         await ThrowawayToolOpsAsync(session, ui); // p2: the throwaway leg's driver presses the same buttons (PlayChecks.Throwaway.cs)
-        await FightChecksAsync(); // M3 3.1 fb: the stand-in's fight (PlayChecks.Fight.cs), after the tools teleport
+        // M3 4.2 p5a C4: --play-skip-scenarios (the smoke's shell-frames run) leaves out the two scenarios that cost the run most of its time (the fight's cast-to-kill and the death's wait for the tuskers); a plain run judges them.
+        var skipScenarios = _services.Options.Play.SkipScenarios;
+        if (skipScenarios)
+        {
+            Log.Info(LogCategory, "scenarios skipped (--play-skip-scenarios): the stand-in's fight and death checks are not run in this run", ("fight", "skipped"), ("death", "skipped"));
+        }
+
+        if (!skipScenarios)
+        {
+            await FightChecksAsync(); // M3 3.1 fb: the stand-in's fight (PlayChecks.Fight.cs), after the tools teleport
+        }
+
         await ProjectileChecksAsync(); // M3 3.1 fc: the projectile on screen (PlayChecks.Projectile.cs)
-        await DeathChecksAsync(); // M3 3.2 db: the stand-in's death (PlayChecks.Death.cs), after the fight checks
+        if (!skipScenarios)
+        {
+            await DeathChecksAsync(); // M3 3.2 db: the stand-in's death (PlayChecks.Death.cs), after the fight checks
+        }
 
         // --- picking and selection (G5 W7): the stand-in portal is picked at its projected screen point; a double click Uses it ---
         var picking = _mode.Picking;
@@ -1183,12 +1220,17 @@ public sealed partial class PlayChecks : Node
         await WaitFor(() => _portal is { } done && done.Director.LoginCompletesSent >= completesBeforePortal + 1, 30.0);
         Check("login-complete-is-sent-for-the-portal", _portal is { } sentFor && sentFor.Director.LoginCompletesSent == completesBeforePortal + 1, $"sent={_portal?.Director.LoginCompletesSent} before_the_portal={completesBeforePortal}");
         await WaitFor(() => _portal is { Director.Machine: { TunnelVisible: false, WorldVisible: true } }, 15.0);
+        await LightsChecksAsync(); // M3 4.1 r1: the bolt and the viewer light in the player's light row (PlayChecks.Lights.cs)
+        await FadeChecksAsync(); // M3 4.1 f: the first-person fade of the player and the wand (PlayChecks.Fade.cs)
+        await HeldItemSetupCheckAsync(session); // M3 4.2 p6: no held item wears a human's or a creature's Setup (PlayChecks.KitLook.cs)
         await InspectorShellChecks(ui); // G7 lane B: the automation inspector shows this run's own actions (docs/retail-ui.md section 22.2)
         await RaiseCheckAsync(session); // M3 1.1 s1b: one RaiseAttribute against the stand-in, priced by the retail XpTable
         await SpellAndItemChecksAsync(session); // M3 1.1 s2b: one spell learn (learned, then known) and one item against the stand-in
         await ActionChecksAsync(session); // M3 1.2 s4c: a stand-in self cast, a fizzle, a combat-mode change, a wield and an unwield complete as the trackers say
         await CastChecksAsync(session); // M3 2.1 s2b: a wand wielded, the Magic mode, a cast with a wind-up: cast_scripts>=1 cast_sounds>=1 and a mid-cast review frame
-        await KitChecksAsync(session); // M3 1.4 s0: SpawnGear against the stand-in: the kit arrives in the pack (kit=n/n), a second run asks for nothing (kit_topup=0)
+        await KitChecksAsync(session); // (see the next line)
+        await KitLookFramesAsync(session, ui?.Screens?.Flow.CurrentScreen as GamePlayScreen); // M3 4.2 p6: with --play-frames, the kit worn and its review frames (PlayChecks.KitLook.cs)
+        // M3 1.4 s0 (the line above): SpawnGear against the stand-in: the kit arrives in the pack (kit=n/n), a second run asks for nothing (kit_topup=0)
 
         // --- a boot by the server: the player is taken away and the retail disconnected screen has the button that reconnects (D43) ---
         var server = _host.StandIn ?? throw new InvalidOperationException("the stand-in session has no server levers");
@@ -1326,8 +1368,10 @@ public sealed partial class PlayChecks : Node
         SaveReviewFrame("05-shell-selection-and-vivid-indicator");
 
         _mode.Selection.Clear();
-        var cleared = await WaitFor(() => display.Selected == 0 && !display.FieldShown && !display.HealthShown && display.NameText.Length == 0 && indicator.State == Lifestone.Client.RetailUi.Selection.VividTargetState.Hidden, 5.0);
+        var cleared = await WaitFor(() => display.Selected == 0 && !display.FieldShown && display.FieldVisible && !display.HealthShown && display.NameText.Length == 0 && indicator.State == Lifestone.Client.RetailUi.Selection.VividTargetState.Hidden, 5.0);
         Check("clearing-the-selection-clears-the-name-the-health-and-the-indicator", cleared, $"selected=0x{display.Selected:X8} field={display.FieldShown} health={display.HealthShown} name='{display.NameText}' state={indicator.State}");
+        await Frames(4);
+        SaveExtraFrame("05b-shell-selection-cleared"); // P2: the empty target panel again (the field in its base state), nothing left of the name, the meter or the stack widgets
     }
 
     /// <summary>

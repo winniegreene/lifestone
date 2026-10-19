@@ -158,6 +158,7 @@ public sealed class ParticleMeshLibrary : IParticleModelSource, IDisposable
             _warm.Add(warm);
         }
 
+        ParticleWarmDraw.Start(variants); // the pipelines too: a variant's first draw would compile one on a live frame (M3 4.1 fix r2)
         return (gfxObjs, variants.Count);
     }
 

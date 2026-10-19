@@ -246,6 +246,15 @@ public interface IActionApi
     ActionHandle AddSpellFavorite(uint spellId, int index, int bar, ActionSource source = ActionSource.Host);
 
     /// <summary>
+    /// Takes a spell off one of the character's spell bars (GameAction 0x01E4 {spell, bar}; retail <c>CM_Character::Event_RemoveSpellFavorite</c>, 11.6096 0x006A26B0; ACE <c>GameActionRemoveSpellFavorite</c>). ACE answers
+    /// nothing (a spell that is not on the bar is ignored), so this completes as <see cref="ActionOutcomeKind.Sent"/> when it is sent. Refused at once for spell 0, a bar outside 0 to 7, or when the player is not in the world.
+    /// </summary>
+    /// <param name="spellId">The spell id.</param>
+    /// <param name="bar">The bar, 0 to 7.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle RemoveSpellFavorite(uint spellId, int bar, ActionSource source = ActionSource.Host);
+
+    /// <summary>
     /// Logs the character off: adds "Logging off..." to the chat as retail does, sends F653 (the only sender), and
     /// publishes <see cref="LogOffRequested"/> for portal space. Completes when the server's F653 and the character list
     /// have arrived.

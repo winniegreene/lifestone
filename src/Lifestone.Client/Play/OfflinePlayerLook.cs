@@ -37,7 +37,13 @@ public static class OfflinePlayerLook
 
     /// <summary>The stand-in's choices.</summary>
     /// <exception cref="ArgumentOutOfRangeException">The dats have no Aluvian man.</exception>
-    public static CharGenLook Create(CharGen charGen, IAppearanceDats dats)
+    public static CharGenLook Create(CharGen charGen, IAppearanceDats dats) => Create(charGen, dats, 0, Shade);
+
+    /// <summary>
+    /// The look with the <paramref name="garment"/>th shirt, trousers and footwear CharGen lists (clamped to each list's length) in <paramref name="garmentShade"/>: the stand-in server's placeholder humans
+    /// (<c>TODO(m3-standin-human-look)</c>) wear other garments than the player.
+    /// </summary>
+    public static CharGenLook Create(CharGen charGen, IAppearanceDats dats, int garment, double garmentShade)
     {
         ArgumentNullException.ThrowIfNull(charGen);
         ArgumentNullException.ThrowIfNull(dats);
@@ -68,9 +74,9 @@ public static class OfflinePlayerLook
             Pick(sex.MouthStrips.Count),
             Shade,
             GearChoice.None,
-            Garment(sex, sex.Shirts, dats),
-            Garment(sex, sex.Pants, dats),
-            Garment(sex, sex.Footwear, dats));
+            Garment(sex, sex.Shirts, dats, garment, garmentShade),
+            Garment(sex, sex.Pants, dats, garment, garmentShade),
+            Garment(sex, sex.Footwear, dats, garment, garmentShade));
     }
 
     /// <summary>
@@ -93,14 +99,15 @@ public static class OfflinePlayerLook
     private static int Pick(int count) => count > 0 ? 0 : -1;
 
     /// <summary>The first garment of a list, in the first colour its table offers (<c>ClothingColors</c>).</summary>
-    private static GearChoice Garment(SexCG sex, List<GearCG> list, IAppearanceDats dats)
+    private static GearChoice Garment(SexCG sex, List<GearCG> list, IAppearanceDats dats, int index, double shade)
     {
         if (list.Count == 0)
         {
             return GearChoice.None;
         }
 
-        var table = dats.GetClothingTable(list[0].ClothingTable.DataId);
+        index = Math.Clamp(index, 0, list.Count - 1);
+        var table = dats.GetClothingTable(list[index].ClothingTable.DataId);
         var template = 0u;
         if (table is not null)
         {
@@ -114,6 +121,6 @@ public static class OfflinePlayerLook
             }
         }
 
-        return new GearChoice(0, template, Shade);
+        return new GearChoice(index, template, shade);
     }
 }

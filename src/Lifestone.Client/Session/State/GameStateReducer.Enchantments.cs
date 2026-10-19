@@ -16,8 +16,9 @@ namespace Lifestone.Client.Session.State;
 /// <para>No timer removes an enchantment: the server's 02C3 does (ACE sends it at expiry with the expire sound). An entry kept more than <see cref="EnchantmentRules.OverdueGraceSeconds"/> past its expiry
 /// is counted once and logged at WARN (<c>TODO(m3-enchant-overdue)</c>, report-only), when the next enchantment message or description is applied and by
 /// <see cref="PlayerQualities.CountOverdueEnchantments"/> whenever a reader asks.</para>
-/// <para><c>TODO(m3-enchant-expiry-chat)</c>: retail composes "&lt;spell&gt; has expired." itself for a 02C3 or 02C5 (<c>NotifyOfEnchantmentRemoval</c>); the spell's name is in the spell table, which the
-/// session layer does not read, so <see cref="EnchantmentChanged.Notify"/> says the line is due and a presentation layer with the table composes it.
+/// <para>Retail composes "&lt;spell&gt; has expired." itself for a 02C3 or 02C5 (<c>NotifyOfEnchantmentRemoval</c>, 11.6096 0x00569460; ACE sends no chat for the player's own expiry): the reducer adds the line with
+/// the spell's name from <see cref="SpellLookup"/> (<see cref="ChatKind.Notice"/>, chat type 7 Magic, " penalty" after the name of the vitae, spell ids from 0x8000 up print nothing). Without the table the line is
+/// not added and the reducer logs once (<c>TODO(m3-enchant-expiry-name)</c>).
 /// <c>TODO(m3-enchant-qualities-event)</c>: a panel that refreshes on <see cref="QualitiesChanged"/> alone (the vitals window) does not see a registry change until it also subscribes to
 /// <see cref="EnchantmentChanged"/> (or the lead adds a <see cref="QualityChange"/> for it).</para>
 /// </remarks>
@@ -34,6 +35,40 @@ internal sealed partial class GameStateReducer
 
     private readonly HashSet<(ushort Spell, ushort Layer, double Received)> _overdueReported = [];
 
+    private bool _expiryNameLogged;
+
+    /// <summary>The retail SpellTable's lookup (the session sets it; null in a host without dats): the spell's name for the expiry line.</summary>
+    internal Func<uint, Lifestone.Data.Magic.SpellInfo?>? SpellLookup { get; set; }
+
+    /// <summary>Retail's chat type for the expiry line: <c>AddTextToScroll(..., 7)</c> in <c>NotifyOfEnchantmentRemoval</c> (Magic).</summary>
+    internal const uint ExpiryChatType = 7;
+
+    /// <summary>The spell id of the vitae (retail's <c>NotifyOfEnchantmentRemoval</c> adds " penalty" to its name).</summary>
+    internal const ushort VitaeSpellId = 666;
+
+    /// <summary><c>NotifyOfEnchantmentRemoval</c> (11.6096 0x00569460): "&lt;spell&gt; has expired." for a spell id below 0x8000 that the SpellTable knows.</summary>
+    private void NoteExpiry(ushort spellId)
+    {
+        if (spellId >= 0x8000)
+        {
+            return;
+        }
+
+        var spell = SpellLookup?.Invoke(spellId);
+        if (spell is null)
+        {
+            if (!_expiryNameLogged)
+            {
+                _expiryNameLogged = true;
+                _log.Warn(SessionLog.Category, "TODO(m3-enchant-expiry-name): an enchantment expired and the SpellTable has no name for it, so retail's expiry line is not added", new LogField("spell", spellId));
+            }
+
+            return;
+        }
+
+        AddChat(new ChatLine(_clock.Now, ChatKind.Notice, ExpiryChatType, null, 0, spell.Name + (spellId == VitaeSpellId ? " penalty" : string.Empty) + " has expired."));
+    }
+
     /// <summary>
     /// GameEvent 0x02C1: the spell joins the book with the value 0, as <c>ClientMagicSystem::Handle_Magic__UpdateSpell</c> (0x00568590) asks <c>CACQualities::AddSpell</c>. ACE's "You learn the X spell." is its own
     /// chat message, so it is not composed here.
@@ -44,6 +79,28 @@ internal sealed partial class GameStateReducer
         var isNew = book.Learn(message.SpellId);
         Changed();
         Publish(new SpellbookChanged(SpellbookChange.Learned, message.SpellId, book.Count, isNew));
+    }
+
+    /// <summary>The client sent AddSpellFavorite: the read model's bars change at once (<see cref="Spellbook.AddFavorite"/>), as retail's player module does before the action goes out. Publishes when a bar changed.</summary>
+    internal void ApplyFavoriteAdd(uint spellId, int index, int bar)
+    {
+        var book = _state.Self.Spellbook;
+        if (book.AddFavorite(spellId, index, bar))
+        {
+            Changed();
+            Publish(new SpellbookChanged(SpellbookChange.Favorites, spellId, book.Count, true));
+        }
+    }
+
+    /// <summary>The client sent RemoveSpellFavorite: the read model's bars change at once (<see cref="Spellbook.RemoveFavorite"/>). Publishes when a bar changed.</summary>
+    internal void ApplyFavoriteRemove(uint spellId, int bar)
+    {
+        var book = _state.Self.Spellbook;
+        if (book.RemoveFavorite(spellId, bar))
+        {
+            Changed();
+            Publish(new SpellbookChanged(SpellbookChange.Favorites, spellId, book.Count, true));
+        }
     }
 
     /// <summary>GameEvent 0x02C2: <c>Handle_Magic__UpdateEnchantment</c> (0x005686D0): the enchantment is added or replaces its twin.</summary>
@@ -181,11 +238,20 @@ internal sealed partial class GameStateReducer
         q.SetActiveEnchantments([.. registry]);
         Changed();
         Publish(new QualitiesChanged(QualityChange.Enchantments, 0));
-        Publish(new EnchantmentChanged(change, removed.ToImmutable(), registry.Count, notify, vitae));
+        var removedSpells = removed.ToImmutable();
+        Publish(new EnchantmentChanged(change, removedSpells, registry.Count, notify, vitae));
+        if (notify)
+        {
+            foreach (var spell in removedSpells)
+            {
+                NoteExpiry(spell.SpellId);
+            }
+        }
+
         NoteOverdueEnchantments(_clock.Now);
     }
 
-    /// <summary><c>CEnchantmentRegistry::PurgeEnchantments</c> or <c>PurgeBadEnchantments</c>, then the event.</summary>
+    /// <summary><c>CEnchantmentRegistry::PurgeEnchantments</c> or <c>PurgeBadEnchantments</c>, then the event (<c>TODO(m3-purge-empty)</c> closed: a 0x02C6 that removes nothing still publishes an empty <see cref="EnchantmentChange.Purged"/>; the bad-only purge does not, as ACE never sends it).</summary>
     private void PurgeEnchantments(bool badOnly)
     {
         var q = _state.Self.Qualities;
@@ -193,6 +259,12 @@ internal sealed partial class GameStateReducer
         var removed = EnchantmentRules.Purge(registry, badOnly);
         if (removed.Count == 0)
         {
+            // ACE sends 0x02C6 at every player death (Player_Death.cs 211-216), buffed or not: the message was received, so it is published (the death tally's purged=). The state did not change.
+            if (!badOnly)
+            {
+                Publish(new EnchantmentChanged(EnchantmentChange.Purged, ImmutableArray<LayeredSpellDesc>.Empty, registry.Count, false, false));
+            }
+
             return;
         }
 

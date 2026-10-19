@@ -37,6 +37,22 @@ public sealed class DeathSendTests
     }
 
     [Fact]
+    public void The_remove_favourite_reaches_the_server_as_the_ACE_layout_on_the_weenie_queue()
+    {
+        using var rig = new SessionRig();
+        rig.ToWorld();
+
+        var ticket = rig.Session.SendRemoveSpellFavorite(0x0B4F, 1);
+        rig.RunFor(TimeSpan.FromMilliseconds(200));
+
+        var action = Assert.Single(rig.Tap.Messages, m => m.Direction == MessageDirection.Outbound && BitConverter.ToUInt32(m.Body) == MessageOpcodes.GameAction);
+        Assert.Equal(MessageQueue.Weenie, action.Queue);
+        Assert.Equal(20, action.Body.Length);
+        Assert.Equal((0x01E4u, 0x0B4Fu, 1u), (BitConverter.ToUInt32(action.Body, 8), BitConverter.ToUInt32(action.Body, 12), BitConverter.ToUInt32(action.Body, 16)));
+        Assert.Equal(ticket.MessageSequence, action.Sequence);
+    }
+
+    [Fact]
     public void Both_refuse_a_session_outside_the_world()
     {
         using var rig = new SessionRig();
@@ -47,6 +63,7 @@ public sealed class DeathSendTests
         [
             () => rig.Session.SendSuicide(),
             () => rig.Session.SendAddSpellFavorite(1, 0, 0),
+            () => rig.Session.SendRemoveSpellFavorite(1, 0),
         ];
 
         Assert.All(sends, s => Assert.Contains("InWorld", Assert.Throws<InvalidOperationException>(s).Message, StringComparison.Ordinal));

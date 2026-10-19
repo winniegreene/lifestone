@@ -4,10 +4,12 @@ using System.Globalization;
 using System.Numerics;
 using Lifestone.Client.Audio;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Interiors;
 using Lifestone.Client.PortalSpace;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.Appearance;
 using Lifestone.Data.Effects;
+using Lifestone.Data.Models;
 using Lifestone.Data.Motion;
 using Lifestone.Data.Physics;
 using Lifestone.Data.World;
@@ -234,6 +236,9 @@ public sealed class Avatar
     /// <summary>True once a projectile avatar was drawn on a frame (<see cref="AvatarSet.NoteDrawn"/>).</summary>
     internal bool ProjectileDrawn { get; set; }
 
+    /// <summary>The Setup light this avatar registered in <see cref="AvatarSet.DynamicLights"/> (a non-static object whose Setup has one), or null.</summary>
+    internal ModelLight? SourceLight { get; set; }
+
     /// <summary>True while this avatar is counted in <see cref="AvatarSet.LiveProjectiles"/>.</summary>
     internal bool CountedLive { get; set; }
 
@@ -301,6 +306,8 @@ public sealed class AvatarSet : ITargetWorld
     private readonly List<string> _problems = [];
     private IPlayerBody? _playerBody;
     private int _cursor;
+    private bool _lightSourcesFullLogged;
+    private bool _multiLightLogged;
 
     /// <param name="sources">The dats.</param>
     /// <param name="log">The log, or none.</param>
@@ -314,6 +321,15 @@ public sealed class AvatarSet : ITargetWorld
 
     /// <summary>The dats.</summary>
     public AvatarSources Sources { get; }
+
+    /// <summary>
+    /// The dynamic light list (M3 4.1 s0): the viewer light and the Setup lights of the non-static objects here (a projectile's, a creature's), kept by
+    /// <see cref="Advance"/> (<c>Render::add_dynamic_light</c>, <c>SmartBox::set_viewer</c>). Set <see cref="DynamicLightList.ViewerLightEnabled"/> from <c>--viewer-light</c>.
+    /// </summary>
+    public DynamicLightList DynamicLights { get; } = new();
+
+    /// <summary>The list as of the last <see cref="Advance"/>: what the Godot layer reads, nearest the viewer first.</summary>
+    public DynamicLightFrame DynamicLightFrame { get; } = new();
 
     /// <summary>The player's guid (from its create), or 0.</summary>
     public uint PlayerGuid { get; private set; }
@@ -417,6 +433,14 @@ public sealed class AvatarSet : ITargetWorld
     /// velocity like any other (a glitch fix; no retail projectile Setup lacks a sphere). Read when a body is made.
     /// </summary>
     public bool RetailSpherelessMissile { get; set; }
+
+    /// <summary>The cell lookup a flying projectile follows its cells with (<see cref="ProjectileCellFollower"/>, over the loaded interiors; null keeps a projectile in its creation cell). Read when a body is made.</summary>
+    public IAvatarCellFollower? CellFollower { get; set; }
+
+    /// <summary>Where sounds are heard from (<see cref="IAvatarListener"/>: the camera, as retail's <c>SmartBox::set_viewer</c> sets it); null, or a listener with none this frame, uses the viewer's position. Read once per <see cref="Advance"/>.</summary>
+    public IAvatarListener? Listener { get; set; }
+
+    private CellFrame _listener;
 
     /// <summary>
     /// The draw layer showed <paramref name="avatar"/> this frame (all its meshes ready; a projectile with no drawable part is shown too, and what is seen of it is its scripts' particles): the first time a projectile is, <see cref="AvatarStats.ProjectilesShown"/> counts it. Nothing for any other avatar; allocates nothing.
@@ -617,6 +641,7 @@ public sealed class AvatarSet : ITargetWorld
         var avatar = new Avatar(body, create, Sources, create.IsSelf);
         _problems.Clear();
         body.RetailSpherelessMissile = RetailSpherelessMissile;
+        body.CellFollower = CellFollower;
         body.SetContact(create.HasContact);
 
         // An object created Hidden plays its Hidden script here (set_description applies the state through set_state,
@@ -634,13 +659,13 @@ public sealed class AvatarSet : ITargetWorld
 
             Stats.ProjectilesCreated++;
             LastProjectileGuid = create.Guid;
-            if (!_projectileCellLogged && create.Position is { } at && Lifestone.Data.World.LandDefs.IsEnvCell(at.CellId))
+            if (CellFollower is null && !_projectileCellLogged && create.Position is { } at && Lifestone.Data.World.LandDefs.IsEnvCell(at.CellId))
             {
                 _projectileCellLogged = true;
                 Log(
                     LogSeverity.Info,
                     create.Guid,
-                    "TODO(m3-bolt-cell-tracking): a projectile created in a dungeon cell keeps that cell while it flies (no collision transition for a server object, D24), so a bolt that crosses into another cell is lit and shown by its creation cell until the server's hit messages; retail's transition would hand it from cell to cell");
+                    "TODO(m3-bolt-cell-tracking): no cell follower is set (the host gives the set a ProjectileCellFollower over the interiors), so a projectile created in a dungeon cell keeps that cell while it flies (no collision transition for a server object, D24); a bolt that crosses into another cell is lit and shown by its creation cell until the server's hit messages; retail's transition would hand it from cell to cell");
             }
 
             if (setup.Spheres.Count == 0 && !RetailSpherelessMissile && _spherelessMissilesLogged.Add(create.SetupId))
@@ -696,6 +721,7 @@ public sealed class AvatarSet : ITargetWorld
         }
 
         AttachWaitingChildren(avatar);
+        RegisterLight(avatar, create);
         if (create.IsSelf)
         {
             Player = new PlayerAvatar(avatar);
@@ -1058,16 +1084,19 @@ public sealed class AvatarSet : ITargetWorld
         Stats.SteppedLastFrame = stepped;
         Stats.LastFrameComplete = complete;
 
+        _listener = Listener is { } listener && listener.TryGetListener(out var heard) ? heard : viewer.Position;
+        UpdateDynamicLights(viewer);
         Frame.Clear();
         for (var i = 0; i < _order.Count; i++)
         {
             var avatar = _order[i];
             if (avatar.Body.InCell)
             {
-                Frame.Add(avatar, viewer, avatar.IsPlayer && Player is { FirstPerson: true }, RetailUnhideFlash);
+                var camera = Player is { CameraTranslucency: > 0f } fading && (avatar.IsPlayer || avatar.Body.TopLevelId == fading.Guid) ? fading.CameraTranslucency : 0f;
+                Frame.Add(avatar, viewer, avatar.IsPlayer && Player is { FirstPerson: true }, RetailUnhideFlash, camera);
             }
 
-            DeliverEvents(avatar.Body, viewer, avatar.IsPlayer, avatar.Guid);
+            DeliverEvents(avatar.Body, avatar.IsPlayer, avatar.Guid);
         }
 
         if (_castClosing)
@@ -1077,7 +1106,7 @@ public sealed class AvatarSet : ITargetWorld
         }
     }
 
-    private void DeliverEvents(AvatarBody body, in AvatarViewer viewer, bool isPlayer, uint guid)
+    private void DeliverEvents(AvatarBody body, bool isPlayer, uint guid)
     {
         if (body.Effects.PendingEvents.Count == 0 && body.PendingServerSounds == 0)
         {
@@ -1093,7 +1122,7 @@ public sealed class AvatarSet : ITargetWorld
         _events.Clear();
         body.Effects.DrainEvents(_events);
         body.DrainServerSounds(_events);
-        var origin = SoundOriginOf(body, viewer);
+        var origin = SoundOriginOf(body, _listener);
         var soundTable = body.SoundTableId;
         var voices = InCastWindow(guid, isPlayer) ? sink as ISoundVoiceCounter : null;
         var voicesBefore = voices?.VoicesStarted ?? 0;
@@ -1118,14 +1147,80 @@ public sealed class AvatarSet : ITargetWorld
     /// <c>Position::heading(source, listener)</c> 0x005AA5D0). The M3 1.3 s1 fix: this method used to measure the
     /// listener-to-source bearing, which mirrored every positioned sound left to right.
     /// </summary>
-    private static SoundOrigin SoundOriginOf(AvatarBody body, in AvatarViewer viewer)
+    private static SoundOrigin SoundOriginOf(AvatarBody body, in CellFrame listener)
     {
-        if (viewer.Position.CellId == 0 || body.Position.CellId == 0)
+        if (listener.CellId == 0 || body.Position.CellId == 0)
         {
             return SoundOrigin.Center;
         }
 
-        return SoundOrigin.Between(viewer.Position, body.Position);
+        return SoundOrigin.Between(listener, body.Position);
+    }
+
+    // ----- dynamic lights (M3 4.1 s0) -----
+
+    /// <summary>
+    /// A non-static object whose Setup has a light adds a dynamic entry (<c>CPartArray::InitLights</c> 0x00519730 gives it a LIGHTLIST; a Static one's lights are static and belong
+    /// to its cell, M2). Colour, intensity and falloff are the Setup's and never change (<c>SetLightHook::Execute</c> 0x00527BD0 only toggles).
+    /// </summary>
+    private void RegisterLight(Avatar avatar, AvatarCreate create)
+    {
+        var lights = avatar.Body.Setup.Lights;
+        if (lights.Count == 0 || (create.PhysicsState & AvatarStateBits.Static) != 0)
+        {
+            return;
+        }
+
+        if (lights.Count > 1 && !_multiLightLogged)
+        {
+            _multiLightLogged = true;
+            Log(LogSeverity.Warning, create.Guid, $"TODO(m3-setup-multi-light): Setup 0x{create.SetupId:X8} has {lights.Count} lights; only the first is a dynamic light (every end-of-retail lit Setup has exactly one)");
+        }
+
+        avatar.SourceLight = lights[0];
+        SyncLight(avatar, lights[0]);
+    }
+
+    private void SyncLight(Avatar avatar, ModelLight light)
+    {
+        var body = avatar.Body;
+        var on = body.InWorld && body.LightsOn && body.Effects.Visual.LightsOn;
+        var position = body.Position;
+        var at = position.Origin + (position.CellId == 0 ? light.Offset.Origin : Vector3.Transform(light.Offset.Origin, position.Orientation));
+        if (!DynamicLights.Contains(avatar.Guid))
+        {
+            if (!DynamicLights.Upsert(avatar.Guid, position.CellId, at, light.ColorRgb, light.Intensity, light.Falloff, on) && !_lightSourcesFullLogged)
+            {
+                _lightSourcesFullLogged = true;
+                Log(LogSeverity.Warning, avatar.Guid, $"TODO(m3-dynamic-light-sources): more than {DynamicLightList.MaxSources} objects with lights; this one is not a dynamic light");
+            }
+
+            return;
+        }
+
+        DynamicLights.Move(avatar.Guid, position.CellId, at);
+        DynamicLights.SetOn(avatar.Guid, on);
+    }
+
+    /// <summary>
+    /// Once per <see cref="Advance"/>: follows every light source with its object's frame and lights flag, rebuilds the list from the viewer
+    /// (<c>SmartBox::set_viewer</c> 0x00452C80 runs every drawn frame from <c>SmartBox::update_viewer</c>, so the list is rebuilt per frame) and fills
+    /// <see cref="DynamicLightFrame"/>. Allocates nothing.
+    /// </summary>
+    private void UpdateDynamicLights(in AvatarViewer viewer)
+    {
+        for (var i = 0; i < _order.Count; i++)
+        {
+            var avatar = _order[i];
+            if (avatar.SourceLight is { } light)
+            {
+                SyncLight(avatar, light);
+            }
+        }
+
+        CellFrame? player = Player is { } p && p.Position.CellId != 0 ? p.Position : null;
+        DynamicLights.Update(viewer.Position, player);
+        DynamicLightFrame.Fill(DynamicLights);
     }
 
     // ----- helpers -----
@@ -1152,6 +1247,12 @@ public sealed class AvatarSet : ITargetWorld
         }
 
         avatar.Body.ExitWorld();
+        if (avatar.SourceLight is not null)
+        {
+            avatar.SourceLight = null;
+            DynamicLights.Remove(avatar.Guid);
+        }
+
         if (avatar.CountedLive)
         {
             avatar.CountedLive = false;

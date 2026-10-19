@@ -278,3 +278,94 @@
 - Never run OpenAC's tests, Launcher, tools/*.ps1 or the self-hosted workflows on the development machine. If tests must run, first patch NetClient, and set TEMP and ACDREAM_ROOT_DIR to the scratchpad per process.
 - Do not import OpenAC's test fixtures, which hold LayoutDesc/EnvCell JSON dumped from the DATs and a retail trace log. Re-derive any Lifestone test fixtures from the user's own DATs at test time.
 - Decide the Lifestone licence before copying anything. If it is permissive (MIT), exclude or reimplement Wb/SceneryHelpers.cs and TerrainUtils.OnRoad (ACE-derived, AGPL) and record that the WorldBuilder licence rests only on its README. If it is AGPL (as the earlier prototype is), these provenance concerns become moot.
+
+## 6. Second read, 2026-10-19 (upstream v0.1.25 @6db05a2)
+
+Read-only, by `gh api` and a scratchpad clone that was deleted afterwards; nothing was built or run. The ask: how
+Lifestone keeps benefiting from OpenAC while staying an independent project, with M4 (fights and loot) next.
+
+### 6.1 Status and the pin
+
+- Upstream: 1,353 commits, releases 0.1.20 to 0.1.25 between 2026-09-26 and 2026-10-10, about 16,900 `[Fact]` and
+  `[Theory]` tests, CI on self-hosted Windows and Linux runners plus macOS, a DocFX API site, two external plugins.
+- Head **6db05a2dfa6f575ad9ae25a5c8bcdd2b682831fa** (2026-10-10T18:31:20Z), tree
+  72b9a7216b21621e08df06d9b3eb293344cd8b39. **It is unsigned.** Upstream signs only its GitHub merge commits (the
+  §1 pin 1ee5a08 and 5639eb4 are `valid`; every direct push between them is `unsigned`), so a head's signature is
+  recorded, not required; the clone's tree hash is compared with the API's instead. Fetched into `vendor-eval/OpenAC`
+  as the tag `watch-2026-10-19`; the worktree stays at 1ee5a08, the pin of every existing port.
+- `compare 1ee5a08...6db05a2`: 15 commits. Under `src/AcDream.Core.Net` only the lock file changed: **no ported file
+  changed, so the ports' pin does not move.** In the folders M4 touches: `Core/Items/ClientObjectTable.cs`,
+  `Core/Items/ItemInteractionPolicy.cs`, `Runtime/Gameplay/RuntimeItemInteraction.cs` (a carried spell focus no longer
+  blocks inventory completeness, #226; a confirmation before a mana stone destroys an item, #217).
+- Corrections to §1 to §4: ImageSharp and `Chorizite.Core` are gone (#215); `NOTICE.md` now lists the real package
+  set (Arch, Silk.NET, Avalonia, DotRecast, the stb ports, OpenAL Soft) and credits WorldBuilder and Chorizite by
+  folder. The §4 findings on the WorldBuilder licence and the ACE-derived scenery files still stand.
+- The plugin repositories: `OpenAC-MagTools` (LGPL-2.1) and `openac-mosstank` (GPL-3.0; a VirindiTank
+  re-implementation that reads `.usd`, `.utl`, `.met`, `.af` and `.nav` with byte-exact round-trip tests). GPL-3.0
+  combines with AGPL-3.0 (GPLv3 §13); LGPL-2.1 only through its §3 conversion to GPL. Neither is planned for porting
+  (no plugins: docs/automation-vision.md). At automation phase A4, MossTank's parsers are a published second reading
+  of the VTank formats beside the real files automation-vision.md requires; its loot vocabulary (`docs/plugin-api.md`
+  "Loot") is a shape for Lifestone's loot engine, read only.
+
+### 6.2 The independence rule (the existing rules, restated once so a brief cites this section)
+
+From docs/protocol.md §9.1, docs/third-party/net.md and CLAUDE.md "Data and sources":
+
+1. **No fork, submodule, package or plugin contract.** Nothing in Lifestone references an OpenAC assembly or tracks
+   its branch. OpenAC is read in `vendor-eval/OpenAC` and never built, tested or run (§1: wildcard UDP bind, HTTP
+   self-update, plugin DLL loading, a process spawn).
+2. **Port by file under the N-process.** Read first; a port header with the pin and the change list; decoupled from
+   `AcDream.Core` types; named on the track's docs/third-party page with the MIT text; the hygiene test checks the
+   header. A codec becomes `TryParse` over `WireReader`: the whole message, never throws, every byte read.
+3. **Decompile check before any port.** OpenAC cites no retail function, and some files carry decompile shape:
+   struct offsets in `Core/Physics` (§4), and the `Retail*` classes whose method names are retail's
+   (`RetailSpellFormula.InqSpellLevelByRoughHeuristic`, `RetailSoundMixer`). Such a file is read and re-expressed, and
+   Lifestone's version cites the retail function and its 11.6096 address; it is never pasted. The check is a grep for
+   `offset`, `decompil`, a `0x00[4-7]` address and a `Retail` prefix, recorded on the slice's doc page.
+4. **Reference only:** `AcDream.Runtime`, `App`, the plugin and peer-hub code (§5, superseded verdict), and every test
+   fixture (12.8 MB of dat-derived JSON and a retail trace: never imported). A reference read is cited by file on
+   the doc page and re-expressed with ACE's cite where ACE has the rule.
+5. **Behaviour, not architecture.** Taken: wire layouts, observed ACE behaviour, retail constants with a retail cite,
+   bug reports, test ideas. Not taken: hosts, the ECS, render packs, the launcher, the markup UI, the plugin API.
+6. **Re-diff on purpose** (docs/protocol.md, "OpenAC drift"): the watch of §6.4 runs at a milestone planning session,
+   never automatically, and the pin of existing ports moves only when a ported file changed and the change was
+   taken.
+
+### 6.3 What §5's table did not cover
+
+| Subsystem | Upstream files @6db05a2 | Verdict | Notes |
+|---|---|---|---|
+| The M4 wire: attack, cancel, drop, split, give, buy, sell, appraise, AttackDone, ViewContents, ApproachVendor | `Core.Net/Messages/{AttackTargetRequest, InventoryActions, VendorRequests, VendorApproach, AppraiseRequest, AppraiseInfoParser, GameEvents}.cs` | Port under the N-process | Row by row in [openac-m4-map.md](openac-m4-map.md) §1; M4 §6.1 Q7 |
+| Combat, items, vendor and spell state | `Runtime/Gameplay/{RuntimeCombatAttackState, RuntimeItemInteraction, RuntimeVendorAutomation, RuntimeSpellCastState}.cs`, `Core/Combat/*`, `Core/Items/*` | Read and re-express | The semantics beside ACE's; the map names the file per row |
+| `Core/Spells/Retail*`, `Core/Audio/{RetailSoundMixer, AmbientSoundScheduler}`, `Core/Lighting/LightManager` | `Retail*` files | Re-express with retail cites | Rule 3. The sound mixer (gain flat under 5 m, inverse square beyond, a −50 dB floor, pan ±15 with a 5 m dead zone, 16 voices) and the light manager (8 active lights, a viewer light, a ranking origin) are report-only cross-checks the M3 4.2 lead may run against 1.3 and 4.1; a finding is a §9 TODO row, never a slice |
+| Navigation | `Core/Navigation/*` (5 files, MIT), `docs/navigation.md` | Port candidate at automation phase A1, after a read | A planner over a grid of standing points sampled from the collision world, nothing precomputed; its decisions (the player always wins, arrival means something specific, a recovery ladder before giving up, leaps from the character's own physics, a narration that replays a report) are the acceptance checklist, and its six "Known limits" are what not to promise |
+| Headless host and bots | `Headless/Hosting/*`, `tests/AcDream.Headless.Tests/*LiveTests.cs`, the `lifecycle-smoke` and `portal-route-smoke` policies, one session-config document both hosts read, a JSON-lines `statusFile` | Reference | The shape of a live scenario against ACE; the one-document-for-both-hosts idea for `Lifestone.Headless` and the smoke's legs |
+| Tests and lanes | the `Lane` traits (`InstalledDat`, `Live`, `Vulkan`, `Timing`, `Manual`), `Status=KnownFailure`, `Purpose=Diagnostic`, the portable filter, `--locked-mode` restore | Ideas, §6.5 | |
+
+### 6.4 Upstream watch (the standing procedure)
+
+At every milestone planning session (m3-plan.md §6, P1), by the planner, read-only, about ten minutes:
+
+1. `gh api repos/eriknihlen/OpenAC/commits/main` for the head; `gh api repos/eriknihlen/OpenAC/compare/<pin>...<head>`
+   filtered to the ported paths (`src/AcDream.Core.Net/**`) and the folders the milestone touches;
+   `gh api "repos/eriknihlen/OpenAC/issues?state=all&since=<last watch>"` for new bug titles.
+2. A change to a ported file: diff it, decide fix-by-re-expression or ignore, and record the decision on the track's
+   docs/third-party page. The pin of existing ports does not move for that; new ports cite the new head.
+3. A new bug that names a Lifestone feature goes into the milestone's gate checklist (openac-m4-map.md §2 for M4).
+4. `git fetch --depth 1 origin <head>` in `vendor-eval/OpenAC` and `git tag watch-<date> FETCH_HEAD`, with the clone
+   settings of §1 (LFS smudge off, no hooks, no credential helper); the worktree stays at the ports' pin. Record the
+   head's `commit.verification` from the API (never `gpg`) and compare the tag's tree hash with the API's.
+5. Never build, test or run it; never import a fixture; never add a dependency on it.
+
+### 6.5 Process ideas, each the owner's decision (M4 §6.1 Q8; the polish pass P5)
+
+- **`Tier=Timing`** (OpenAC's `Lane=Timing`): tests whose outcome depends on load. Lifestone's frame-time checks
+  already carry the rule "likely contention: rerun once, then report"; a trait lets the default filter skip them and
+  the lead run them alone. **`Status=KnownFailure`**: a test written against an open TODO row, never in the green
+  total, run explicitly. Both extend the existing `Tier` filter.
+- **`dotnet restore --locked-mode`** in `tools/smoke.ps1`'s build step: the lock files exist since M2 D6, but a
+  restore that disagrees with them rewrites them instead of failing. One flag; the pin-everything rule.
+- **A `summary.json` beside smoke's `summary.md`** (commit, branch, filter, per-step verdict and duration), so P5's
+  before-and-after measurements are diffs of two files; the stage clock M4 §5.1 asks for is the same instrument.
+- **Not adopted**, said once: OpenAC's backlog format (`OpenAC-improvements.md`), its plugin-contract rules, its
+  release-gate evidence bundle (Lifestone has no releases), its multi-OS CI (no CI), its peer hub.

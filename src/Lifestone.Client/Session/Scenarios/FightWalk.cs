@@ -63,6 +63,14 @@ public interface IFightWalk : IDisposable
 
     /// <summary>Drops the leg and releases every key.</summary>
     void Abandon();
+
+    /// <summary>
+    /// True when a bolt flying from <paramref name="from"/> (the caster's feet) to <paramref name="to"/> (the target's feet) meets no wall (M3 4.2 P4: ACE and retail check no line, so a cast through rock explodes on the wall).
+    /// The default is true (a walker without physics, the tests' scripted ones, keeps the nearest pick).
+    /// </summary>
+    /// <param name="from">The caster's position.</param>
+    /// <param name="to">The target's position.</param>
+    bool HasClearLine(in CellFrame from, in CellFrame to) => true;
 }
 
 /// <summary>

@@ -359,7 +359,7 @@ internal static class Program
                         log.Warn("headless", "--character and --create-character are ignored by --scenario=buff (the mage is always the template's character)");
                     }
 
-                    scenario = new BuffScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Buff, log);
+                    scenario = new BuffScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Buff, log, bars: new MageSpellBars(log));
                 }
                 else if (options.Scenario == HeadlessScenario.Fight)
                 {

@@ -102,6 +102,34 @@ internal sealed class GameFightWalk : IFightWalk
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// ACE aims a bolt from the caster's 2/3 height to the target's 2/3 height (<c>ProjHeight</c>, WorldObject_Magic.cs 1526); the sweep is the camera's viewer sphere (<c>PhysicsWorld.SweepViewer</c>, retail <c>SmartBox::update_viewer</c>).
+    /// <c>TODO(m3-fight-los-radius)</c>: the bolt's own sphere is not known, 0.3 m is the viewer's. <c>TODO(m3-fight-los-target-height)</c>: the target's height is not read, 1.8 m stands in.
+    /// <c>TODO(m3-fight-los-approximation)</c>: moving objects and ethereal flags are not part of the sweep.
+    /// </remarks>
+    public bool HasClearLine(in CellFrame from, in CellFrame to)
+    {
+        if (_host.Walker is not { } walker)
+        {
+            return true;
+        }
+
+        var lift = new System.Numerics.Vector3(0f, 0f, StandInBodyHeight * ProjHeight);
+        var a = new CellFrame(from.CellId, from.Frame with { Origin = from.Frame.Origin + lift });
+        var b = new CellFrame(to.CellId, to.Frame with { Origin = to.Frame.Origin + lift });
+        return !walker.World.SweepViewer(in a, in b, LineRadius).Blocked;
+    }
+
+    /// <summary>The body height a bolt's start and end heights are taken from (<c>TODO(m3-fight-los-target-height)</c>).</summary>
+    private const float StandInBodyHeight = 1.8f;
+
+    /// <summary>ACE's <c>ProjHeight</c>, the share of a body's height a bolt leaves from and aims at.</summary>
+    private const float ProjHeight = 2f / 3f;
+
+    /// <summary>The sphere swept along the line (<c>TODO(m3-fight-los-radius)</c>).</summary>
+    private const float LineRadius = 0.3f;
+
+    /// <inheritdoc/>
     public FightWalkStatus Tick(IGameSessionView session, double now)
     {
         if (_driver is not { } driver)

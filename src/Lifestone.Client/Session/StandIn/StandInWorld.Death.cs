@@ -505,6 +505,7 @@ internal sealed partial class StandInWorld
         var self = _reducer.State.Self;
         var level = Math.Max(self.Qualities.Level, 1);
         var here = self.Position;
+        var wornAtDeath = _reducer.State.Objects.TryGet(self.Guid, out var dying) ? dying.Model : ModelData.Empty; // the corpse wears what the player wore before the drops (Creature_Death.cs 474-480)
         var dropped = LoseItems(sink, level);
         if (here is { } at && AcCoordinates.IsOutdoorCell(at.CellId))
         {
@@ -521,7 +522,7 @@ internal sealed partial class StandInWorld
 
         if (here is { } place)
         {
-            CreateCorpse(sink, new AcPosition(place.CellId, place.Origin, place.Orientation));
+            CreateCorpse(sink, new AcPosition(place.CellId, place.Origin, place.Orientation), wornAtDeath);
         }
 
         var jump = _sanctuary is { } bound ? new StandInTeleport(0, bound.Cell, bound.Origin) : new StandInTeleport(0, _visit.Cell, _visit.Origin);
@@ -593,6 +594,7 @@ internal sealed partial class StandInWorld
             Zeros(sink, guid); // TryDequipObjectWithNetworking: the Wielder and CurrentWieldedLocation zeros (Player_Inventory.cs 400-405)
             PlaySound(sink, _reducer.State.Self.Guid, SoundUnwieldObject, 1f);
             DeleteObject(sink, guid); // ToCorpseOnDeath: the item is deleted from the client (the corpse holds it)
+            SendLook(sink, entry.Worn);
             return (entry.Name, 1);
         }
 
@@ -627,7 +629,7 @@ internal sealed partial class StandInWorld
     }
 
     /// <summary>The player's corpse (<c>Creature_Death.cs</c> <c>CreateCorpse</c> 428-600): "Corpse of &lt;name&gt;" with the corpse bit, the player's Setup and motion table, in the Dead pose, where the player fell.</summary>
-    private void CreateCorpse(IAcSessionSink sink, in AcPosition place)
+    private void CreateCorpse(IAcSessionSink sink, in AcPosition place, ModelData worn)
     {
         var self = _reducer.State.Self;
         Placeholder("m3-standin-corpse-weenie", "the corpse weenie's class id, look and physics are ACE's world database's; the stand-in's corpse wears the player's Setup, lies in the Dead pose and holds nothing the client can open");
@@ -660,7 +662,8 @@ internal sealed partial class StandInWorld
             ObjectDescriptionFlags = WorldObjectTable.CorpseFlag,
         };
         AnswerLog.Add("F745");
-        sink.OnCreateObject(Context(sink), new CreateObjectMsg(guid, ModelData.Empty, physics, weenie), isUpdate: false);
+        // ACE's CreateCorpse saves the dying creature's CalculateObjDesc on the corpse (Creature_Death.cs 474-480) and Corpse.CalculateObjDesc sends it: the corpse wears what the player wore.
+        sink.OnCreateObject(Context(sink), new CreateObjectMsg(guid, worn, physics, weenie), isUpdate: false);
     }
 
     /// <summary>
@@ -713,6 +716,8 @@ internal sealed partial class StandInWorld
     }
 
     /// <summary>A teleport dispels the protection (<c>Player_Location.cs</c> 702-703); called by <see cref="Teleport"/> before it sends.</summary>
+    internal void DispelProtectionOnTeleport() => Later(DispelProtectionOnTeleport);
+
     private void DispelProtectionOnTeleport(IAcSessionSink sink)
     {
         if (_protected)
@@ -864,6 +869,33 @@ internal sealed partial class StandInWorld
             return Ticket();
         }
 
+        var list = BarList(bar);
+        if (!list.Contains(spell))
+        {
+            list.Insert((int)Math.Min(index, (uint)list.Count), spell);
+        }
+
+        return Ticket();
+    }
+
+    /// <summary>
+    /// A RemoveSpellFavorite (0x01E4, M3 4.2 p1): ACE takes the spell off the bar when it is on it and answers nothing (<c>Player_Character.cs</c> <c>HandleActionRemoveSpellFavorite</c>,
+    /// <c>CharacterExtensions.TryRemoveSpellFromBar</c>); the bars after it close up. A bar above 7 is ignored.
+    /// </summary>
+    internal OutboundTicket RemoveSpellFavorite(uint spell, uint bar)
+    {
+        if (bar > 7)
+        {
+            return Ticket();
+        }
+
+        BarList(bar).Remove(spell);
+        return Ticket();
+    }
+
+    /// <summary>The stand-in's own list for a bar, seeded from the session's bars on first use.</summary>
+    private List<uint> BarList(uint bar)
+    {
         if (_bars is null)
         {
             _bars = [];
@@ -878,13 +910,7 @@ internal sealed partial class StandInWorld
             _bars.Add([]);
         }
 
-        var list = _bars[(int)bar];
-        if (!list.Contains(spell))
-        {
-            list.Insert((int)Math.Min(index, (uint)list.Count), spell);
-        }
-
-        return Ticket();
+        return _bars[(int)bar];
     }
 
     /// <summary><paramref name="description"/> with the bars the stand-in holds since an AddSpellFavorite; unchanged when none was added.</summary>

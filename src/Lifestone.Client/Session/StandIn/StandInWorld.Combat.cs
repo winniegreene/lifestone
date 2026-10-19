@@ -149,7 +149,7 @@ internal sealed partial class StandInWorld
         Later(sink =>
         {
             AnswerLog.Add("F745");
-            sink.OnCreateObject(Context(sink), StandInSessions.ObjectMessage(kind, at), isUpdate: false);
+            sink.OnCreateObject(Context(sink), StandInSessions.ObjectMessage(kind, at, _visit.LookFor(kind.Name)), isUpdate: false);
         });
     }
 
@@ -350,7 +350,7 @@ internal sealed partial class StandInWorld
             Flags = flags,
             Velocity = direction * speed,
             // SpellProjectile.Setup (SpellProjectile.cs 76-90): ReportCollisions, Missile, AlignPath, PathClipped; not Ethereal, not IgnoreCollisions. The weenie's own base state is not known (TODO(m3-standin-projectile-weenies)).
-            State = PhysicsState.ReportCollisions | PhysicsState.Missile | PhysicsState.AlignPath | PhysicsState.PathClipped,
+            State = PhysicsState.ReportCollisions | PhysicsState.Missile | PhysicsState.AlignPath | PhysicsState.PathClipped | PhysicsState.LightingOn, // ACE sets LightingOn on a spell projectile (the bolt lights its surroundings: M3 4.1); ProjectileImpact clears it (the impact SetState below)
             Position = new AcPosition(startCell, localStart, HeadingOf(direction)),
             SetupId = model.Setup,
             Scale = model.Scale != 1f ? model.Scale : null,

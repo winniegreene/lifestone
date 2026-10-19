@@ -8,8 +8,11 @@
     timeout, so silent: Dummy audio):
 
       build                    dotnet build Lifestone.slnx (must report 0 warnings and 0 errors)
-      test                     dotnet test Lifestone.slnx --filter "Category!=Loopback&Tier!=Soak" (must pass): the
-                               loopback tests need the backend, and the soak tier runs only at merge gates
+      test                     dotnet test Lifestone.slnx --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive" (must pass): the
+                               loopback tests need the backend, the soak tier runs only at merge gates and the Exhaustive tier (the dat
+                               sweeps: every GfxObj, landblock and cell) runs through slice-check -Exhaustive (G-A and before a merge). The
+                               step writes <OutDir>\test-results\*.trx (per-test timings, VSTest's trx logger) and <OutDir>\test-times.txt (the
+                               20 slowest tests); its detail and the summary name the slowest (M3 4.2 p5a C6)
       cli-help                 --help prints the option registry and exits 0
       cli-bad-argument         an automated run with a mistyped option exits 1 at once
       terrain-golden           tools\terrain-golden.ps1 (GPU terrain against the CPU reference compositor)
@@ -42,14 +45,19 @@
                                portal space plays and sends LoginComplete once per arrival, a server teleport (the scripted one, a tools place, a portal Use)
                                moves the world, the physics and the camera, a boot and a silent server end on the disconnected screen whose button
                                reconnects, a log off through Shift+Escape takes it all away; one [playcheck] PASS|FAIL line each and a final line)
-      record-audio             --play-checks --record-audio=<OutDir>\record-audio\record-audio.wav (M3 1.3 s3, no backend; the audio check): the play checks on the stand-in
+      record-audio             --play-checks --record-audio=<OutDir>\record-audio\record-audio.wav (M3 1.3 s3, no backend; the audio check; M3 4.2 p5a C3: when play-checks is
+                               wanted too, the two steps SHARE this one Godot run, started at the play-checks step, and each keeps its own judges and row; the record-audio row
+                               says "shared run <log>", the play-checks row fails on the checks and on any ERROR that is not the recording's, the record-audio row on the
+                               recording's: the levels, the file, the muted flag, the sounded counts and an ERROR naming the recording; a run that did not hold names the half
+                               that failed in both rows): the play checks on the stand-in
                                server (portal sounds, the F750, the footstep and gesture hooks, the UI's sounds, ambient sound when the run reaches the outdoors) with the game's own
                                sound recorded from the Master bus; automated and therefore muted (M2 D8: no --volume; the recording is taken before the bus's level, so it holds the full
                                mix and nothing reaches the speakers). The run quits normally, the game reads the file back (Lifestone.Client.Audio.WaveLevels) and logs
                                "audio recording levels file= seconds= peak_dbfs= rms_dbfs= active_windows= sources=<server:n,hooks:n,footsteps:n,footsteps_sounded:n,ui:n,ambient:n,server_handed:n,hooks_handed:n; each n or n/a; server and hooks are voices started, the *_handed counts are calls handed to the sound player> windows= muted=true". The step passes on the play
                                checks' own verdict, a recording that exists, is non-silent (peak above -60 dBFS and at least one active 50 ms window) and was taken with the Master bus
                                muted, and the sounded counts in sources= are judged: server>=1 and hooks>=1 (a recording of portal sounds alone fails; footsteps stay unjudged, TODO(footstep-sound-table)). Detail: "peak_dbfs=<x> rms_dbfs=<x> active_windows=<n>/<n> seconds=<x> muted=true sources=<..>"
-      shell-frames             --play-checks --play-frames=<OutDir>\shell-frames\<W>x<H> at 800x600 (UI scale 1; with -AllSizes also 1920x1080 at scale 1 and 2560x1440 at scale 2), each through
+      shell-frames             --play-checks --play-skip-scenarios --play-frames=<OutDir>\shell-frames\<W>x<H> at 800x600 (UI scale 1; with -AllSizes also 1920x1080 at scale 1 and 2560x1440 at scale 2; M3 4.2 p5a C4:
+                               the stand-in's fight and death scenarios are not run here, the play-checks step judges them in the same smoke: the frames are the same, the run is about 200 s shorter), each through
                                tools\godot.ps1 -Resolution: the play checks on the stand-in server save the shell's ten review frames (portal space in the
                                SmartBox, the arrival, the spew box and chat, a NotInM2 message, an object selected with the vivid indicator, character information,
                                the options with side-by-side vitals, the logout confirmation, the automation inspector, the tools panel); the run fails if the window is not the size asked for or a frame is
@@ -118,6 +126,31 @@
     ACE's logs (server\runtime\logs\ACE_Log*.txt, rolled copies too). The summary's 'secrets=<n>' line gives the count
     and, for each hit, the file and the secrets.json key that matched, never a value. Any hit, or a file or folder that
     could not be read or listed, fails the run.
+
+    The scan is bounded (M3 4.2 p5a C8): this run's OutDir is always read whole; the other folders (the isolated Godot logs, the
+    session recordings, ACE's logs) are read only for files written since the last clean full or incremental scan (the stamp
+    cache\smoke-scan.json holds the scan's start time and secrets.json's modification time and length, never a password; a file
+    is read when it changed in the 2 minutes before that start or since). A full scan runs when there is no readable stamp, the
+    stamp is over 7 days old, secrets.json changed (a new password may already sit in old logs) or -FullScan is given: slice-check
+    -Smoke (G-A) and the live gate pass it. The 'secrets=' line says "full scan" or "incremental since <utc>: <n> file(s) unchanged,
+    not read" (counts only).
+
+    Steps that need neither the backend nor an undisturbed machine run two at a time with -Parallel 2 (default 1): cli-help,
+    cli-bad-argument, terrain-golden, engine-checks, interior-engine-checks, sky-checks, blend-checks, portal-space-checks,
+    retail-ui, spell-showcase and golden-viewpoints. Each runs as a child of this script (-Only <step>, its own OutDir below
+    <OutDir>\par\<step>, its own Godot user-data slot) and the batch is joined before any other step starts, so no frame-judged
+    step ever shares the machine with one of them; the rows are replayed in the table's order. A further child starts only
+    while fewer than 3 Godot processes run on the machine (other agents' too).
+
+    Frame-time checks (the play checks: an-unhidden-object-and-the-player-pass-through-intermediate-alpha-and-end-opaque-with-no-
+    frame-over-50-ms, no-frame-over-50-ms-from-the-arrival-to-the-teleport, enter-right-after-character-select, no-frame-over-50-ms-
+    from-enter-to-the-arrival-with-a-heavy-player-description and no-ui-step-after-enter-is-over-12-ms; the live legs' frame windows
+    (cast_frame_max_ms, fight_frame_max_ms, death_frame_max_ms, enter_to_walk and the teleport windows)) are judged against the machine
+    they ran on (M3 4.2 D42): the steps that run them (play-checks, record-audio, login-check, login, login-buff, login-bsd,
+    login-death) sample the Godot processes on the machine (the step's own excluded). When every failure of such a step is a
+    frame-time check and another Godot run was up during the step, the step is reported, not failed: "PASS (frames=contended)" and
+    the detail names the checks. With no other run it fails as today. -SoloFrames: any frame-time failure fails, and a frame-judged
+    step does not start while another Godot run is up (it waits at most 10 minutes, one line per minute, then fails as refused).
 
     A Godot step also fails when Lifestone logged an ERROR line during it (the "Errors logged" column), except
     cli-bad-argument, whose ERROR is the point: false ERRORs (shutdown cancellations) once went unnoticed in passing runs.
@@ -196,11 +229,34 @@ param(
     [int] $FlySpeed = 200,
     [switch] $JudgeLifestoneFramesOnly,
     [switch] $AllSizes,
-    [string] $DotnetRoot = ''
+    [string] $DotnetRoot = '',
+    [switch] $SoloFrames,
+    [switch] $FullScan,
+    [ValidateRange(1, 3)]
+    [int] $Parallel = 1,
+    # Internals of -Parallel (a child run of one step): the step's number in the parent's table, where it writes its rows, the Godot user-data slot, and no secret scan (the parent scans the lot).
+    [Parameter(DontShow)] [int] $StepNumber = 0,
+    [Parameter(DontShow)] [string] $ResultsJson = '',
+    [Parameter(DontShow)] [ValidatePattern('^[a-z0-9]{0,8}$')] [string] $UserDataSlot = '',
+    [Parameter(DontShow)] [switch] $NoScan
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Get-FrameRule {
+    <# 4.2 fix A (R4): the frame rule in force. The live gate (-Backend require) always judges frames solo (D42: a frame-time failure there is never "contended") and scans in full; elsewhere the rule is what the switches say.
+       Returns @{ Solo; Full; Text }: Text is the words the smoke's first line prints. #>
+    param([string] $Backend, [bool] $Solo, [bool] $Full)
+    $implied = $Backend -eq 'require'
+    $soloNow = $Solo -or $implied
+    $fullNow = $Full -or $implied
+    $text = if ($soloNow) { "frames: solo (-SoloFrames$(if ($implied -and -not $Solo) { ' implied by -Backend require' })): a frame-time failure fails, no contended pass)" } else { 'frames: contended-allowed (a frame-time failure with another Godot run up is reported, not failed; -SoloFrames judges it)' }
+    return @{ Solo = $soloNow; Full = $fullNow; Text = $text }
+}
+$frameRule = Get-FrameRule -Backend $Backend -Solo ([bool]$SoloFrames) -Full ([bool]$FullScan)
+$SoloFrames = [switch]$frameRule.Solo
+$FullScan = [switch]$frameRule.Full
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $godotScript = Join-Path $PSScriptRoot 'godot.ps1'
@@ -214,6 +270,7 @@ $defaultSize = '800x600'
 $frameSizes = if ($AllSizes) { @('800x600', '1920x1080') } else { @('800x600') }
 $shellFrameSizes = if ($AllSizes) { @('800x600', '1920x1080', '2560x1440') } else { @('800x600') }
 Import-Module (Join-Path $PSScriptRoot 'lib\Toolchain.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'lib\TestTimes.psm1') -Force
 $DotnetRoot = Find-LifestoneDotnetRoot -DotnetRoot $DotnetRoot
 $dotnetExe = Join-Path $DotnetRoot 'dotnet.exe'
 
@@ -221,8 +278,19 @@ $allSteps = @('build', 'test', 'cli-help', 'cli-bad-argument', 'terrain-golden',
     'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
 # The steps that need the local backend (gated by -Backend).
 $backendSteps = @('login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death')
-# The default test run leaves out the loopback tests (they need the backend) and the soak tier (merge gates only).
-$testFilter = 'Category!=Loopback&Tier!=Soak'
+# The steps whose verdict judges frame time: a failure of one of their frame-time checks is judged against the machine (D42, the help above).
+$frameJudgedSteps = @('play-checks', 'record-audio', 'login-check', 'login', 'login-buff', 'login-bsd', 'login-death')
+# The frame-time checks of the play checks (PlayChecks.cs: the ones that compare a frame or a UI step with FrameLimitMilliseconds / MaxUiStepMilliseconds).
+$frameTimeChecks = @(
+    'an-unhidden-object-and-the-player-pass-through-intermediate-alpha-and-end-opaque-with-no-frame-over-50-ms',
+    'no-frame-over-50-ms-from-the-arrival-to-the-teleport',
+    'enter-right-after-character-select',
+    'no-frame-over-50-ms-from-enter-to-the-arrival-with-a-heavy-player-description',
+    'no-ui-step-after-enter-is-over-12-ms')
+# The steps -Parallel runs two at a time: backend-free, and never frame-judged (a frame-judged step never shares the machine with them).
+$parallelSteps = @('cli-help', 'cli-bad-argument', 'terrain-golden', 'engine-checks', 'interior-engine-checks', 'sky-checks', 'blend-checks', 'portal-space-checks', 'retail-ui', 'spell-showcase', 'golden-viewpoints')
+# The default test run leaves out the loopback tests (they need the backend), the soak tier (merge gates only) and the Exhaustive tier (the dat sweeps; slice-check -Exhaustive runs it at G-A and before a merge).
+$testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive'
 # 'pwsh -File' passes '-Only a,b' as one string: split on commas either way.
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Skip = @($Skip | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -255,7 +323,11 @@ $childEnv = [ordered]@{
 }
 
 $script:results = [System.Collections.Generic.List[object]]::new()
-$script:stepIndex = 0
+$script:stepIndex = if ($StepNumber -gt 0) { $StepNumber - 1 } else { 0 }
+$script:enginePeak = 0
+$script:testTimesLine = ''
+# C3: the one Godot run the play-checks and record-audio steps share (Get-PlayChecksRun).
+$script:sharedPlay = $null
 # -Backend start: what was running before and what this run started (Start-SmokeBackend, Stop-SmokeBackend).
 $script:backendStart = $null
 $script:serverModule = $null
@@ -267,7 +339,7 @@ function Invoke-Logged {
       itself: the backend scripts start mariadbd and ACE detached, but a tree kill (by parent PID) still reaches them, and
       a MariaDB killed in its shutdown leaves InnoDB to crash-recover.
     #>
-    param([string] $FileName, [string[]] $Arguments, [string] $LogPath, [int] $TimeoutSeconds, [switch] $KillRootOnly)
+    param([string] $FileName, [string[]] $Arguments, [string] $LogPath, [int] $TimeoutSeconds, [switch] $KillRootOnly, [switch] $SampleEngines)
     $psi = [System.Diagnostics.ProcessStartInfo]::new($FileName)
     foreach ($a in $Arguments) { $psi.ArgumentList.Add($a) }
     $psi.UseShellExecute = $false
@@ -279,7 +351,17 @@ function Invoke-Logged {
     $process = [System.Diagnostics.Process]::Start($psi)
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+    $exited = $false
+    if ($SampleEngines) {
+        # D42: how many Godot processes ran at once while this step ran (its own included), sampled every 2 s: $script:enginePeak.
+        $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+        while (-not $exited -and [DateTime]::UtcNow -lt $deadline) {
+            $exited = $process.WaitForExit(2000)
+            $script:enginePeak = [math]::Max($script:enginePeak, (Get-EngineProcessCount))
+        }
+    }
+    else { $exited = $process.WaitForExit($TimeoutSeconds * 1000) }
+    if (-not $exited) {
         $process.Kill(-not $KillRootOnly)
         $process.WaitForExit()
         # After a root-only kill, a grandchild that inherited the output pipes can hold them open: wait 30 s at most.
@@ -294,8 +376,14 @@ function Invoke-Logged {
     return $process.ExitCode
 }
 
+function Get-EngineProcessCount {
+    <# Godot game processes on the machine (the console wrappers excluded): the count the brief's "other Godot run" rule uses. #>
+    return @(Get-Process -Name 'Godot*' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike '*_console' }).Count
+}
+
 function Invoke-Godot {
-    <# One off-screen game run through tools\godot.ps1 (at -Resolution WxH when given); returns @{ Code; Log; Text }. #>
+    <# One off-screen game run through tools\godot.ps1 (at -Resolution WxH when given); returns @{ Code; Log; Text; Others; Seconds }.
+       Others: the most other Godot runs seen on the machine while it ran (before it started, or sampled during it; its own excluded). #>
     param(
         [string] $Step,
         [string] $GameArgs,
@@ -308,9 +396,14 @@ function Invoke-Godot {
     $arguments = @('-NoProfile', '-File', $godotScript, '-Run', '-Offscreen', '-IsolateUserData', '-NoBuild',
         '-TimeoutSeconds', "$TimeoutSeconds")
     if ($Resolution) { $arguments += @('-Resolution', $Resolution) }
+    if ($UserDataSlot) { $arguments += @('-UserDataSlot', $UserDataSlot) }
     $arguments += "-GameArgs:$GameArgs"
-    $code = Invoke-Logged -FileName $pwshExe -Arguments $arguments -LogPath $log -TimeoutSeconds ($TimeoutSeconds + 60)
-    return @{ Code = $code; Log = $log; Text = (Get-Content -LiteralPath $log -Raw) }
+    $before = Get-EngineProcessCount
+    $script:enginePeak = 0
+    $started = [Diagnostics.Stopwatch]::StartNew()
+    $code = Invoke-Logged -FileName $pwshExe -Arguments $arguments -LogPath $log -TimeoutSeconds ($TimeoutSeconds + 60) -SampleEngines
+    $others = [math]::Max($before, $script:enginePeak - 1)
+    return @{ Code = $code; Log = $log; Text = (Get-Content -LiteralPath $log -Raw); Others = $others; Seconds = $started.Elapsed.TotalSeconds }
 }
 
 function Test-RecordedSources([string] $Sources) {
@@ -330,6 +423,129 @@ function Test-RecordedSources([string] $Sources) {
         elseif ($n -lt 1) { $failed += "$name=$n (>= 1 expected)" }
     }
     return @{ Ok = ($failed.Count -eq 0); Detail = ($failed -join '; ') }
+}
+
+function Get-PlayCheckFailures([string] $Text) {
+    <# The names of the play checks that failed in a run's log ('[playcheck] FAIL <name>'), in order. #>
+    return @([regex]::Matches($Text, '\[playcheck\] FAIL (\S+)') | ForEach-Object { $_.Groups[1].Value })
+}
+
+function Get-RecordingErrorCount([string] $Text) {
+    <# Lifestone ERROR lines that name the recording: the record-audio half of a shared play-checks run (Main.cs's "--record-audio: nothing is recorded", the audio service's). #>
+    return ([regex]::Matches($Text, 'Z ERROR \[[^\]]*\][^\r\n]*(?:--record-audio|audio recording|record-audio)')).Count
+}
+
+function Get-FrameVerdict {
+    <#
+      D42 for the play checks. $Failed: the checks that failed; $Frame of them are frame-time checks ($FrameChecks), $Other are not. Contended
+      (the step is reported, not failed) when every failure is a frame-time check, no ERROR line besides those checks' own (and the $IgnoredErrors the
+      other half of a shared run owns) was logged, another Godot run was up during the step ($Others > 0) and -SoloFrames is off.
+      Returns @{ Contended; Frame; Other; Errors (ERROR lines the step still fails on); Note }.
+    #>
+    param([string] $Text, [int] $Others, [bool] $Solo, [string[]] $FrameChecks, [int] $IgnoredErrors = 0)
+    $failed = @(Get-PlayCheckFailures $Text)
+    $frame = @($failed | Where-Object { $FrameChecks -contains $_ })
+    $other = @($failed | Where-Object { $FrameChecks -notcontains $_ })
+    $errors = [math]::Max(0, (Get-ErrorCount $Text) - $IgnoredErrors)
+    $contended = $frame.Count -gt 0 -and $other.Count -eq 0 -and ($errors - $frame.Count) -le 0 -and $Others -gt 0 -and -not $Solo
+    $note = ''
+    if ($contended) { $note = "; frames=contended: $($frame -join ', ') failed with $Others other Godot run(s) up (reported, not failed; rerun on a quiet machine or with -SoloFrames to judge)" }
+    elseif ($frame.Count -gt 0) { $note = "; frame-time check(s) failed: $($frame -join ', ') (other Godot runs up: $Others$(if ($Solo) { '; -SoloFrames' }))" }
+    return @{ Contended = $contended; Frame = $frame; Other = $other; Errors = $(if ($contended) { $errors - $frame.Count } else { $errors }); Note = $note }
+}
+
+function Get-LiveFrameVerdict {
+    <#
+      D42 for the live steps (login-check, login, login-buff, login-bsd, login-death): their frame windows are judged in the game and reach the log as
+      ERROR lines: 'frame over 50 ms between Enter and walking', 'frame over 50 ms around a server teleport' and a leg's 'the ... leg failed ... why=...'
+      whose reasons are all '<window>_frame_max_ms=<x> (at most 75 expected)'. Contended when there is at least one ERROR line and every one of them is such a
+      line, another Godot run was up and -SoloFrames is off. Conservative on purpose (a failure with no ERROR line, or any other ERROR, stays a failure):
+      TODO(p5a-live-frame-contended): the lead's first live gate confirms the legs print nothing else when only a frame window fails.
+    #>
+    param([string] $Text, [int] $Others, [bool] $Solo)
+    $lines = @([regex]::Matches($Text, 'Z ERROR \[[^\]]*\][^\r\n]*') | ForEach-Object { $_.Value })
+    $names = [System.Collections.Generic.List[string]]::new()
+    $allFrame = $lines.Count -gt 0
+    foreach ($line in $lines) {
+        if ($line -match 'frame over 50 ms') { $names.Add('frame over 50 ms (enter or teleport window)'); continue }
+        if ($line -match 'leg failed[^\r\n]*why=(?<why>.*)$') {
+            $segments = @($Matches['why'] -split ';\s*' | Where-Object { $_ })
+            $frameOnly = $segments.Count -gt 0
+            foreach ($segment in $segments) {
+                if ($segment -match '^\s*(?<n>\w*frame_max_ms)=[\d.]+ \(at most \d+ expected\)') { $names.Add($Matches['n']) } else { $frameOnly = $false }
+            }
+            if ($frameOnly) { continue }
+        }
+        $allFrame = $false
+    }
+    $contended = $allFrame -and $Others -gt 0 -and -not $Solo
+    $note = if ($contended) { "; frames=contended: $(($names | Select-Object -Unique) -join ', ') failed with $Others other Godot run(s) up (reported, not failed)" } else { '' }
+    return @{ Contended = $contended; Names = @($names | Select-Object -Unique); Note = $note }
+}
+
+function Wait-SoloEngine {
+    <#
+      -SoloFrames: a frame-judged step does not start while another Godot run is up. Waits at most 10 minutes with a line per minute; after that the step
+      is recorded as a FAIL (refused) and this returns $false. Without -SoloFrames it returns $true at once.
+    #>
+    param([string] $Step, [System.Diagnostics.Stopwatch] $Timer)
+    if (-not $SoloFrames) { return $true }
+    $started = Get-Date
+    $reported = -1
+    while ($true) {
+        $count = Get-EngineProcessCount
+        if ($count -eq 0) { return $true }
+        $waited = ((Get-Date) - $started).TotalSeconds
+        if ($waited -ge 600) {
+            Add-Result $Step $false 0 $Timer.Elapsed.TotalSeconds "refused to start: $count other Godot run(s) were up for 10 minutes (-SoloFrames)" -NotRun
+            return $false
+        }
+        $minute = [int][math]::Floor($waited / 60)
+        if ($minute -gt $reported) {
+            $reported = $minute
+            Write-Host "[smoke] $Step`: waiting for $count other Godot run(s) to end (-SoloFrames), minute $($minute + 1) of 10"
+        }
+        Start-Sleep -Seconds 5
+    }
+}
+
+function Resolve-LiveFrames {
+    <# D42 for a live step: $Ok is the step's own verdict; a failure that is only frame windows with another Godot run up is reported as contended (PASS with the note), nothing else changes. Returns @{ Ok; Errors; Note; PassNote }. #>
+    param([bool] $Ok, $Run)
+    if ($Ok) { return @{ Ok = $true; Errors = (Get-ErrorCount $Run.Text); Note = ''; PassNote = '' } }
+    $verdict = Get-LiveFrameVerdict $Run.Text $Run.Others ([bool]$SoloFrames)
+    if ($verdict.Contended -and $Run.Code -ne 124) { return @{ Ok = $true; Errors = -1; Note = $verdict.Note; PassNote = 'frames=contended' } }
+    return @{ Ok = $false; Errors = (Get-ErrorCount $Run.Text); Note = ''; PassNote = '' }
+}
+
+function Get-PlayChecksRun {
+    <#
+      C3: the play-checks and record-audio steps share ONE Godot run (--play-checks --record-audio=<wav>) when both are wanted. The first of them to be
+      reached starts it; the second reads the same result. Returns @{ Run; Rel; Wav; Owner; Refused }.
+    #>
+    param([string] $Step, [System.Diagnostics.Stopwatch] $Timer)
+    if ($script:sharedPlay) { return $script:sharedPlay }
+    $wav = Join-Path (Join-Path $OutDir 'record-audio') 'record-audio.wav'
+    $rel = [IO.Path]::GetRelativePath($repoRoot, $wav).Replace('\', '/')
+    $shared = @{ Run = $null; Rel = $rel; Wav = $wav; Owner = $Step; Refused = $false }
+    if (Wait-SoloEngine $Step $Timer) { $shared.Run = Invoke-Godot $Step "--play-checks --record-audio=$rel" 420 '' $defaultSize }
+    else { $shared.Refused = $true }
+    $script:sharedPlay = $shared
+    return $shared
+}
+
+function Get-FrameFlags([string] $Text, [string] $Prefix) {
+    <#
+      The 50 ms flags of a login-check leg (docs/milestones/m3-plan.md section 5: a window's worst frame over 75 ms fails in the leg;
+      over 50 ms the leg prints frame_over_50=yes and still passes, the gate judges the worst of three runs). Reads the leg's
+      '[logincheck] <Prefix> done ...' line; returns @{ Over50 = [bool]; Suffix = '; frame_over_50=<yes|no> <window>_frame_max_ms=<x> ...' }.
+    #>
+    $line = [regex]::Match($Text, '\[logincheck\] ' + [regex]::Escape($Prefix) + ' done [^\r\n]*')
+    if (-not $line.Success) { return @{ Over50 = $false; Suffix = '' } }
+    $over = $line.Value -match ' frame_over_50=yes(\s|$)'
+    $maxima = @([regex]::Matches($line.Value, '(?<![\w])([a-z_]*frame_max_ms)=([\d.]+|n/a)') | ForEach-Object { "$($_.Groups[1].Value)=$($_.Groups[2].Value)" })
+    $flag = if ($over) { 'yes' } else { 'no' }
+    return @{ Over50 = $over; Suffix = ('; frame_over_50=' + $flag + $(if ($maxima.Count) { ' ' + ($maxima -join ' ') } else { '' })) }
 }
 
 function Get-ErrorCount([string] $text) {
@@ -595,13 +811,48 @@ function Get-NeedleHits {
     return , $counts
 }
 
+function Get-ScanPlan {
+    <#
+      C8: whether the secret scan reads everything or only what changed. Full when forced (-FullScan), when the stamp ($StampPath: the last clean scan's start and
+      secrets.json's modification time and length, never a password) is missing, unreadable or over 7 days old, or when secrets.json is not the file the stamp saw
+      (a new password may already sit in old logs). Otherwise incremental: files written since the stamp's start less 2 minutes (a log still being appended).
+      Returns @{ Full; Since (UTC, or $null when Full); Reason }.
+    #>
+    param([string] $StampPath, [string] $SecretsPath, [bool] $Force, [datetime] $Now)
+    if ($Force) { return @{ Full = $true; Since = $null; Reason = 'full scan (-FullScan)' } }
+    if (-not (Test-Path -LiteralPath $StampPath -PathType Leaf)) { return @{ Full = $true; Since = $null; Reason = 'full scan (no stamp)' } }
+    try {
+        $stamp = Get-Content -LiteralPath $StampPath -Raw | ConvertFrom-Json
+        $started = [DateTime]::new([long]$stamp.scanStartedTicks, [DateTimeKind]::Utc)
+        $info = Get-Item -LiteralPath $SecretsPath -ErrorAction Stop
+        if ($info.LastWriteTimeUtc.Ticks -ne [long]$stamp.secretsMtimeTicks -or $info.Length -ne [long]$stamp.secretsLength) {
+            return @{ Full = $true; Since = $null; Reason = 'full scan (secrets.json changed since the last scan)' }
+        }
+    }
+    catch { return @{ Full = $true; Since = $null; Reason = 'full scan (the stamp could not be read)' } }
+    if (($Now.ToUniversalTime() - $started).TotalDays -gt 7) { return @{ Full = $true; Since = $null; Reason = 'full scan (the last scan is over 7 days old)' } }
+    return @{ Full = $false; Since = $started.AddMinutes(-2); Reason = "incremental since $($started.ToString('yyyy-MM-dd HH:mm:ss'))Z" }
+}
+
+function Write-ScanStamp {
+    <# After a clean scan (0 hits, nothing unreadable): the stamp Get-ScanPlan reads. Timestamps and file facts only; a temp file, then a move. #>
+    param([string] $StampPath, [string] $SecretsPath, [datetime] $Started)
+    $info = Get-Item -LiteralPath $SecretsPath
+    $json = [ordered]@{ scanStartedTicks = $Started.ToUniversalTime().Ticks; secretsMtimeTicks = $info.LastWriteTimeUtc.Ticks; secretsLength = $info.Length } | ConvertTo-Json
+    $temp = "$StampPath.tmp"
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $StampPath) | Out-Null
+    Set-Content -LiteralPath $temp -Value $json -Encoding utf8
+    Move-Item -LiteralPath $temp -Destination $StampPath -Force
+}
+
 function Measure-SecretLeaks {
     <#
       The secret scan (see the description above). The passwords stay in this function's memory; the result holds
       counts, file names and the secrets.json keys that matched, never a value, and a secrets.json error names only its
       exception type. Returns @{ Hits (-1: the scan could not run); Files; Scanned; Secrets; Unreadable; Note }.
     #>
-    $result = @{ Hits = 0; Files = [System.Collections.Generic.List[string]]::new(); Scanned = 0; Secrets = 0
+    $scanStarted = [DateTime]::UtcNow
+    $result = @{ Hits = 0; Files = [System.Collections.Generic.List[string]]::new(); Scanned = 0; Secrets = 0; Skipped = 0; Mode = ''
         Unreadable = [System.Collections.Generic.List[string]]::new(); Note = '' }
     $runtime = Find-LifestoneServerRuntime -RepoRoot $repoRoot -AllowMissing
     $secretsPath = if ($runtime) { Join-Path $runtime 'secrets.json' } else { '' }
@@ -648,9 +899,14 @@ function Measure-SecretLeaks {
     $targets = [System.Collections.Generic.List[object]]::new()
     $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $listErrors = [System.Collections.ArrayList]::new()
+    $stampPath = Join-Path $repoRoot 'cache\smoke-scan.json'
+    $plan = Get-ScanPlan -StampPath $stampPath -SecretsPath $secretsPath -Force ([bool]$FullScan) -Now $scanStarted
+    $result.Mode = $plan.Reason
+    # $bounded: the folders the run does not own (the isolated Godot logs, the session recordings, ACE's logs) are read only for files written since the stamp's start, in an incremental scan.
     $addFiles = {
-        param([string] $root, $files)
+        param([string] $root, $files, [bool] $bounded = $false)
         foreach ($file in $files) {
+            if ($bounded -and -not $plan.Full -and $file.LastWriteTimeUtc -lt $plan.Since) { $result.Skipped++; continue }
             if ($seen.Add($file.FullName)) { $targets.Add(@{ Path = $file.FullName; Name = [IO.Path]::GetRelativePath($root, $file.FullName) }) }
         }
     }
@@ -658,18 +914,18 @@ function Measure-SecretLeaks {
     $godotData = Join-Path $repoRoot 'cache\godot'
     if (Test-Path -LiteralPath $godotData) {
         foreach ($logs in @(Get-ChildItem -LiteralPath $godotData -Recurse -Directory -Force -Filter 'logs' -ErrorAction SilentlyContinue -ErrorVariable +listErrors)) {
-            & $addFiles $repoRoot @(Get-ChildItem -LiteralPath $logs.FullName -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +listErrors)
+            & $addFiles $repoRoot @(Get-ChildItem -LiteralPath $logs.FullName -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +listErrors) $true
         }
     }
     $sessions = Join-Path $repoRoot 'cache\sessions'
     if (Test-Path -LiteralPath $sessions) {
-        & $addFiles $repoRoot @(Get-ChildItem -LiteralPath $sessions -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +listErrors)
+        & $addFiles $repoRoot @(Get-ChildItem -LiteralPath $sessions -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +listErrors) $true
     }
     $aceLogs = Join-Path $runtime 'logs'
     if (Test-Path -LiteralPath $aceLogs) {
         # ACE_Log.txt, ACE_Log-WARN.txt and log4net's rolled copies (ACE_Log.txt.1, ...).
         & $addFiles $mainCheckout @(Get-ChildItem -LiteralPath $aceLogs -File -Force -ErrorAction SilentlyContinue -ErrorVariable +listErrors |
-                Where-Object { $_.Name -match '^ACE_Log.*\.txt(\.\d+)?$' })
+                Where-Object { $_.Name -match '^ACE_Log.*\.txt(\.\d+)?$' }) $true
     }
     foreach ($listError in $listErrors) {
         # The folder relative to this checkout (or, for ACE's logs, the main checkout), and the exception type only.
@@ -703,6 +959,10 @@ function Measure-SecretLeaks {
         }
     }
     $needles.Clear()
+    if ($result.Hits -eq 0 -and $result.Unreadable.Count -eq 0) {
+        try { Write-ScanStamp -StampPath $stampPath -SecretsPath $secretsPath -Started $scanStarted }
+        catch { $result.Note = "the scan stamp could not be written ($(Get-ExceptionKind $_)): the next scan is a full one" }
+    }
     return $result
 }
 
@@ -767,10 +1027,97 @@ function Get-FlyPathAttribution([string] $step, [string] $suffix) {
     return @{ Text = ('max with Lifestone work {0:0.0} ms, max with none {1:0.0} ms' -f $maxWork, $maxIdle); WorkMs = $maxWork }
 }
 
-$strayBefore = Get-StrayOutputs
+function Test-BatchSlot {
+    <# C8 (cut 9): may another child of the parallel batch start? The first always does (as a sequential run would); a further one only while fewer than $Requested run and fewer than 3 Godot processes run on the machine (other agents' too). #>
+    param([int] $Requested, [int] $Running, [int] $Engines)
+    if ($Running -eq 0) { return $true }
+    return $Running -lt $Requested -and $Engines -lt 3
+}
+
+function Start-BatchChild {
+    <# One step as a child of this script: -Only <step>, its own OutDir (par\<step>), its own Godot user-data slot, no secret scan, its rows in par\<step>.json. #>
+    param([string] $Step, [int] $Number, [string] $Slot)
+    $dir = Join-Path $OutDir 'par'
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $psi = [System.Diagnostics.ProcessStartInfo]::new($pwshExe)
+    $arguments = @('-NoProfile', '-File', $PSCommandPath, '-NoBuild', '-Only', $Step, '-OutDir', (Join-Path $dir $Step), '-StepNumber', "$Number", '-UserDataSlot', $Slot,
+        '-NoScan', '-ResultsJson', (Join-Path $dir "$Step.json"), '-Backend', 'auto', '-DotnetRoot', $DotnetRoot) + @(if ($AllSizes) { '-AllSizes' })
+    foreach ($a in $arguments) { $psi.ArgumentList.Add($a) }
+    $psi.UseShellExecute = $false
+    $psi.WorkingDirectory = $repoRoot
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($psi)
+    return @{ Step = $Step; Slot = $Slot; Process = $process; Out = $process.StandardOutput.ReadToEndAsync(); Err = $process.StandardError.ReadToEndAsync()
+        Deadline = [DateTime]::UtcNow.AddSeconds(1800); Json = (Join-Path $dir "$Step.json"); Console = (Join-Path $dir "$Step.console.log"); Timer = [Diagnostics.Stopwatch]::StartNew() }
+}
+
+function Invoke-ParallelBatch {
+    <#
+      C8 (cut 9): runs $Steps (all of them in $parallelSteps, backend-free, never frame-judged) as children, at most -Parallel at a time, and returns @{ <step> = @{ Rows; Code; Wall } }.
+      The batch is fully joined before this returns, so no other step starts while a child runs. A child that wrote no rows is a FAIL row, never a pass.
+    #>
+    param([string[]] $Steps, [hashtable] $Numbers)
+    $queue = [System.Collections.Generic.Queue[string]]::new($Steps)
+    $running = [System.Collections.Generic.List[object]]::new()
+    $results = @{}
+    $wall = [Diagnostics.Stopwatch]::StartNew()
+    while ($queue.Count -gt 0 -or $running.Count -gt 0) {
+        foreach ($child in @($running)) {
+            $finished = $child.Process.HasExited
+            if (-not $finished -and [DateTime]::UtcNow -gt $child.Deadline) { $child.Process.Kill($true); $child.Process.WaitForExit(); $finished = $true }
+            if (-not $finished) { continue }
+            $child.Process.WaitForExit()
+            $text = @($(if ($child.Out.Wait(30000)) { $child.Out.Result }), $(if ($child.Err.Wait(30000)) { $child.Err.Result })) -join [Environment]::NewLine
+            Set-Content -LiteralPath $child.Console -Value $text -Encoding utf8
+            $rows = @()
+            if (Test-Path -LiteralPath $child.Json) { try { $rows = @(Get-Content -LiteralPath $child.Json -Raw | ConvertFrom-Json) } catch { $rows = @() } }
+            $results[$child.Step] = @{ Rows = $rows; Code = $child.Process.ExitCode; Wall = $child.Timer.Elapsed.TotalSeconds }
+            $running.Remove($child) | Out-Null
+        }
+        while ($queue.Count -gt 0 -and (Test-BatchSlot $Parallel $running.Count (Get-EngineProcessCount))) {
+            $used = @($running | ForEach-Object { $_.Slot })
+            $slot = @('p1', 'p2', 'p3') | Where-Object { $used -notcontains $_ } | Select-Object -First 1
+            $step = $queue.Dequeue()
+            $running.Add((Start-BatchChild -Step $step -Number $Numbers[$step] -Slot $slot))
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    $sum = ($results.Values | ForEach-Object { $_.Wall } | Measure-Object -Sum).Sum
+    Write-Host ("[smoke] parallel x{0}: {1} steps, {2:0} s wall (sum {3:0} s)" -f $Parallel, $Steps.Count, $wall.Elapsed.TotalSeconds, $sum)
+    return $results
+}
+
+function Add-ReplayedResult {
+    <# The parent's row for a step a child ran: the child's own row (its Log under par\<step>\), or a FAIL when the child wrote none. #>
+    param([string] $Step, $Child, [double] $Seconds)
+    $row = @($Child.Rows | Where-Object { $_.Step -eq $Step }) | Select-Object -First 1
+    if (-not $row) {
+        Add-Result $Step $false $Child.Code $Seconds "no result from the parallel child (exit $($Child.Code); par\$Step.console.log)" -NotRun
+        return
+    }
+    $note = if ($row.Result -match '^PASS \((.*)\)$') { $Matches[1] } else { '' }
+    $log = if ($row.Log) { Join-Path (Join-Path 'par' $Step) $row.Log } else { '' }
+    $errors = if ("$($row.Errors)" -ne '') { [int]$row.Errors } else { -1 }
+    $exit = if ("$($row.Exit)" -ne '') { [int]$row.Exit } else { 0 }
+    if ($row.Outcome -eq 'SKIP') { Add-Result $Step $true $exit ([double]$row.Seconds) $row.Detail $log -Skipped }
+    else { Add-Result $Step ($row.Outcome -ne 'FAIL') $exit ([double]$row.Seconds) $row.Detail $log -1 $note }
+}
+
+$strayBefore = if (Test-Wanted 'stray-output') { Get-StrayOutputs } else { @() }
 $suiteTimer = [System.Diagnostics.Stopwatch]::StartNew()
-Write-Host "[smoke] repository $repoRoot; logs and outputs in $OutDir"
+Write-Host "[smoke] $($frameRule.Text); repository $repoRoot; logs and outputs in $OutDir"
 $wantedBackendSteps = @($backendSteps | Where-Object { Test-Wanted $_ })
+# The step numbers of the table (the loop's rule: build is skipped under -NoBuild, then every wanted step counts), for the -Parallel children.
+$stepNumbers = @{}
+$counter = if ($StepNumber -gt 0) { $StepNumber - 1 } else { 0 }
+foreach ($candidate in $allSteps) {
+    if ($candidate -eq 'build' -and $NoBuild) { continue }
+    if (-not (Test-Wanted $candidate)) { continue }
+    $counter++
+    $stepNumbers[$candidate] = $counter
+}
+$script:batch = $null
 $backendAtStart = Test-BackendReady
 Write-Host "[smoke] backend: $(if ($backendAtStart.Ready) { 'ready' } else { "not ready: $($backendAtStart.Reason)" }); -Backend $Backend"
 
@@ -801,6 +1148,16 @@ try {
             continue
         }
         if ($backendSteps -contains $step -and -not (Test-BackendGate $step $timer)) { continue }
+        # -Parallel: at the first eligible step the whole batch runs (joined before anything else starts); each eligible step then replays its row here, in the table's order.
+        if ($Parallel -gt 1 -and $parallelSteps -contains $step) {
+            if ($null -eq $script:batch) {
+                $eligible = @($allSteps | Where-Object { $parallelSteps -contains $_ -and (Test-Wanted $_) })
+                $script:batch = if ($eligible.Count -ge 2) { Invoke-ParallelBatch $eligible $stepNumbers } else { @{} }
+            }
+            if ($script:batch.ContainsKey($step)) { Add-ReplayedResult $step $script:batch[$step] $timer.Elapsed.TotalSeconds; continue }
+        }
+        # -SoloFrames: a live step (a frame-judged one that has no shared run) waits for the machine; play-checks and record-audio wait inside their own blocks.
+        if ($SoloFrames -and $frameJudgedSteps -contains $step -and $step -notin @('play-checks', 'record-audio') -and -not (Wait-SoloEngine $step $timer)) { continue }
         switch ($step) {
             'build' {
                 $log = Join-Path $OutDir ('{0:00}-build.log' -f $script:stepIndex)
@@ -813,14 +1170,19 @@ try {
             }
             'test' {
                 $log = Join-Path $OutDir ('{0:00}-test.log' -f $script:stepIndex)
+                # C6: --logger trx into this run's own folder (one trx per assembly, no LogFileName so they do not overwrite each other): the per-test timings, the 20 slowest in <OutDir>	est-times.txt.
+                $trxDir = Join-Path $OutDir 'test-results'
                 $code = Invoke-Logged -FileName $dotnetExe -LogPath $log -TimeoutSeconds 1800 `
-                    -Arguments @('test', (Join-Path $repoRoot 'Lifestone.slnx'), '--disable-build-servers', '--no-build', '-nologo', '--filter', $testFilter)
+                    -Arguments @('test', (Join-Path $repoRoot 'Lifestone.slnx'), '--disable-build-servers', '--no-build', '-nologo', '--filter', $testFilter, '--logger', 'trx;LogFilePrefix=test', '--results-directory', $trxDir)
                 $text = Get-Content -LiteralPath $log -Raw
                 $passed = 0; $failed = 0; $skipped = 0
                 foreach ($m in [regex]::Matches($text, 'Failed:\s+(\d+), Passed:\s+(\d+), Skipped:\s+(\d+)')) {
                     $failed += [int]$m.Groups[1].Value; $passed += [int]$m.Groups[2].Value; $skipped += [int]$m.Groups[3].Value
                 }
-                Add-Result $step ($code -eq 0 -and $failed -eq 0 -and $passed -gt 0) $code $timer.Elapsed.TotalSeconds "passed=$passed failed=$failed skipped=$skipped filter=$testFilter" $log
+                $times = @(Get-TrxTimes $trxDir)
+                $script:testTimesLine = Format-SlowestSummary $times 20 3
+                if ($times.Count) { Set-Content -LiteralPath (Join-Path $OutDir 'test-times.txt') -Value (Format-SlowestLines $times 20) -Encoding utf8 }
+                Add-Result $step ($code -eq 0 -and $failed -eq 0 -and $passed -gt 0) $code $timer.Elapsed.TotalSeconds "passed=$passed failed=$failed skipped=$skipped filter=$testFilter; $($script:testTimesLine) (test-times.txt)" $log
             }
             'cli-help' {
                 $run = Invoke-Godot $step '--help' 90
@@ -836,7 +1198,7 @@ try {
                 $log = Join-Path $OutDir ('{0:00}-terrain-golden.log' -f $script:stepIndex)
                 $goldenDir = Join-Path $OutDir 'terrain-golden'
                 $code = Invoke-Logged -FileName $pwshExe -LogPath $log -TimeoutSeconds 420 `
-                    -Arguments @('-NoProfile', '-File', $goldenScript, '-NoBuild', '-TimeoutSeconds', '300', '-OutDir', $goldenDir)
+                    -Arguments (@('-NoProfile', '-File', $goldenScript, '-NoBuild', '-TimeoutSeconds', '300', '-OutDir', $goldenDir) + @(if ($UserDataSlot) { '-UserDataSlot', $UserDataSlot }))
                 $text = Get-Content -LiteralPath $log -Raw
                 $verdict = if ($text -match '\[terrain-golden\] (PASS|FAIL[^\r\n]*|error[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
                 Add-Result $step ($code -eq 0) $code $timer.Elapsed.TotalSeconds "$verdict (report: terrain-golden\terrain-golden-report.txt)" $log (Get-ErrorCount $text)
@@ -919,56 +1281,82 @@ try {
                 Add-Result $step ($run.Code -eq 0 -and $run.Text -match 'all offline-player checks hold') $run.Code $timer.Elapsed.TotalSeconds "pass=$pass fail=$fail$max" $run.Log (Get-ErrorCount $run.Text)
             }
             'play-checks' {
-                $run = Invoke-Godot $step '--play-checks' 420 '' $defaultSize
-                $pass = ([regex]::Matches($run.Text, '\[playcheck\] PASS')).Count
-                $fail = ([regex]::Matches($run.Text, '\[playcheck\] FAIL')).Count
-                $max = if ($run.Text -match 'all play checks hold[^\r\n]*max_frame_ms_after_arrival=([\d.]+)') { " max_frame_ms=$($Matches[1])" } else { '' }
-                Add-Result $step ($run.Code -eq 0 -and $run.Text -match 'all play checks hold') $run.Code $timer.Elapsed.TotalSeconds "pass=$pass fail=$fail$max" $run.Log (Get-ErrorCount $run.Text)
+                # C3: with record-audio wanted too, the two steps share one Godot run (--play-checks --record-audio=<wav>, Get-PlayChecksRun); this row judges the checks and every ERROR that is not the recording's.
+                $shared = Test-Wanted 'record-audio'
+                if ($shared) { $sharedRun = Get-PlayChecksRun $step $timer; $run = $sharedRun.Run; $refused = $sharedRun.Refused }
+                elseif (Wait-SoloEngine $step $timer) { $run = Invoke-Godot $step '--play-checks' 420 '' $defaultSize; $refused = $false }
+                else { $run = $null; $refused = $true }
+                if (-not $refused) {
+                    $pass = ([regex]::Matches($run.Text, '\[playcheck\] PASS')).Count
+                    $fail = ([regex]::Matches($run.Text, '\[playcheck\] FAIL')).Count
+                    $max = if ($run.Text -match 'all play checks hold[^\r\n]*max_frame_ms_after_arrival=([\d.]+)') { " max_frame_ms=$($Matches[1])" } else { '' }
+                    $recordingErrors = if ($shared) { Get-RecordingErrorCount $run.Text } else { 0 }
+                    $frames = Get-FrameVerdict $run.Text $run.Others ([bool]$SoloFrames) $frameTimeChecks $recordingErrors
+                    $holds = $run.Text -match 'all play checks hold'
+                    $detail = "pass=$pass fail=$fail$max$(if ($shared) { "; shared run with record-audio ($([IO.Path]::GetFileName($run.Log)))" })$($frames.Note)"
+                    if ($recordingErrors -gt 0) { $detail += "; the recording half logged $recordingErrors ERROR line(s) (the record-audio row judges them)" }
+                    Add-Result $step (($run.Code -eq 0 -and $holds) -or $frames.Contended) $run.Code $timer.Elapsed.TotalSeconds $detail $run.Log $frames.Errors $(if ($frames.Contended) { 'frames=contended' } else { '' })
+                }
             }
             'record-audio' {
                 # The audio check (M3 1.3 s3; TODO(record-audio-check) closed): the play checks with the game's own sound recorded. No --volume: an automated run is muted (M2 D8),
                 # and the recording is taken before the Master bus's level, so it holds the full mix and nothing reaches the speakers; the levels line's muted=true is the proof.
+                # C3: with play-checks wanted too this row reads the run the play-checks row started (Get-PlayChecksRun) and judges the recording half; the play checks' own verdict still counts (a run that did not hold fails both rows, each naming its half).
+                $shared = Test-Wanted 'play-checks'
                 $recordDir = Join-Path $OutDir 'record-audio'
                 $wav = Join-Path $recordDir 'record-audio.wav'
                 $rel = [IO.Path]::GetRelativePath($repoRoot, $wav).Replace('\', '/')
-                $run = Invoke-Godot $step "--play-checks --record-audio=$rel" 420 '' $defaultSize
-                $pass = ([regex]::Matches($run.Text, '\[playcheck\] PASS')).Count
-                $fail = ([regex]::Matches($run.Text, '\[playcheck\] FAIL')).Count
-                $holds = $run.Text -match 'all play checks hold'
-                $levelsPattern = 'audio recording levels file=(?<file>\S+) seconds=(?<seconds>[\d.]+) peak_dbfs=(?<peak>-?[\d.]+) rms_dbfs=(?<rms>-?[\d.]+) active_windows=(?<active>\d+) sources=(?<sources>\S+) windows=(?<windows>\d+)(?<muted> muted=(?:true|false))?'
-                $hasLevels = $run.Text -match $levelsPattern
-                if ($hasLevels) {
-                    $levels = @{}
-                    foreach ($name in 'seconds', 'peak', 'rms', 'active', 'sources', 'windows', 'muted') { $levels[$name] = $Matches[$name] }
-                    $peak = [double]::Parse($levels.peak, [Globalization.CultureInfo]::InvariantCulture)
-                    $active = [int]$levels.active
-                    $nonSilent = $peak -gt -60.0 -and $active -ge 1
-                    $muted = $levels.muted -eq ' muted=true'
-                    $sourcesJudge = Test-RecordedSources $levels.sources
-                    $sourcesOk = $sourcesJudge.Ok
-                    $detail = "peak_dbfs=$($levels.peak) rms_dbfs=$($levels.rms) active_windows=$($levels.active)/$($levels.windows) seconds=$($levels.seconds) muted=$($muted.ToString().ToLowerInvariant()) sources=$($levels.sources) (server>=1 and hooks>=1 judged); play checks pass=$pass fail=$fail"
-                    if (-not $nonSilent) { $detail += '; FAIL: the recording is silent (judge: peak above -60 dBFS and at least one active window)' }
-                    if (-not $muted) { $detail += '; FAIL: the run was not muted (M2 D8)' }
-                    if (-not $sourcesOk) { $detail += "; FAIL: sounded counts: $($sourcesJudge.Detail)" }
+                if ($shared) { $sharedRun = Get-PlayChecksRun $step $timer; $run = $sharedRun.Run; $refused = $sharedRun.Refused; $owner = $sharedRun.Owner }
+                elseif (Wait-SoloEngine $step $timer) { $run = Invoke-Godot $step "--play-checks --record-audio=$rel" 420 '' $defaultSize; $refused = $false; $owner = $step }
+                else { $run = $null; $refused = $true; $owner = $step }
+                if ($refused) {
+                    if ($owner -ne $step) { Add-Result $step $false 0 $timer.Elapsed.TotalSeconds "refused with the shared play-checks run (-SoloFrames: another Godot run was up for 10 minutes)" -NotRun }
                 }
                 else {
-                    $nonSilent = $false; $muted = $false; $sourcesOk = $false
-                    $detail = "no 'audio recording levels' line (the recording was not written or not read back); play checks pass=$pass fail=$fail"
+                    $pass = ([regex]::Matches($run.Text, '\[playcheck\] PASS')).Count
+                    $fail = ([regex]::Matches($run.Text, '\[playcheck\] FAIL')).Count
+                    $frames = Get-FrameVerdict $run.Text $run.Others ([bool]$SoloFrames) $frameTimeChecks 0
+                    $holds = ($run.Text -match 'all play checks hold') -or $frames.Contended
+                    $levelsPattern = 'audio recording levels file=(?<file>\S+) seconds=(?<seconds>[\d.]+) peak_dbfs=(?<peak>-?[\d.]+) rms_dbfs=(?<rms>-?[\d.]+) active_windows=(?<active>\d+) sources=(?<sources>\S+) windows=(?<windows>\d+)(?: clipped_samples=(?<clipped>\d+))?(?<muted> muted=(?:true|false))?'
+                    $hasLevels = $run.Text -match $levelsPattern
+                    if ($hasLevels) {
+                        $levels = @{}
+                        foreach ($name in 'seconds', 'peak', 'rms', 'active', 'sources', 'windows', 'clipped', 'muted') { $levels[$name] = $Matches[$name] }
+                        $peak = [double]::Parse($levels.peak, [Globalization.CultureInfo]::InvariantCulture)
+                        $active = [int]$levels.active
+                        $nonSilent = $peak -gt -60.0 -and $active -ge 1
+                        $muted = $levels.muted -eq ' muted=true'
+                        $sourcesJudge = Test-RecordedSources $levels.sources
+                        $sourcesOk = $sourcesJudge.Ok
+                        $detail = "peak_dbfs=$($levels.peak) rms_dbfs=$($levels.rms) active_windows=$($levels.active)/$($levels.windows) seconds=$($levels.seconds) clipped_samples=$(if ($levels.clipped) { $levels.clipped } else { 'n/a' }) muted=$($muted.ToString().ToLowerInvariant()) sources=$($levels.sources) (server>=1 and hooks>=1 judged); play checks pass=$pass fail=$fail"
+                        if (-not $nonSilent) { $detail += '; FAIL: the recording is silent (judge: peak above -60 dBFS and at least one active window)' }
+                        if (-not $muted) { $detail += '; FAIL: the run was not muted (M2 D8)' }
+                        if (-not $sourcesOk) { $detail += "; FAIL: sounded counts: $($sourcesJudge.Detail)" }
+                    }
+                    else {
+                        $nonSilent = $false; $muted = $false; $sourcesOk = $false
+                        $detail = "no 'audio recording levels' line (the recording was not written or not read back); play checks pass=$pass fail=$fail"
+                    }
+                    $fileOk = Test-Path -LiteralPath $wav
+                    if (-not $fileOk) { $detail += "; FAIL: $rel does not exist" }
+                    if (-not $holds) { $detail += '; FAIL: the play checks half did not all hold (shared run: the play-checks row names the checks)' }
+                    if ($shared) { $detail += "; shared run $([IO.Path]::GetFileName($run.Log))" }
+                    $detail += $frames.Note
+                    # The recording's own ERROR lines fail this row; in an unshared run every ERROR does (as before).
+                    $errorsHere = if ($shared) { Get-RecordingErrorCount $run.Text } else { $frames.Errors }
+                    Add-Result $step (($run.Code -eq 0 -or $frames.Contended) -and $holds -and $hasLevels -and $nonSilent -and $muted -and $sourcesOk -and $fileOk) $run.Code $timer.Elapsed.TotalSeconds $detail $run.Log $errorsHere $(if ($frames.Contended) { 'frames=contended' } else { '' })
                 }
-                $fileOk = Test-Path -LiteralPath $wav
-                if (-not $fileOk) { $detail += "; FAIL: $rel does not exist" }
-                if (-not $holds) { $detail += '; FAIL: the play checks did not all hold' }
-                Add-Result $step ($run.Code -eq 0 -and $holds -and $hasLevels -and $nonSilent -and $muted -and $sourcesOk -and $fileOk) $run.Code $timer.Elapsed.TotalSeconds $detail $run.Log (Get-ErrorCount $run.Text)
             }
             'shell-frames' {
                 # The shell's review frames at two window sizes on the stand-in session (no backend). A frames run is not a timing run (the verdict says frame_time=reported).
+                # C4: --play-skip-scenarios leaves out the stand-in's fight and death scenarios (the play-checks step judges them in the same smoke); the ten frames and their judges are unchanged.
                 $verdictPattern = 'shell frames done size=(?<size>\d+x\d+) scale=(?<scale>\d+) captured=(?<captured>\d+) failures=(?<failures>\d+) frame_time=reported'
                 $expectedFrames = 10 # ShellFramesPlan.FrameNames.Count (G7: 09 the automation inspector, 10 the tools panel)
                 $parts = [System.Collections.Generic.List[string]]::new()
                 $pass = $true; $errors = 0; $exitCode = 0; $firstLog = ''; $failedLog = ''
                 foreach ($size in $shellFrameSizes) {
                     $dir = [IO.Path]::GetRelativePath($repoRoot, (Join-Path $OutDir "shell-frames\$size")).Replace('\', '/')
-                    $run = Invoke-Godot $step "--play-checks --play-frames=$dir" 420 "-$size" $size
+                    $run = Invoke-Godot $step "--play-checks --play-skip-scenarios --play-frames=$dir" 420 "-$size" $size
                     $holds = $run.Text -match 'all play checks hold'
                     $hasVerdict = $run.Text -match $verdictPattern
                     $files = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot $dir) -Filter '*.png' -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 5000 }).Count
@@ -989,7 +1377,8 @@ try {
                 # The test account only; the game reads its password from secrets.json itself (names only on the command line).
                 $run = Invoke-Godot $step '--account=test --login-check=all' 1100 '' $defaultSize
                 $verdict = if ($run.Text -match '\[logincheck\] (done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
-                Add-Result $step ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] done ok=true ' -and $run.Text -match 'corrections=0 ' -and $run.Text -match 'logoff=ok ' -and $run.Text -match 'logoff_tunnel=held ' -and $run.Text -match 'portal_sounds=ok ') $run.Code $timer.Elapsed.TotalSeconds $verdict $run.Log (Get-ErrorCount $run.Text)
+                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] done ok=true ' -and $run.Text -match 'corrections=0 ' -and $run.Text -match 'logoff=ok ' -and $run.Text -match 'logoff_tunnel=held ' -and $run.Text -match 'portal_sounds=ok ') $run
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $live.Note) $run.Log $live.Errors $live.PassNote
             }
             'login-throwaway' {
                 # --login-check=throwaway (docs/session.md section 28): creates 'Lifestone Throwaway' on the test account through the retail screens, uses the tools panel, deletes, restores,
@@ -1011,7 +1400,9 @@ try {
                 # minutes; 900 s leaves room for a slow wait for regeneration. The runner's own limit (BuffLegRunner.WholeCheckSeconds) must stay under it so the leg logs off before it reports a failure.
                 $run = Invoke-Godot $step '--account=test --login-check=buff' 900 '' $defaultSize
                 $verdict = if ($run.Text -match '\[logincheck\] (buff done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
-                Add-Result $step ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] buff done ok=true ') $run.Code $timer.Elapsed.TotalSeconds $verdict $run.Log (Get-ErrorCount $run.Text)
+                $flags = Get-FrameFlags $run.Text 'buff'
+                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] buff done ok=true ') $run
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' })
             }
             'login-bsd' {
                 # --login-check=bsd-fight (docs/session.md section 31): the game enters BSD Mage on the test account, tops up the buffs, goes to the Black Spawn Den and fights the tuskers of the arrival's floor
@@ -1019,7 +1410,9 @@ try {
                 # 240, teleport 30, the fight's 300) and may take 120 s more to log off after a failure; FightLegRunner.WholeCheckSeconds must stay under this so the leg logs off before it reports a failure.
                 $run = Invoke-Godot $step '--account=test --login-check=bsd-fight' 1200 '' $defaultSize
                 $verdict = if ($run.Text -match '\[logincheck\] (bsd-fight done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
-                Add-Result $step ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] bsd-fight done ok=true ') $run.Code $timer.Elapsed.TotalSeconds $verdict $run.Log (Get-ErrorCount $run.Text)
+                $flags = Get-FrameFlags $run.Text 'bsd-fight'
+                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] bsd-fight done ok=true ') $run
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' })
             }
             'login-death' {
                 # --login-check=bsd-death (docs/session.md section 32): the game enters BSD Mage on the test account, binds it at Holtburg's lifestone, goes to the Black Spawn Den (a suicide first when any
@@ -1028,7 +1421,9 @@ try {
                 # may take 120 s more to log off after a failure; DeathLegRunner.WholeCheckSecondsFor must stay under this so the leg logs off before it reports a failure.
                 $run = Invoke-Godot $step '--account=test --login-check=bsd-death' 1650 '' $defaultSize
                 $verdict = if ($run.Text -match '\[logincheck\] (bsd-death done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
-                Add-Result $step ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] bsd-death done ok=true ') $run.Code $timer.Elapsed.TotalSeconds $verdict $run.Log (Get-ErrorCount $run.Text)
+                $flags = Get-FrameFlags $run.Text 'bsd-death'
+                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] bsd-death done ok=true ') $run
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' })
             }
             'login' {
                 # The player's own entry point (tools\play.ps1) on the test account (-Offscreen makes it the test account and refuses any other). The backend is the
@@ -1036,13 +1431,17 @@ try {
                 $log = Join-Path $OutDir ('{0:00}-login.log' -f $script:stepIndex)
                 $startedAt = [DateTime]::UtcNow
                 $arguments = @('-NoProfile', '-File', $playScript, '-Offscreen', '-IsolateUserData', '-NoBuild', '-TimeoutSeconds', '420', '-Resolution', $defaultSize, '-GameArgs:--login-check=enter')
-                $code = Invoke-Logged -FileName $pwshExe -Arguments $arguments -LogPath $log -TimeoutSeconds 480
+                $enginesBefore = Get-EngineProcessCount
+                $script:enginePeak = 0
+                $code = Invoke-Logged -FileName $pwshExe -Arguments $arguments -LogPath $log -TimeoutSeconds 480 -SampleEngines
                 $text = Get-Content -LiteralPath $log -Raw
+                $loginRun = @{ Code = $code; Text = $text; Others = [math]::Max($enginesBefore, $script:enginePeak - 1) }
                 $verdict = if ($text -match '\[logincheck\] (done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
                 $frameDir = Join-Path $repoRoot 'docs\screenshots\m2\login'
                 # Only frames this run wrote count (the folder keeps the earlier run's until they are overwritten).
                 $frames = @(Get-ChildItem -LiteralPath $frameDir -Filter '*.png' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTimeUtc -ge $startedAt }).Count
-                Add-Result $step ($code -eq 0 -and $text -match '\[logincheck\] done ok=true ' -and $text -match 'materialised=true' -and $frames -ge 4 -and $text -match 'shell=ok ' -and $text -match 'spew_portal=yes ' -and $text -match 'logoff_tunnel=held ' -and $text -match 'portal_sounds=ok ') $code $timer.Elapsed.TotalSeconds "$verdict; frames=$frames in docs/screenshots/m2/login" $log (Get-ErrorCount $text)
+                $live = Resolve-LiveFrames ($code -eq 0 -and $text -match '\[logincheck\] done ok=true ' -and $text -match 'materialised=true' -and $frames -ge 4 -and $text -match 'shell=ok ' -and $text -match 'spew_portal=yes ' -and $text -match 'logoff_tunnel=held ' -and $text -match 'portal_sounds=ok ') $loginRun
+                Add-Result $step $live.Ok $code $timer.Elapsed.TotalSeconds "$verdict; frames=$frames in docs/screenshots/m2/login$($live.Note)" $log $live.Errors $live.PassNote
             }
             'offline-player' {
                 $dir = [IO.Path]::GetRelativePath($repoRoot, (Join-Path $OutDir 'player')) -replace '\\', '/'
@@ -1108,15 +1507,16 @@ $backendLine = "backend: -Backend $Backend; at start: $(if ($backendAtStart.Read
 $backendLine += if ($wantedBackendSteps.Count) { "; steps that need it: $($wantedBackendSteps -join ', ')" } else { '; no selected step needs it' }
 if ($Backend -eq 'start') { $backendLine += "; start: $(if ($script:backendStart) { $script:backendStart.Note } else { 'not needed, nothing started' })" }
 
-try { $leaks = Measure-SecretLeaks }
+if ($NoScan) { $leaks = @{ Hits = 0; Files = @(); Scanned = 0; Secrets = 0; Skipped = 0; Mode = 'not scanned (a -Parallel child: the parent scans the whole run)'; Unreadable = @(); Note = '' } }
+else { try { $leaks = Measure-SecretLeaks }
 catch {
     # Only the exception's type: whatever went wrong, no message may carry a password into the summary.
-    $leaks = @{ Hits = -1; Files = @(); Scanned = 0; Secrets = 0; Unreadable = @(); Note = "the scan failed ($(Get-ExceptionKind $_))" }
-}
+    $leaks = @{ Hits = -1; Files = @(); Scanned = 0; Secrets = 0; Skipped = 0; Mode = ''; Unreadable = @(); Note = "the scan failed ($(Get-ExceptionKind $_))" }
+} }
 $secretsFailed = $leaks.Hits -ne 0 -or $leaks.Unreadable.Count -gt 0
 $secretsLine = if ($leaks.Hits -lt 0) { "secrets=? FAIL: $($leaks.Note)" } else {
     "secrets=$($leaks.Hits)$(if ($secretsFailed) { ' FAIL' })" +
-    $(if ($leaks.Note) { " ($($leaks.Note))" } else { " ($($leaks.Secrets) password(s) from secrets.json; $($leaks.Scanned) file(s) scanned in OutDir, cache\godot\**\logs, cache\sessions and server\runtime\logs\ACE_Log*.txt, as UTF-8 and UTF-16LE)" }) +
+    $(if ($leaks.Note) { " ($($leaks.Note))" } else { " ($($leaks.Secrets) password(s) from secrets.json; $($leaks.Scanned) file(s) scanned in OutDir, cache\godot\**\logs, cache\sessions and server\runtime\logs\ACE_Log*.txt, as UTF-8 and UTF-16LE; $($leaks.Mode)$(if ($leaks.Skipped) { ", $($leaks.Skipped) older file(s) not read" }))" }) +
     $(if ($leaks.Files.Count) { "; found in: $($leaks.Files -join ', ')" }) +
     $(if ($leaks.Unreadable.Count) { "; could not read: $($leaks.Unreadable -join ', ')" })
 }
@@ -1141,8 +1541,10 @@ $lines.Add('')
 $lines.Add($backendLine)
 $lines.Add('')
 $lines.Add($secretsLine)
+if ($script:testTimesLine) { $lines.Add(''); $lines.Add("tests: $($script:testTimesLine) (test-times.txt, test-results\*.trx)") }
 $summary = $lines -join [Environment]::NewLine
 Set-Content -LiteralPath (Join-Path $OutDir 'summary.md') -Value $summary -Encoding utf8
+if ($ResultsJson) { ConvertTo-Json -InputObject @($script:results) -Depth 4 | Set-Content -LiteralPath $ResultsJson -Encoding utf8 }
 Write-Host ''
 Write-Host $summary
 exit $(if ($failedSteps.Count -eq 0 -and -not $secretsFailed) { 0 } else { 1 })

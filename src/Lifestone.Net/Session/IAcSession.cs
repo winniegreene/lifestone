@@ -241,6 +241,14 @@ public interface IAcSession : IDisposable
     /// <param name="bar">The bar (0 to 7).</param>
     OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar);
 
+    /// <summary>
+    /// Sends GameAction 0x01E4 RemoveSpellFavorite {u32 spell, u32 bar} (in world only), retail <c>CM_Character::Event_RemoveSpellFavorite</c> (11.4186 0x006A1890, 11.6096 0x006A26B0);
+    /// ACE answers nothing and ignores a spell that is not on the bar.
+    /// </summary>
+    /// <param name="spellId">The spell id.</param>
+    /// <param name="bar">The bar (0 to 7).</param>
+    OutboundTicket SendRemoveSpellFavorite(uint spellId, uint bar);
+
     /// <summary>Sends GameAction 0x0015 Talk (in world only). The text is the message's last field, so any Windows-1252
     /// character may be sent.</summary>
     /// <exception cref="ArgumentException">A character Windows-1252 lacks, or a text over 65,535 bytes; nothing is sent.</exception>

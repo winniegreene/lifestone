@@ -21,8 +21,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// </summary>
 /// <remarks>
 /// <para><b>Stages</b> (<see cref="Stage"/>, each logged once on entry as <c>[death] stage &lt;name&gt;</c>; <see cref="DeathStages"/> masks the groups): <c>start</c>; <c>gear</c> (<see cref="GearScenario"/>'s steps) and <c>bars</c>
-/// (bar 1: for each of the arena profile's lines the highest of its first seven spells the spellbook holds; bar 2: Flame Bolt I to VII, ids 27, 81 to 85 and 2128; only what <see cref="Spellbook.SpellBars"/> lacks is sent,
-/// <c>bars=set:&lt;n&gt;</c> or <c>bars=ok</c>); <c>bind-place</c>, <c>bind-teleporting</c>, <c>bind-settle</c>, <c>bind-use</c>, <c>bind-line</c> (the Holtburg point of interest through <c>PlayerTools.Place</c>, the nearest
+/// (<see cref="MageSpellBars"/>: tab I the buffs, tab II the fight, exactly; only what <see cref="Spellbook.SpellBars"/> differs in is sent, <c>bars=set:&lt;n&gt;</c> or <c>bars=ok</c>); <c>bind-place</c>, <c>bind-teleporting</c>, <c>bind-settle</c>, <c>bind-use</c>, <c>bind-line</c> (the Holtburg point of interest through <c>PlayerTools.Place</c>, the nearest
 /// <see cref="WorldObjectTable.LifestoneFlag"/> object within <see cref="LifestoneSearchMetres"/>, <c>IActionApi.Use</c>; ACE's <c>Lifestone.cs</c> 55-75: the Sanctuary motion, then in one action the weenie's UseMessage as a
 /// Magic chat line and the stamina halved by a 0x02E9; done when that line, that halving and the UseDone all followed the Use, the line logged as the world database wrote it; the known Magic lines that are not the attune, an
 /// enchantment's expiry among them, are ignored and counted); <c>den-place</c>, <c>den-teleporting</c>, <c>den-settle</c> (the floor rule of D12: a settle off the floor fails); <c>unbuff</c>,
@@ -91,7 +90,7 @@ public sealed class DeathScenario : IScenario, IDisposable
     public const double RegearSettleSeconds = 5;
 
     /// <summary>The limit on the spell bars to be known and sent, in seconds.</summary>
-    public const double BarsSeconds = 30;
+    public const double BarsSeconds = MageSpellBars.Seconds;
 
     /// <summary>The most seconds the vitae stage waits for the vitae to leave the registry after the grant (ACE removes it 2 s after the penalty reaches 1.0, <c>Player_Xp.cs</c> 166-171).</summary>
     public const double VitaeSeconds = 10;
@@ -110,15 +109,6 @@ public sealed class DeathScenario : IScenario, IDisposable
         return level => (uint)level < (uint)table.CharacterLevelXpList.Count ? table.XpForLevel(level) : null;
     }
 
-    /// <summary>The favourite bar of the profile's lines.</summary>
-    public const int ProfileBar = 1;
-
-    /// <summary>The favourite bar of Flame Bolt I to VII.</summary>
-    public const int BoltBar = 2;
-
-    /// <summary>The highest level of a line put on the profile's bar (VII, D10; the eighth spell is the Incantation).</summary>
-    public const int BarLevels = 7;
-
     private readonly GearKit _kit;
     private readonly GearScenario? _gear;
     private GearScenario? _regear;
@@ -133,7 +123,7 @@ public sealed class DeathScenario : IScenario, IDisposable
     private readonly DeathTally _tally = new();
     private readonly TeleportDestination _holtburg;
     private readonly TeleportDestination _den = TeleportCatalog.FromInterior(InteriorLocations.BlackSpawnDenAluvian);
-    private readonly List<(uint Spell, int Index, int Bar)> _barPlan = [];
+    private MageSpellBars? _bars;
     private ActionHandle? _pending;
     private IDisposable? _movedSubscription;
     private IDisposable? _chatSubscription;
@@ -144,9 +134,6 @@ public sealed class DeathScenario : IScenario, IDisposable
     private bool _disposed;
     private bool _unbuffDone;
     private bool _afterSuicide;
-    private bool _barsPlanned;
-    private int _barNext;
-    private int _barsSet;
     private int _suicides;
     private int _selfTeleports;
     private int _selfBase;
@@ -276,6 +263,9 @@ public sealed class DeathScenario : IScenario, IDisposable
 
     /// <summary>The spell bar note: <c>set:&lt;n&gt;</c>, <c>ok</c> or <c>n/a</c>.</summary>
     public string BarsNote => _barsNote;
+
+    /// <summary>The bars step (null before the bars stage), for its tabs as the read model held them at its end.</summary>
+    public MageSpellBars? Bars => _bars;
 
     /// <summary>The unbuff note: <c>suicide</c>, <c>none</c> (the mage held only the vitae) or <c>n/a</c>.</summary>
     public string UnbuffNote => _unbuffNote;
@@ -664,109 +654,17 @@ public sealed class DeathScenario : IScenario, IDisposable
 
     private ScenarioStatus BarsStep(IGameSessionView session, double clock)
     {
-        if (_pending is { Outcome: { } sent })
+        _bars ??= new MageSpellBars(_log);
+        switch (_bars.Step(session, clock))
         {
-            _pending = null;
-            if (sent.Kind != ActionOutcomeKind.Sent)
-            {
-                return Fail(session, "bars: the spell was not put on its bar: " + Describe(sent));
-            }
-
-            _barsSet++;
+            case ScenarioStatus.Failed:
+                return Fail(session, "bars: " + _bars.Failure);
+            case ScenarioStatus.Succeeded:
+                _barsNote = _bars.Note;
+                return Begin(DeathStages.Bind, session, clock);
+            default:
+                return ScenarioStatus.Running;
         }
-
-        if (!_barsPlanned)
-        {
-            var book = session.State.Self.Spellbook;
-            if (!book.IsKnown)
-            {
-                return clock - _stageStart > BarsSeconds
-                    ? Fail(session, "bars: the spellbook (and its bars) did not arrive with the PlayerDescription")
-                    : ScenarioStatus.Running;
-            }
-
-            _barPlan.AddRange(PlanBars(book, _log));
-            _barsPlanned = true;
-        }
-
-        if (_pending is null && _barNext < _barPlan.Count)
-        {
-            var step = _barPlan[_barNext++];
-            _pending = session.Actions.AddSpellFavorite(step.Spell, step.Index, step.Bar, ActionSource.Host);
-            return ScenarioStatus.Running;
-        }
-
-        if (_pending is not null)
-        {
-            return ScenarioStatus.Running;
-        }
-
-        _barsNote = _barsSet > 0 ? "set:" + _barsSet.ToString(CultureInfo.InvariantCulture) : "ok";
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"the spell bars: {_barsSet} spell(s) put on bar {ProfileBar} and bar {BoltBar} ({_barsNote})"));
-        return Begin(DeathStages.Bind, session, clock);
-    }
-
-    /// <summary>
-    /// The spells the bars lack, in the order they go: bar 1 the profile's lines (the highest of the first <see cref="BarLevels"/> spells of each line that <paramref name="book"/> holds), then bar 2 Flame Bolt I to VII
-    /// (ids 27, 81 to 85 and 2128); each appended after what the bar already holds, and only when the bar does not hold the spell already (so a second run plans nothing). A spell the book lacks is left off and logged.
-    /// </summary>
-    /// <param name="book">The spellbook with its bars (from the PlayerDescription).</param>
-    /// <param name="log">Where a spell left off is logged, or null.</param>
-    public static IReadOnlyList<(uint Spell, int Index, int Bar)> PlanBars(Spellbook book, ILogSink? log = null)
-    {
-        ArgumentNullException.ThrowIfNull(book);
-        var plan = new List<(uint Spell, int Index, int Bar)>();
-        var onProfileBar = book.Bar(ProfileBar);
-        var next = onProfileBar.Length;
-        var lines = ArenaProfile.Lines;
-        for (var l = 0; l < lines.Count; l++)
-        {
-            var spells = lines[l].Spells;
-            ProfileSpell? pick = null;
-            for (var i = Math.Min(BarLevels, spells.Count) - 1; i >= 0; i--)
-            {
-                if (book.Knows(spells[i].Id))
-                {
-                    pick = spells[i];
-                    break;
-                }
-            }
-
-            if (pick is null)
-            {
-                log?.Warn(LogCategory, "bars: no spell of the line " + lines[l].Name + " is in the spellbook; it is left off bar " + ProfileBar.ToString(CultureInfo.InvariantCulture));
-                continue;
-            }
-
-            if (!onProfileBar.Contains(pick.Id))
-            {
-                plan.Add((pick.Id, next++, ProfileBar));
-            }
-        }
-
-        if (ArenaProfile.LineNamed(ArenaProfile.WarLineName) is not { } bolt)
-        {
-            return plan;
-        }
-
-        var onBoltBar = book.Bar(BoltBar);
-        var nextBolt = onBoltBar.Length;
-        for (var i = 0; i < Math.Min(BarLevels, bolt.Spells.Count); i++)
-        {
-            var id = bolt.Spells[i].Id;
-            if (!book.Knows(id))
-            {
-                log?.Warn(LogCategory, "bars: " + bolt.Spells[i].Name + " is not in the spellbook; it is left off bar " + BoltBar.ToString(CultureInfo.InvariantCulture));
-                continue;
-            }
-
-            if (!onBoltBar.Contains(id))
-            {
-                plan.Add((id, nextBolt++, BoltBar));
-            }
-        }
-
-        return plan;
     }
 
     // ------------------------------------------------------------------------------------------------ teleports

@@ -375,7 +375,9 @@ public sealed record SpellLearnData(IReadOnlyList<SpellOutcome> Spells, int Lear
 /// <param name="Requested">The stack size the request asked for, or null when it asked for none.</param>
 /// <param name="MaxStack">The item's maximum stack size, or null when it does not stack.</param>
 /// <param name="Clamped">True when <paramref name="Stack"/> is below <paramref name="Requested"/>: clamped to the maximum, or ignored for an item that does not stack (as @ci does).</param>
-public sealed record ItemData(uint Guid, uint Wcid, string Name, int Stack, int? Requested, int? MaxStack, bool Clamped)
+/// <param name="Palette">The PaletteTemplate the created object holds, read back from ACE's object, present only when the request named a palette (so a caller can see ACE applied it).</param>
+/// <param name="Shade">The shade the created object holds, present only when the request named one.</param>
+public sealed record ItemData(uint Guid, uint Wcid, string Name, int Stack, int? Requested, int? MaxStack, bool Clamped, int? Palette = null, double? Shade = null)
 {
     /// <summary>The reply's human sentence.</summary>
     public string Describe() => string.Create(

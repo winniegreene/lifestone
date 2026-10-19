@@ -66,6 +66,7 @@ public sealed class ObjectSelection : IDisposable
         ArgumentNullException.ThrowIfNull(events);
         _subscriptions.Add(events.Subscribe<ObjectDeleted>(OnDeleted));
         _subscriptions.Add(events.Subscribe<PlayerTeleportAnnounced>(OnTeleport));
+        _subscriptions.Add(events.Subscribe<AutoTargetRequested>(OnAutoTarget));
     }
 
     /// <inheritdoc/>
@@ -80,4 +81,13 @@ public sealed class ObjectSelection : IDisposable
     }
 
     private void OnTeleport(in PlayerTeleportAnnounced e) => Clear();
+
+    // ClientCombatSystem::AutoTarget (11.6096 0x0056C9D0): the attacker is selected, only when nothing is (the handlers' own test of ACCWeenieObject::selectedID).
+    private void OnAutoTarget(in AutoTargetRequested e)
+    {
+        if (Selected == 0 && e.Attacker != 0)
+        {
+            Select(e.Attacker);
+        }
+    }
 }

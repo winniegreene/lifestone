@@ -235,6 +235,15 @@ public sealed class TextureLoader
             used is null ? default : used.Argb, clipMap);
     }
 
+    private readonly ConcurrentDictionary<uint, byte> _overrideFallbackReported = new();
+    private int _overrideFallbacks;
+
+    /// <summary>Texture changes that fell back to the surface's own texture because the new one could not load.</summary>
+    public int OverrideFallbacks => Volatile.Read(ref _overrideFallbacks);
+
+    /// <summary>Told once per unloadable replacement texture (the host logs it).</summary>
+    public Action<string>? OverrideFallback { get; set; }
+
     /// <summary>
     /// Resolves and decodes a Surface for drawing: material, SurfaceTexture resolution, texture and palette.
     /// Returns null when the Surface record does not exist.
@@ -265,8 +274,28 @@ public sealed class TextureLoader
         }
 
         var stId = surfaceTextureOverride ?? material.SurfaceTextureId;
-        var resolution = ResolveSurfaceTexture(stId, detail)
-            ?? throw new InvalidDataException($"Surface 0x{surfaceId:X8}: SurfaceTexture 0x{stId:X8} does not exist.");
+        var resolution = ResolveSurfaceTexture(stId, detail);
+        if (surfaceTextureOverride is not null && stId != material.SurfaceTextureId && resolution is not { IsResolved: true })
+        {
+            // Retail's rule, not a glitch fix (M3 4.2 p6, R6; no --retail-* flag exists because none is needed): an ObjDesc texture change whose texture cannot load is not applied, so the surface keeps its own
+            // texture and the part still draws. In retail CSurface::UseTextureMap (11.6096 0x00537020) does not take the new map and CPartArray::SetTextureMap (11.6096 0x00519110) reports the failure and
+            // goes on. Lifestone's old behaviour (the whole part's mesh dropped) was the bug; this is the fidelity fix. A data condition, logged once per texture: OverrideFallbacks counts them and
+            // OverrideFallback tells the host.
+            Interlocked.Increment(ref _overrideFallbacks);
+            if (_overrideFallbackReported.TryAdd(stId, 0))
+            {
+                OverrideFallback?.Invoke($"Surface 0x{surfaceId:X8}: the changed SurfaceTexture 0x{stId:X8} cannot load; the surface keeps its own texture, as retail's failed texture change does (textures: override-unloadable)");
+            }
+
+            stId = material.SurfaceTextureId;
+            resolution = ResolveSurfaceTexture(stId, detail);
+        }
+
+        if (resolution is null)
+        {
+            throw new InvalidDataException($"Surface 0x{surfaceId:X8}: SurfaceTexture 0x{stId:X8} does not exist.");
+        }
+
         if (!resolution.IsResolved)
         {
             throw new InvalidDataException($"Surface 0x{surfaceId:X8}: {resolution}.");

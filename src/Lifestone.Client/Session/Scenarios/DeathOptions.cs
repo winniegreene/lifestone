@@ -10,7 +10,7 @@ public enum DeathStages
     /// <summary>Only the logging off (the stage mask of a run with nothing to do).</summary>
     None = 0,
 
-    /// <summary>The gear scenario's steps, then the mage's spell bars (bar 1: the arena profile's lines; bar 2: Flame Bolt I to VII).</summary>
+    /// <summary>The gear scenario's steps, then the mage's spell bars (<see cref="MageSpellBars"/>: tab I the buffs, tab II the fight).</summary>
     Gear = 1,
 
     /// <summary>D34: the teleport to Holtburg, the nearest lifestone and a Use on it (ACE moves the player to it and attunes it).</summary>

@@ -32,8 +32,9 @@ public static class ParticleShaders
     /// <summary>Cell variants (<see cref="SurfaceLighting.CellObject"/>): the core line reading the cell's draw-state slot from the mesh.</summary>
     public const string CellSlotAnchor = "\tint ac_slot = int(CUSTOM1.a + 0.5);";
 
-    /// <summary>Cell variants: the core cell-object light rule, whose CUSTOM1.rgb is a merged cell mesh's static-light sum.</summary>
-    public const string CellLightAnchor = "\tv_light = clamp(vec3(luminosity) + world_ambient * diffuse + CUSTOM1.rgb, 0.0, 1.0);";
+    /// <summary>Cell variants: the core cell-object light rule, whose CUSTOM1.rgb is a merged cell mesh's static-light sum
+    /// and ac_dyn the dynamic lights' sum.</summary>
+    public const string CellLightAnchor = "\tv_light = clamp(vec3(luminosity) + world_ambient * diffuse + CUSTOM1.rgb + ac_dyn, 0.0, 1.0);";
 
     private static readonly Dictionary<SurfaceShaderVariant, Shader> Cache = new();
 
@@ -47,9 +48,13 @@ public static class ParticleShaders
     /// (<c>PView::DrawCells</c> → <c>DrawObjCell</c>) and with the sun off (<c>Render::useSunlightSet(0)</c>). A particle
     /// mesh carries no cell slot, so the slot comes per instance from <c>INSTANCE_CUSTOM.z</c>
     /// (<see cref="Lifestone.Client.Effects.InstanceBuffer.ParticleCustom"/>), and no static-light sum: the lit colour is
-    /// luminosity + world ambient. TODO(objects): whether retail adds the cell's hardware point lights
-    /// (<c>Render::minimize_object_lighting</c>) to particle parts is not established; the flame and glow sprites of
-    /// living statics are luminous, so they show the same either way.</para>
+    /// luminosity + world ambient + the dynamic lights (M3 4.1 r2). Retail lights a particle part like any
+    /// other: a particle emitter's parts are <c>CPhysicsPart</c>s drawn through <c>CPhysicsPart::Draw</c> (0x0050E270) and
+    /// <c>RenderDeviceD3D::DrawMeshInternal</c> (0x005A0470), which calls <c>Render::minimize_object_lighting</c> (0x0054E090) for every part
+    /// drawn with the sun off, dynamic lights first (11.4186 acclient.c 314587 and 456960). The dynamic term is the cell variants' own
+    /// (<see cref="SurfaceLightingCode.DynamicLightFunction"/>, per vertex, so a sprite takes the light at its corners). The static cell
+    /// lights are not summed for a particle (the mesh carries no light sum): <c>TODO(particle-cell-static-lights)</c>; the flame and glow
+    /// sprites of living statics are luminous, so they show the same either way.</para>
     /// </remarks>
     public static string GenerateCode(SurfaceShaderVariant variant)
     {
@@ -69,7 +74,7 @@ public static class ParticleShaders
             code = Replace(code, CellSlotAnchor,
                 "\tint ac_slot = int(INSTANCE_CUSTOM.z + 0.5);   // particle of an EnvCell static: its cell's slot, per instance");
             code = Replace(code, CellLightAnchor,
-                "\tv_light = clamp(vec3(luminosity) + world_ambient * diffuse, 0.0, 1.0);   // particle in a cell: no sun, no static-light sum");
+                "\tv_light = clamp(vec3(luminosity) + world_ambient * diffuse + ac_dyn, 0.0, 1.0);   // particle in a cell: no sun, the dynamic lights, no static-light sum (TODO(particle-cell-static-lights))");
         }
         else if (variant.Lighting != SurfaceLighting.Object)
         {
@@ -84,6 +89,7 @@ public static class ParticleShaders
     {
         if (!Cache.TryGetValue(variant, out var shader))
         {
+            DynamicLightTable.Declare(); // M3 4.1 r2: the cell variants name the dynamic-light global
             shader = new Shader { Code = GenerateCode(variant), ResourceName = $"lifestone_particle_{variant.Name}" };
             Cache.Add(variant, shader);
             Log.Debug("particles", "particle shader created", ("variant", variant.Name));

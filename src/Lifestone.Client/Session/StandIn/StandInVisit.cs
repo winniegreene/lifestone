@@ -230,6 +230,38 @@ public sealed record StandInVisit
     public Func<uint, uint?>? ProjectileSetup { get; set; }
 
     /// <summary>
+    /// The ModelData of the stand-in's player and of every human-Setup object that has no look of its own in <see cref="HumanLooks"/> (M3 4.2 p6): a real server sends a human's clothing, palettes and
+    /// texture changes in its CreateObject, and the base body is what draws without them. Empty (the default) sends the base body, the bare figure the Holtburg frames showed;
+    /// the host composes a look from the dats (<c>TODO(m3-standin-human-look)</c>: every garment is a placeholder).
+    /// </summary>
+    public ModelData HumanModel { get; set; } = ModelData.Empty;
+
+    /// <summary>Looks by object name for the stand-in's placeholder humans (a role: guard, vendor); a name not held wears <see cref="HumanModel"/>.</summary>
+    public IReadOnlyDictionary<string, ModelData>? HumanLooks { get; set; }
+
+    /// <summary>
+    /// Dresses the player in the pieces it wears and gives a created piece its own ObjDesc (M3 4.2 p6 follow-up): with it the stand-in sends an ObjDescEvent (F625) on a wield, an unwield and a lost wielded item, as ACE does
+    /// (<c>Creature_Equipment.cs</c> 365, 438). Null: the player keeps the look it was created with (<c>TODO(m3-standin-objdesc-on-wield)</c>).
+    /// </summary>
+    public IStandInDresser? Dresser { get; set; }
+
+    /// <summary>Sets <see cref="HumanModel"/> and <see cref="HumanLooks"/> from ObjDescs (a host that may not name <c>Lifestone.Net</c> composes them from the dats).</summary>
+    public void SetHumanLooks(Lifestone.Data.Appearance.ObjDesc player, IEnumerable<KeyValuePair<string, Lifestone.Data.Appearance.ObjDesc>> roles)
+    {
+        HumanModel = StandInHumanLook.FromObjDesc(player);
+        var looks = new Dictionary<string, ModelData>();
+        foreach (var role in roles)
+        {
+            looks[role.Key] = StandInHumanLook.FromObjDesc(role.Value);
+        }
+
+        HumanLooks = looks;
+    }
+
+    /// <summary>The ModelData a human-Setup object called <paramref name="name"/> is created with.</summary>
+    internal ModelData LookFor(string name) => HumanLooks is not null && HumanLooks.TryGetValue(name, out var look) ? look : HumanModel;
+
+    /// <summary>
     /// The weenies the stand-in knows for <c>item</c>, by class id. Null: <see cref="StandInItemKind.Default"/> (<c>TODO(m3-standin-weenies)</c>: the stand-in has no weenie database;
     /// a class id it does not hold answers <c>unknown-wcid</c>).
     /// </summary>
@@ -613,7 +645,7 @@ public static partial class StandInSessions
             Timestamps = Stamps(1, 1),
         };
         var weenie = new WeenieDesc { Header = WeenieHeaderFlags.None, Name = name, WeenieClassId = 1, IconId = 0x06000001, ItemType = 0x10, ObjectDescriptionFlags = 0x8 };
-        sink.OnCreateObject(WorldContext(sink), new CreateObjectMsg(guid, ModelData.Empty, physics, weenie), isUpdate: false);
+        sink.OnCreateObject(WorldContext(sink), new CreateObjectMsg(guid, visit.HumanModel, physics, weenie), isUpdate: false);
         if (visit.Recorded is { } contents)
         {
             // The objects the description lists, so that every one of them exists (the portal wait of retail's SendLoginCompleteNotification); the recorded player's guid in them becomes this player's.
@@ -625,7 +657,7 @@ public static partial class StandInSessions
 
         foreach (var obj in visit.Objects)
         {
-            sink.OnCreateObject(WorldContext(sink), ObjectMessage(obj, new AcPosition(visit.Cell, visit.Origin + obj.Offset, Quaternion.Identity)), isUpdate: false);
+            sink.OnCreateObject(WorldContext(sink), ObjectMessage(obj, new AcPosition(visit.Cell, visit.Origin + obj.Offset, Quaternion.Identity), visit.LookFor(obj.Name)), isUpdate: false);
         }
     }
 
@@ -637,7 +669,7 @@ public static partial class StandInSessions
     /// The CreateObject the server sends for one object of a visit (<paramref name="obj"/>) at <paramref name="position"/>: the visit's objects at their offsets from the player's creation position, and an object a check places (M3 3.1 fb,
     /// <see cref="StandInServer.Place"/>) where it is told.
     /// </summary>
-    internal static CreateObjectMsg ObjectMessage(StandInObject obj, AcPosition position)
+    internal static CreateObjectMsg ObjectMessage(StandInObject obj, AcPosition position, ModelData? humanLook = null)
     {
         var hiddenAtCreation = obj.UnhideAfter is not null;
         var objectPhysics = new PhysicsDesc
@@ -664,7 +696,7 @@ public static partial class StandInSessions
             RadarBehavior = 4,
             RadarBlipColor = obj.BlipColor != 0 ? obj.BlipColor : null,
         };
-        return new CreateObjectMsg(obj.Guid, ModelData.Empty, objectPhysics, objectWeenie);
+        return new CreateObjectMsg(obj.Guid, humanLook is not null && obj.Setup == StandInVisit.HumanSetup ? humanLook : ModelData.Empty, objectPhysics, objectWeenie);
     }
 
     /// <summary>

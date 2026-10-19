@@ -5,25 +5,41 @@
 .DESCRIPTION
     Prints exactly one line per stage and nothing else on stdout:
 
-      [slicecheck] <stage> PASS|FAIL|SKIP <short detail> (<seconds>s)
+      [slicecheck] <stage> PASS|FAIL|SKIP <short detail> (<seconds>s) at_s=<seconds since the start>
 
-    Stages, in order (-Stages picks a subset; the default is build,test,steps, plus smoke with -Smoke):
+    Stages, in order (-Stages picks a subset; the default is build,test,steps, plus exhaustive with -Exhaustive and smoke with -Smoke):
 
-      build   dotnet build Lifestone.slnx --disable-build-servers; detail = warning and error counts (0 and 0 to pass)
-      test    dotnet test Lifestone.slnx --no-build --filter "Category!=Loopback&Tier!=Soak"; detail = passed/failed/skipped
-              totals and the passed count of each test assembly. -MinTests N fails the stage when fewer than N tests
-              passed (the "count never decreases" gate)
-      steps   each step of -Steps through tools\smoke.ps1 itself (-Only <step> -NoBuild -Backend auto), so the Godot command
-              lines live only there; one line per step with the step's own detail (pass/fail counts, max frame time). The
-              name retail-ui-checks is an alias of smoke's retail-ui step (its frames and the [uicheck] suite)
-      smoke   with -Smoke: the whole of tools\smoke.ps1 -Backend auto -NoBuild; detail = its verdict and total time
+      build       dotnet build Lifestone.slnx --disable-build-servers; detail = warning and error counts (0 and 0 to pass)
+      test        dotnet test Lifestone.slnx --no-build --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive"; detail = passed/failed/skipped
+                  totals, the passed count of each test assembly and the slowest tests (the VSTest trx logger's per-test timings,
+                  top 20 in cache\slice-check\test-times.txt). -MinTests N fails the stage when fewer than N tests passed (the
+                  "count never decreases" gate: N is the DEFAULT count; the Exhaustive tier is counted by its own stage)
+      exhaustive  dotnet test Lifestone.slnx --no-build --filter "Tier=Exhaustive": the dat sweeps (every GfxObj, landblock and cell),
+                  left out of the default filter because they cost about 55 s of an 85 s run. -Exhaustive adds the stage; -Smoke implies
+                  it (G-A); the lead runs it before a merge. Per-test timings as above (exhaustive-times.txt)
+      steps       the steps of -Steps (and, with -Changed, the steps the diff touches) through ONE tools\smoke.ps1 process
+                  (-Only <steps> -NoBuild -Backend auto), so the Godot command lines live only there; one line per step with the
+                  step's own detail and seconds. The name retail-ui-checks is an alias of smoke's retail-ui step. A
+                  -Rerun runs the failed steps once more in a second smoke process
+      smoke       with -Smoke: the whole of tools\smoke.ps1 -Backend auto -NoBuild -SoloFrames -FullScan; detail = its verdict and
+                  total time. Its own test step is the run's test: with this stage the test stage is not run a second time, the
+                  `test` line is read from the smoke's test row (and -MinTests judges it)
+
+    -Changed [-Base master]: adds the backend-free steps the diff touches (merge-base with -Base, the working tree and untracked
+    files, read-only git; tools\lib\StepPaths.psd1 maps source folders to steps). A path under src/ or tools/ that no rule matches runs
+    every backend-free step and is named (never a silent skip); a docs- or tests-only diff runs no Godot step. -Steps stays a floor.
+    Paths that only the live steps (login-check, login) notice print one advisory line, "live-probe SKIP touched: ...": slice-check never
+    starts the backend.
 
     Full logs go to cache\slice-check\<stage>.log (gitignored). A FAIL prints at most 15 lines of the failure (failing test
     names and messages, or the step's FAIL lines), then the log path. The last line is "[slicecheck] done ok=true|false"
     and the exit code is 0 or 1. When the build fails the later stages are reported SKIP.
 
     -Rerun runs a failed Godot step once more (the known 50 ms flakes on a loaded machine); a pass on the rerun is
-    reported as "PASS (rerun)".
+    reported as "PASS (rerun)". A frame-time failure while another Godot run was up is reported by smoke as
+    "frames=contended" (D42) and is a PASS; the smoke stage passes -SoloFrames and fails on any frame check.
+
+    -Parallel N (default 2): smoke runs the backend-free, not frame-judged steps (cli-help, ..., retail-ui, spell-showcase, golden-viewpoints) N at a time.
 
     Every Godot check and frame run is at retail's native 800x600 (owner rule, 2026-10-14). -AllSizes passes smoke's -AllSizes: the larger sizes
     (1920x1080, 2560x1440) as well; never run by default.
@@ -33,10 +49,13 @@
     and its children, and the per-user SDK is found as smoke.ps1 does (tools\lib\Toolchain.psm1).
 
 .EXAMPLE
-    pwsh -File tools\slice-check.ps1 -MinTests 6142 -Steps play-checks,retail-ui-checks -Rerun
+    pwsh -File tools\slice-check.ps1 -MinTests 7900 -Steps play-checks,retail-ui-checks -Rerun
 
 .EXAMPLE
     pwsh -File tools\slice-check.ps1 -Stages build,test
+
+.EXAMPLE
+    pwsh -File tools\slice-check.ps1 -Changed -MinTests 7900
 #>
 [CmdletBinding()]
 param(
@@ -45,6 +64,11 @@ param(
     [ValidateRange(0, 1000000)]
     [int] $MinTests = 0,
     [switch] $Smoke,
+    [switch] $Exhaustive,
+    [switch] $Changed,
+    [string] $Base = 'master',
+    [ValidateRange(1, 3)]
+    [int] $Parallel = 2,
     [switch] $Rerun,
     [switch] $AllSizes,
     [ValidateSet('auto')]
@@ -59,27 +83,34 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $smokeScript = Join-Path $PSScriptRoot 'smoke.ps1'
 $pwshExe = (Get-Process -Id $PID).Path
 $outDir = Join-Path $repoRoot 'cache\slice-check'
-$allStages = @('build', 'test', 'steps', 'smoke')
+$allStages = @('build', 'test', 'exhaustive', 'steps', 'smoke')
 # retail-ui-checks is the name slices use for the retail UI layer's checks; smoke runs them inside its retail-ui step.
 $stepAliases = @{ 'retail-ui-checks' = 'retail-ui' }
-$testFilter = 'Category!=Loopback&Tier!=Soak'
+# The default tests leave out the loopback tests (backend), the soak tier (merge gates) and the Exhaustive tier (its own stage).
+$testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive'
+$exhaustiveFilter = 'Tier=Exhaustive'
 $maxFailureLines = 15
+$clock = [Diagnostics.Stopwatch]::StartNew()
 
 # 'pwsh -File' passes '-Steps a,b' as one string: split on commas either way.
 function Split-List([string[]] $values) { @($values | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 $Stages = @(Split-List $Stages)
 $Steps = @(Split-List $Steps)
 foreach ($name in $Stages) { if ($allStages -notcontains $name) { throw "Unknown stage '$name'. Stages: $($allStages -join ', ')" } }
-if ($Stages.Count -eq 0) { $Stages = @(@("build", "test") + @(if ($Steps.Count) { "steps" }) + @(if ($Smoke) { "smoke" })) }
-elseif ($Smoke -and $Stages -notcontains 'smoke') { $Stages += 'smoke' }
-$resolvedSteps = @($Steps | ForEach-Object { if ($stepAliases.ContainsKey($_)) { $stepAliases[$_] } else { $_ } })
-foreach ($name in $resolvedSteps) {
+if ($Stages.Count -eq 0) { $Stages = @(@("build", "test") + @(if ($Exhaustive -or $Smoke) { "exhaustive" }) + @(if ($Steps.Count -or $Changed) { "steps" }) + @(if ($Smoke) { "smoke" })) }
+else {
+    if ($Smoke -and $Stages -notcontains 'smoke') { $Stages += 'smoke' }
+    if (($Smoke -or $Exhaustive) -and $Stages -notcontains 'exhaustive') { $Stages += 'exhaustive' }
+    if ($Changed -and $Stages -notcontains 'steps') { $Stages += 'steps' }
+}
+foreach ($name in @($Steps | ForEach-Object { if ($stepAliases.ContainsKey($_)) { $stepAliases[$_] } else { $_ } })) {
     if ($name -in @('build', 'test')) { throw "'$name' is a stage, not a step: use -Stages." }
     if ($name -in @('login-check', 'login')) { throw "'$name' needs the backend, which slice-check never starts." }
 }
-if ($Stages -contains 'steps' -and $Steps.Count -eq 0) { throw "The steps stage needs -Steps <names>." }
+if ($Stages -contains 'steps' -and $Steps.Count -eq 0 -and -not $Changed) { throw "The steps stage needs -Steps <names> (or -Changed)." }
 
 Import-Module (Join-Path $PSScriptRoot 'lib\Toolchain.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'lib\TestTimes.psm1') -Force
 $DotnetRoot = Find-LifestoneDotnetRoot -DotnetRoot $DotnetRoot
 $dotnetExe = Join-Path $DotnetRoot 'dotnet.exe'
 # This process only (children inherit it); nothing persistent.
@@ -103,10 +134,10 @@ function Get-LogLines([string] $path) {
 }
 
 function Write-Stage([string] $stage, [string] $outcome, [string] $detail, [double] $seconds, [string[]] $failure = @(), [string] $log = '') {
-    # One line per stage; on a FAIL at most $maxFailureLines lines of the failure, then the log path.
+    # One line per stage; on a FAIL at most $maxFailureLines lines of the failure, then the log path. at_s: the stage clock, seconds since slice-check started.
     if ($outcome -eq 'FAIL') { $script:ok = $false }
     $colour = switch -Wildcard ($outcome) { 'FAIL' { 'Red' } 'SKIP' { 'Yellow' } '*rerun*' { 'Yellow' } default { 'Green' } }
-    Write-Host ('[slicecheck] {0} {1} {2} ({3:0}s)' -f $stage, $outcome, $detail, $seconds) -ForegroundColor $colour
+    Write-Host ('[slicecheck] {0} {1} {2} ({3:0}s) at_s={4:0}' -f $stage, $outcome, $detail, $seconds, $clock.Elapsed.TotalSeconds) -ForegroundColor $colour
     if ($outcome -eq 'FAIL') {
         foreach ($line in @($failure | Select-Object -First $maxFailureLines)) { Write-Host "  $line" }
         if ($log) { Write-Host ('  log: {0}' -f [IO.Path]::GetRelativePath($repoRoot, $log).Replace('\', '/')) }
@@ -142,10 +173,39 @@ function Invoke-BuildStage {
     return $pass
 }
 
-function Invoke-TestStage {
-    $log = Join-Path $outDir 'test.log'
+function Get-TestFailureLines([string[]] $lines) {
+    # "  Failed Some.Test.Name [12 ms]" and the first line of its "Error Message:" block.
+    $failure = [Collections.Generic.List[string]]::new()
+    for ($i = 0; $i -lt $lines.Count -and $failure.Count -lt $maxFailureLines; $i++) {
+        if ($lines[$i] -match '^\s+Failed\s+(\S.*?)(\s+\[[^\]]*\])?\s*$') {
+            $message = ''
+            for ($j = $i + 1; $j -lt [Math]::Min($i + 4, $lines.Count); $j++) {
+                if ($lines[$j] -match 'Error Message:') { $message = if ($j + 1 -lt $lines.Count) { $lines[$j + 1].Trim() } else { '' }; break }
+            }
+            $text = "$($Matches[1]): $message"
+            $failure.Add($(if ($text.Length -gt 220) { $text.Substring(0, 220) } else { $text }))
+        }
+    }
+    if ($failure.Count -eq 0) { return @(Get-FirstLines $lines 'error|fail|exception' 8) }
+    return @($failure)
+}
+
+function Get-SlowestDetail([string] $name) {
+    # C6: the per-test timings of <name>'s trx files: top 20 to cache\slice-check\<name>-times.txt, the first three in the stage line.
+    $times = @(Get-TrxTimes (Join-Path $outDir "$name.trx"))
+    if ($times.Count -eq 0) { return '' }
+    $file = Join-Path $outDir "$name-times.txt"
+    Set-Content -LiteralPath $file -Value (Format-SlowestLines $times 20) -Encoding utf8
+    return '; ' + (Format-SlowestSummary $times 20 3) + " (cache/slice-check/$name-times.txt)"
+}
+
+function Invoke-TestRun([string] $stage, [string] $filter, [int] $minimum) {
+    # One `dotnet test` over the solution with the trx logger into this run's own folder (cache\slice-check\<stage>.trx, one trx per assembly).
+    $log = Join-Path $outDir "$stage.log"
+    $trx = Join-Path $outDir "$stage.trx"
+    if (Test-Path -LiteralPath $trx) { Remove-Item -LiteralPath $trx -Recurse -Force }
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    $code = Invoke-ToFile $dotnetExe @('test', 'Lifestone.slnx', '--no-build', '--disable-build-servers', '--filter', $testFilter) $log
+    $code = Invoke-ToFile $dotnetExe @('test', 'Lifestone.slnx', '--no-build', '--disable-build-servers', '--filter', $filter, '--logger', 'trx;LogFilePrefix=test', '--results-directory', $trx) $log
     $lines = Get-LogLines $log
     $passed = 0; $failed = 0; $skipped = 0; $perAssembly = [Collections.Generic.List[string]]::new()
     # "Passed!  - Failed: 0, Passed: 905, Skipped: 8, Total: 913, Duration: 2 s - Lifestone.Net.Tests.dll (net10.0)"
@@ -159,28 +219,17 @@ function Invoke-TestStage {
     $detail = "$passed passed ($($perAssembly -join ', ')), $failed failed, $skipped skipped"
     $pass = $code -eq 0 -and $failed -eq 0 -and $perAssembly.Count -gt 0
     $failure = @()
-    if ($pass -and $MinTests -gt 0 -and $passed -lt $MinTests) {
+    if ($pass -and $minimum -gt 0 -and $passed -lt $minimum) {
         $pass = $false
-        $detail += "; below -MinTests $MinTests"
-        $failure = @("$passed tests passed, -MinTests requires at least $MinTests (the count must never decrease)")
+        $detail += "; below -MinTests $minimum"
+        $failure = @("$passed tests passed, -MinTests requires at least $minimum (the count must never decrease)")
     }
     elseif (-not $pass) {
-        # "  Failed Some.Test.Name [12 ms]" and the first line of its "Error Message:" block.
-        $failure = [Collections.Generic.List[string]]::new()
-        for ($i = 0; $i -lt $lines.Count -and $failure.Count -lt $maxFailureLines; $i++) {
-            if ($lines[$i] -match '^\s+Failed\s+(\S.*?)(\s+\[[^\]]*\])?\s*$') {
-                $message = ''
-                for ($j = $i + 1; $j -lt [Math]::Min($i + 4, $lines.Count); $j++) {
-                    if ($lines[$j] -match 'Error Message:') { $message = if ($j + 1 -lt $lines.Count) { $lines[$j + 1].Trim() } else { '' }; break }
-                }
-                $text = "$($Matches[1]): $message"
-                $failure.Add($(if ($text.Length -gt 220) { $text.Substring(0, 220) } else { $text }))
-            }
-        }
-        if ($failure.Count -eq 0) { $failure = @(Get-FirstLines $lines 'error|fail|exception' 8) }
+        $failure = Get-TestFailureLines $lines
         if ($perAssembly.Count -eq 0) { $detail = "no test summary (exit $code)" }
     }
-    Write-Stage 'test' $(if ($pass) { 'PASS' } else { 'FAIL' }) $detail $timer.Elapsed.TotalSeconds $failure $log
+    $detail += Get-SlowestDetail $stage
+    Write-Stage $stage $(if ($pass) { 'PASS' } else { 'FAIL' }) $detail $timer.Elapsed.TotalSeconds $failure $log
     return $pass
 }
 
@@ -189,62 +238,155 @@ function Invoke-Smoke([string[]] $smokeArguments, [string] $name) {
     # (smoke deletes and recreates it) is cache\slice-check\<name>.work. Returns @{ Code; Log; Lines; Work }.
     $log = Join-Path $outDir "$name.log"
     $work = Join-Path $outDir "$name.work"
-    $arguments = @('-NoProfile', '-File', $smokeScript, '-NoBuild', '-Backend', $Backend, '-OutDir', $work) + @(if ($AllSizes) { '-AllSizes' }) + $smokeArguments
+    $arguments = @('-NoProfile', '-File', $smokeScript, '-NoBuild', '-Backend', $Backend, '-OutDir', $work, '-Parallel', "$Parallel") + @(if ($AllSizes) { '-AllSizes' }) + $smokeArguments
     $code = Invoke-ToFile $pwshExe $arguments $log
     return @{ Code = $code; Log = $log; Lines = (Get-LogLines $log); Work = $work }
 }
 
+function Get-SmokeRowLog($run, [string] $step) {
+    # The Log cell of the step's row in smoke's printed summary table ("| play-checks | PASS | 0 | 300 | 0 | detail | 05-play-checks.log |"), relative to the work folder.
+    foreach ($line in $run.Lines) {
+        if ($line -match '^\|\s*(\S+)\s*\|' -and $Matches[1] -eq $step) {
+            $cells = @($line.Trim().Trim('|') -split '\|' | ForEach-Object { $_.Trim() })
+            if ($cells.Count -ge 7) { return $cells[-1] }
+        }
+    }
+    return ''
+}
+
 function Get-StepFailureLines($run, [string] $step) {
-    # The step's own FAIL lines ([playcheck] FAIL ..., [uicheck] FAIL ...) from its logs, else smoke's row for it.
+    # The step's own FAIL lines ([playcheck] FAIL ..., [uicheck] FAIL ...) from its log (named in smoke's table), else smoke's row for it.
     $failure = [Collections.Generic.List[string]]::new()
-    foreach ($stepLog in @(Get-ChildItem -LiteralPath $run.Work -Filter "*-$step*.log" -ErrorAction SilentlyContinue | Sort-Object Name)) {
-        foreach ($line in (Get-FirstLines (Get-LogLines $stepLog.FullName) '\[\w+\] FAIL|Z ERROR \[|SCRIPT ERROR|Unhandled exception|killed after|no verdict' 10)) { $failure.Add($line) }
+    $rel = Get-SmokeRowLog $run $step
+    if ($rel) {
+        $path = Join-Path $run.Work $rel
+        foreach ($line in (Get-FirstLines (Get-LogLines $path) '\[\w+\] FAIL|Z ERROR \[|SCRIPT ERROR|Unhandled exception|killed after|no verdict' 10)) { $failure.Add($line) }
     }
     foreach ($line in (Get-FirstLines $run.Lines '^\[smoke\] .*\bFAIL\b' 4)) { $failure.Add($line) }
     return @($failure | Select-Object -Unique)
 }
 
 function Read-SmokeRow($run, [string] $step) {
-    # "[smoke] play-checks             PASS  (68.3 s) pass=80 fail=0 max_frame_ms=21.3"
+    # "[smoke] play-checks             PASS  (68.3 s) pass=80 fail=0 max_frame_ms=21.3"; PASS (frames=contended) keeps its note.
     foreach ($line in $run.Lines) {
         if ($line -match '^\[smoke\]\s+(\S+)\s+(PASS(?: \([^)]*\))?|FAIL|SKIP)\s+\(([\d.]+) s\)\s*(.*)$' -and $Matches[1] -eq $step) {
             $detail = $Matches[4] -replace ';?\s*frames in .*$', ''
-            return @{ Result = $Matches[2]; Detail = $detail.Trim() }
+            return @{ Result = $Matches[2]; Seconds = [double]$Matches[3]; Detail = $detail.Trim() }
         }
     }
     return $null
 }
 
-function Invoke-StepsStage {
-    foreach ($step in $Steps) {
-        $smokeStep = if ($stepAliases.ContainsKey($step)) { $stepAliases[$step] } else { $step }
-        $timer = [Diagnostics.Stopwatch]::StartNew()
-        $safe = $smokeStep -replace '[^\w-]', '_'
-        $run = Invoke-Smoke @('-Only', $smokeStep) "step-$safe"
-        $row = Read-SmokeRow $run $smokeStep
-        $outcome = if ($row) { ($row.Result -split ' ')[0] } else { 'FAIL' }
-        $detail = if ($row) { $row.Detail } else { "no result row for '$smokeStep' (smoke exit $($run.Code))" }
-        $note = ''
-        if ($outcome -eq 'FAIL' -and $Rerun) {
-            $firstFailure = Get-StepFailureLines $run $smokeStep
-            $rerunRun = Invoke-Smoke @('-Only', $smokeStep) "step-$safe-rerun"
-            $rerunRow = Read-SmokeRow $rerunRun $smokeStep
-            if ($rerunRow -and $rerunRow.Result -like 'PASS*') {
-                $outcome = 'PASS'; $note = ' (rerun)'; $detail = $rerunRow.Detail; $run = $rerunRun
-            }
-            else {
-                $run = $rerunRun
-                $detail = if ($rerunRow) { "$($rerunRow.Detail); failed again on rerun" } else { "no result row on rerun; failed again" }
-            }
+function Get-ChangedFiles {
+    # Read-only git: the diff against the merge base with -Base, the working tree against HEAD, and untracked files.
+    $files = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    Push-Location $repoRoot
+    try {
+        $mergeBase = (& git merge-base HEAD $Base 2>$null | Select-Object -First 1)
+        $sources = @()
+        if ($mergeBase) { $sources += , @('diff', '--name-only', $mergeBase, 'HEAD') }
+        $sources += , @('diff', '--name-only', 'HEAD')
+        $sources += , @('ls-files', '-o', '--exclude-standard')
+        foreach ($source in $sources) {
+            foreach ($line in @(& git @source 2>$null)) { if ($line) { [void]$files.Add(([string]$line).Trim().Replace('\', '/')) } }
         }
-        $failure = if ($outcome -eq 'FAIL') { Get-StepFailureLines $run $smokeStep } else { @() }
-        Write-Stage $step "$outcome$note" $detail $timer.Elapsed.TotalSeconds $failure $run.Log
+    }
+    finally { Pop-Location }
+    return @($files | Sort-Object)
+}
+
+function Resolve-ChangedSteps([string[]] $files, $map) {
+    # Which backend-free steps the files touch (tools\lib\StepPaths.psd1). Returns @{ Steps; Live; Unmatched; Everything }.
+    $startsWith = { param([string] $path, [string[]] $prefixes) foreach ($p in $prefixes) { if ($path.StartsWith($p, [StringComparison]::OrdinalIgnoreCase)) { return $true } } return $false }
+    $selected = [Collections.Generic.HashSet[string]]::new()
+    $live = [Collections.Generic.HashSet[string]]::new()
+    $unmatched = [Collections.Generic.List[string]]::new()
+    $everything = $false
+    foreach ($file in $files) {
+        $matched = $false
+        if (& $startsWith $file @($map.NoGodot)) { $matched = $true }
+        if (& $startsWith $file @($map.Everything)) { $matched = $true; $everything = $true }
+        foreach ($step in $map.Steps.Keys) { if (& $startsWith $file @($map.Steps[$step])) { $matched = $true; [void]$selected.Add($step) } }
+        foreach ($step in $map.Live.Keys) { if (& $startsWith $file @($map.Live[$step])) { [void]$live.Add($step) } }
+        if (-not $matched -and ($file.StartsWith('src/') -or $file.StartsWith('tools/'))) { $unmatched.Add($file) }
+    }
+    if ($everything -or $unmatched.Count -gt 0) { foreach ($step in $map.Steps.Keys) { [void]$selected.Add($step) } }
+    return @{ Steps = @($selected); Live = @($live | Sort-Object); Unmatched = @($unmatched); Everything = $everything }
+}
+
+function Get-StepsToRun {
+    # -Steps (a floor, aliases resolved) plus, with -Changed, the steps the diff touches; in smoke's own order. Prints the advisory lines.
+    $resolved = @($Steps | ForEach-Object { if ($stepAliases.ContainsKey($_)) { $stepAliases[$_] } else { $_ } })
+    if (-not $Changed) { return $resolved }
+    $map = Import-PowerShellDataFile (Join-Path $PSScriptRoot 'lib\StepPaths.psd1')
+    $files = Get-ChangedFiles
+    $found = Resolve-ChangedSteps $files $map
+    $order = @($map.Steps.Keys)
+    # smoke's order is its $allSteps order; the map's keys are not ordered, so sort by smoke's list.
+    $smokeText = Get-Content -LiteralPath $smokeScript -Raw
+    $allSteps = if ($smokeText -match '\$allSteps = @\(([^)]*)\)') { @([regex]::Matches($Matches[1], "'([^']+)'") | ForEach-Object { $_.Groups[1].Value }) } else { $order }
+    $union = @($resolved + $found.Steps | Select-Object -Unique)
+    $sorted = @($allSteps | Where-Object { $union -contains $_ }) + @($union | Where-Object { $allSteps -notcontains $_ })
+    if ($found.Unmatched.Count -gt 0) {
+        $named = ($found.Unmatched | Select-Object -First 5) -join ', '
+        Write-Host "[slicecheck] changed: no rule for $($found.Unmatched.Count) path(s) under src/ or tools/ ($named), so every backend-free step runs (add them to tools\lib\StepPaths.psd1)"
+    }
+    elseif ($found.Everything) { Write-Host '[slicecheck] changed: a cross-cutting path changed, so every backend-free step runs' }
+    if ($found.Live.Count -gt 0) { Write-Host "[slicecheck] live-probe SKIP touched: $($found.Live -join ',') (slice-check never starts the backend)" }
+    return $sorted
+}
+
+function Invoke-StepsStage([string[]] $stepList) {
+    if ($stepList.Count -eq 0) { Write-Stage 'steps' 'SKIP' 'no backend-free step is touched by the diff' 0; return }
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    # ONE smoke process for all the steps (one start-up, one scan, one stray-output listing); the rerun is one more for the failures.
+    $run = Invoke-Smoke @('-Only', ($stepList -join ',')) 'steps'
+    $rows = @{}
+    foreach ($step in $stepList) { $rows[$step] = Read-SmokeRow $run $step }
+    $failed = @($stepList | Where-Object { -not $rows[$_] -or $rows[$_].Result -eq 'FAIL' })
+    $rerunRun = $null
+    $rerunRows = @{}
+    if ($failed.Count -gt 0 -and $Rerun) {
+        $rerunRun = Invoke-Smoke @('-Only', ($failed -join ',')) 'steps-rerun'
+        foreach ($step in $failed) { $rerunRows[$step] = Read-SmokeRow $rerunRun $step }
+    }
+    foreach ($step in $stepList) {
+        $row = $rows[$step]
+        $thisRun = $run
+        $outcome = if ($row) { ($row.Result -split ' ')[0] } else { 'FAIL' }
+        $detail = if ($row) { $row.Detail } else { "no result row for '$step' (smoke exit $($run.Code))" }
+        $seconds = if ($row) { $row.Seconds } else { 0 }
+        $note = ''
+        if ($row -and $row.Result -match '^PASS \((?<n>[^)]*)\)$') { $note = " ($($Matches['n']))" }
+        if ($outcome -eq 'FAIL' -and $Rerun) {
+            $rerunRow = $rerunRows[$step]
+            $thisRun = $rerunRun
+            if ($rerunRow -and $rerunRow.Result -like 'PASS*') { $outcome = 'PASS'; $note = ' (rerun)'; $detail = $rerunRow.Detail; $seconds += $rerunRow.Seconds }
+            else { $detail = if ($rerunRow) { "$($rerunRow.Detail); failed again on rerun" } else { 'no result row on rerun; failed again' } }
+        }
+        $failure = if ($outcome -eq 'FAIL') { Get-StepFailureLines $thisRun $step } else { @() }
+        Write-Stage $step "$outcome$note" $detail $seconds $failure $thisRun.Log
     }
 }
 
 function Invoke-SmokeStage {
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    $run = Invoke-Smoke @() 'smoke'
+    # G-A: the whole smoke, frame checks judged (-SoloFrames: it waits for a quiet machine and fails on any frame check) and the secret scan in full (-FullScan).
+    $run = Invoke-Smoke @('-SoloFrames', '-FullScan') 'smoke'
+    # Its test step is the run's test (no second dotnet test): the `test` line comes from its row, judged by -MinTests.
+    $testRow = Read-SmokeRow $run 'test'
+    if ($testRow) {
+        $count = if ($testRow.Detail -match 'passed=(\d+) failed=(\d+) skipped=(\d+)') { @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3]) } else { @(0, 0, 0) }
+        $pass = $testRow.Result -like 'PASS*' -and $count[0] -gt 0
+        $detail = "$($count[0]) passed, $($count[1]) failed, $($count[2]) skipped (smoke's test step)" + $(if ($testRow.Detail -match ';\s*(top \d+ slowest.*)$') { "; $($Matches[1])" } else { '' })
+        $failure = @()
+        if ($pass -and $MinTests -gt 0 -and $count[0] -lt $MinTests) {
+            $pass = $false; $detail += "; below -MinTests $MinTests"
+            $failure = @("$($count[0]) tests passed, -MinTests requires at least $MinTests (the count must never decrease)")
+        }
+        elseif (-not $pass) { $failure = Get-StepFailureLines $run 'test' }
+        Write-Stage 'test' $(if ($pass) { 'PASS' } else { 'FAIL' }) $detail $testRow.Seconds $failure $run.Log
+    }
     $summary = @($run.Lines | Where-Object { $_ -match ' - total [\d.]+ min - ' } | Select-Object -Last 1)
     $verdict = if ($summary -and $summary[0] -match ' - (total [\d.]+ min) - (.*)$') { "$($Matches[2]), $($Matches[1])" } else { "no summary (exit $($run.Code))" }
     $pass = $run.Code -eq 0
@@ -258,15 +400,19 @@ function Invoke-SmokeStage {
 
 $buildOk = $true
 if ($Stages -contains 'build') { $buildOk = Invoke-BuildStage }
-foreach ($stage in 'test', 'steps', 'smoke') {
+$stepList = @()
+if ($Stages -contains 'steps') { $stepList = @(Get-StepsToRun) }
+foreach ($stage in 'test', 'exhaustive', 'steps', 'smoke') {
     if ($Stages -notcontains $stage) { continue }
     if (-not $buildOk) {
-        if ($stage -eq 'steps') { foreach ($step in $Steps) { Write-Stage $step 'SKIP' 'the build failed' 0 } } else { Write-Stage $stage 'SKIP' 'the build failed' 0 }
+        if ($stage -eq 'steps') { foreach ($step in $stepList) { Write-Stage $step 'SKIP' 'the build failed' 0 } } else { Write-Stage $stage 'SKIP' 'the build failed' 0 }
         continue
     }
     switch ($stage) {
-        'test' { Invoke-TestStage | Out-Null }
-        'steps' { Invoke-StepsStage }
+        # With the smoke stage its test step is the run's test (below): no second dotnet test.
+        'test' { if ($Stages -notcontains 'smoke') { Invoke-TestRun 'test' $testFilter $MinTests | Out-Null } }
+        'exhaustive' { Invoke-TestRun 'exhaustive' $exhaustiveFilter 0 | Out-Null }
+        'steps' { Invoke-StepsStage $stepList }
         'smoke' { Invoke-SmokeStage }
     }
 }

@@ -23,7 +23,11 @@ character creation's starting skill classes, for the headless host's character.
 
 ### Ported
 
-None.
+Paths are under ACEmulator/ACE @95ef426d (AGPL-3.0); the header names the source.
+
+| Lifestone file | ACE source | Notes |
+|---|---|---|
+| `Session/Contracts/WeenieErrorText.cs` (M3 4.2 x1) | `Source/ACE.Entity/Enum/WeenieError.cs`, `Source/ACE.Entity/Enum/WeenieErrorWithString.cs` (the XML summaries) | The message text of each code; "_" and a WithString text's blank gap become the `{0}` slot. The chat types (0x1A, 7, 0) are numbers read from 11.6096 `ClientCommunicationSystem::HandleFailureEvent` 0x00572760; no retail text is copied. |
 
 ### Re-expressed retail behaviour (each type cites its functions)
 

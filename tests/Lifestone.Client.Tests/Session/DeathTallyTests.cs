@@ -406,22 +406,22 @@ public sealed class DeathTallyTests
     }
 
     [Fact]
-    public void A_purge_that_removes_nothing_is_not_counted_because_the_reducer_publishes_nothing_for_it()
+    public void A_purge_that_removes_nothing_is_counted_because_the_reducer_publishes_it_empty()
     {
-        // ACE sends 0x02C6 at every player death (Player_Death.cs 211-216) even when the unbuffed player holds nothing a purge takes; the reducer then changes nothing and publishes no EnchantmentChanged,
-        // so the tally (which counts the registry's purges) reads 0: TODO(m3-purge-empty), see the handoff. The first death of the loop, the suicide of a buffed mage, is counted.
+        // ACE sends 0x02C6 at every player death (Player_Death.cs 211-216) even when the unbuffed player holds nothing a purge takes; the reducer changes nothing and publishes an empty
+        // EnchantmentChanged (TODO(m3-purge-empty) closed), so the tally counts the unbuffed death's purge too. The bad-only purge (0x0312) is ACE-never and still not published when empty.
         Started();
         Vitae(0.95f);
         Purge();
-        Assert.Equal(0, _tally.Purges);
+        Assert.Equal(1, _tally.Purges);
 
         Buff();
         Purge();
-        Assert.Equal(1, _tally.Purges);
+        Assert.Equal(2, _tally.Purges);
 
         Buff();
         Event(AceM3Writers.MagicPurgeBadEnchantments(Player, ++_event)); // a beneficial buff survives the bad-only purge: nothing removed, nothing counted
-        Assert.Equal(1, _tally.Purges);
+        Assert.Equal(2, _tally.Purges);
     }
 
     [Fact]

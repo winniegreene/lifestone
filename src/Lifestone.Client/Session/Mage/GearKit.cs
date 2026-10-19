@@ -9,10 +9,10 @@ namespace Lifestone.Client.Session.Mage;
 /// <summary>What sort of thing a kit item is.</summary>
 public enum GearKind
 {
-    /// <summary>The caster the mage wields.</summary>
+    /// <summary>The held caster the mage wields (<see cref="GearKit.Wand"/>: The Healer's Heart since M3 4.2 P7).</summary>
     Wand,
 
-    /// <summary>A piece of the leather set the mage wears.</summary>
+    /// <summary>A piece of the classic armour the mage wears (<see cref="GearKit.Armour"/>).</summary>
     Armour,
 
     /// <summary>A spell component a cast burns.</summary>
@@ -25,12 +25,14 @@ public enum GearKind
 /// </summary>
 /// <param name="Wcid">The weenie class id.</param>
 /// <param name="Name">The weenie's name.</param>
-/// <param name="WeenieType">ACE's <c>WeenieType</c>: 35 Caster, 2 Clothing (the leather set), 32 SpellComponent.</param>
+/// <param name="WeenieType">ACE's <c>WeenieType</c>: 35 Caster, 2 Clothing (the armour), 32 SpellComponent.</param>
 /// <param name="ItemType">ACE's <c>ItemType</c>: 0x8000 Caster, 0x2 Armor, 0x1000 SpellComponents.</param>
 /// <param name="ValidLocations">The <c>EquipMask</c> bits the item can occupy.</param>
 /// <param name="ArmorLevel">The armour level (0 for the wand).</param>
 /// <param name="Burden">The burden of one item.</param>
-public sealed record GearWeenie(uint Wcid, string Name, uint WeenieType, uint ItemType, EquipMask ValidLocations, int ArmorLevel, int Burden);
+/// <param name="Palette">The <c>PaletteTemplate</c> the kit asks the <c>item</c> verb to give the piece (ACE's <c>@ci</c> palette argument), or null for the weenie's own.</param>
+/// <param name="Shade">The shade (0 to 1) the kit asks for, or null for the weenie's own.</param>
+public sealed record GearWeenie(uint Wcid, string Name, uint WeenieType, uint ItemType, EquipMask ValidLocations, int ArmorLevel, int Burden, int? Palette = null, double? Shade = null);
 
 /// <summary>One line of the kit: a weenie, how many the kit holds (a component's stack; 1 for the wand and a piece) and where it goes.</summary>
 /// <param name="Wcid">The weenie class id.</param>
@@ -42,14 +44,16 @@ public sealed record GearWeenie(uint Wcid, string Name, uint WeenieType, uint It
 /// <param name="Stack">The count the kit wants (1 for the wand and a piece).</param>
 /// <param name="MaxStack">The most one stack holds, or null for an item that does not stack.</param>
 /// <param name="UnitBurden">The burden of one item (<see cref="GearKit.ComponentBurden"/> for a component).</param>
-public sealed record GearItem(uint Wcid, string Name, GearKind Kind, uint WeenieType, uint ItemType, EquipMask ValidLocations, int Stack, int? MaxStack, int UnitBurden)
+/// <param name="Palette">The palette the <c>item</c> request asks for (<see cref="GearWeenie.Palette"/>), or null.</param>
+/// <param name="Shade">The shade the <c>item</c> request asks for, or null.</param>
+public sealed record GearItem(uint Wcid, string Name, GearKind Kind, uint WeenieType, uint ItemType, EquipMask ValidLocations, int Stack, int? MaxStack, int UnitBurden, int? Palette = null, double? Shade = null)
 {
     /// <summary>The burden of the whole stack.</summary>
     public int Burden => UnitBurden * Stack;
 }
 
 /// <summary>
-/// The BSD mage's gear (M3 1.4 s0; docs/milestones/m3-lights-and-sound.md sections 5.2 and 5.3, plan D9): a wand, the five pieces of a leather set and the spell components the profile's spells burn, as the
+/// The BSD mage's gear (M3 1.4 s0; docs/milestones/m3-lights-and-sound.md sections 5.2 and 5.3, plan D9): a held caster (The Healer's Heart), the five pieces of the classic armour and the spell components the profile's spells burn, as the
 /// weenies ACE spawns for the <c>item</c> verb. Built once for an account from the SpellTable (<see cref="Build"/>).
 /// </summary>
 /// <remarks>
@@ -69,7 +73,7 @@ public sealed record GearItem(uint Wcid, string Name, GearKind Kind, uint Weenie
 /// <see cref="BuffCycles"/> is 3 (the first buff, a re-buff after the 30-minute enchantments expire, a spare) and <see cref="Safety"/> 3 (a fizzled cast burns its components too, and a retry casts one level down).
 /// The loops top the kit up with <see cref="PlayerTools.SpawnGear"/> (idempotent) between cycles. The server's <c>item</c> verb makes each grant its own pack item (it never merges, <c>Container.TryAddToInventory</c>, Container.cs:499-560), so
 /// a top-up takes a new slot; <see cref="PlayerTools.SpawnGear"/> merges each arrived grant into the held stack of its weenie afterwards (GameAction 0x0054, <see cref="IActionApi.MergeStack"/>), so a top-up leaves one stack per line.</para>
-/// <para><b>The burden.</b> The wand and the pieces carry the SELECT's burdens (50; 100, 810, 960, 270, 420). A component's burden is 4 for every component weenie of the kit (a read-only SELECT of the world database, 2026-10-16, all 81 weenies; <c>TODO(m3-kit-burdens)</c> closed), so the kit's burden is exact, and the tests keep it well under the capacity of Strength 131
+/// <para><b>The burden.</b> The caster and the pieces carry the SELECT's burdens (50; 600, 1,600, 2,288, 919, 540 since M3 4.2 P7; the leather set's 2,560 stays in the pack: <see cref="LeatherSetBurden"/>). A component's burden is 4 for every component weenie of the kit (a read-only SELECT of the world database, 2026-10-16, all 81 weenies; <c>TODO(m3-kit-burdens)</c> closed), so the kit's burden is exact, and the tests keep it well under the capacity of Strength 131
 /// (<see cref="EncumbranceCapacity"/>, ACE <c>EncumbranceSystem.EncumbranceCapacity</c>: 150 × Strength with no augmentations).</para>
 /// <para><b>The pack.</b> A player's main pack holds <see cref="PackCapacity"/> items (the human weenie's ItemCapacity, 102; each stack is one slot); the kit's slots are its lines, and the tests keep them well under it. A top-up is granted as new items
 /// before it is merged, so <see cref="PlayerTools.SpawnGear"/> counts the main pack's items plus the new grants against the capacity first and refuses (<see cref="GearSpawn.GuardRefusal"/>) before the server would.</para>
@@ -79,7 +83,7 @@ public sealed class GearKit
     /// <summary>ACE's <c>WeenieType.Caster</c>.</summary>
     public const uint WeenieTypeCaster = 35;
 
-    /// <summary>ACE's <c>WeenieType.Clothing</c> (the leather armour).</summary>
+    /// <summary>ACE's <c>WeenieType.Clothing</c> (the armour).</summary>
     public const uint WeenieTypeClothing = 2;
 
     /// <summary>ACE's <c>WeenieType.SpellComponent</c>.</summary>
@@ -143,18 +147,32 @@ public sealed class GearKit
     /// </summary>
     public static IReadOnlyList<uint> FociWcids { get; } = [15268, 15269, 15270, 15271, 43173];
 
-    /// <summary>The wand: weenie 2472 "Wand", a Caster with no wield requirement and no spells (ValidLocations 0x01000000, HeldCaster).</summary>
-    public static GearWeenie Wand { get; } = new(2472, "Wand", WeenieTypeCaster, ItemTypeCaster, EquipMask.Held, 0, 50);
+    /// <summary>ACE's <c>PaletteTemplate.Gold</c> (ACE.Entity/Enum/PaletteTemplate.cs: the 22nd member, Undef being 0, so 21; the pinned enum, read 2026-10-19).</summary>
+    public const int PaletteGold = 21;
 
-    /// <summary>The leather set, a disjoint set with no wield requirement: cap, coat, leggings, gauntlets, boots.</summary>
+    /// <summary>
+    /// The held caster (the property keeps its M3 name; the weenie is the owner's D43 choice): weenie 8552 "The Healer's Heart" (<c>orbhealer</c>), a Caster (WeenieType 35, ItemType 0x8000) held in the hand (ValidLocations 0x01000000), burden 50, no
+    /// WieldRequirements (a read-only parse of the pinned world SQL, ACE-World-16PY-Patches v0.9.296, 2026-10-19: the only weenie of that name). It carries three item spells (Regeneration Self VI 170, Healing Mastery Self VI 879, Life Giver 1997; item
+    /// spellcraft 225, ItemDifficulty 105, which BSD Mage's Arcane Lore 144 meets) and is <b>not a focus</b>: it is not in <see cref="FociWcids"/>, so ACE's <c>HasFoci</c> does not apply and the casts use the account's customised formulas.
+    /// </summary>
+    public static GearWeenie Wand { get; } = new(8552, "The Healer's Heart", WeenieTypeCaster, ItemTypeCaster, EquipMask.Held, 0, 50);
+
+    /// <summary>
+    /// BSD Mage's classic armour (D43, 2026-10-19), a disjoint set with no wield requirement (the world SQL, 2026-10-19): the olthoi helm 3715, the Greater Amuli Shadow coat 6600 and leggings 6606 (armour level 190, the pre-"new" rows: 7658 and 7689 are 150 with 0.1
+    /// elemental protection), and the Platemail Gauntlets 57 and Sollerets 107 in the <see cref="PaletteGold"/> palette (the shade stays the weenie's own). Total burden 5,947 (the leather set's 2,550 stays in the pack after the swap:
+    /// <see cref="LeatherSetBurden"/>). The coat covers chest and both arms, the leggings abdomen and both legs.
+    /// </summary>
     public static IReadOnlyList<GearWeenie> Armour { get; } =
     [
-        new(45, "Leather Cap", WeenieTypeClothing, ItemTypeArmor, EquipMask.HeadWear, 130, 100),
-        new(47, "Leather Coat", WeenieTypeClothing, ItemTypeArmor, EquipMask.ChestArmor | EquipMask.AbdomenArmor | EquipMask.UpperArmArmor | EquipMask.LowerArmArmor, 90, 810),
-        new(81, "Leather Leggings", WeenieTypeClothing, ItemTypeArmor, EquipMask.UpperLegArmor | EquipMask.LowerLegArmor, 90, 960),
-        new(56, "Leather Gauntlets", WeenieTypeClothing, ItemTypeArmor, EquipMask.HandWear, 130, 270),
-        new(115, "Leather Boots", WeenieTypeClothing, ItemTypeArmor, EquipMask.LowerLegWear | EquipMask.FootWear, 130, 420),
+        new(3715, "Olthoi Helm", WeenieTypeClothing, ItemTypeArmor, EquipMask.HeadWear, 230, 600),
+        new(6600, "Greater Amuli Shadow Coat", WeenieTypeClothing, ItemTypeArmor, EquipMask.ChestArmor | EquipMask.UpperArmArmor | EquipMask.LowerArmArmor, 190, 1600),
+        new(6606, "Greater Amuli Shadow Leggings", WeenieTypeClothing, ItemTypeArmor, EquipMask.AbdomenArmor | EquipMask.UpperLegArmor | EquipMask.LowerLegArmor, 190, 2288),
+        new(57, "Platemail Gauntlets", WeenieTypeClothing, ItemTypeArmor, EquipMask.HandWear, 150, 919, PaletteGold),
+        new(107, "Sollerets", WeenieTypeClothing, ItemTypeArmor, EquipMask.FootWear, 150, 540, PaletteGold),
     ];
+
+    /// <summary>The burden of the five leather pieces the kit used before M3 4.2 P7 (cap 100, coat 810, leggings 960, gauntlets 270, boots 420): a mage that wore them keeps them in the pack after the gear scenario swaps, so the burden check counts them.</summary>
+    public const int LeatherSetBurden = 2_560;
 
     /// <summary>The capacity ACE gives <paramref name="strength"/> with no augmentations (<c>EncumbranceSystem.EncumbranceCapacity</c>: 150 × strength).</summary>
     public static int EncumbranceCapacity(int strength) => strength <= 0 ? 0 : 150 * strength;
@@ -370,7 +388,7 @@ public sealed class GearKit
             $"items={Items.Count} components={Items.Count - 1 - Armour.Count} customised_components={CustomisedComponentIds.Count} slots={Slots}/{PackCapacity} burden={Burden}/{EncumbranceCapacity(CapacityStrength)}");
 
     private static GearItem ItemOf(GearWeenie w) =>
-        new(w.Wcid, w.Name, w.Wcid == Wand.Wcid ? GearKind.Wand : GearKind.Armour, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.Burden);
+        new(w.Wcid, w.Name, w.Wcid == Wand.Wcid ? GearKind.Wand : GearKind.Armour, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.Burden, w.Palette, w.Shade);
 }
 
 /// <summary>One request <see cref="PlayerTools.SpawnGear"/> made for a kit line: what was asked for, and the handle that tells how it ended.</summary>

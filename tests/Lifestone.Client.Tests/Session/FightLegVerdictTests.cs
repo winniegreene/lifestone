@@ -8,7 +8,7 @@ namespace Lifestone.Client.Tests.Session;
 public sealed class FightLegVerdictTests
 {
     private static readonly Regex Shape = new(
-        @"^bsd-fight done ok=(true|false) kills=-?\d+ damage_dealt=-?\d+ spells_cast=\d+ misses=\d+ xp_gained=-?\d+ damage_taken=\d+ hits_taken=\d+ evades=\d+ projectiles=(\d+|n/a) cast_frame_max_ms=([\d.]+|n/a) fight_frame_max_ms=([\d.]+|n/a) bsd_min_fps=([\d.]+|n/a) fight_s=(\d+|n/a)( frame_over_50=yes)?$",
+        @"^bsd-fight done ok=(true|false) kills=-?\d+ damage_dealt=-?\d+ spells_cast=\d+ misses=\d+ blocked_picks=\d+ wall_hits=\d+ xp_gained=-?\d+ damage_taken=\d+ hits_taken=\d+ evades=\d+ projectiles=(\d+|n/a) cast_frame_max_ms=([\d.]+|n/a) fight_frame_max_ms=([\d.]+|n/a) bsd_min_fps=([\d.]+|n/a) fight_s=(\d+|n/a)( frame_over_50=yes)?$",
         RegexOptions.CultureInvariant);
 
     private static FightLegMeasures Good() => new(Kills: 3, DamageDealt: 912, SpellsCast: 14, Misses: 2, XpGained: 90_000, DamageTaken: 140, HitsTaken: 4, Evades: 1, Projectiles: 14, CastFrameMaxMs: 31.25, FightFrameMaxMs: 40.04, BsdMinFps: 58.5, FightSeconds: 123.9);
@@ -22,7 +22,7 @@ public sealed class FightLegVerdictTests
         Assert.Empty(outcome.Problems);
         Assert.Matches(Shape, outcome.Line);
         Assert.Equal(
-            "bsd-fight done ok=true kills=3 damage_dealt=912 spells_cast=14 misses=2 xp_gained=90000 damage_taken=140 hits_taken=4 evades=1 projectiles=14 cast_frame_max_ms=31.3 fight_frame_max_ms=40.0 bsd_min_fps=58.5 fight_s=123",
+            "bsd-fight done ok=true kills=3 damage_dealt=912 spells_cast=14 misses=2 blocked_picks=0 wall_hits=0 xp_gained=90000 damage_taken=140 hits_taken=4 evades=1 projectiles=14 cast_frame_max_ms=31.3 fight_frame_max_ms=40.0 bsd_min_fps=58.5 fight_s=123",
             outcome.Line);
     }
 
@@ -110,5 +110,26 @@ public sealed class FightLegVerdictTests
         Assert.Equal(LoginCheckKind.BsdFight, PlayOptions.Parse(["--login-check=bsd-fight"]).LoginCheck);
         Assert.NotEqual(LoginCheckKind.BsdFight, PlayOptions.Parse(["--login-check=all"]).LoginCheck);
         Assert.NotEqual(LoginCheckKind.BsdFight, PlayOptions.Parse(["--login-check"]).LoginCheck);
+    }
+
+    [Fact]
+    public void Bolt_light_no_and_viewer_light_off_fail_in_every_leg_and_n_a_does_not_fail_live()
+    {
+        Assert.False(FightLegVerdict.Compose(null, Good() with { BoltLight = false, ViewerLight = true }).Ok);
+        Assert.False(FightLegVerdict.Compose(null, Good() with { BoltLight = true, ViewerLight = false }).Ok);
+        Assert.Contains(FightLegVerdict.Compose(null, Good() with { ViewerLight = false }).Problems, p => p.StartsWith("viewer_light=off", StringComparison.Ordinal));
+        Assert.True(FightLegVerdict.Compose(null, Good() with { BoltLight = true, ViewerLight = true }).Ok);
+
+        // A run with no flight long enough to judge reads bolt_light=n/a (the runner passes null) and passes live.
+        var none = FightLegVerdict.Compose(null, Good() with { BoltLight = null, ViewerLight = true, DynamicLightsMax = 1 });
+        Assert.True(none.Ok);
+        Assert.Contains(" bolt_light=n/a ", none.Line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_new_counters_print_in_the_line()
+    {
+        var line = FightLegVerdict.Compose(null, Good() with { BlockedPicks = 2, WallHits = 1 }).Line;
+        Assert.Contains(" blocked_picks=2 wall_hits=1 ", line, StringComparison.Ordinal);
     }
 }

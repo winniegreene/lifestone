@@ -418,6 +418,8 @@ public sealed partial class ModSourceTests
             "AdminCommands.VerifyCreateWeenieType(",
             "WorldObjectFactory.CreateNewWorldObject(weenie!)",
             "item.SetStackSize(",
+            "item.PaletteTemplate = palette", // @ci's order (AdminCommands.cs:2559-2563): stack, palette, shade, then the pack
+            "item.Shade = shade",
             "player.TryCreateInInventoryWithNetworking(item)",
             "item.Destroy()",
         }.Select(s => code.IndexOf(s, StringComparison.Ordinal)).ToArray();

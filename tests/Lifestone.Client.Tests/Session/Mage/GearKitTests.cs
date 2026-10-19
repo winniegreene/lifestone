@@ -4,6 +4,7 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Data.Magic;
+using Lifestone.Data.Motion;
 using Lifestone.Data.Tests;
 using Lifestone.Tests.Shared;
 using Xunit.Abstractions;
@@ -118,24 +119,57 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
         var capacity = GearKit.EncumbranceCapacity(GearKit.CapacityStrength);
         output.WriteLine($"kit: {kit.Describe()}; capacity at strength {GearKit.CapacityStrength} = {capacity}; wand+armour burden = {kit.Items.Where(i => i.Kind != GearKind.Component).Sum(i => i.Burden)}; components = {kit.Components.Sum(c => c.Stack)} units");
         Assert.Equal(19_650, capacity);
-        Assert.Equal(2_610, kit.Items.Where(i => i.Kind != GearKind.Component).Sum(i => i.Burden)); // wand 50 + armour 100 + 810 + 960 + 270 + 420
-        // M3 2.1 s0a: the two mana lines (D24) take the burden from 9,510 to 13,618, 69% of the capacity; the bound is three quarters (the Prismatic Taper alone is 682 x 6).
-        Assert.True(kit.Burden * 4 <= capacity * 3, $"the kit's burden {kit.Burden} is over three quarters of {capacity}");
-        Assert.Equal(13_618, kit.Burden);
+        Assert.Equal(5_997, kit.Items.Where(i => i.Kind != GearKind.Component).Sum(i => i.Burden)); // M3 4.2 P7 (D43): the Healer's Heart 50 + helm 600 + coat 1,600 + leggings 2,288 + gauntlets 919 + sollerets 540
+        // M3 2.1 s0a: the two mana lines (D24) put the components at 11,008 (the leather kit's 13,618 less its 2,610); with the classic armour the kit is 17,005, 86.5% of the conservative capacity.
+        Assert.True(kit.Burden * 100 <= capacity * 90, $"the kit's burden {kit.Burden} is over 90% of {capacity}");
+        Assert.Equal(17_005, kit.Burden);
         Assert.True(kit.Slots <= GearKit.PackCapacity * 6 / 10, $"{kit.Slots} slots of {GearKit.PackCapacity}");
         Assert.Equal(kit.Items.Sum(i => i.Burden), kit.Burden);
         var tapers = kit.ItemOf(GearKit.PrismaticTaperWcid)!.Stack;
-        Assert.Equal(2_610 + (4 * (kit.Components.Sum(c => c.Stack) - tapers)) + (6 * tapers), kit.Burden); // exact: every component weenie weighs 4 but the Prismatic Taper's 6 (the SELECT; TODO(m3-kit-burdens) closed)
+        Assert.Equal(5_997 + (4 * (kit.Components.Sum(c => c.Stack) - tapers)) + (6 * tapers), kit.Burden); // exact: every component weenie weighs 4 but the Prismatic Taper's 6 (the SELECT; TODO(m3-kit-burdens) closed)
+    }
+
+    [RequiresDatsFact]
+    public void A_mage_that_wore_the_leather_set_and_the_old_wand_still_fits_under_its_capacity_after_the_swap_as_the_character_panel_counts_it()
+    {
+        // The swap takes the leather and the old wand to the pack; they stay there (their burden counts). The character panel's capacity is EncumbranceSystem.EncumbranceCapacity(strength with the registry, carrying augmentations)
+        // (GameCharacterInfo.LoadOf, CACQualities::InqLoad 0x0058FF60): BSD Mage's Strength is the creation 10 plus the 131 ranks of the plan = 141, no augmentations; the build's buffs only raise it.
+        var kit = KitFor(Account);
+        const int OldWand = 50;
+        Assert.Equal(2_560, GearKit.LeatherSetBurden);
+        var carried = kit.Burden + GearKit.LeatherSetBurden + OldWand;
+        var real = EncumbranceSystem.EncumbranceCapacity((int)(MageTemplate.LowAttribute + GearKit.CapacityStrength), 0);
+        var conservative = EncumbranceSystem.EncumbranceCapacity(GearKit.CapacityStrength, 0);
+        output.WriteLine($"kit {kit.Burden} + leather {GearKit.LeatherSetBurden} + old wand {OldWand} = {carried}; capacity at strength 141 = {real} (load {(double)carried / real:P1}), at 131 = {conservative} (load {(double)carried / conservative:P1})");
+        Assert.Equal(21_150, real);
+        Assert.True(carried * 100 <= real * 95, $"carrying {carried} is over 95% of {real}: the load penalty would start");
+        Assert.True(carried <= conservative, $"carrying {carried} is over the conservative capacity {conservative}");
+        Assert.True(EncumbranceSystem.Load(real, carried) < 1.0);
     }
 
     [Fact]
-    public void The_wand_and_the_leather_set_are_the_selects_weenies_and_the_kit_holds_items_only()
+    public void The_held_caster_and_the_classic_armour_are_the_selects_weenies_with_their_palettes_and_the_kit_holds_items_only()
     {
-        Assert.Equal((2472u, "Wand", 35u, EquipMask.Held), (GearKit.Wand.Wcid, GearKit.Wand.Name, GearKit.Wand.WeenieType, GearKit.Wand.ValidLocations));
+        // D43 (2026-10-19): The Healer's Heart (8552, the only weenie of that name), the olthoi helm 3715, the pre-"new" Shadow Amuli rows 6600 and 6606 (armour level 190), and the plain Platemail Gauntlets 57 and Sollerets 107 in Gold.
+        Assert.Equal((8552u, "The Healer's Heart", 35u, EquipMask.Held, 50), (GearKit.Wand.Wcid, GearKit.Wand.Name, GearKit.Wand.WeenieType, GearKit.Wand.ValidLocations, GearKit.Wand.Burden));
         Assert.Equal(
-            [(45u, 0x1u, 130, 100), (47u, 0x1E00u, 90, 810), (81u, 0x6000u, 90, 960), (56u, 0x20u, 130, 270), (115u, 0x180u, 130, 420)],
-            GearKit.Armour.Select(a => (a.Wcid, (uint)a.ValidLocations, a.ArmorLevel, a.Burden)));
-        Assert.Equal(["Leather Cap", "Leather Coat", "Leather Leggings", "Leather Gauntlets", "Leather Boots"], GearKit.Armour.Select(a => a.Name));
+            [(3715u, 0x1u, 230, 600, (int?)null), (6600u, 0x1A00u, 190, 1600, null), (6606u, 0x6400u, 190, 2288, null), (57u, 0x20u, 150, 919, 21), (107u, 0x100u, 150, 540, 21)],
+            GearKit.Armour.Select(a => (a.Wcid, (uint)a.ValidLocations, a.ArmorLevel, a.Burden, a.Palette)));
+        Assert.Equal(["Olthoi Helm", "Greater Amuli Shadow Coat", "Greater Amuli Shadow Leggings", "Platemail Gauntlets", "Sollerets"], GearKit.Armour.Select(a => a.Name));
+        Assert.Equal(21, GearKit.PaletteGold); // ACE's PaletteTemplate.Gold: Undef 0 ... Yellow 17, YellowBrown 18, Copper 19, Silver 20, Gold 21
+        Assert.All(GearKit.Armour, a => Assert.Null(a.Shade)); // the weenie's own shade (57 and 107 default to 0.66; @ci needs none)
+        Assert.Null(GearKit.Wand.Palette);
+        Assert.Equal(5_947, GearKit.Armour.Sum(a => a.Burden)); // q7: 5,947 against the leather set's 2,560
+        // Disjoint places: no piece covers another's slot, so the swap never needs a layering order.
+        var taken = (uint)GearKit.Wand.ValidLocations;
+        foreach (var piece in GearKit.Armour)
+        {
+            Assert.Equal(0u, taken & (uint)piece.ValidLocations);
+            taken |= (uint)piece.ValidLocations;
+        }
+
+        // The orb is not a focus: ACE's HasFoci (Player_Spells.cs 458-488) does not apply, so the casts use the account-customised formulas, whose components the kit carries (the dats test below).
+        Assert.DoesNotContain(GearKit.Wand.Wcid, GearKit.FociWcids);
 
         // TODO(item-creature) (the mod is not changed in wave 1): the kit asks the mod's item verb only for these WeenieTypes, never a Creature (10).
         Assert.All(GearKit.Armour, a => Assert.Equal(GearKit.WeenieTypeClothing, a.WeenieType));
@@ -144,6 +178,37 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
         Assert.DoesNotContain(GearKit.Wand.Wcid, ComponentWeenies.All.Select(c => c.Wcid));
         // The tuskers (creatures) are the loops' targets, not the kit's.
         Assert.Empty(ArenaProfile.TargetWcids.Intersect(GearKit.Armour.Select(a => a.Wcid).Append(GearKit.Wand.Wcid).Concat(ComponentWeenies.All.Select(c => c.Wcid))));
+    }
+
+    [RequiresDatsFact]
+    public void With_the_orb_in_hand_the_kit_still_carries_every_component_the_customised_formulas_and_the_foci_formula_need()
+    {
+        // The earlier held item sat beside a focus (the live mage holds the Foci of Strife in its pack): a focus switches ACE's casts to the foci formula. The orb is not one, so the casts use the account's customised formulas.
+        var kit = KitFor(Account);
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        Assert.Equal(GearKind.Wand, kit.WandItem.Kind);
+        Assert.Equal(GearKit.Wand.Wcid, kit.WandItem.Wcid);
+        foreach (var id in kit.CustomisedComponentIds)
+        {
+            ComponentWeenies.TryGetByComponent(id, out var weenie);
+            Assert.NotNull(kit.ItemOf(weenie.Wcid));
+        }
+
+        foreach (var spell in ArenaProfile.Lines.SelectMany(l => l.Spells))
+        {
+            var info = spells[spell.Id];
+            foreach (var group in SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, Account).Where(i => i != 0).GroupBy(i => i))
+            {
+                ComponentWeenies.TryGetByComponent(group.Key, out var weenie);
+                Assert.True(kit.ItemOf(weenie.Wcid)!.Stack >= group.Count(), $"spell {spell.Id}: the customised formula needs {group.Count()} of {weenie.Name}");
+            }
+
+            foreach (var (id, count) in GearKit.FociFormulaCounts(info.Formula))
+            {
+                ComponentWeenies.TryGetByComponent(id, out var weenie);
+                Assert.True(kit.ItemOf(weenie.Wcid)!.Stack >= count, $"spell {spell.Id}: the foci formula (a focus held later) needs {count} of {weenie.Name}");
+            }
+        }
     }
 
     [RequiresDatsFact]
@@ -244,7 +309,7 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
         Assert.True(spawn.Arrived);
         Assert.Equal(3, spawn.Requested);
         Assert.Equal(0, spawn.AlreadyHeld);
-        Assert.Equal([(2472u, (int?)null), (691u, 40), (774u, 10)], spawn.Grants.Select(g => (g.Item.Wcid, g.Requested)));
+        Assert.Equal([(GearKit.Wand.Wcid, (int?)null), (691u, 40), (774u, 10)], spawn.Grants.Select(g => (g.Item.Wcid, g.Requested)));
         Assert.Empty(spawn.Refusals);
         Assert.Equal(3, rig.Inventory.Pack.Count); // the wand, the lead, and the 15 Hyssop with the 10 more merged into it (the server's item verb makes the 10 its own stack; SpawnGear merges it: 1.4-R2)
         Assert.Equal(25, rig.Held(774));
@@ -261,12 +326,26 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
     }
 
     [Fact]
+    public void SpawnGear_asks_for_a_piece_in_its_palette_and_a_piece_without_one_plainly()
+    {
+        using var rig = new Rig();
+        var gold = GearKit.Armour.Single(a => a.Wcid == 57);
+        var coat = GearKit.Armour.Single(a => a.Wcid == 6600);
+        GearItem Line(GearWeenie w) => new(w.Wcid, w.Name, GearKind.Armour, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.Burden, w.Palette, w.Shade);
+        var spawn = rig.Finish(rig.Session.Tools.SpawnGear(GearKit.Of([Line(coat), Line(gold)]), ActionSource.Host));
+        Assert.True(spawn.Succeeded, spawn.Describe());
+        var summaries = spawn.Grants.ToDictionary(g => g.Item.Wcid, g => g.Handle.Summary);
+        Assert.Contains("palette=21", summaries[57], StringComparison.Ordinal);
+        Assert.DoesNotContain("palette", summaries[6600], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SpawnGear_counts_an_equipped_item_as_held_and_a_bigger_kit_tops_up_only_the_difference()
     {
         using var rig = new Rig();
         var small = GearKit.Of([Wand(), Comp(691, "Lead Scarab", 10)]);
         Assert.True(rig.Finish(rig.Session.Tools.SpawnGear(small, ActionSource.Host)).Arrived);
-        var wand = rig.Inventory.Pack.First(e => rig.Session.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == 2472).Guid;
+        var wand = rig.Inventory.Pack.First(e => rig.Session.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == GearKit.Wand.Wcid).Guid;
         var wield = rig.Session.Actions.Wield(wand, EquipMask.Held, ActionSource.Host);
         rig.Run(1.5);
         Assert.Equal(ActionOutcomeKind.Confirmed, wield.Outcome!.Value.Kind);

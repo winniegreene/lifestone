@@ -62,7 +62,7 @@ public sealed class SpellTableHostTests
         Assert.False(host.Ready);
         Assert.Null(host.Find(2));
         var warning = Assert.Single(log.Entries, e => e.Severity >= LogSeverity.Warning);
-        Assert.Contains("TODO(m3-cast-spell-table-host)", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("TODO(m3-cast-no-spell-table)", warning.Message, StringComparison.Ordinal);
         Assert.Contains("unreadable", warning.Message, StringComparison.Ordinal);
     }
 

@@ -71,7 +71,7 @@ public sealed class GamePlayScreenTests(DatSetFixture fixture) : IClassFixture<D
 
         Assert.True(screen.IsBuilt);
         // The build budget is a wall-clock one (BuildBudgetMilliseconds), so how many frames it takes depends on the machine's speed and load: it is staged when it took more than one frame,
-        // not a fixed count (gameplay-staged-notice-flake: "> 3" failed on a fast moment).
+        // not a fixed count (TODO(gameplay-staged-notice-flake): "> 3" failed on a fast moment; polish P5 owns the test cuts).
         Assert.True(screen.BuildFrames >= 2, $"the shell was built in {screen.BuildFrames} frames");
         Assert.False(rig.Screens.Notices.ExpectWindows);
         Assert.Equal(0, rig.Screens.Notices.HeldCount);

@@ -14,7 +14,7 @@ public sealed class BuffLegVerdictTests
     private const string Gear = "gear=wielded worn=8 kit=40/40 gear_steps=0 topup=0 cast=n/a";
 
     private static readonly Regex Line = new(
-        @"^buff done ok=(true|false) gear=(wielded|failed|\?) worn=(\d+|\?) cast=(ok|fizzled|failed|n/a) buffs=\d+/\d+ rebuffed=(yes|no) forced=(yes|no) min_remaining_s=(\d+|n/a) levels=\S+ cycle_s=\d+ cast_scripts=\d+ cast_sounds=\d+ cast_windows=\d+ cast_frame_max_ms=(\d+\.\d|n/a) sounds_server=(\d+|n/a) fizzles=\d+ misses=\S+ surpassed=\d+$",
+        @"^buff done ok=(true|false) gear=(wielded|failed|\?) worn=(\d+|\?) cast=(ok|fizzled|failed|n/a) buffs=\d+/\d+ rebuffed=(yes|no) forced=(yes|no) min_remaining_s=(\d+|n/a) levels=\S+ cycle_s=\d+ cast_scripts=\d+ cast_sounds=\d+ cast_windows=\d+ cast_frame_max_ms=(\d+\.\d|n/a) sounds_server=(\d+|n/a) fizzles=\d+ misses=\S+ surpassed=\d+ cast_scripts_expected=\d+( frame_over_50=yes)?$",
         RegexOptions.CultureInvariant);
 
     private static BuffResult Cycle(int cast = 30, int fizzles = 0, string[]? misses = null, string? failure = null) => new()
@@ -58,7 +58,7 @@ public sealed class BuffLegVerdictTests
         Assert.Equal("ok", outcome.Cast);
         Assert.Matches(Line, outcome.Line);
         Assert.StartsWith("buff done ok=true gear=wielded worn=8 cast=ok buffs=24/24 rebuffed=yes forced=yes min_remaining_s=1204 levels=Focus:VII,Will:VII cycle_s=1324 ", outcome.Line, StringComparison.Ordinal);
-        Assert.EndsWith(" cast_scripts=12 cast_sounds=20 cast_windows=31 cast_frame_max_ms=21.4 sounds_server=3 fizzles=0 misses=none surpassed=0", outcome.Line, StringComparison.Ordinal);
+        Assert.EndsWith(" cast_scripts=12 cast_sounds=20 cast_windows=31 cast_frame_max_ms=21.4 sounds_server=3 fizzles=0 misses=none surpassed=0 cast_scripts_expected=" + (Ran().Cycle!.Cast + Ran().Forced!.Cast), outcome.Line, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -88,6 +88,37 @@ public sealed class BuffLegVerdictTests
         Assert.Contains(" cast_frame_max_ms=480.0 ", slow.Line, StringComparison.Ordinal);
         Assert.Matches(Line, quiet.Line);
         Assert.Matches(Line, slow.Line);
+    }
+
+    [Theory]
+    [InlineData(21.4, false)]
+    [InlineData(50.0, false)]
+    [InlineData(50.1, true)]
+    [InlineData(74.9, true)]
+    [InlineData(480.0, true)]
+    public void A_cast_window_over_50_ms_prints_the_flag_and_still_passes(double frame, bool over50)
+    {
+        var outcome = BuffLegVerdict.Compose(Ran(), Measures(frame: frame));
+
+        Assert.True(outcome.Ok, string.Join("; ", outcome.Problems));
+        Assert.Matches(Line, outcome.Line);
+        Assert.Equal(over50, outcome.Line.EndsWith(" frame_over_50=yes", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void An_unmeasured_cast_window_is_not_flagged()
+    {
+        Assert.DoesNotContain("frame_over_50", BuffLegVerdict.Compose(Ran(), Measures(frame: null)).Line, StringComparison.Ordinal);
+        Assert.DoesNotContain("frame_over_50", BuffLegVerdict.Compose(Ran(), Measures(frame: double.NaN)).Line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_expected_cast_scripts_count_the_casts_of_both_passes()
+    {
+        var none = BuffLegVerdict.Compose(new BuffLegScenarioResult(true, null, Gear, null, null), Measures());
+
+        Assert.Contains(" cast_scripts_expected=0", none.Line, StringComparison.Ordinal);
+        Assert.Contains(" cast_scripts_expected=" + (Ran().Cycle!.Cast + Ran().Forced!.Cast), BuffLegVerdict.Compose(Ran(), Measures(scripts: 2)).Line, StringComparison.Ordinal);
     }
 
     [Fact]

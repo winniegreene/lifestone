@@ -254,6 +254,9 @@ internal sealed class ReplayAcSession : IAcSession
     public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => Sent(MessageOpcodes.GameAction, GameActionTypes.AddSpellFavorite);
 
     /// <inheritdoc/>
+    public OutboundTicket SendRemoveSpellFavorite(uint spellId, uint bar) => Sent(MessageOpcodes.GameAction, GameActionTypes.RemoveSpellFavorite);
+
+    /// <inheritdoc/>
     public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => Sent(MessageOpcodes.GameAction, GameActionTypes.GetAndWieldItem);
 
     /// <inheritdoc/>

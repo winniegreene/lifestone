@@ -27,7 +27,8 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <see cref="EquipMask.Held"/>, HeldCaster 0x01000000). ACE (<c>Player_Inventory.cs</c> <c>TryEquipObjectWithNetworking</c> 297-306, <c>Creature_Equipment.cs</c> 354-368) sends 0x02DA Wielder 0 and
 /// 0x02CE 0 before GameEvent 0x0023 names the location, so membership comes from the 0x0023 and the 0x0022 only (spec 5.4, "wield"); a failure is GameEvent 0x00A0 and 0x02EB, which
 /// <see cref="IActionApi.Wield"/> reports as a ServerError. A piece is skipped when the read model already shows a world object of its weenie equipped within its locations. One wield is in flight
-/// at a time (lane Inventory), and every wait names its reason in the failure (<see cref="ReasonTimer"/>).</para>
+/// at a time (lane Inventory), and every wait names its reason in the failure (<see cref="ReasonTimer"/>). <b>The swap (M3 4.2 P7):</b> before a kit line is wielded, a worn object that is not a kit line and occupies one of its locations (today's leather, the earlier wand)
+/// is moved to the pack with <see cref="IActionApi.Unwield"/> (each counts as a <c>gear_steps</c>), so a mage geared with an older kit ends wearing exactly this one, and a second run sends nothing.</para>
 /// <para><b>The verdict</b> (<see cref="VerdictFields"/>, logged as <c>[gear] verdict ...</c>, printed by the headless host as <c>gear ...</c>):
 /// <c>gear=wielded|failed worn=&lt;n&gt; kit=&lt;held&gt;/&lt;lines&gt; gear_steps=&lt;n&gt; topup=&lt;n&gt; cast=...</c>. <c>gear=wielded</c> means the read model shows the wand and all five pieces equipped within their locations;
 /// <c>worn</c> counts the pieces (0 to 5); <c>kit</c> counts the kit lines held in full (components summed over stacks); <c>gear_steps</c> counts the requests this run sent for the wand, the armour and the wields (0 on a ready mage); <c>topup</c> counts the
@@ -463,6 +464,20 @@ public sealed class GearScenario : IScenario
                 continue;
             }
 
+            // M3 4.2 P7: the mage wears exactly the kit's armour and holds the kit's caster, so a worn piece that is not a kit line and covers the slots of this one (today's leather, the old wand) goes to the pack first
+            // (Event_PutItemInContainer 0x006ACC80 through IActionApi.Unwield, as the retail pack screen's drag does); the loop comes back to this item once the model shows the pack move.
+            var blocker = BlockingPiece(session, item);
+            if (blocker != 0)
+            {
+                _wait.Reset();
+                _wielding = "take off a piece that is not in the kit, which holds the place of the " + item.Name;
+                _log.Info(LogCategory, _wielding + " (object 0x" + blocker.ToString("X8", CultureInfo.InvariantCulture) + ")");
+                _sentWields.Add(_wielding);
+                _wieldSteps++;
+                _wield = session.Actions.Unwield(blocker, ActionSource.Host);
+                return ScenarioStatus.Running;
+            }
+
             if (carried == 0)
             {
                 return _wait.Expired(session.Clock.Now, NotInPackReason) // a constant reason: the text is built only on the failure (1.4-R5)
@@ -471,12 +486,12 @@ public sealed class GearScenario : IScenario
             }
 
             _wait.Reset();
-            _wielding = (item.Kind == GearKind.Wand ? "wield the " : "wear the ") + item.Name + " at 0x" + ((uint)item.ValidLocations).ToString("X", CultureInfo.InvariantCulture);
+            _wielding = (item.Kind == GearKind.Wand ? "wield " : "wear the ") + item.Name + " at 0x" + ((uint)item.ValidLocations).ToString("X", CultureInfo.InvariantCulture);
             _log.Info(LogCategory, _wielding);
             _sentWields.Add(_wielding);
             _wieldSteps++;
             _next++;
-            _wield = session.Actions.Wield(carried, item.ValidLocations, ActionSource.Host);
+            _wield = session.Actions.Wield(carried, (EquipMask)WieldSlotChoice.Choose(inventory, (uint)item.ValidLocations), ActionSource.Host);
             return ScenarioStatus.Running;
         }
 
@@ -642,6 +657,39 @@ public sealed class GearScenario : IScenario
     private static string DescribeOutcome(in ActionOutcome outcome) =>
         outcome.Kind + (outcome.Code == 0 ? string.Empty : string.Create(CultureInfo.InvariantCulture, $" code 0x{outcome.Code:X}")) + (outcome.Detail is null ? string.Empty : ": " + outcome.Detail);
 
+    /// <summary>
+    /// The guid of a worn object that is not a line of the kit and occupies a location <paramref name="item"/> would take (0 when none): what the swap takes off first. No allocation: loops over the model's lists.
+    /// </summary>
+    private uint BlockingPiece(IGameSessionView session, GearItem item)
+    {
+        var worn = session.State.Self.Inventory.Equipped;
+        for (var i = 0; i < worn.Count; i++)
+        {
+            var e = worn[i];
+            if (e.Location == 0 || (e.Location & (uint)item.ValidLocations) == 0 || !session.State.Objects.TryGet(e.Guid, out var o) || InKit(o.Weenie.WeenieClassId))
+            {
+                continue;
+            }
+
+            return e.Guid;
+        }
+
+        return 0;
+    }
+
+    private bool InKit(uint wcid)
+    {
+        for (var i = 0; i < _kit.Items.Count; i++)
+        {
+            if (_kit.Items[i].Wcid == wcid)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>True when <paramref name="guid"/> is equipped at a location within the item's <see cref="GearItem.ValidLocations"/> (the 0x0023 names it; spec 5.4).</summary>
     private static bool IsWornWithin(PlayerInventory inventory, uint guid, GearItem item) =>
         inventory.TryGetEquipped(guid, out var e) && e.Location != 0 && (e.Location & ~(uint)item.ValidLocations) == 0;
@@ -780,7 +828,7 @@ public sealed record CastPick(ProfileLine Line, ProfileSpell Spell, uint Skill, 
 /// <para><b>The current skill</b> is ACE's <c>CreatureSkill.Current</c> (<c>Entity/CreatureSkill.cs</c> 154-195) for the four magic skills: the skill's formula, (Focus + Self) / 4 rounded half away from zero
 /// (<c>MageTemplate.MagicSkillDivisor</c>; the SkillTable pins it, <c>MageTemplateDatTests</c>), over the attributes <i>with their enchantments</i>, plus the skill's start level (<c>SkillDesc.Init</c>, ACE's
 /// <c>InitLevel</c>) and ranks, scaled by the multiplicative skill enchantments and the vitae, plus the additive ones, floored at 0. Each enchantment list keeps the strongest enchantment of one spell category.
-/// Not modelled: the augmentation bonuses (<c>GetAugBonus_Base</c> and <c>GetAugBonus_Current</c>, <c>CreatureSkill.cs</c> 169 and 184; the BSD mage has none: <c>TODO(m3-skill-aug-bonus)</c>). The arithmetic is <see cref="SkillRules"/> (M3 2.2 a2), which also applies the attack and defence skill groups. A skill below Trained is not usable (the formula does not
+/// The augmentation bonuses (<c>GetAugBonus_Base</c> and <c>GetAugBonus_Current</c>, <c>CreatureSkill.cs</c> 169 and 184) are <see cref="SkillRules.AugBonusBase"/> and <see cref="SkillRules.AugBonusCurrent"/> (the BSD mage has none). The arithmetic is <see cref="SkillRules"/> (M3 2.2 a2), which also applies the attack and defence skill groups. A skill below Trained is not usable (the formula does not
 /// apply, ACE's <c>IsUsable</c>): no value.</para>
 /// </remarks>
 public static class GearCasts
@@ -974,7 +1022,6 @@ public static class GearCasts
             return false;
         }
 
-        // TODO(m3-skill-aug-bonus): ACE's CreatureSkill.Current also adds GetAugBonus_Base and GetAugBonus_Current (CreatureSkill.cs 169, 184); the BSD mage has no augmentations, so they are 0 here.
         if (!SkillRules.TryCurrent(q, skillId, MagicFormula, SkillRules.TrainedClass, out value))
         {
             why = "the read model has no Focus or Self";

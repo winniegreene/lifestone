@@ -85,7 +85,7 @@ public sealed class AvatarFrame
     }
 
     /// <summary>Appends one avatar's draws: its parts and its particles.</summary>
-    internal void Add(Avatar avatar, in AvatarViewer viewer, bool hideBody, bool retailUnhideFlash = false)
+    internal void Add(Avatar avatar, in AvatarViewer viewer, bool hideBody, bool retailUnhideFlash = false, float cameraTranslucency = 0f)
     {
         var body = avatar.Body;
         var setup = body.Setup;
@@ -108,6 +108,9 @@ public sealed class AvatarFrame
             objectTranslucency = 1f; // the glitch fix: the first frame after an unhide is not drawn until the new fade's hook applies (AvatarBody.ConsumeUnhideHold)
         }
 
+        // The camera's fade (CameraSet::UpdateCamera's SetTranslucencyHierarchical on the player and the items it holds): never below the object's own (FirstPersonFade).
+        objectTranslucency = FirstPersonFade.Apply(objectTranslucency, cameraTranslucency);
+
         var scale = visual.Scale != 1f ? visual.Scale : body.Scale;
         var appearance = body.Appearance.Parts;
         var frames = body.PartFrames;
@@ -121,7 +124,7 @@ public sealed class AvatarFrame
             var partFrame = i < frames.Length ? frames[i] : frame;
             var partScale = part.DefaultScale * scale;
             var chain = appearance[i].Chain;
-            _translucency[_partCount] = visual.PartTranslucency.TryGetValue(i, out var t) ? t : objectTranslucency;
+            _translucency[_partCount] = visual.PartTranslucency.TryGetValue(i, out var t) ? FirstPersonFade.Apply(t, cameraTranslucency) : objectTranslucency;
             if (!visible || !part.IsGfxObj || !chain.IsLoadable)
             {
                 _parts[_partCount++] = new PartDraw(i, 0, partFrame, partScale, DegradeMode.Normal);

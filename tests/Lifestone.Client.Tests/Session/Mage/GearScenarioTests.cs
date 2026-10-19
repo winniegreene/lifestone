@@ -44,12 +44,17 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         /// <summary>The profile's creature spells as the Rig gave the stand-in and the Action API (by id); a test changes an entry's mana before it hands the table to a scenario.</summary>
         public Dictionary<uint, SpellInfo> Table { get; } = [];
 
-        public Rig(StandInPlayerStats? stats = null, ImmutableArray<StandInVitalUpdate> vitals = default)
+        public Rig(StandInPlayerStats? stats = null, ImmutableArray<StandInVitalUpdate> vitals = default, IReadOnlyDictionary<uint, StandInItemKind>? items = null)
         {
             var visit = stats is null ? new StandInVisit { EnterAfter = 0.2, UnhideAfter = 1.0 } : new StandInVisit { EnterAfter = 0.2, UnhideAfter = 1.0, Stats = stats };
             if (!vitals.IsDefault)
             {
                 visit = visit with { VitalUpdates = vitals };
+            }
+
+            if (items is not null)
+            {
+                visit = visit with { Items = items };
             }
 
             Log = new RecordingLogSink();
@@ -151,7 +156,7 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Equal("gear=wielded worn=5 kit=7/7 gear_steps=12 topup=1 cast=n/a", verdict); // 6 requests (the wand and the five pieces) and 6 wields; the scarabs are the top-up
         Assert.True(scenario.GearSteps > 0);
         Assert.Equal(6, scenario.SentWields.Count);
-        Assert.StartsWith("wield the Wand ", scenario.SentWields[0], StringComparison.Ordinal);
+        Assert.StartsWith("wield The Healer's Heart ", scenario.SentWields[0], StringComparison.Ordinal);
         Assert.Equal(5, WornPieces(rig));
         var wand = rig.Inventory.Equipped.Single(e => rig.Session.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == GearKit.Wand.Wcid);
         Assert.Equal(EquipMask.Held, (EquipMask)wand.Location);
@@ -169,8 +174,100 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         }
 
         // The coat goes out with its whole ValidLocations mask (chest, abdomen, upper and lower arm).
-        var coat = GearKit.Armour.Single(a => a.Name == "Leather Coat");
+        var coat = GearKit.Armour.Single(a => a.Name == "Greater Amuli Shadow Coat");
         Assert.Contains(rig.Responder.ActionSends, s => s.Type == GameActionTypes.GetAndWieldItem && s.Second == (uint)coat.ValidLocations);
+    }
+
+    // ---------------------------------------------------------------- M3 4.2 P7 (D43): the swap on a mage already geared
+
+    private const uint OldWandWcid = 2472;
+
+    /// <summary>The kit before P7: the Wand and the five leather pieces (the earlier GearKit rows, the world database's), as a mage built by an earlier run wears them.</summary>
+    private static GearItem[] OldKitLines() =>
+    [
+        new(OldWandWcid, "Wand", GearKind.Wand, GearKit.WeenieTypeCaster, GearKit.ItemTypeCaster, EquipMask.Held, 1, null, 50),
+        new(45, "Leather Cap", GearKind.Armour, GearKit.WeenieTypeClothing, GearKit.ItemTypeArmor, EquipMask.HeadWear, 1, null, 100),
+        new(47, "Leather Coat", GearKind.Armour, GearKit.WeenieTypeClothing, GearKit.ItemTypeArmor, EquipMask.ChestArmor | EquipMask.AbdomenArmor | EquipMask.UpperArmArmor | EquipMask.LowerArmArmor, 1, null, 810),
+        new(81, "Leather Leggings", GearKind.Armour, GearKit.WeenieTypeClothing, GearKit.ItemTypeArmor, EquipMask.UpperLegArmor | EquipMask.LowerLegArmor, 1, null, 960),
+        new(56, "Leather Gauntlets", GearKind.Armour, GearKit.WeenieTypeClothing, GearKit.ItemTypeArmor, EquipMask.HandWear, 1, null, 270),
+        new(115, "Leather Boots", GearKind.Armour, GearKit.WeenieTypeClothing, GearKit.ItemTypeArmor, EquipMask.LowerLegWear | EquipMask.FootWear, 1, null, 420),
+    ];
+
+    /// <summary>The stand-in's own weenies for the earlier kit: the stand-in knows only the current kit's weenies, so the old ones come in through the visit.</summary>
+    private static Dictionary<uint, StandInItemKind> OldKitWeenies() => OldKitLines().ToDictionary(i => i.Wcid, i => new StandInItemKind(i.Name, null));
+
+    private static void Pump(Rig rig, double seconds)
+    {
+        for (var t = 0.0; t < seconds; t += 0.1)
+        {
+            rig.Tick(0.1);
+        }
+    }
+
+    private static bool WornWcid(Rig rig, uint wcid) =>
+        rig.Inventory.Equipped.Any(e => e.Location != 0 && rig.Session.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == wcid);
+
+    private static bool InPack(Rig rig, uint wcid) =>
+        rig.Inventory.Pack.Any(e => rig.Session.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == wcid);
+
+    [Fact]
+    public void A_mage_wearing_the_leather_kit_ends_wearing_exactly_the_new_kit_with_the_old_pieces_in_the_pack_and_a_second_run_sends_nothing()
+    {
+        using var rig = new Rig(items: OldKitWeenies());
+        var old = new GearScenario(GearKit.Of(OldKitLines()), rig.Log, endSession: false, cast: false);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(old));
+        Assert.Equal("gear=wielded worn=5 kit=6/6 gear_steps=12 topup=0 cast=n/a", old.VerdictFields());
+        Assert.All(OldKitLines(), l => Assert.True(WornWcid(rig, l.Wcid), l.Name));
+
+        var kit = GearKit.Of([Wand(), .. GearKit.Armour.Select(Armour)]);
+        var swap = new GearScenario(kit, rig.Log, endSession: false, cast: false);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(swap));
+
+        // 6 grants, 6 pieces taken off (the old wand and the five leathers), 6 wields.
+        Assert.Equal("gear=wielded worn=5 kit=6/6 gear_steps=18 topup=0 cast=n/a", swap.VerdictFields());
+        Assert.Equal(6, swap.SentWields.Count(w => w.StartsWith("take off", StringComparison.Ordinal)));
+        Assert.Equal(12, swap.SentWields.Count);
+        Assert.Equal(5, WornPieces(rig));
+        Assert.True(WornWcid(rig, GearKit.Wand.Wcid));
+        Assert.All(OldKitLines(), l => Assert.False(WornWcid(rig, l.Wcid), l.Name + " is still worn"));
+        Assert.All(OldKitLines(), l => Assert.True(InPack(rig, l.Wcid), l.Name + " is not in the pack"));
+        Assert.Equal(6, rig.Inventory.Equipped.Count); // nothing else is worn
+
+        // The take-offs came before the wield that needed the place: the coat's wield follows the leather coat's take-off.
+        var coat = GearKit.Armour.Single(a => a.Name == "Greater Amuli Shadow Coat");
+        var sends = rig.Responder.ActionSends;
+        var coatWield = sends.Select((s, i) => (s, i)).Last(p => p.s.Type == GameActionTypes.GetAndWieldItem && p.s.Second == (uint)coat.ValidLocations).i;
+        Assert.Contains(sends.Take(coatWield), s => s.Type == GameActionTypes.PutItemInContainer);
+
+        // A second run sends nothing: every kit line is worn and nothing else covers its places.
+        var sent = rig.Responder.ActionSends.Count;
+        var again = new GearScenario(kit, rig.Log, endSession: false, cast: false);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(again));
+        Assert.Equal("gear=wielded worn=5 kit=6/6 gear_steps=0 topup=0 cast=n/a", again.VerdictFields());
+        Assert.Empty(again.SentWields);
+        Assert.Equal(sent, rig.Responder.ActionSends.Count);
+    }
+
+    [Fact]
+    public void A_worn_piece_that_covers_no_kit_place_is_left_on()
+    {
+        const uint Cloak = 31_001;
+        using var rig = new Rig(items: new Dictionary<uint, StandInItemKind> { [Cloak] = new("Test Cloak", null) });
+        var made = rig.Session.Tools.SpawnItem(Cloak, null, ActionSource.Host);
+        Pump(rig, 2);
+        Assert.True(made.IsCompleted, made.Summary);
+        var guid = made.Result!.Guid;
+        Pump(rig, 1);
+        var wear = rig.Session.Actions.Wield(guid, EquipMask.Cloak, ActionSource.Host);
+        Pump(rig, 2);
+        Assert.Equal(ActionOutcomeKind.Confirmed, wear.Outcome!.Value.Kind);
+
+        var scenario = new GearScenario(SmallKit(), rig.Log, endSession: false, cast: false);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.DoesNotContain(scenario.SentWields, w => w.StartsWith("take off", StringComparison.Ordinal));
+        Assert.True(WornWcid(rig, Cloak));
+        Assert.Equal(5, WornPieces(rig));
     }
 
     [Fact]
@@ -201,26 +298,26 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
 
         Assert.Equal("gear=wielded worn=5 kit=7/7 gear_steps=8 topup=1 cast=n/a", scenario.VerdictFields()); // 4 requests (the wand and the cap are held) and 4 wields, and the scarabs
-        Assert.DoesNotContain(scenario.SentWields, w => w.Contains("Leather Cap", StringComparison.Ordinal));
+        Assert.DoesNotContain(scenario.SentWields, w => w.Contains("Olthoi Helm", StringComparison.Ordinal));
     }
 
     [Fact]
     public void A_refused_wield_ends_failed_naming_the_piece_and_the_server_error_and_counts_what_was_worn()
     {
         using var rig = new Rig();
-        var gauntlets = GearKit.Armour.Single(a => a.Name == "Leather Gauntlets");
+        var gauntlets = GearKit.Armour.Single(a => a.Name == "Platemail Gauntlets");
         rig.World.RefusedWieldWcids.Add(gauntlets.Wcid);
         var scenario = new GearScenario(SmallKit(), rig.Log, endSession: false);
 
         Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
 
-        Assert.Contains("Leather Gauntlets", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("Platemail Gauntlets", scenario.Failure, StringComparison.Ordinal);
         Assert.Contains("ServerError", scenario.Failure, StringComparison.Ordinal);
         Assert.Equal("wielding", scenario.Stage);
         var verdict = scenario.VerdictFields();
         Assert.Matches(Verdict, verdict);
         Assert.StartsWith("gear=failed worn=3 ", verdict, StringComparison.Ordinal); // cap, coat and leggings were worn before the gauntlets
-        Assert.Contains(rig.Log.Entries, e => e.Severity == LogSeverity.Error && e.Message.Contains("Leather Gauntlets", StringComparison.Ordinal));
+        Assert.Contains(rig.Log.Entries, e => e.Severity == LogSeverity.Error && e.Message.Contains("Platemail Gauntlets", StringComparison.Ordinal));
         Assert.Contains(rig.Log.Entries, e => e.Message.StartsWith("verdict gear=failed", StringComparison.Ordinal));
     }
 
@@ -228,7 +325,7 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
     public void A_run_that_fails_in_the_world_logs_off_before_it_reports_the_failure_so_the_next_run_can_enter()
     {
         using var rig = new Rig();
-        var gauntlets = GearKit.Armour.Single(a => a.Name == "Leather Gauntlets");
+        var gauntlets = GearKit.Armour.Single(a => a.Name == "Platemail Gauntlets");
         rig.World.RefusedWieldWcids.Add(gauntlets.Wcid);
         var scenario = new GearScenario(SmallKit(), rig.Log); // endSession: the headless host's
 
@@ -245,7 +342,7 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Equal(ScenarioStatus.Failed, status);
         Assert.False(sawFailureWhileInWorld, "the failure was reported while the character was still in the world");
         Assert.NotEqual(SessionPhase.InWorld, rig.Session.State.Phase);
-        Assert.Contains("Leather Gauntlets", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("Platemail Gauntlets", scenario.Failure, StringComparison.Ordinal);
         Assert.Contains(rig.Log.Entries, e => e.Message.Contains("logging off before the run ends as failed", StringComparison.Ordinal));
         Assert.Contains(rig.Log.Entries, e => e.Message.StartsWith("the failed run logged off: Confirmed", StringComparison.Ordinal));
     }

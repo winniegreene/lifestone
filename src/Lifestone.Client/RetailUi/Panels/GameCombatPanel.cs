@@ -93,9 +93,10 @@ public static class CombatModeRules
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(manager);
         var current = session.State.Self.Qualities.CombatMode;
+        var requested = CombatMode.NonCombat;
         if (current is 0 or CombatModes.NonCombat)
         {
-            var mode = DefaultMode(session.State, out var blockedBy, out var missing);
+            requested = DefaultMode(session.State, out var blockedBy, out var missing);
             if (missing != 0)
             {
                 var hex = "0x" + missing.ToString("X8", CultureInfo.InvariantCulture);
@@ -104,20 +105,83 @@ public static class CombatModeRules
 
             if (blockedBy is not null)
             {
-                var line = $"You can't enter combat mode while wielding the {blockedBy}";
-                manager.Services.Log.Info("retailui", line);
-                notice?.Invoke(line);
+                Say(manager, notice, $"You can't enter combat mode while wielding the {blockedBy}");
             }
 
-            if (mode == CombatMode.NonCombat)
+            if (requested == CombatMode.NonCombat)
             {
                 return null; // the player is in non-combat already: nothing to ask
             }
-
-            return session.Actions.SetCombatMode(mode, ActionSource.Ui);
         }
 
-        return session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Ui);
+        // ClientCombatSystem::SetCombatMode (0x0056CB80), a player request: CompatibleCombatMode first, then the portal-space refusal.
+        if (!Compatible(session.State, requested, out var wielded))
+        {
+            if (wielded is not null)
+            {
+                Say(manager, notice, $"You can't enter {ModeWord(requested)} mode while wielding the {wielded}");
+            } // retail returns silently when the weapon-ready slot's object is unknown
+
+            return null;
+        }
+
+        if (InPortalSpace(session.State.Self.Travel))
+        {
+            Say(manager, notice, PortalSpaceText);
+            return null;
+        }
+
+        manager.LogOnce("combat:pending-mode", LogSeverity.Warning, "TODO(m3-combat-pending-mode): retail keeps a mode request made while the player's motions are pending and applies it when ready (ClientCombatSystem::PlayerInReadyPosition); Lifestone sends it at once and ACE queues it");
+        return session.Actions.SetCombatMode(requested, ActionSource.Ui);
+    }
+
+    /// <summary>Retail's refusal text for a combat press during a teleport (<c>SetCombatMode</c>, 11.6096 0x0056CB80).</summary>
+    public const string PortalSpaceText = "You can't enter combat mode while in portal space";
+
+    /// <summary>
+    /// <c>CPlayerSystem::teleportInProgress</c> read from the travel state: an F751 teleport is announced and its destination position has not arrived. Arrival (<c>Arriving</c>, <c>TeleportArrived</c>: the login's own, and what the offline stand-in stays in)
+    /// is not counted. The flag's exact setting and clearing are not read: <c>TODO(m3-portal-space-flag)</c>.
+    /// </summary>
+    public static bool InPortalSpace(SelfTravel travel) => travel is SelfTravel.TeleportAnnounced;
+
+    /// <summary>
+    /// <c>ClientCombatSystem::CompatibleCombatMode</c> (11.6096 0x0056B2C0) over the equipped slots: missile needs a missile weapon (0x400000), magic a held item (0x1000000); melee fails when something is in the melee, missile, held or
+    /// two-handed slots (0x3500000) but nothing in melee (0x100000) or two-handed (0x2000000). Peace always fits. <paramref name="wielded"/> is the name retail prints (the weapon-ready slot's item), or null when none is known.
+    /// </summary>
+    public static bool Compatible(GameState state, CombatMode mode, out string? wielded)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        var inventory = state.Self.Inventory;
+        var ok = mode switch
+        {
+            CombatMode.Missile => inventory.EquippedAt((uint)EquipMask.MissileWeapon) is not null,
+            CombatMode.Magic => inventory.EquippedAt((uint)EquipMask.Held) is not null,
+            CombatMode.Melee => inventory.EquippedAt((uint)(EquipMask.MeleeWeapon | EquipMask.TwoHanded)) is not null
+                || inventory.EquippedAt(0x3500000u) is null,
+            _ => true,
+        };
+        wielded = null;
+        if (!ok && inventory.EquippedAt(0x3500000u) is { } guid && state.Objects.TryGet(guid, out var item))
+        {
+            wielded = item.Name;
+        }
+
+        return ok;
+    }
+
+    /// <summary>The mode word of retail's refusal line; the string table of <c>CombatEnumMapper::CombatModeToString</c> (0x005CAAF0) was not read: <c>TODO(m3-combat-mode-word)</c>.</summary>
+    public static string ModeWord(CombatMode mode) => mode switch
+    {
+        CombatMode.Melee => "melee",
+        CombatMode.Missile => "missile",
+        CombatMode.Magic => "magic",
+        _ => "combat",
+    };
+
+    private static void Say(UiElementManager manager, Action<string>? notice, string line)
+    {
+        manager.Services.Log.Info("retailui", line);
+        notice?.Invoke(line);
     }
 }
 

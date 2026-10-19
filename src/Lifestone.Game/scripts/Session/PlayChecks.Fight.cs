@@ -209,6 +209,7 @@ public sealed partial class PlayChecks
         // The whole scenario, stepped once per frame as the leg steps it. The sampler gets the engine's delta, the avatar set's windows and the scenario's target.
         using var scenario = new FightScenario(table.Spells, "stand-in-loop", new BuffOptions(), options, walk: null, GodotLogSink.Instance, endSession: false, stages: FightStages.All);
         var sampler = new FightFrameSampler();
+        var lightSampler = new LightFrameSampler(); // M3 4.1 lane c: bolt_light, dyn_lights_max, viewer_light over the stand-in's fight
         var stats = avatars.Stats;
         var (createdBefore, shownBefore, explodesBefore, launchesBefore) = (stats.ProjectilesCreated, stats.ProjectilesShown, stats.ProjectileExplodes, stats.ProjectileLaunches);
         var status = ScenarioStatus.Running;
@@ -218,15 +219,17 @@ public sealed partial class PlayChecks
             await Frames(1);
             status = scenario.Step(session, PortalSpaceSetup.Now());
             sampler.Step(GetProcessDeltaTime(), avatars.CastWindowOpen, avatars.ProjectileWindowOpen, scenario.Fighting && scenario.Target != 0, scenario.Fighting, inDen: false, skip: false);
+            lightSampler.Step(avatars);
         }
 
+        lightSampler.Finish();
         var tally = scenario.Tally;
         var failure = status == ScenarioStatus.Running ? $"the scenario was still running after {FightLoopSeconds:0} s (stage {scenario.Stage})" : scenario.Failure;
         var projectilesShown = (int)Math.Max(0, stats.ProjectilesShown - shownBefore);
         var explodes = Math.Max(0, stats.ProjectileExplodes - explodesBefore);
         var measures = new FightLegMeasures(
-            tally.Kills, tally.DamageDealt, tally.Casts, tally.Misses, tally.XpGained, tally.DamageTaken, tally.HitsTaken, tally.Evades, projectilesShown, sampler.CastFrameMaxMs, sampler.FightFrameMaxMs, sampler.BsdMinFps, double.IsNaN(scenario.FightSeconds) ? null : scenario.FightSeconds);
-        var outcome = FightLegVerdict.Compose(failure, measures);
+            tally.Kills, tally.DamageDealt, tally.Casts, tally.Misses, tally.XpGained, tally.DamageTaken, tally.HitsTaken, tally.Evades, projectilesShown, sampler.CastFrameMaxMs, sampler.FightFrameMaxMs, sampler.BsdMinFps, double.IsNaN(scenario.FightSeconds) ? null : scenario.FightSeconds, lightSampler.BoltLight, lightSampler.DynamicLightsMax, lightSampler.ViewerLight, BlockedPicks: tally.BlockedPicks, WallHits: tally.WallHits);
+        var outcome = FightLegVerdict.Compose(failure, measures, judgeBoltLight: true); // offline the stand-in's bolts are deterministic: bolt_light=yes is judged here (report-only in the live leg)
         Check(
             verdictName,
             status == ScenarioStatus.Succeeded && outcome.Ok && tally.Kills >= 1 && tally.DamageDealt > 0,
@@ -240,6 +243,11 @@ public sealed partial class PlayChecks
             "fight loop done",
             ("verdict", outcome.Line),
             ("frames", sampler.Frames),
+            ("light_flights_judged", lightSampler.FlightsJudged),
+            ("light_flights_lit", lightSampler.FlightsLit),
+            ("light_short_flights", lightSampler.ShortFlights),
+            ("light_state_off_flights", lightSampler.StateOffFlights),
+            ("light_flights_alive_lit", lightSampler.FlightsText()),
             ("scenario_verdict", scenario.VerdictFields()));
     }
 }

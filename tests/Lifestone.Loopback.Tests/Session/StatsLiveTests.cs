@@ -27,7 +27,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// exactly that, the stat's experience spent rises by exactly that, and its rank rises by exactly one. That is s0's reading, confirmed live (a wrong reading
 /// would make the server's rank differ from r+1, or the spent experience differ). (3) The read model follows the server: after the grant the total
 /// experience, available experience, level and skill credits equal the mod's reply and the level is the XpTable's level for the total; raising spends the
-/// available experience and leaves the total and the level alone; a train spends exactly the SkillTable's credits and turns the skill trained.</para>
+/// available experience and leaves the total and the level alone; a train spends exactly the SkillTable's credits and turns the skill trained. (4) Each raise's chat line ("Your base X is now N!")
+/// reaches the chat model within a few seconds of the stat's update (M3 4.2 x3, cluster-k1 gap 1).</para>
 /// <para><b>Touches</b> only the throwaway (levelled freely, D3). A leftover throwaway pending deletion fails the run with the instruction to purge it
 /// (<c>ModCharPurgeLiveTests</c> does). The run always ends logged off.</para>
 /// </remarks>
@@ -57,6 +58,7 @@ public sealed class StatsLiveTests(ITestOutputHelper output)
             output.WriteLine($"{x.What}: table {x.Expected}, server {x.Actual}");
         }
         Assert.Equal(7, leg.Spent.Count);
+        Assert.Equal(3, leg.RaiseLines); // the attribute's, the vital's and the skill's raise each told "Your base X is now N!" and the line reached the chat model (cluster-k1 gap 1)
     }
 
     private static HeadlessRunResult Run(DatSet dats, IScenario scenario, double seconds)
@@ -193,6 +195,30 @@ public sealed class StatsLiveTests(ITestOutputHelper output)
             }
         }
 
+        /// <summary>How long the raise's chat line may trail the stat's private update (ACE sends it after the updates, in the same turn).</summary>
+        private const double ChatSeconds = 5.0;
+
+        /// <summary>How many raises (of the three) had their "Your base X is now N!" line (ACE's <c>Player_Xp</c> raise methods) reach <c>GameState.Chat</c>.</summary>
+        public int RaiseLines => raiseLines;
+
+        private int raiseLines;
+
+        /// <summary>True when a chat line since <paramref name="mark"/> (a <c>ChatLog.Total</c>) reads "Your base X is now N!".</summary>
+        private static bool RaiseLineSeen(GameState state, long mark)
+        {
+            var fresh = (int)Math.Min(state.Chat.Count, state.Chat.Total - mark);
+            for (var i = state.Chat.Count - fresh; i < state.Chat.Count; i++)
+            {
+                var text = state.Chat[i].Text;
+                if (text.StartsWith("Your base ", StringComparison.Ordinal) && text.Contains(" is now ", StringComparison.Ordinal) && text.EndsWith('!'))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static void Require(bool ok, string what)
         {
             if (!ok)
@@ -304,10 +330,19 @@ public sealed class StatsLiveTests(ITestOutputHelper output)
             Stage = "raising-attribute";
             var (level0, total0) = (q.Level, q.TotalExperience);
             availableBefore = q.AvailableExperience;
+            var chatMark = s.State.Chat.Total;
             var attribute = s.Actions.RaiseAttribute(Focus, (uint)attributeCost, ActionSource.Host);
             yield return attribute;
             Outcomes["RaiseAttribute"] = attribute.Outcome?.Kind ?? ActionOutcomeKind.Cancelled;
             Confirmed(attribute, "RaiseAttribute");
+            _since = s.Clock.Now;
+            while (!RaiseLineSeen(s.State, chatMark))
+            {
+                Require(s.Clock.Now - _since <= ChatSeconds, "Focus: ACE's \"Your base ... is now ...!\" line did not reach the chat model within " + ChatSeconds + " s of the raise");
+                yield return null;
+            }
+
+            raiseLines++;
             Require(q.TryGetAttribute(Focus, out var focusAfter) && focusAfter.Ranks == focus.Ranks + 1, $"Focus ranks {focus.Ranks} -> {focusAfter.Ranks}: expected one more");
             Spent.Add(("Focus: available experience taken", (long)attributeCost, availableBefore - q.AvailableExperience));
             Spent.Add(("Focus: experience spent on the stat", (long)attributeCost, focusAfter.Experience - focus.Experience));
@@ -316,10 +351,19 @@ public sealed class StatsLiveTests(ITestOutputHelper output)
             // --- RaiseVital ---
             Stage = "raising-vital";
             availableBefore = q.AvailableExperience;
+            chatMark = s.State.Chat.Total;
             var vital = s.Actions.RaiseVital(MaxStamina, (uint)vitalCost, ActionSource.Host);
             yield return vital;
             Outcomes["RaiseVital"] = vital.Outcome?.Kind ?? ActionOutcomeKind.Cancelled;
             Confirmed(vital, "RaiseVital");
+            _since = s.Clock.Now;
+            while (!RaiseLineSeen(s.State, chatMark))
+            {
+                Require(s.Clock.Now - _since <= ChatSeconds, "Max Stamina: ACE's \"Your base ... is now ...!\" line did not reach the chat model within " + ChatSeconds + " s of the raise");
+                yield return null;
+            }
+
+            raiseLines++;
             Require(q.TryGetVital(MaxStamina, out var staminaAfter) && staminaAfter.Ranks == stamina.Ranks + 1, "Max Stamina did not gain exactly one rank");
             Spent.Add(("Max Stamina: available experience taken", (long)vitalCost, availableBefore - q.AvailableExperience));
             Spent.Add(("Max Stamina: experience spent on the stat", (long)vitalCost, staminaAfter.Experience - stamina.Experience));
@@ -328,10 +372,19 @@ public sealed class StatsLiveTests(ITestOutputHelper output)
             // --- RaiseSkill ---
             Stage = "raising-skill";
             availableBefore = q.AvailableExperience;
+            chatMark = s.State.Chat.Total;
             var skill = s.Actions.RaiseSkill(trained.Value.Id, (uint)skillCost, ActionSource.Host);
             yield return skill;
             Outcomes["RaiseSkill"] = skill.Outcome?.Kind ?? ActionOutcomeKind.Cancelled;
             Confirmed(skill, "RaiseSkill");
+            _since = s.Clock.Now;
+            while (!RaiseLineSeen(s.State, chatMark))
+            {
+                Require(s.Clock.Now - _since <= ChatSeconds, "the skill: ACE's \"Your base ... is now ...!\" line did not reach the chat model within " + ChatSeconds + " s of the raise");
+                yield return null;
+            }
+
+            raiseLines++;
             Require(q.TryGetSkill(trained.Value.Id, out var skillAfter) && skillAfter.Ranks == trained.Value.Ranks + 1, "the skill did not gain exactly one rank");
             Spent.Add(("the skill: available experience taken", (long)skillCost, availableBefore - q.AvailableExperience));
             Spent.Add(("the skill: experience spent on the stat", (long)skillCost, skillAfter.Experience - trained.Value.Experience));

@@ -88,6 +88,7 @@ public sealed class GameSession : IGameSessionView, IDisposable
         _reducer = new GameStateReducer(State, _bus, Clock, log) { StandIn = new StandInSchedule() };
         ActionLog = new ActionLog();
         _actions = new ActionApi(_reducer, _bus, ActionLog, log, link: null, _thread);
+        _reducer.SpellLookup = _actions.FindSpell;
     }
 
     private GameSession(LiveSessionSetup setup, TimeProvider time, ILogSink log)
@@ -110,6 +111,7 @@ public sealed class GameSession : IGameSessionView, IDisposable
 
         _tap = new Tap(this);
         _actions = new ActionApi(_reducer, _bus, ActionLog, log, new ActionLink(setup.Server, () => _net, LogIn), _thread);
+        _reducer.SpellLookup = _actions.FindSpell;
     }
 
     /// <inheritdoc/>
@@ -120,6 +122,13 @@ public sealed class GameSession : IGameSessionView, IDisposable
 
     /// <inheritdoc/>
     public IActionApi Actions => _actions;
+
+    /// <summary>True for <c>--retail-cast-any-mode</c> (M3 4.2 D40): this session's casts are sent whatever the combat mode, as retail's client sends them. Default false: refused at once. Per session, so no test shares it (4.2 R1).</summary>
+    public bool RetailCastAnyMode
+    {
+        get => _actions.RetailCastAnyMode;
+        set => _actions.RetailCastAnyMode = value;
+    }
 
     /// <inheritdoc/>
     /// <remarks>An offline session refuses every request (there is no server).</remarks>
@@ -163,7 +172,7 @@ public sealed class GameSession : IGameSessionView, IDisposable
 
     /// <summary>
     /// Gives the Action API the retail SpellTable from <paramref name="dats"/> (decoded on a worker from this call, <see cref="SpellTableHost"/>; a cast before it is done is of unknown kind), so a cast completes by its spell's kind. A session without it (unit tests,
-    /// a host without dats) treats every cast as of unknown kind (<c>TODO(m3-cast-spell-table-host)</c>).
+    /// a host without dats) treats every cast as of unknown kind (<c>TODO(m3-cast-no-spell-table)</c>).
     /// </summary>
     /// <param name="dats">The opened dats.</param>
     public void UseSpellsFrom(Lifestone.Data.Dat.DatSet dats)

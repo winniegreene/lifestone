@@ -148,6 +148,27 @@ public sealed class ObjectLightTable : IDisposable
         _dirty = true;
     }
 
+    /// <summary>
+    /// Reads light <paramref name="index"/> of <paramref name="row"/> as the shader gets it (the shadow of the texture, so it is what the next upload carries): Godot world position, reach (0 ends the list) and radiance. False for a
+    /// row outside the table, an index past the row or an empty entry. The play-checks judge the light rows by it (M3 4.1 r1).
+    /// </summary>
+    public bool TryReadLight(int row, int index, out System.Numerics.Vector3 position, out float reach, out System.Numerics.Vector3 radiance)
+    {
+        position = default;
+        reach = 0f;
+        radiance = default;
+        if ((uint)row >= (uint)Rows || (uint)index >= (uint)ObjectLightSets.MaxLights)
+        {
+            return false;
+        }
+
+        var at = (row * Stride) + (index * ObjectLightSets.TexelsPerLight * 4);
+        position = new System.Numerics.Vector3(_shadow[at], _shadow[at + 1], _shadow[at + 2]);
+        reach = _shadow[at + 3];
+        radiance = new System.Numerics.Vector3(_shadow[at + 4], _shadow[at + 5], _shadow[at + 6]);
+        return reach > 0f;
+    }
+
     /// <summary>Uploads the table when a row changed since the last call. The table calls it before every draw; calling it sooner is harmless.</summary>
     public void Flush()
     {

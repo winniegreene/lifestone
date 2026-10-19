@@ -9,15 +9,15 @@ namespace Lifestone.Client.Tests.Session.Mage;
 public sealed class ArenaProfileTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     [Fact]
-    public void The_profile_has_31_lines_247_spells_and_every_id_once()
+    public void The_profile_has_31_lines_247_spells_and_every_id_once_and_the_build_learns_two_more()
     {
         Assert.Equal(31, ArenaProfile.Lines.Count);
         Assert.Equal(247, ArenaProfile.Lines.Sum(l => l.Spells.Count));
-        Assert.Equal(247, ArenaProfile.SpellsToLearn.Count);
-        Assert.Equal(247, ArenaProfile.SpellsToLearn.Distinct().Count());
+        Assert.Equal(249, ArenaProfile.SpellsToLearn.Count); // the lines and the fight tab's Fire Vulnerability Other VII and Heal Self VII (M3 4.2 p1)
+        Assert.Equal(249, ArenaProfile.SpellsToLearn.Distinct().Count());
         Assert.Equal(30, ArenaProfile.Lines.Count(l => l.Spells.Count == 8));
         Assert.Equal(7, ArenaProfile.LineNamed("Flame Blast")!.Spells.Count);
-        Assert.Equal(ArenaProfile.Lines.SelectMany(l => l.Spells).Select(s => s.Id), ArenaProfile.SpellsToLearn);
+        Assert.Equal(ArenaProfile.Lines.SelectMany(l => l.Spells).Select(s => s.Id).Concat(ArenaProfile.FightExtras), ArenaProfile.SpellsToLearn);
         Assert.All(ArenaProfile.Lines, l => Assert.Equal(Enumerable.Range(1, l.Spells.Count), l.Spells.Select(s => s.Position)));
     }
 

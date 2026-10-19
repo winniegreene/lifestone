@@ -5,7 +5,7 @@ using Lifestone.Data.Magic;
 namespace Lifestone.Client.Session;
 
 /// <summary>
-/// Gives a session's Action API the retail SpellTable (M3 1.2 s4c; <c>TODO(m3-cast-spell-table-host)</c> closed): <c>ActionApi.SpellLookup</c> reads it, so a cast knows whether its spell is a
+/// Gives a session's Action API the retail SpellTable (M3 1.2 s4c; a session without it takes the no-table outcome, <c>TODO(m3-cast-no-spell-table)</c>): <c>ActionApi.SpellLookup</c> reads it, so a cast knows whether its spell is a
 /// self enchantment, a projectile or neither (<c>CastTracker.Classify</c>), and <c>ActionApi.ProjectileSetupLookup</c> reads the war spells' projectile Setups (the ACE world extract the visuals
 /// already use) so a projectile is only taken for the cast's when it wears the spell's model.
 /// </summary>
@@ -85,7 +85,7 @@ internal sealed class SpellTableHost
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
-            log.Warn(SessionLog.Category, "TODO(m3-cast-spell-table-host): the SpellTable could not be read, so a cast's kind stays Unknown: " + e.GetType().Name + ": " + e.Message);
+            log.Warn(SessionLog.Category, "TODO(m3-cast-no-spell-table): the SpellTable could not be read, so a cast's kind stays Unknown: " + e.GetType().Name + ": " + e.Message);
             return;
         }
 

@@ -38,7 +38,7 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// <see cref="ActionSource.Ui"/>.
 /// </para>
 /// <para>
-/// <b>Deviations (named).</b> <c>TODO(m3-cast-untargeted)</c>: retail asks the spell's formula for its targeting type (<c>CSpellBase::IsUntargeted</c> 11.6096 0x005974A0 over <c>SpellFormula::GetTargetingType</c>) and casts a
+/// <b>Deviations (named).</b> <c>TODO(m3-cast-untargeted)</c>: retail asks the spell's formula for its targeting type (<c>CSpellBase::IsUntargeted</c> 11.6096 0x00598410 over <c>SpellFormula::GetTargetingType</c>) and casts a
 /// spell with no target type with no target; the client keeps no component table of target types, so every spell that is not SelfTargeted needs a selection. <c>TODO(m3-cast-components)</c>: retail refuses a spell whose
 /// components the pack lacks before sending ("You do not have all of this spell's components"); ACE answers the same through the cast's UseDone, which the action reports. <c>TODO(m3-cast-compat)</c>:
 /// <c>ObjectCompatibleWithSpell</c> (the target must suit the spell) is ACE's to judge. <c>TODO(m3-spellcast-selection-notice)</c>: the cast button's tooltip follows the spell selection, not the object selection (the shell
@@ -50,6 +50,9 @@ public sealed class GameSpellcastingPanel : UiElement
 {
     /// <summary>The retail class id (<c>gmSpellcastingUI</c>, Register 11.6096 0x004C6C20).</summary>
     public const uint RetailClassId = 0x10000015;
+
+    /// <summary><c>--video-hide-floaties</c> (video capture only, off by default): the Magic mode does not show the window, as any other mode does not. Set once at start-up by the main scene.</summary>
+    public static bool HideForVideo { get; set; }
 
     /// <summary>The window's element id in the gameplay layout.</summary>
     public const uint WindowId = 0x10000061;
@@ -252,7 +255,7 @@ public sealed class GameSpellcastingPanel : UiElement
     public void SetCombatMode(int mode)
     {
         Mode = mode;
-        if (mode == CombatModes.Magic)
+        if (mode == CombatModes.Magic && !HideForVideo)
         {
             SetVisible(true);
             Refresh();

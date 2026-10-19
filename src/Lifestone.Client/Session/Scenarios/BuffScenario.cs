@@ -34,6 +34,7 @@ public sealed class BuffScenario : IScenario
     public const string LogCategory = BuffCycle.LogCategory;
 
     private readonly GearScenario _gear;
+    private readonly MageSpellBars? _bars;
     private readonly IReadOnlyDictionary<uint, SpellInfo> _spells;
     private readonly BuffOptions _options;
     private readonly bool _endSession;
@@ -55,8 +56,9 @@ public sealed class BuffScenario : IScenario
     /// <param name="arrivalSeconds">The limit on the arrival.</param>
     /// <param name="endSession">True (the headless host's): log off and quit when done. False: end at <c>done</c> in the world.</param>
     /// <param name="cycle">A cycle object that already ran on this session (a second run casts nothing), or null for a new one.</param>
-    public BuffScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null)
-        : this(GearKit.Build(spells ?? throw new ArgumentNullException(nameof(spells)), account), spells, options, log, arrivalSeconds, endSession, cycle)
+    /// <param name="bars">The spell bars step run after the gear (M3 4.2 p1), or null to leave the bars alone.</param>
+    public BuffScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null, MageSpellBars? bars = null)
+        : this(GearKit.Build(spells ?? throw new ArgumentNullException(nameof(spells)), account), spells, options, log, arrivalSeconds, endSession, cycle, bars)
     {
     }
 
@@ -68,7 +70,8 @@ public sealed class BuffScenario : IScenario
     /// <param name="arrivalSeconds">The limit on the arrival.</param>
     /// <param name="endSession">True: log off and quit when done. False: end at <c>done</c> in the world.</param>
     /// <param name="cycle">A cycle object that already ran on this session, or null for a new one.</param>
-    public BuffScenario(GearKit kit, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null)
+    /// <param name="bars">The spell bars step run after the gear (M3 4.2 p1: tab I the buffs, tab II the fight), or null to leave the bars alone (the tests').</param>
+    public BuffScenario(GearKit kit, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null, MageSpellBars? bars = null)
     {
         ArgumentNullException.ThrowIfNull(kit);
         ArgumentNullException.ThrowIfNull(spells);
@@ -79,6 +82,7 @@ public sealed class BuffScenario : IScenario
         _log = log;
         _endSession = endSession;
         _cycle = cycle;
+        _bars = bars;
         _gear = new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells);
         foreach (var line in ArenaProfile.Lines)
         {
@@ -91,6 +95,9 @@ public sealed class BuffScenario : IScenario
 
     /// <inheritdoc/>
     public string Name => ScenarioName;
+
+    /// <summary>What the spell bars step ended with (<c>set:&lt;n&gt;</c>, <c>ok</c>), or <c>n/a</c> when it did not run.</summary>
+    public string BarsNote => _bars?.Note ?? "n/a";
 
     /// <inheritdoc/>
     public string Stage { get; private set; } = "start";
@@ -189,7 +196,28 @@ public sealed class BuffScenario : IScenario
                         return Fail(session, "gear: " + _gear.Failure);
                     case ScenarioStatus.Succeeded:
                         _gearFields = _gear.VerdictFields();
-                        _log.Info(LogCategory, "gear done (" + _gearFields + "): magic combat mode next");
+                        _log.Info(LogCategory, "gear done (" + _gearFields + "): " + (_bars is null ? "magic combat mode next" : "the spell bars next"));
+                        if (_bars is null)
+                        {
+                            _pending = actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
+                            Stage = "mode-magic";
+                        }
+                        else
+                        {
+                            Stage = "bars";
+                        }
+
+                        break;
+                }
+
+                break;
+
+            case "bars":
+                switch (_bars!.Step(session, clock))
+                {
+                    case ScenarioStatus.Failed:
+                        return Fail(session, "bars: " + _bars.Failure);
+                    case ScenarioStatus.Succeeded:
                         _pending = actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
                         Stage = "mode-magic";
                         break;

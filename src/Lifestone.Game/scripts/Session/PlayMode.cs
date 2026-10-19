@@ -195,6 +195,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
         ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(camera);
         var session = host.Session ?? throw new InvalidOperationException("play mode needs the live session");
+        session.RetailCastAnyMode = services.Options.Play.RetailCastAnyMode; // D40: the cast guard's retail switch, per session (M3 4.2 fix A, R1)
         var mode = new PlayMode
         {
             Name = "PlayMode",
@@ -371,7 +372,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
         }
 
         Log.Info(LogCategory, "the sound hooks are played: the avatars' hooks and the server's sounds, and the living statics' hooks, go to the audio service's sound player");
-        Log.Warn(LogCategory, "TODO(avatars-listener-camera): the avatars' sounds are positioned from the player's body, not the camera (retail's listener is the camera, SmartBox::set_viewer -> SoundManager::SetPlayerPosition); the living statics' use the camera. Differs in third person by the camera's offset; logged once");
+        Log.Info(LogCategory, "the sound listener is the camera (retail: SmartBox::set_viewer 0x00452C80 -> SoundManager::SetPlayerPosition): the avatars' sounds are positioned and panned from it, as the living statics' and the ambient sound are (M3 4.2 x2; closes TODO(avatars-listener-camera))");
     }
 
     /// <summary>
@@ -745,6 +746,8 @@ public sealed partial class PlayMode : Node, IPlayWorld
         _adapter?.Dispose();
         Selection.Clear(); // a log off (and the start): the objects belong to the arrival that is over
         _avatars = new AvatarSet(_sources!, GodotLogSink.Instance) { RetailUnhideFlash = _services.Options.Play.RetailUnhideFlash, RetailSpherelessMissile = _services.Options.Play.RetailSphereless, EffectEvents = _hookSounds, ScriptTableSeen = PrepareScriptTable, PlayerSoundTableSeen = PrefetchPlayerSounds }; // --retail-unhide-flash (docs/avatars.md section 17)
+        _avatars.Listener = new Lifestone.Game.World.ServerObjects.FlyCameraListener(_camera); // the sound listener is the camera (M3 4.2 x2, TODO(avatars-listener-camera) closed)
+        PlayerRig.WireDynamicLights(_avatars, _interiors); // --viewer-light and the cell glow's source, the one wiring every avatar set shares (M3 4.1 fix A, R1)
         var session = _host.Session!;
         _adapter = new SessionAvatarAdapter(session.Events, session.State, _avatars, PlayerController.Clock, GodotLogSink.Instance);
         if (_layer is not null)
@@ -844,6 +847,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
         if (_layer is not null)
         {
             _layer.Avatars = avatars;
+            _layer.PlayerSource = rig.Controller;
             _layer.Active = true;
         }
 
@@ -899,6 +903,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
         if (_layer is not null)
         {
             _layer.Active = false;
+            _layer.PlayerSource = null;
         }
 
         if (_rig is { } rig)

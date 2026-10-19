@@ -95,6 +95,28 @@ internal sealed class AddSpellFavoriteTracker(ActionHandle handle, uint spellId,
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
     {
         session!.SendAddSpellFavorite(spellId, (uint)index, (uint)bar);
+        api.Reducer.ApplyFavoriteAdd(spellId, index, bar);
         return new ActionOutcome(ActionOutcomeKind.Sent, 0, "spell " + spellId + " at index " + index + " on bar " + bar);
+    }
+}
+
+/// <summary>
+/// <see cref="IActionApi.RemoveSpellFavorite"/> (M3 4.2 p1): GameAction 0x01E4 {spell, bar}, as retail's <c>CM_Character::Event_RemoveSpellFavorite</c> sends it (11.4186 0x006A1890, 11.6096 0x006A26B0) and ACE's
+/// <c>GameActionRemoveSpellFavorite</c> reads it. ACE answers nothing, so the action completes as <see cref="ActionOutcomeKind.Sent"/> when it is sent. Lane Immediate (no reply to wait for, no limit).
+/// </summary>
+internal sealed class RemoveSpellFavoriteTracker(ActionHandle handle, uint spellId, int bar) : ActionTracker(handle, ActionLane.Immediate, double.PositiveInfinity)
+{
+    /// <inheritdoc/>
+    internal override string WouldSend => "GameAction 0x01E4 RemoveSpellFavorite spell=" + spellId + " bar=" + bar;
+
+    /// <inheritdoc/>
+    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api);
+
+    /// <inheritdoc/>
+    internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
+    {
+        session!.SendRemoveSpellFavorite(spellId, (uint)bar);
+        api.Reducer.ApplyFavoriteRemove(spellId, bar);
+        return new ActionOutcome(ActionOutcomeKind.Sent, 0, "spell " + spellId + " off bar " + bar);
     }
 }

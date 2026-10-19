@@ -101,6 +101,18 @@ public sealed class PlayerRig
     public PhysicsWorld Physics { get; }
 
     /// <summary>
+    /// The one place every avatar set gets its dynamic-light wiring (M3 4.1 fix A, finding R1): <c>--viewer-light=on|off</c> and the interior table's source (the cell glow reads the
+    /// frame the avatars fill). PlayMode's set and the offline rig's own set both call it, so neither path ignores the option or leaves the walls dark.
+    /// </summary>
+    public static void WireDynamicLights(AvatarSet avatars, InteriorController? interiors)
+    {
+        ArgumentNullException.ThrowIfNull(avatars);
+        avatars.DynamicLights.ViewerLightEnabled = Lifestone.Client.Interiors.LightOptions.Parse(OS.GetCmdlineUserArgs()).ViewerLight; // --viewer-light=on|off (M3 4.1)
+        if (interiors is not null) { interiors.DynamicLights.Source = avatars.DynamicLightFrame; } // the cell glow reads the frame the avatars fill (M3 4.1 r2)
+        Log.Info("play", "dynamic lights wired", ("viewer_light", avatars.DynamicLights.ViewerLightEnabled ? "on" : "off"), ("cell_glow_source", interiors is not null ? "bound" : "none (no interiors layer)"));
+    }
+
+    /// <summary>
     /// Builds the player and joins its nodes to <see cref="PlayerRigRequest.Main"/>. Returns null (after logging why) when the avatar set refuses the description.
     /// The caller installs the world's streaming focus (<see cref="Controller"/> is the focus source's player) and the retail UI's router.
     /// </summary>
@@ -115,6 +127,7 @@ public sealed class PlayerRig
         var spawn = request.Spawn;
 
         var avatars = request.Avatars ?? new AvatarSet(request.Sources, log);
+        if (request.Avatars is null) { WireDynamicLights(avatars, interiors); } // an own set (offline) is wired here; a shared set is wired by its owner (PlayMode.NewObjects)
         if (request.Avatars is null && avatars.Create(request.Create, now) != AvatarApply.Applied)
         {
             Log.Error("play", "the avatar set refused the player's description; there is no player", ("guid", $"0x{request.Guid:X8}"));
@@ -133,6 +146,7 @@ public sealed class PlayerRig
         avatars.Advance(now, new AvatarViewer(spawn), request.Avatars is null ? long.MaxValue : 0);
         var lightTable = request.LightTable ?? new ObjectLightTable();
         var view = new PlayerView(services, world, interiors, lightTable, new PlayerCellLights(services));
+        view.DynamicLights = avatars.DynamicLightFrame; // M3 4.1 r1: the player's light row takes the frame's dynamic lights ahead of the cell's
         main.AddChild(view);
         var lapAvatar = timer.Elapsed.TotalMilliseconds;
         view.Prepare(avatars.Frame, player);
@@ -188,6 +202,12 @@ public sealed class PlayerRig
         if (options.Camera == PlayerCameraMode.First)
         {
             controller.CameraModel.SetInHead();
+        }
+
+        if (Diagnostics.VideoOptions.Camera() is { } videoCamera)
+        {
+            controller.CameraModel.SetVideoOffset(videoCamera.Distance, videoCamera.Height);
+            Log.Info("play", "--video-camera: the chase camera is widened for the video", ("distance", videoCamera.Distance), ("height", videoCamera.Height));
         }
 
         var lapInput = timer.Elapsed.TotalMilliseconds;

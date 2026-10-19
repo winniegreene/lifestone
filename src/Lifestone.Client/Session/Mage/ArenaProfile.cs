@@ -377,8 +377,11 @@ public static class ArenaProfile
             S(2745, "Flame Arc VII", 300, 0),
             S(4423, "Incantation of Flame Arc", 400, 0)),    ];
 
+    /// <summary>Fire Vulnerability Other VII ("Inferno's Gift") and Heal Self VII ("Adja's Intervention"): the fight tab's spells that are no profile line (M3 4.2 p1); the build learns them after the lines.</summary>
+    public static IReadOnlyList<uint> FightExtras { get; } = [2170, 2073];
+
     /// <summary>Every spell id of every line: what the mage learns (all levels, D10), in line order then list order.</summary>
-    public static IReadOnlyList<uint> SpellsToLearn { get; } = [.. Lines.SelectMany(l => l.Spells).Select(s => s.Id)];
+    public static IReadOnlyList<uint> SpellsToLearn { get; } = [.. Lines.SelectMany(l => l.Spells).Select(s => s.Id), .. FightExtras];
 
     /// <summary>The line named <paramref name="name"/> (the spec's name), or null.</summary>
     public static ProfileLine? LineNamed(string name) => LinesByName.GetValueOrDefault(name);

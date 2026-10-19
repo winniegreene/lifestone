@@ -3,10 +3,12 @@ using Godot;
 using Lifestone.Client.Avatars;
 using Lifestone.Client.Effects;
 using Lifestone.Client.Interiors;
+using Lifestone.Client.Play;
 using Lifestone.Client.Rendering;
 using Lifestone.Client.World;
 using Lifestone.Data.Terrain;
 using Lifestone.Game.Core;
+using Lifestone.Game.Player;
 using Lifestone.Game.World.Interiors;
 using AcVector3 = System.Numerics.Vector3;
 
@@ -61,7 +63,6 @@ public sealed partial class ServerObjectsLayer : Node3D
     private long _frameNo;
     private long _originEpoch;
     private bool _translucencyLogged;
-    private bool _objectLightsLogged;
     private int _drawn;
     private int _waiting;
     private int _drawnParts;
@@ -98,12 +99,28 @@ public sealed partial class ServerObjectsLayer : Node3D
             if (!ReferenceEquals(_avatars, value))
             {
                 _avatars = value;
+                if (value is not null && _interiors is not null)
+                {
+                    value.CellFollower ??= new ProjectileCellFollower(_interiors.Registry); // a flying bolt changes cell as it crosses cell boundaries (M3 4.2 x2: closes TODO(m3-bolt-cell-tracking))
+                }
+
                 ForgetStates();
             }
         }
     }
 
     private AvatarSet? _avatars;
+
+    /// <summary>
+    /// The player's controller, whose interpolated draw frame the player's held items follow (M3 4.1 fix A, R6; closes TODO(g5-held-item-interpolation)). The player is drawn by <c>PlayerView</c> at the
+    /// interpolated frame (D26), the other objects at the avatar set's; a wand in the hand uses the set's frame for the parent's parts, so without this it lags the body by up to a physics step.
+    /// </summary>
+    public PlayerController? PlayerSource { get; set; }
+
+    private uint _playerGuid;
+    private AcVector3 _playerBodyOrigin;
+    private uint _playerAnchorCell;
+    private DrawInterpolation.Offset _playerOffset = DrawInterpolation.Offset.None;
 
     /// <summary>True while the layer draws (the player is in the world and its controller advances the set).</summary>
     public bool Active { get; set; }
@@ -204,6 +221,25 @@ public sealed partial class ServerObjectsLayer : Node3D
         }
 
         var frame = avatars.Frame;
+        _playerGuid = 0;
+        _playerOffset = DrawInterpolation.Offset.None;
+        foreach (var draw in frame.Avatars)
+        {
+            if (draw.IsPlayer)
+            {
+                // The held items (children of the player) are moved with the body by the same offset the player's own parts get.
+                _playerGuid = draw.Guid;
+                _playerBodyOrigin = draw.Frame.Origin;
+                _playerAnchorCell = draw.AnchorCellId;
+                if (PlayerSource is { } source && IsInstanceValid(source))
+                {
+                    _playerOffset = source.DrawOffset;
+                }
+
+                break;
+            }
+        }
+
         foreach (var draw in frame.Avatars)
         {
             if (!draw.IsPlayer)
@@ -262,12 +298,6 @@ public sealed partial class ServerObjectsLayer : Node3D
 
             ReleaseLights(state);
             return;
-        }
-
-        if (draw.LightsOn && !_objectLightsLogged)
-        {
-            _objectLightsLogged = true;
-            Log.Warn("serverobjects", "TODO(g5-object-lights): an object whose lights are on (LightingOn, the Setup's own lights) is drawn but lights nothing yet; only the cell's static lights reach other objects", ("guid", $"0x{draw.Guid:X8}"));
         }
 
         var inCell = draw.InEnvCell;
@@ -339,6 +369,7 @@ public sealed partial class ServerObjectsLayer : Node3D
         var layers = inCell ? InteriorController.CellsLayerMask : 1u;
         var translucency = frame.PartTranslucency.Slice(draw.PartStart, draw.PartCount);
         var anchor = AcCoordinates.LandblockOrigin(LandblockCoord.FromId(draw.AnchorCellId));
+        var heldByPlayer = _playerGuid != 0 && !_playerOffset.IsNone && avatar.Body.Parent is { } holder && holder.Guid == _playerGuid && draw.AnchorCellId == _playerAnchorCell;
         var any = false;
         for (var i = 0; i < parts.Length; i++)
         {
@@ -359,8 +390,14 @@ public sealed partial class ServerObjectsLayer : Node3D
                 continue;
             }
 
-            var transform = AcToGodot.Transform(AcVector3.Zero, part.Frame.Orientation, part.Scale);
-            transform.Origin = _world.ToRender(anchor + part.Frame.Origin);
+            var partFrame = part.Frame;
+            if (heldByPlayer)
+            {
+                partFrame = _playerOffset.Apply(partFrame, _playerBodyOrigin);
+            }
+
+            var transform = AcToGodot.Transform(AcVector3.Zero, partFrame.Orientation, part.Scale);
+            transform.Origin = _world.ToRender(anchor + partFrame.Origin);
             // The materialise fade (D45, D63): while 0 < translucency < 1 the part is an instance of its mesh's blended twin (the surfaces drawn SRCALPHA/INVSRCALPHA without a depth
             // write, as retail draws a part with a translucency material), at 0 it is an instance of the opaque mesh again. Every slot is refilled each frame and uploaded in
             // Upload below, so the hand-over is within one frame: the part is in exactly one of the two batches in every frame (no gap, no double draw).
@@ -466,6 +503,8 @@ public sealed partial class ServerObjectsLayer : Node3D
     }
 
     /// <summary>The object's light-set row: the cell's lights that reach it, written when they, the object or the render origin changed.</summary>
+    private static readonly CellLight[] NoStaticLights = [];
+
     private int UpdateLights(AvatarState state, in AvatarDraw draw, float height, float radius)
     {
         if (state.LightRow < 0)
@@ -481,12 +520,15 @@ public sealed partial class ServerObjectsLayer : Node3D
         var lights = _cellLights.TryGet(draw.CellId);
         var origin = draw.Frame.Origin;
         var moved = (origin - state.LightOrigin).LengthSquared() > 0.0025f;
-        if (state.LightsValid && !moved && state.LightEpoch == _originEpoch && state.LightVersion == _cellLights.Version && state.LightCell == draw.CellId)
+        var dynamic = _avatars?.DynamicLightFrame;
+        var dynamicNow = dynamic is { Count: > 0 };
+        // The dynamic lights (a bolt in flight, the viewer light) move every frame, so a row that holds one is rewritten every frame (the write skips an unchanged row); a row of static lights only is rewritten when they or the object changed.
+        if (state.LightsValid && !moved && !dynamicNow && !state.LightDynamic && state.LightEpoch == _originEpoch && state.LightVersion == _cellLights.Version && state.LightCell == draw.CellId)
         {
             return state.LightRow;
         }
 
-        if (lights is null)
+        if (lights is null && !dynamicNow)
         {
             return state.LightRow; // the worker is still reading the cell; the object shows its ambient and the row is written when the lights land
         }
@@ -496,7 +538,10 @@ public sealed partial class ServerObjectsLayer : Node3D
         var anchorToCell = new AcVector3((float)(anchorBlock.X - cellBlock.X), (float)(anchorBlock.Y - cellBlock.Y), 0f);
         var center = origin + anchorToCell + new AcVector3(0f, 0f, height * 0.5f);
         Span<ObjectLight> set = stackalloc ObjectLight[ObjectLightSets.MaxLights];
-        var count = ObjectLightSets.Select(center, Math.Max(height * 0.5f, radius), lights, set);
+        var sphere = Math.Max(height * 0.5f, radius);
+        var count = dynamicNow
+            ? ObjectLightSets.Select(center, sphere, draw.CellId, lights ?? NoStaticLights, dynamic!, set) // the dynamic lights first (Render::minimize_object_lighting 11.6096 0x0054E090), then the static ones, 8 at most
+            : ObjectLightSets.Select(center, sphere, lights!, set);
         for (var i = 0; i < count; i++)
         {
             var world = _world.ToRender(cellBlock + set[i].Position);
@@ -504,7 +549,8 @@ public sealed partial class ServerObjectsLayer : Node3D
         }
 
         _lights.Write(state.LightRow, set, count);
-        state.LightsValid = true;
+        state.LightsValid = lights is not null; // a row written from the dynamic lights alone is written again when the cell's lights land
+        state.LightDynamic = dynamicNow;
         state.LightOrigin = origin;
         state.LightEpoch = _originEpoch;
         state.LightVersion = _cellLights.Version;
@@ -659,6 +705,7 @@ public sealed partial class ServerObjectsLayer : Node3D
         public long DrawnFrame = -1;
         public int LightRow = -1;
         public bool LightsValid;
+        public bool LightDynamic;
         public AcVector3 LightOrigin;
         public long LightEpoch;
         public long LightVersion;

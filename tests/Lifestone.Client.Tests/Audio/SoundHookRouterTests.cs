@@ -140,6 +140,35 @@ public sealed class SoundHookRouterTests
     }
 
     [Fact]
+    public void A_silent_player_footstep_names_TODO_footstep_sound_table_once()
+    {
+        // M3 4.2 x2, item 5: the human table has no type 55 or 56; the router names the gap where it meets it, once, and a footstep that sounds (or an NPC's) does not.
+        var log = new FootstepLog();
+        var source = RetailSoundPlayerTests.Source().AddWave(0x0A000010)
+            .AddTable(0x20000001, (0x1Fu, [new SoundEntry(0x0A000010, 0.9f, 1f, 1f)]))
+            .AddTable(0x20000010, (SoundHookRouter.Footstep1, [new SoundEntry(0x0A000010, 0.9f, 1f, 1f)]));
+        var router = new SoundHookRouter(new RetailSoundPlayer(new RecordingAudioOutput(), source, new ScriptedDice(), new ScriptedCrt(), log: log));
+        var step = Event(new SoundTableHook(AnimHookDirection.Both, SoundHookRouter.Footstep1));
+
+        router.OnEffectEvent(step, default, 0x20000010, fromPlayer: true);  // sounds: no note
+        router.OnEffectEvent(step, default, 0x20000001, fromPlayer: false); // an NPC with the human table: not the player's
+        Assert.DoesNotContain(log.Lines, l => l.Contains("TODO(footstep-sound-table)", StringComparison.Ordinal));
+
+        router.OnEffectEvent(step, default, 0x20000001, fromPlayer: true);
+        router.OnEffectEvent(step, default, 0x20000001, fromPlayer: true);
+        Assert.Single(log.Lines, l => l.Contains("TODO(footstep-sound-table)", StringComparison.Ordinal));
+    }
+
+    private sealed class FootstepLog : Lifestone.Client.Diagnostics.ILogSink
+    {
+        public List<string> Lines { get; } = [];
+
+        public bool IsEnabled(Lifestone.Client.Diagnostics.LogSeverity severity) => true;
+
+        public void Write(Lifestone.Client.Diagnostics.LogSeverity severity, string category, string message, ReadOnlySpan<Lifestone.Client.Diagnostics.LogField> fields) => Lines.Add(message);
+    }
+
+    [Fact]
     public void A_server_sound_is_sounded_only_when_it_starts_a_voice_and_a_plain_sink_cannot_say()
     {
         var output = new RecordingAudioOutput();

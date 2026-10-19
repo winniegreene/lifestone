@@ -142,14 +142,14 @@ public sealed class StandInInventoryTests
         Assert.Equal(["inventory Added", "reply item", "create " + leadGuid.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)], rig.Order.Skip(rig.Order.Count - 3));
 
         // The wand and a piece of armour: the SELECT's ValidLocations, item type and burden, and the model's burden grows by each (the 02CD).
-        var wand = rig.Spawn(2472, null);
+        var wand = rig.Spawn(8552, null);
         Assert.True(rig.Session.State.Objects.TryGet(wand.Result!.Guid, out var wandObject));
-        Assert.Equal(("Wand", GearKit.ItemTypeCaster, 0x01000000u, (ushort)50), (wandObject.Name, wandObject.ItemType, wandObject.Weenie.ValidLocations, wandObject.Weenie.Burden));
+        Assert.Equal(("The Healer's Heart", GearKit.ItemTypeCaster, 0x01000000u, (ushort)50), (wandObject.Name, wandObject.ItemType, wandObject.Weenie.ValidLocations, wandObject.Weenie.Burden));
         Assert.Null(wandObject.Weenie.StackSize);
-        var coat = rig.Spawn(47, null);
+        var coat = rig.Spawn(6600, null);
         Assert.True(rig.Session.State.Objects.TryGet(coat.Result!.Guid, out var coatObject));
-        Assert.Equal(("Leather Coat", GearKit.ItemTypeArmor, 0x1E00u, (ushort)810), (coatObject.Name, coatObject.ItemType, coatObject.Weenie.ValidLocations, coatObject.Weenie.Burden));
-        Assert.Equal((GearKit.ComponentBurden * 40) + 50 + 810, rig.Inventory.Burden);
+        Assert.Equal(("Greater Amuli Shadow Coat", GearKit.ItemTypeArmor, 0x1A00u, (ushort)1600), (coatObject.Name, coatObject.ItemType, coatObject.Weenie.ValidLocations, coatObject.Weenie.Burden));
+        Assert.Equal((GearKit.ComponentBurden * 40) + 50 + 1600, rig.Inventory.Burden);
     }
 
     [Fact]

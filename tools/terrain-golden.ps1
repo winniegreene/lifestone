@@ -43,7 +43,9 @@ param(
     [int] $Size = 1000,
     [ValidateRange(10, 3600)]
     [int] $TimeoutSeconds = 300,
-    [switch] $NoBuild
+    [switch] $NoBuild,
+    [ValidatePattern('^[a-z0-9]{0,8}$')]
+    [string] $UserDataSlot = ''
 )
 
 Set-StrictMode -Version Latest
@@ -63,6 +65,7 @@ $godotScript = Join-Path $PSScriptRoot 'godot.ps1'
 $arguments = @('-NoProfile', '-File', $godotScript, '-Run', '-Offscreen', '-IsolateUserData',
     '-TimeoutSeconds', "$TimeoutSeconds", '-GodotArgs', 'res://scenes/TerrainPreview.tscn', "-GameArgs:$gameArgs")
 if ($NoBuild) { $arguments += '-NoBuild' }
+if ($UserDataSlot) { $arguments += @('-UserDataSlot', $UserDataSlot) }
 
 $pwshExe = (Get-Process -Id $PID).Path
 & $pwshExe @arguments

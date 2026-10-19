@@ -136,8 +136,8 @@ public sealed class DeathLegVerdictTests
             Evades = 99,
             HealthMinPercent = 99,
             DeathSeconds = 9_000,
-            DeathFrameMaxMs = 900,
-            FightFrameMaxMs = 900,
+            DeathFrameMaxMs = 40, // judged since M3 4.1 lane c (LightLegFieldsTests)
+            FightFrameMaxMs = 900, // still report-only in the death leg
         };
 
         Assert.True(DeathLegVerdict.Compose(null, m).Ok);

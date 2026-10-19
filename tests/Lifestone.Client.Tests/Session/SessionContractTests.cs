@@ -31,7 +31,7 @@ public sealed class SessionContractTests
         nameof(QualitiesChanged), nameof(LogOffRequested), nameof(MessageDropped), nameof(UnknownMessage),
         nameof(EnchantmentChanged), nameof(SpellbookChanged), // M3 1.2 lane s1
         nameof(InventoryChanged), nameof(InventoryFailed),
-        nameof(CombatEvent), nameof(CombatModeChanged), nameof(PlayerDied), nameof(PlayerKilledSomething), // M3 1.2 s3 (CombatEvents.cs)
+        nameof(CombatEvent), nameof(CombatModeChanged), nameof(PlayerDied), nameof(PlayerKilledSomething), nameof(AutoTargetRequested), // M3 1.2 s3 (CombatEvents.cs), M3 4.2 p2
         nameof(AdminEnvironChanged), // M3 1.3 s2b (AmbientEnvirons.cs)
     ];
 

@@ -53,6 +53,7 @@ public sealed class SurfaceShaders
         if (!_shaders.TryGetValue(variant, out var shader))
         {
             var start = System.Diagnostics.Stopwatch.GetTimestamp();
+            DynamicLightTable.Declare(); // M3 4.1 r2: the cell variants name the dynamic-light global; it exists before any shader is made
             shader = new Shader { Code = GenerateCode(variant), ResourceName = $"lifestone_surface_{variant.Name}" };
             _shaders.Add(variant, shader);
             Log.Debug("render", "surface shader created", ("variant", variant.Name), ("ms", System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds));

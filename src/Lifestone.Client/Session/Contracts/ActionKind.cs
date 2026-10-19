@@ -105,6 +105,9 @@ public enum ActionKind
 
     /// <summary><see cref="IActionApi.AddSpellFavorite"/> (M3 3.2 s0).</summary>
     AddSpellFavorite,
+
+    /// <summary><see cref="IActionApi.RemoveSpellFavorite"/> (M3 4.2 p1).</summary>
+    RemoveSpellFavorite,
 }
 
 /// <summary>Where an <see cref="ActionHandle"/> is in its life.</summary>

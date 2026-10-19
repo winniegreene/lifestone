@@ -53,6 +53,12 @@ public sealed class FightTally : IDisposable
     /// <summary>The casts that ended without a projectile or without a damage line (<see cref="NoteMiss"/>).</summary>
     public int Misses { get; private set; }
 
+    /// <summary>The picks the clear-line rule skipped: a tusker whose line from the caster the sweep found blocked (M3 4.2 P4).</summary>
+    public int BlockedPicks { get; private set; }
+
+    /// <summary>The confirmed bolts that exploded on the world with no damage line (M3 4.2 P4).</summary>
+    public int WallHits { get; private set; }
+
     /// <summary>The sum of the points in the player's own spell-damage lines.</summary>
     public long DamageDealt { get; private set; }
 
@@ -101,6 +107,12 @@ public sealed class FightTally : IDisposable
     /// <summary>How many Magic-typed lines matched no spell-damage form (counted, never guessed).</summary>
     public int UnparsedMagicLines { get; private set; }
 
+    /// <summary>
+    /// How many resist lines arrived: ACE's "X resists your spell" and "You resist the spell cast by X" (<c>WorldObject_Magic.cs</c> 192 and 199, Magic lines). Report-only: no verdict reads it; a resist is
+    /// neither damage nor an unparsed line.
+    /// </summary>
+    public int Resists { get; private set; }
+
     /// <summary>True between <see cref="Start"/> and <see cref="Dispose"/>.</summary>
     public bool Running => _view is not null;
 
@@ -140,11 +152,19 @@ public sealed class FightTally : IDisposable
     /// <summary>A cast ended without a projectile, or a projectile ended without a damage line.</summary>
     public void NoteMiss() => Misses++;
 
+    /// <summary>The clear-line rule skipped a blocked tusker.</summary>
+    public void NoteBlockedPick() => BlockedPicks++;
+
+    /// <summary>A bolt exploded with no damage line (a wall hit).</summary>
+    public void NoteWallHit() => WallHits++;
+
     /// <summary>Zeroes every counter and takes the experience baseline again (the subscriptions stay).</summary>
     public void Reset()
     {
         Casts = 0;
         Misses = 0;
+        BlockedPicks = 0;
+        WallHits = 0;
         DamageDealt = 0;
         DamageLinesDealt = 0;
         CriticalsDealt = 0;
@@ -160,6 +180,7 @@ public sealed class FightTally : IDisposable
         LastKillText = null;
         XpGained = 0;
         UnparsedMagicLines = 0;
+        Resists = 0;
         TakeBaseline();
     }
 
@@ -194,6 +215,13 @@ public sealed class FightTally : IDisposable
             {
                 break;
             }
+        }
+
+        // "<target> resists your spell" and "You resist the spell cast by <source>" (no prefixes, no full stop)
+        if ((text.EndsWith(" resists your spell", StringComparison.Ordinal) && text.Length > " resists your spell".Length)
+            || (text.StartsWith("You resist the spell cast by ", StringComparison.Ordinal) && text.Length > "You resist the spell cast by ".Length))
+        {
+            return MagicLineKind.Resist;
         }
 
         // "With <spell> you drain <n> points of <vital> from <target>."
@@ -281,9 +309,9 @@ public sealed class FightTally : IDisposable
 
     private void OnChat(in ChatReceived e)
     {
-        if (e.Line.ChatType != MagicChatType)
+        if (e.Line.ChatType != MagicChatType || e.Line.Kind != ChatKind.System)
         {
-            return;
+            return; // the server's own lines only: the client's composed notices ("<spell> has expired.") are not the server's
         }
 
         switch (Classify(e.Line.Text, out var amount, out var critical))
@@ -306,6 +334,9 @@ public sealed class FightTally : IDisposable
                 break;
             case MagicLineKind.DrainTaken:
                 DrainTaken += amount;
+                break;
+            case MagicLineKind.Resist:
+                Resists++;
                 break;
             default:
                 UnparsedMagicLines++;
@@ -377,4 +408,7 @@ public enum MagicLineKind
 
     /// <summary>"&lt;source&gt; casts &lt;spell&gt; and drains &lt;n&gt; points of your &lt;vital&gt;.".</summary>
     DrainTaken,
+
+    /// <summary>"&lt;target&gt; resists your spell" or "You resist the spell cast by &lt;source&gt;" (counted in <see cref="FightTally.Resists"/>, report-only).</summary>
+    Resist,
 }

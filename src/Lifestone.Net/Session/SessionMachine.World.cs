@@ -251,6 +251,16 @@ internal sealed partial class SessionMachine
         return SendAction(connection, writer);
     }
 
+    public OutboundTicket SendRemoveSpellFavorite(uint spellId, uint bar)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendRemoveSpellFavorite");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        MagicActionCodecs.WriteRemoveSpellFavorite(writer, connection.NextActionSequence, spellId, bar);
+        return SendAction(connection, writer);
+    }
+
     public OutboundTicket SendTalk(ReadOnlySpan<char> text)
     {
         EnterGameThread(capture: false);

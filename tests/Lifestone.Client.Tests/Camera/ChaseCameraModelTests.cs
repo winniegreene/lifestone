@@ -28,6 +28,33 @@ public sealed class ChaseCameraModelTests
     }
 
     [Fact]
+    public void Without_a_video_offset_the_default_offsets_are_retails()
+    {
+        var model = new ChaseCameraModel();
+        Assert.Null(model.VideoOffset);
+        Near(new Vector3(0f, ChaseCameraModel.DefaultOffsetYFactor, ChaseCameraModel.DefaultOffsetZFactor), model.ViewerOffset);
+    }
+
+    [Fact]
+    public void A_video_offset_widens_the_chase_camera_and_survives_the_default_offsets_being_set_again()
+    {
+        var model = new ChaseCameraModel();
+        model.SetVideoOffset(4.5f, 1.6f);
+        Near(new Vector3(0f, -4.5f, 1.6f), model.ViewerOffset);
+        model.SetDefaultOffsets();
+        Near(new Vector3(0f, -4.5f, 1.6f), model.ViewerOffset);
+    }
+
+    [Fact]
+    public void The_video_options_are_registered_for_the_main_scene()
+    {
+        var names = Lifestone.Client.Options.OptionCatalog.Video().Options.Select(o => o.Name).ToList();
+        Assert.Contains("--video-sync-marker", names);
+        Assert.Contains("--video-camera", names);
+        Assert.Contains("--video-hide-floaties", names);
+    }
+
+    [Fact]
     public void The_constants_are_the_retail_ones()
     {
         Assert.Equal(1.5f, ChaseCameraModel.DefaultPivotZ);

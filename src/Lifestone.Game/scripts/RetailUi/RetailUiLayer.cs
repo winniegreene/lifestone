@@ -184,6 +184,12 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
     /// <summary>The composite slice, in milliseconds, while the shell is painted and the world held hidden (a frame still under the 50 ms limit).</summary>
     public const double ShellPaintSliceMilliseconds = 3.0;
 
+    /// <summary>While the shell holds the world, a step that spent more than this on the tick and the screens does not also paint (M3 4.2 fixb: the 12 ms UI-step rule).</summary>
+    public const double ShellBusyMilliseconds = 2.0;
+
+    /// <summary>While the shell holds the world, a step that is already this long after its paint does not also upload tiles (M3 4.2 fixb).</summary>
+    public const double ShellCopySkipMilliseconds = 3.5;
+
     /// <summary>The most a frame spends uploading tiles while the shell is painted and the world held hidden (the whole screen's first upload was 12 ms in one frame, the one that builds the shell).</summary>
     public const double ShellCopySliceMilliseconds = 3.0;
 
@@ -477,7 +483,10 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
         // so the previous screen is erased at once.
         var builtThisFrame = ShellHoldsWorld && _shellFrames == 0 && Screens?.Flow.CurrentScreen is GamePlayScreen { Root: not null };
         var slice = ShellHoldsWorld ? (builtThisFrame ? 0.0 : ShellPaintSliceMilliseconds) : CompositeSliceMilliseconds;
-        if (!builtThisFrame)
+        // M3 4.2 fixb: the compositor paints a whole surface per unit and the copy a whole root, so a frame that already spent time on the tick and the screens (the shell's last build units) skips
+        // the paint, and a frame whose paint overran skips the upload, while the shell holds the world: the first paint and upload spread over more frames and no step after Enter passes 12 ms.
+        var shellBusy = ShellHoldsWorld && Stopwatch.GetElapsedTime(stepStart, start).TotalMilliseconds > ShellBusyMilliseconds;
+        if (!builtThisFrame && !shellBusy)
         {
             Compositor.Composite(start + (long)(slice * Stopwatch.Frequency / 1000.0));
         }
@@ -492,7 +501,7 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
 
         Frames++;
         var afterCompositeMark = Stopwatch.GetTimestamp();
-        if (Compositor.HasChangesToCopy && !builtThisFrame)
+        if (Compositor.HasChangesToCopy && !builtThisFrame && !(ShellHoldsWorld && Stopwatch.GetElapsedTime(stepStart, afterCompositeMark).TotalMilliseconds > ShellCopySkipMilliseconds))
         {
             CopyTiles();
         }

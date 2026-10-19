@@ -82,6 +82,10 @@ public sealed class ToolsWireTests
         AssertSame(XpToLevel126, RoundTrip(XpToLevel126, ToolVerbs.Xp, XpToLevel126.Describe()));
         AssertSame(SpellsLearned, RoundTrip(SpellsLearned, ToolVerbs.Spell, SpellsLearned.Describe()));
         AssertSame(ItemCreated, RoundTrip(ItemCreated, ToolVerbs.Item, ItemCreated.Describe()));
+        var painted = new ItemData(0x7A000125, 57, "Platemail Gauntlets", 1, null, null, false, 21, 0.5); // P7: the palette and shade ACE's object holds, read back
+        AssertSame(painted, RoundTrip(painted, ToolVerbs.Item, painted.Describe()));
+        Assert.Contains("\"palette\":21", ToolsWire.Reply(ToolReply.Success(null, ToolVerbs.Item, painted), painted.Describe()), StringComparison.Ordinal);
+        Assert.DoesNotContain("palette", ToolsWire.Reply(ToolReply.Success(null, ToolVerbs.Item, ItemCreated), ItemCreated.Describe()), StringComparison.Ordinal);
         var unstackable = ItemCreated with { Requested = null, MaxStack = null, Stack = 1 };
         AssertSame(unstackable, RoundTrip(unstackable, ToolVerbs.Item, unstackable.Describe()));
         AssertSame(Net, RoundTrip(Net, ToolVerbs.Net, Net.Describe()));

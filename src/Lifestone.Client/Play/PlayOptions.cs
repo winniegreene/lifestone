@@ -107,6 +107,12 @@ public sealed record PlayOptions
     /// <summary>True for <c>--retail-sphereless-missile</c>: a projectile whose Setup has no spheres never moves, as retail's sphereless branch (docs/avatars.md section 17; <c>AvatarSet.RetailSpherelessMissile</c>). Default false: it flies on its own velocity.</summary>
     public bool RetailSphereless { get; init; }
 
+    /// <summary>True for <c>--retail-cast-any-mode</c>: a cast is sent outside the magic combat mode (<c>GameSession.RetailCastAnyMode</c>, per session). Default false: refused at once on the client.</summary>
+    public bool RetailCastAnyMode { get; init; }
+
+    /// <summary>True for <c>--play-skip-scenarios</c> (M3 4.2 p5a C4): <c>--play-checks</c> leaves out the stand-in's fight and death scenarios (the smoke's shell-frames run; the play-checks step judges them in the same smoke).</summary>
+    public bool SkipScenarios { get; init; }
+
     /// <summary>True for <c>--retail-unhide-flash</c>: retail's one opaque frame after an unhide that follows a re-hide mid-fade (docs/avatars.md section 17). Default false: that frame is not drawn.</summary>
     public bool RetailUnhideFlash { get; init; }
 
@@ -192,9 +198,21 @@ public sealed record PlayOptions
                 continue;
             }
 
+            if (argument.Name == "--retail-cast-any-mode")
+            {
+                options = options with { RetailCastAnyMode = true };
+                continue;
+            }
+
             if (argument.Name == "--retail-sphereless-missile")
             {
                 options = options with { RetailSphereless = true };
+                continue;
+            }
+
+            if (argument.Name == "--play-skip-scenarios")
+            {
+                options = options with { SkipScenarios = true };
                 continue;
             }
 

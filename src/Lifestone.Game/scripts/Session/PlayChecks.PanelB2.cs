@@ -11,7 +11,7 @@ namespace Lifestone.Game.Sessions;
 /// <summary>
 /// Slice b2 (the paperdoll of inventory page 7), docs/milestones/m3-plan.md section 4.6 row "b2". The stand-in grants the kit's wand and leather cap and coat through the item tool and wields them (the wand held, the armour at
 /// its valid locations); the page is then opened and judged against <see cref="PlayerInventory.Equipped"/> and the world objects, slot by slot with the rule of <c>gmPaperDollUI::SetUIItemIntoLocation</c> (a slot shows the last
-/// equipped item whose locations include one of its own): every slot holds what the model says, the coat shows in four. The items are then taken off through the Action API (the client's unwield) and the slots empty. The
+/// equipped item whose locations include one of its own): every slot holds what the model says, the coat shows in each slot its locations name. The items are then taken off through the Action API (the client's unwield) and the slots empty. The
 /// page is closed again. Slice b4 adds the figure: the page opens on the player's 3D figure (the viewport 0x100001D5 has a source, shows, and its picture holds a drawn body; the Setup and appearance are the
 /// player's; the nine armour slots are hidden), and the frames of the first opening are timed (reported, not judged).
 /// </summary>
@@ -79,7 +79,8 @@ public sealed partial class PlayChecks
             }
         }
 
-        var coatSlots = new uint[] { 0x100005AC, 0x100005AD, 0x100005AE, 0x100005AF };
+        // the coat covers the slots its valid locations name (the Amuli coat since D43: chest and both arms; the old leather coat had four)
+        var coatSlots = GamePaperDoll.SlotTable.Where(slot => (slot.Mask & (uint)GearKit.Armour[1].ValidLocations) != 0).Select(slot => slot.ElementId).ToArray();
         var coatEverywhere = guids[2] != 0 && coatSlots.All(id => doll.ItemIn(id) == guids[2]);
         Check(
             shownName,

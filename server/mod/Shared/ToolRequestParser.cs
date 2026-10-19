@@ -55,6 +55,12 @@ public static class ToolRequestParser
     /// <summary>The largest <c>item</c> stack: ACE's <c>@ci</c> limit, a u16 (AdminCommands.cs:2502-2514).</summary>
     public const int MaxItemStack = 65535;
 
+    /// <summary>The lowest <c>item</c> palette: 1, since PaletteTemplate 0 is <c>Undef</c> (ACE.Entity/Enum/PaletteTemplate.cs).</summary>
+    public const int MinItemPalette = 1;
+
+    /// <summary>The highest <c>item</c> palette: the last member of ACE's <c>PaletteTemplate</c> enum (DyeSpringBlack, 93). <c>@ci</c> takes any int (AdminCommands.cs:2527-2540); the verb refuses what is no template.</summary>
+    public const int MaxItemPalette = 93;
+
     /// <summary>How far a rotation's length may be from 1.</summary>
     public const double QuaternionTolerance = 0.01;
 
@@ -196,9 +202,24 @@ public static class ToolRequestParser
                 }
 
                 text.Append(ToolVerbs.Item).Append(' ').Append(item.Wcid.ToString(CultureInfo.InvariantCulture));
+                if (item.Palette is < MinItemPalette or > MaxItemPalette || item.Shade is { } badShade && !IsValidShade(badShade))
+                {
+                    throw new ArgumentException(ItemRule, nameof(request));
+                }
+
                 if (item.Stack is { } stack)
                 {
                     text.Append(' ').Append(stack.ToString(CultureInfo.InvariantCulture));
+                }
+
+                if (item.Palette is { } palette)
+                {
+                    text.Append(" palette=").Append(palette.ToString(CultureInfo.InvariantCulture));
+                }
+
+                if (item.Shade is { } shade)
+                {
+                    text.Append(" shade=").Append(shade.ToString("0.######", CultureInfo.InvariantCulture));
                 }
 
                 break;
@@ -365,7 +386,7 @@ public static class ToolRequestParser
 
     private const string SpellRule = "spell learn takes 1 to 128 whole spell ids, comma-separated with no spaces: spell learn 1,2,3";
 
-    private const string ItemRule = "item takes a weenie class id (a whole number) and optionally a stack size from 1 to 65,535: item <wcid> [<stack>]";
+    private const string ItemRule = "item takes a weenie class id (a whole number), optionally a stack size from 1 to 65,535, a palette=<1 to 93> (ACE's PaletteTemplate) and a shade=<0 to 1>: item <wcid> [<stack>] [palette=<n>] [shade=<f>]";
 
     private const string CharUsage = "char takes purge and one character name in double quotes: char purge \"<name>\"";
 
@@ -430,24 +451,57 @@ public static class ToolRequestParser
 
     private static ToolRequestParse ParseItem(List<(string Text, bool Quoted)> words, string? id)
     {
-        if (words.Count is not (2 or 3) || words.Skip(1).Any(w => w.Quoted) || !TryParseWhole(words[1].Text, out var wcid))
+        if (words.Count < 2 || words.Skip(1).Any(w => w.Quoted) || !TryParseWhole(words[1].Text, out var wcid))
         {
             return Fail(ToolErrors.BadArgs, ItemRule, ToolVerbs.Item, id);
         }
 
         int? stack = null;
-        if (words.Count == 3)
+        int? palette = null;
+        double? shade = null;
+        for (var i = 2; i < words.Count; i++)
         {
-            if (!TryParseWhole(words[2].Text, out var count) || count is < 1 or > MaxItemStack)
+            var text = words[i].Text;
+            if (i == 2 && !text.Contains('=', StringComparison.Ordinal))
+            {
+                if (!TryParseWhole(text, out var count) || count is < 1 or > MaxItemStack)
+                {
+                    return Fail(ToolErrors.BadArgs, ItemRule, ToolVerbs.Item, id);
+                }
+
+                stack = (int)count;
+            }
+            else if (palette is null && text.StartsWith("palette=", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryParseWhole(text["palette=".Length..], out var number) || number is < MinItemPalette or > MaxItemPalette)
+                {
+                    return Fail(ToolErrors.BadArgs, ItemRule, ToolVerbs.Item, id);
+                }
+
+                palette = (int)number;
+            }
+            else if (shade is null && text.StartsWith("shade=", StringComparison.OrdinalIgnoreCase))
+            {
+                var digits = text["shade=".Length..];
+                if (digits.Length is < 1 or > 10 || !digits.All(c => char.IsAsciiDigit(c) || c == '.')
+                    || !double.TryParse(digits, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value) || !IsValidShade(value))
+                {
+                    return Fail(ToolErrors.BadArgs, ItemRule, ToolVerbs.Item, id);
+                }
+
+                shade = value;
+            }
+            else
             {
                 return Fail(ToolErrors.BadArgs, ItemRule, ToolVerbs.Item, id);
             }
-
-            stack = (int)count;
         }
 
-        return new ToolRequestParse(new ItemRequest(wcid, stack, id), null, ToolVerbs.Item, id);
+        return new ToolRequestParse(new ItemRequest(wcid, stack, id, palette, shade), null, ToolVerbs.Item, id);
     }
+
+    /// <summary>A shade is a finite number from 0 to 1 (a PaletteTemplate's shade blends along the palette).</summary>
+    private static bool IsValidShade(double shade) => double.IsFinite(shade) && shade is >= 0d and <= 1d;
 
     /// <summary>A whole number of plain digits (no sign, separator or exponent) that fits a u32.</summary>
     private static bool TryParseWhole(string text, out uint value)

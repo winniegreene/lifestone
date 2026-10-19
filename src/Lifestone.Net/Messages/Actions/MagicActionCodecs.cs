@@ -18,6 +18,8 @@ namespace Lifestone.Net.Messages;
 /// ACE <c>GameActionDie</c> (<c>GameActionType.Suicide</c>) reads nothing and calls <c>HandleActionDie</c>.</item>
 /// <item>0x01E3 AddSpellFavorite {u32 spell, u32 index, u32 bar} (M3 3.2 s0): retail <c>CM_Character::Event_AddSpellFavorite</c> (11.4186 0x006A0F70,
 /// 11.6096 0x006A1D90), prototype (spell, index, list); ACE <c>GameActionAddSpellFavorite</c> reads the spell, the position on the bar, then the bar.</item>
+/// <item>0x01E4 RemoveSpellFavorite {u32 spell, u32 bar} (M3 4.2 p1): retail <c>CM_Character::Event_RemoveSpellFavorite</c> (11.4186 0x006A1890,
+/// 11.6096 0x006A26B0); ACE <c>GameActionRemoveSpellFavorite</c> reads the spell, then the bar (no index).</item>
 /// </list>
 /// </summary>
 internal static class MagicActionCodecs
@@ -54,6 +56,14 @@ internal static class MagicActionCodecs
         GameActionEnvelope.WriteHeader(writer, sequence, GameActionTypes.AddSpellFavorite);
         writer.WriteUInt32(spellId);
         writer.WriteUInt32(index);
+        writer.WriteUInt32(bar);
+    }
+
+    /// <summary>Writes F7B1 {<paramref name="sequence"/>, 0x01E4, <paramref name="spellId"/>, <paramref name="bar"/>}: the spell, then the bar, as ACE reads them.</summary>
+    public static void WriteRemoveSpellFavorite(PacketWriter writer, uint sequence, uint spellId, uint bar)
+    {
+        GameActionEnvelope.WriteHeader(writer, sequence, GameActionTypes.RemoveSpellFavorite);
+        writer.WriteUInt32(spellId);
         writer.WriteUInt32(bar);
     }
 }

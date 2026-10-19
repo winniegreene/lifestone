@@ -229,8 +229,21 @@ public sealed class ChaseCameraModel
         Direction = Vector3.UnitY;
         TranslationalStiffness = CurrentStiffness;
         RotationalStiffness = CurrentStiffness;
-        ViewerOffset = new Vector3(0f, DefaultOffsetYFactor * Scale, DefaultOffsetZFactor * Scale);
+        ViewerOffset = VideoOffset ?? new Vector3(0f, DefaultOffsetYFactor * Scale, DefaultOffsetZFactor * Scale);
         SetTargetForOffset(ViewerOffset);
+    }
+
+    /// <summary>
+    /// <c>--video-camera=distance,height</c> (video capture only, off by default): the viewer offset <see cref="SetDefaultOffsets"/> uses instead of retail's (0, -2.5, 0.75),
+    /// so the player and a target in front of him are both in frame. Null: retail's. Not a retail behaviour (TODO(video-camera): a recording aid, nothing in the game changes without the option).
+    /// </summary>
+    public Vector3? VideoOffset { get; private set; }
+
+    /// <summary>Sets <see cref="VideoOffset"/> to (0, -<paramref name="distance"/>, <paramref name="height"/>) and puts the camera on it.</summary>
+    public void SetVideoOffset(float distance, float height)
+    {
+        VideoOffset = new Vector3(0f, -distance, height);
+        SetDefaultOffsets();
     }
 
     /// <summary><c>CameraSet::SetInHead</c>: the viewer 18 cm in front of the pivot, following the player at once.</summary>

@@ -492,7 +492,7 @@ public sealed partial class BuffLegRunner : Node
     {
         var (table, kit, buildMilliseconds) = _loading!.Result;
         Log.Info(LogCategory, "buff: the gear kit was built on the loading worker, off the game thread", ("build_ms", buildMilliseconds));
-        _scenario = new BuffScenario(kit, table.Spells, new BuffOptions(), GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false);
+        _scenario = new BuffScenario(kit, table.Spells, new BuffOptions(), GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false, bars: new MageSpellBars(GodotLogSink.Instance));
         _avatars = _mode.Avatars;
         if (_avatars is { } avatars)
         {

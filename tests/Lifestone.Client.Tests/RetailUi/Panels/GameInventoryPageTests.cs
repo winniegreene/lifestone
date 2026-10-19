@@ -16,6 +16,7 @@ using Lifestone.Data.Tests;
 using Lifestone.Net.Dispatch;
 using Lifestone.Net.Messages;
 using Lifestone.Net.Types;
+using Lifestone.Tests.Shared.Net;
 
 namespace Lifestone.Client.Tests.RetailUi.Panels;
 
@@ -490,6 +491,44 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixtur
         DoubleClick(g, g.Page.PackList.CellAt(1)!); // the pyreals: no valid locations
         g.Frames(2);
         Assert.Equal(before + 1, session.ActionLog.Total);
+    }
+
+    [Fact]
+    public void The_held_slot_rule_refuses_a_non_caster_outside_peace_and_nothing_else()
+    {
+        // CPlayerSystem::AutoWieldIsLegal (0x0055FAD0): Held in the valid locations, not peace, not a caster (ItemType 0x8000).
+        Assert.True(GameInventoryPage.HoldRefused(CombatModes.Melee, 0x01000000, 0x10));
+        Assert.True(GameInventoryPage.HoldRefused(CombatModes.Magic, 0x01000000 | 0x100000, 0));
+        Assert.False(GameInventoryPage.HoldRefused(CombatModes.Melee, 0x01000000, 0x8000)); // a caster
+        Assert.False(GameInventoryPage.HoldRefused(CombatModes.NonCombat, 0x01000000, 0x10)); // peace
+        Assert.False(GameInventoryPage.HoldRefused(0, 0x01000000, 0x10)); // no mode said yet is peace
+        Assert.False(GameInventoryPage.HoldRefused(CombatModes.Melee, 0x100000, 0x10)); // a melee weapon is not held
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_double_click_wielding_a_held_non_caster_in_combat_says_retails_line_and_sends_nothing_and_in_peace_wields()
+    {
+        using var g = Enter(populate: true);
+        g.Open();
+        var lines = new List<string>();
+        g.Page.HoldNotice = lines.Add;
+        var session = g.Rig.Session;
+        var wield = () => Enumerable.Range(0, session.ActionLog.Count).Select(i => session.ActionLog[i]).Count(static e => e.Kind == ActionKind.Wield);
+
+        // ACE's answer to a mode change (0x02CD, property 40): the stand-in's own session would refuse the request, so the test plays the server.
+        Assert.Equal(DispatchOutcome.Decoded, InboundDispatcher.Dispatch(g.Context, AceWireWriters.PrivateUpdatePropertyInt(1, CombatModes.Property, CombatModes.Melee), g.Handler).Outcome);
+        g.Frames(2);
+        DoubleClick(g, g.Page.PackList.CellAt(2)!); // the wand: valid location Held, ItemType 0x01000000 (not a caster)
+        g.Frames(2);
+        Assert.Equal(["Cannot hold Wand while in combat"], lines);
+        Assert.Equal(0, wield());
+
+        Assert.Equal(DispatchOutcome.Decoded, InboundDispatcher.Dispatch(g.Context, AceWireWriters.PrivateUpdatePropertyInt(2, CombatModes.Property, CombatModes.NonCombat), g.Handler).Outcome);
+        g.Frames(2);
+        DoubleClick(g, g.Page.PackList.CellAt(2)!);
+        g.Frames(2);
+        Assert.Single(lines);
+        Assert.Equal(1, wield());
     }
 
     private static void DoubleClick(Game g, UiItem cell)

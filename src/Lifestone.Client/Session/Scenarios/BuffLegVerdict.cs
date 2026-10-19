@@ -27,7 +27,8 @@ public sealed record BuffLegScenarioResult(bool ScenarioSucceeded, string? Failu
 /// <summary>
 /// The buff leg's verdict (<c>--login-check=buff</c>, M3 2.1 s3; docs/session.md section 30): composed from the scenario's result and the game's measures, so it is built and tested without Godot. The line is
 /// <c>buff done ok=&lt;true|false&gt; gear= worn= cast=ok|fizzled|failed|n/a buffs=&lt;active&gt;/&lt;wanted&gt; rebuffed= forced= min_remaining_s= levels= cycle_s= cast_scripts= cast_sounds= cast_windows=
-/// cast_frame_max_ms= sounds_server= fizzles= misses=</c> (no name, no account).
+/// cast_frame_max_ms= sounds_server= fizzles= misses= surpassed= cast_scripts_expected=[ frame_over_50=yes]</c> (no name, no account). <c>cast_scripts_expected</c> is the casts the passes made
+/// (cycle plus forced), to read against <c>cast_scripts</c> (the effects the cast windows saw: cluster-k3 gap 1); <c>frame_over_50=yes</c> is <c>cast_frame_max_ms</c> over <see cref="FrameWarnMs"/>.
 /// </summary>
 /// <remarks>
 /// <para><b>Judged</b> (<c>ok=</c>): what the loopback test asserts (<c>gear=wielded</c>, every wanted line active, <c>rebuffed=yes</c>, with the scenario ended without a failure) and <c>sounds_server&gt;=1</c> (D27, the owner's:
@@ -38,6 +39,11 @@ public sealed record BuffLegScenarioResult(bool ScenarioSucceeded, string? Failu
 /// </remarks>
 public static class BuffLegVerdict
 {
+    /// <summary>A cast window whose slowest frame is over this many milliseconds prints <c>frame_over_50=yes</c> and passes (the fight leg's rule, report-only here: a new judge; the lead's worst of three).</summary>
+    public const double FrameWarnMs = 50.0;
+
+    // TODO(m3-buff-cast-frame-judge): the fight leg fails a window over 75 ms (FightLegVerdict.FrameFailMs); the buff leg's cast window is report-only in M3 4.2 (a new judge reports first). M4 judges it.
+
     /// <summary>The miss tokens (<c>Short:why</c>) whose why is a fizzle: <c>fizzled</c> (the retry failed too) and <c>upgrade-fizzled</c> (an upgrade is cast once).</summary>
     private static readonly string[] FizzleWhys = ["fizzled", "upgrade-fizzled"];
 
@@ -158,7 +164,7 @@ public static class BuffLegVerdict
         var ok = problems.Count == 0;
         var line = string.Create(
             inv,
-            $"buff done ok={(ok ? "true" : "false")} gear={gear} worn={worn} cast={cast} buffs={active}/{wanted} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(forcedLanded ? "yes" : "no")} min_remaining_s={min} levels={(best is null ? "n/a" : best.Levels)} cycle_s={Math.Floor(scenario.Cycle?.CycleSeconds ?? 0).ToString("0", inv)} cast_scripts={measures.CastScripts} cast_sounds={measures.CastSounds} cast_windows={measures.CastWindows} cast_frame_max_ms={(measures.CastFrameMaxMs is { } ms ? ms.ToString("0.0", inv) : "n/a")} sounds_server={(measures.SoundsServer is { } s ? s.ToString(inv) : "n/a")} fizzles={best?.Fizzles ?? 0} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={(scenario.Cycle?.Surpassed ?? 0) + (scenario.Forced?.Surpassed ?? 0)}");
+            $"buff done ok={(ok ? "true" : "false")} gear={gear} worn={worn} cast={cast} buffs={active}/{wanted} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(forcedLanded ? "yes" : "no")} min_remaining_s={min} levels={(best is null ? "n/a" : best.Levels)} cycle_s={Math.Floor(scenario.Cycle?.CycleSeconds ?? 0).ToString("0", inv)} cast_scripts={measures.CastScripts} cast_sounds={measures.CastSounds} cast_windows={measures.CastWindows} cast_frame_max_ms={(measures.CastFrameMaxMs is { } ms ? ms.ToString("0.0", inv) : "n/a")} sounds_server={(measures.SoundsServer is { } s ? s.ToString(inv) : "n/a")} fizzles={best?.Fizzles ?? 0} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={(scenario.Cycle?.Surpassed ?? 0) + (scenario.Forced?.Surpassed ?? 0)} cast_scripts_expected={(scenario.Cycle?.Cast ?? 0) + (scenario.Forced?.Cast ?? 0)}{(measures.CastFrameMaxMs is { } castMs && !double.IsNaN(castMs) && castMs > FrameWarnMs ? " frame_over_50=yes" : string.Empty)}");
         return new BuffLegOutcome(ok, cast, line, problems);
     }
 

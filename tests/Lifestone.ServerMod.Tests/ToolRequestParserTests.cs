@@ -34,6 +34,11 @@ public sealed class ToolRequestParserTests
         new ItemRequest(1628, 1, "i1"),
         new ItemRequest(0, ToolRequestParser.MaxItemStack),
         new ItemRequest(4_294_967_295, 25, "i2"),
+        new ItemRequest(57, null, "g1", 21),
+        new ItemRequest(6600, 1, null, 21, 0.3),
+        new ItemRequest(107, null, null, null, 0.66),
+        new ItemRequest(3715, 1, "e", ToolRequestParser.MinItemPalette, 0),
+        new ItemRequest(3715, null, null, ToolRequestParser.MaxItemPalette, 1),
         new PlacePoiRequest("Holtburg"),
         new PlacePoiRequest("Bandit Castle", "a2"),
         new PlacePoiRequest("Al-Arqas", "a3"),
@@ -97,6 +102,9 @@ public sealed class ToolRequestParserTests
     [InlineData("spell-one", "@lifestone spell learn 5189")]
     [InlineData("item", "@lifestone item 1628")]
     [InlineData("item-stack", "@lifestone item 273 25 #i1")]
+    [InlineData("item-gold", "@lifestone item 57 palette=21 #g1")]
+    [InlineData("item-all", "@lifestone item 107 1 palette=21 shade=0.3")]
+    [InlineData("item-shade", "@lifestone item 107 shade=0.66")]
     public void Requests_have_one_canonical_text(string which, string expected)
     {
         ToolRequest request = which switch
@@ -114,10 +122,29 @@ public sealed class ToolRequestParserTests
             "spell-one" => new SpellLearnRequest([5189]),
             "item" => new ItemRequest(1628),
             "item-stack" => new ItemRequest(273, 25, "i1"),
+            "item-gold" => new ItemRequest(57, null, "g1", 21),
+            "item-all" => new ItemRequest(107, 1, null, 21, 0.3),
+            "item-shade" => new ItemRequest(107, null, null, null, 0.66),
             "loc" => new PlaceLocRequest(new ToolLocation(0xA9B40019, 84.5f, 7.1f, 94.005f)),
             _ => new PlaceLocRequest(new ToolLocation(0xA9B40019, 84.5f, 7.1f, 94.005f, 0.5f, 0.5f, 0.5f, 0.5f), "z"),
         };
         Assert.Equal(expected, ToolsWire.Request(request));
+    }
+
+    [Fact]
+    public void An_item_palette_and_shade_parse_in_either_order_and_an_out_of_range_one_is_refused_with_a_reply()
+    {
+        Assert.Equal(new ItemRequest(57, null, "g", 21, 0.5), ToolRequestParser.Parse("item 57 shade=0.5 palette=21 #g").Request);
+        Assert.Equal(new ItemRequest(57, 3, null, 21, null), ToolRequestParser.Parse("item 57 3 PALETTE=21").Request);
+        Assert.Equal(new ItemRequest(57, null, null, null, 1), ToolRequestParser.Parse("item 57 shade=1").Request);
+        var refused = ToolRequestParser.Parse("item 57 palette=94 #r");
+        Assert.Null(refused.Request);
+        Assert.Equal(ToolErrors.BadArgs, refused.Error!.Code);
+        Assert.Contains("palette=<1 to 93>", refused.Error.Message, StringComparison.Ordinal);
+        Assert.Throws<ArgumentException>(() => ToolsWire.Request(new ItemRequest(57, null, null, 0)));
+        Assert.Throws<ArgumentException>(() => ToolsWire.Request(new ItemRequest(57, null, null, 94)));
+        Assert.Throws<ArgumentException>(() => ToolsWire.Request(new ItemRequest(57, null, null, 21, 1.5)));
+        Assert.Throws<ArgumentException>(() => ToolsWire.Request(new ItemRequest(57, null, null, 21, double.NaN)));
     }
 
     [Theory]
@@ -346,6 +373,20 @@ public sealed class ToolRequestParserTests
     [InlineData("item 1628 \"5\"", ToolErrors.BadArgs)]
     [InlineData("item 1628 5 5", ToolErrors.BadArgs)]
     [InlineData("item 1628,1629", ToolErrors.BadArgs)]
+    // item palette and shade (P7, D43): ACE's PaletteTemplate runs 1 to 93 (Undef is 0); a shade is 0 to 1; each is given once, after the stack.
+    [InlineData("item 57 palette=0", ToolErrors.BadArgs)]
+    [InlineData("item 57 palette=94", ToolErrors.BadArgs)]
+    [InlineData("item 57 palette=-1", ToolErrors.BadArgs)]
+    [InlineData("item 57 palette=", ToolErrors.BadArgs)]
+    [InlineData("item 57 palette=gold", ToolErrors.BadArgs)]
+    [InlineData("item 57 palette=21 palette=22", ToolErrors.BadArgs)]
+    [InlineData("item 57 shade=1.01", ToolErrors.BadArgs)]
+    [InlineData("item 57 shade=-0.1", ToolErrors.BadArgs)]
+    [InlineData("item 57 shade=", ToolErrors.BadArgs)]
+    [InlineData("item 57 shade=1e-1", ToolErrors.BadArgs)]
+    [InlineData("item 57 shade=0.3 shade=0.4", ToolErrors.BadArgs)]
+    [InlineData("item 57 palette=21 5", ToolErrors.BadArgs)]
+    [InlineData("item 57 colour=3", ToolErrors.BadArgs)]
     // Ids.
     [InlineData("status #", ToolErrors.BadArgs)]
     [InlineData("status #a_1", ToolErrors.BadArgs)]

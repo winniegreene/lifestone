@@ -44,7 +44,7 @@ public sealed class Spellbook
 
     /// <summary>
     /// The favourite-spell bars in the order the description carries them (ACE sends eight: bar 0 is the first spell tab's bar; the lists hold spell ids in slot order). Empty until the description
-    /// arrives. Nothing sent by the client changes it yet (<c>AddSpellFavorite</c> 0x01E3 and <c>RemoveSpellFavorite</c> 0x01E4 are not sent).
+    /// arrives. Nothing sent by the client changes it: <c>AddSpellFavorite</c> 0x01E3 and <c>RemoveSpellFavorite</c> 0x01E4 show at the next description.
     /// </summary>
     public ImmutableArray<ImmutableArray<uint>> SpellBars { get; private set; } = [];
 
@@ -66,6 +66,60 @@ public sealed class Spellbook
         Filters = message.SpellbookFilters;
         DesiredComponents = message.DesiredComponents.IsDefault ? [] : message.DesiredComponents;
         IsKnown = true;
+    }
+
+    /// <summary>
+    /// Puts a spell on a bar as the client does when it sends AddSpellFavorite (M3 4.2 p1): retail's <c>SpellCastSubMenu::AddSpellToPlayerModule</c> (11.6096 0x004C70B0) asks
+    /// <c>PlayerModule::AddSpellFavorite</c> (0x005D5460) before <c>CM_Character::Event_AddSpellFavorite</c> (0x006A1D90) goes out, so the client's own list changes at once. The rules are ACE's
+    /// (<c>HandleActionAddSpellFavorite</c>, <c>AddSpellToBar</c>): a bar above 7 or a spell the book lacks changes nothing, a spell already on the bar stays where it is, the index is clamped to the bar's length.
+    /// The next PlayerDescription replaces it. Returns true when the bar changed.
+    /// </summary>
+    internal bool AddFavorite(uint spellId, int index, int bar)
+    {
+        if (bar is < 0 or > 7 || spellId == 0 || !Knows(spellId))
+        {
+            return false;
+        }
+
+        var bars = GrowBars(bar);
+        var list = bars[bar].IsDefault ? [] : bars[bar];
+        if (list.Contains(spellId))
+        {
+            return false;
+        }
+
+        bars[bar] = list.Insert(Math.Clamp(index, 0, list.Length), spellId);
+        SpellBars = bars.ToImmutable();
+        return true;
+    }
+
+    /// <summary>
+    /// Takes a spell off a bar as the client does when it sends RemoveSpellFavorite: <c>SpellCastSubMenu::RemoveSpellFromPlayerModule</c> (11.6096 0x004C7000) asks <c>PlayerModule::RemoveSpellFavorite</c>
+    /// (0x005D5A60) before <c>CM_Character::Event_RemoveSpellFavorite</c> (0x006A26B0) goes out; the bar closes up. Returns true when the spell was on the bar.
+    /// </summary>
+    internal bool RemoveFavorite(uint spellId, int bar)
+    {
+        if (bar is < 0 or > 7 || bar >= SpellBars.Length || SpellBars[bar].IsDefault || !SpellBars[bar].Contains(spellId))
+        {
+            return false;
+        }
+
+        var bars = GrowBars(bar);
+        bars[bar] = bars[bar].Remove(spellId);
+        SpellBars = bars.ToImmutable();
+        return true;
+    }
+
+    private ImmutableArray<ImmutableArray<uint>>.Builder GrowBars(int bar)
+    {
+        var bars = ImmutableArray.CreateBuilder<ImmutableArray<uint>>(Math.Max(SpellBars.Length, bar + 1));
+        bars.AddRange(SpellBars);
+        while (bars.Count <= bar)
+        {
+            bars.Add([]);
+        }
+
+        return bars;
     }
 
     /// <summary>Adds a learned spell (0x02C1) with the value 0 as retail does; a spell the book already holds keeps its value. Returns true when the spell was new.</summary>

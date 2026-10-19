@@ -84,19 +84,46 @@ public sealed class GameSelectionTests(DatSetFixture fixture) : IClassFixture<Da
     }
 
     [RequiresLocalDatsFact]
-    public void The_selection_is_off_the_placeholder_note_and_its_display_is_hidden_with_nothing_selected()
+    public void The_selection_is_off_the_placeholder_note_and_its_display_is_the_empty_panel_with_nothing_selected()
     {
         var (rig, screen, selection, _, _) = Enter();
         using var _ = rig;
         Assert.DoesNotContain("selection", screen.Placeholders);
         Assert.Null(screen.PlaceholderNote);
         Assert.Equal(SessionPhase.InWorld, rig.Session.State.Phase);
-        Assert.False(selection.FieldShown);
+        Assert.False(selection.FieldShown); // no selection is showing ...
+        Assert.True(selection.FieldVisible); // ... but the field is drawn, in its base state: retail's blank target panel (P2; HandleSelectionChanged calls the field's SetState with 0)
+        Assert.Equal(0u, selection.FieldState);
         Assert.False(selection.HealthShown);
         Assert.Equal(string.Empty, selection.NameText);
         Assert.Equal(VividTargetState.Hidden, selection.Indicator.State);
         Assert.False(selection.Indicator.OnScreenElement!.Visible);
         Assert.False(selection.Indicator.OffScreenElement!.Visible);
+    }
+
+    [RequiresLocalDatsFact]
+    public void The_empty_panel_is_the_fields_base_image_and_a_selection_moves_it_to_state_0x1000000B()
+    {
+        var (rig, screen, selection, held, _) = Enter();
+        using var _ = rig;
+        var field = screen.Toolbar!.GetChildRecursive(GameSelection.FieldId)!;
+        Assert.True(field.Visible);
+        Assert.Equal(0u, field.State);
+        Assert.Null(field.CurrentStateDesc); // the base state
+        Assert.Contains(field.Desc.BaseState.Media, m => m is Lifestone.Data.Ui.UiImageMedia { File: 0x06001126 });
+        foreach (var id in GameSelection.StackIds)
+        {
+            Assert.False(screen.Toolbar!.GetChildRecursive(id)!.Visible); // TODO(p2-stack-initial)
+        }
+
+        held.Value = Statue;
+        rig.Frame();
+        Assert.Equal(GameSelection.SelectedStateId, field.State);
+        Assert.True(selection.FieldShown);
+        held.Value = 0;
+        rig.Frame();
+        Assert.Equal(0u, field.State);
+        Assert.True(field.Visible);
     }
 
     [RequiresLocalDatsFact]
@@ -148,6 +175,7 @@ public sealed class GameSelectionTests(DatSetFixture fixture) : IClassFixture<Da
         held.Value = 0;
         rig.Frame();
         Assert.False(selection.FieldShown);
+        Assert.True(selection.FieldVisible); // the empty panel stays
         Assert.False(selection.HealthShown);
         Assert.Equal(string.Empty, selection.NameText);
         Assert.Equal(0u, selection.Selected);

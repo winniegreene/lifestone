@@ -18,6 +18,7 @@ public sealed class WorldActionStubTests
     public void A_good_request_is_no_longer_a_stub_it_is_queued_and_sent_or_refused_for_what_the_state_says()
     {
         var r = new WorldActionRig();
+        r.CombatModeIs(CombatModes.Magic); // the stance guard (M3 4.2 p3) refuses a cast outside magic mode
 
         var handles = new[]
         {
@@ -103,6 +104,7 @@ public sealed class WorldActionStubTests
     public void The_kill_switch_refuses_automation_and_leaves_a_person_s_cast_alone()
     {
         var r = new WorldActionRig();
+        r.CombatModeIs(CombatModes.Magic);
         r.Api.KillSwitch = true;
 
         var bot = r.Api.Cast(Spell, ActionSource.Automation);
@@ -121,7 +123,7 @@ public sealed class WorldActionStubTests
         // Appended after ToolItem so the recorded values above stay stable.
         Assert.Equal(ActionKind.ToolItem + 1, ActionKind.CastSpell);
         Assert.Equal(
-            [ActionKind.CastSpell, ActionKind.SetCombatMode, ActionKind.Wield, ActionKind.Unwield, ActionKind.MoveToPack, ActionKind.MergeStack, ActionKind.Suicide, ActionKind.AddSpellFavorite],
+            [ActionKind.CastSpell, ActionKind.SetCombatMode, ActionKind.Wield, ActionKind.Unwield, ActionKind.MoveToPack, ActionKind.MergeStack, ActionKind.Suicide, ActionKind.AddSpellFavorite, ActionKind.RemoveSpellFavorite],
             Enum.GetValues<ActionKind>().Where(k => k > ActionKind.ToolItem));
     }
 

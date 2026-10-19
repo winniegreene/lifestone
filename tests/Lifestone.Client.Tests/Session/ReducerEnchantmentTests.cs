@@ -310,7 +310,7 @@ public sealed class ReducerEnchantmentTests
     }
 
     [Fact]
-    public void A_purge_with_nothing_to_take_changes_nothing()
+    public void A_purge_with_nothing_to_take_changes_nothing_but_the_02C6_is_published_empty()
     {
         var h = Buffed();
         var version = h.State.Version;
@@ -320,8 +320,79 @@ public sealed class ReducerEnchantmentTests
         Send(h, AceM3Writers.MagicPurgeBadEnchantments);
 
         Assert.Equal(138, h.State.Self.Qualities.Enchantments.Length);
-        Assert.Empty(h.Of<EnchantmentChanged>());
+        // TODO(m3-purge-empty) closed: ACE sends 0x02C6 at every death, so an unbuffed player's purge is an event with no spells; the bad-only purge is not.
+        var purged = Assert.Single(h.Of<EnchantmentChanged>());
+        Assert.Equal((EnchantmentChange.Purged, 0, 138), (purged.Change, purged.Spells.Length, purged.Count));
         Assert.Equal(version, h.State.Version);
+    }
+
+    // ------------------------------------------------------------------ "<spell> has expired." (NotifyOfEnchantmentRemoval 11.6096 0x00569460)
+
+    private static ReducerHarness WithNames()
+    {
+        var h = Buffed();
+        h.Reducer.SpellLookup = id => id switch
+        {
+            5000 => WorldActionRig.Spell(5000, DatReaderWriter.Enums.SpellType.Enchantment) with { Name = "Strength Self VII" },
+            666 => WorldActionRig.Spell(666, DatReaderWriter.Enums.SpellType.Enchantment) with { Name = "Vitae" },
+            _ => null,
+        };
+        return h;
+    }
+
+    [Fact]
+    public void An_expiry_removal_prints_the_spell_name_in_the_magic_type()
+    {
+        var h = WithNames();
+        Send(h, (p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, Health(5000, 1, 300, 300, 22f)));
+        h.ClearEvents();
+        var before = h.State.Chat.Count;
+
+        Send(h, (p, s) => AceM3Writers.MagicRemoveEnchantment(p, s, 5000, 1));
+
+        Assert.Equal(before + 1, h.State.Chat.Count);
+        var line = h.State.Chat[before];
+        Assert.Equal((ChatKind.Notice, 7u, "Strength Self VII has expired."), (line.Kind, line.ChatType, line.Text));
+        Assert.True(Lifestone.Client.RetailUi.Chat.ChatLineText.TryFormat(line, 1, out var type, out _));
+        Assert.Equal(7, type);
+    }
+
+    [Fact]
+    public void A_dispel_prints_no_expiry_line()
+    {
+        var h = WithNames();
+        Send(h, (p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, Health(5000, 1, 300, 300, 22f)));
+        var before = h.State.Chat.Count;
+
+        Send(h, (p, s) => AceM3Writers.MagicDispelEnchantment(p, s, 5000, 1));
+
+        Assert.Equal(before, h.State.Chat.Count);
+    }
+
+    [Fact]
+    public void A_spell_the_table_lacks_prints_nothing_and_is_logged_once()
+    {
+        var h = WithNames();
+        var before = h.State.Chat.Count;
+        Send(h, (p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, Health(5100, 1, 301, 300, 22f)));
+        Send(h, (p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, Health(5101, 1, 302, 300, 22f)));
+        Send(h, (p, s) => AceM3Writers.MagicRemoveEnchantment(p, s, 5100, 1));
+        Send(h, (p, s) => AceM3Writers.MagicRemoveEnchantment(p, s, 5101, 1));
+
+        Assert.Equal(before, h.State.Chat.Count);
+        Assert.Equal(1, h.Log.Entries.Count(entry => entry.Message.Contains("TODO(m3-enchant-expiry-name)", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void The_vitae_expiry_says_penalty()
+    {
+        var h = WithNames();
+        Send(h, (p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, Ench(666, 1, 0, 1, VitaeType, 0, 0.95f)));
+        var before = h.State.Chat.Count;
+
+        Send(h, (p, s) => AceM3Writers.MagicRemoveEnchantment(p, s, 666, 1));
+
+        Assert.Equal("Vitae penalty has expired.", h.State.Chat[before].Text);
     }
 
     [Fact]

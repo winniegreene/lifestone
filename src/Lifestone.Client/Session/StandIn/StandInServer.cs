@@ -105,6 +105,12 @@ public sealed class StandInServer
     /// <summary>True while the lifestone protection holds.</summary>
     public bool UnderProtection => World().UnderProtection;
 
+    /// <summary>
+    /// Dispels the lifestone protection as a teleport does (<c>Player_Location.cs</c> 702-703, <c>LifestoneProtectionDispel</c>: the 0x028A-less system line "Your actions have dispelled the Lifestone's magic!"). The live death
+    /// scenario's den teleport does this before the tuskers come; the offline whole-death check has no den teleport, so it calls this once before its scenario, with the protection of the check's own earlier death.
+    /// </summary>
+    public void DispelProtectionAsATeleportDoes() => World().DispelProtectionOnTeleport();
+
     /// <summary>True once a lifestone bound the player (the death's teleport then goes to it; before, to the visit's start).</summary>
     public bool Bound => World().Sanctuary is not null;
 

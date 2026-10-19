@@ -21,7 +21,7 @@ namespace Lifestone.Client.RetailUi.Widgets;
 /// 0x10000052; then retail sets the selected object, and a container list opens the item in its child list), the double left button uses it (a pack: wield, <see cref="ItemActivated"/>), the right button examines it.
 /// Retail's selection is the player's one selected object; here a list keeps its own (<c>TODO(m3-selected-object)</c>) and tells the owner. No drag and drop (D13: the runtime has none; the drag handlers, drop release,
 /// drag scrolling and <c>AcceptDragObject</c> are not built), no vendor, salvage or shortcut list, no use of a double-clicked item (<c>TODO(m3-itemlist-use)</c>), no examination (<c>TODO(m3-itemlist-examine)</c>), no
-/// empty-slot fill of a list that grows (<c>UpdateEmptySlots</c> 0x004E3700, <c>TODO(m3-itemlist-empty-fill)</c>: no M3 page has one) and no cache of removed cells (nothing removes one).
+/// empty-slot fill of a list that grows (<c>UpdateEmptySlots</c> 0x004E4390, <c>TODO(m3-itemlist-empty-fill)</c>: no M3 page has one) and no cache of removed cells (nothing removes one).
 /// </para>
 /// </remarks>
 public class UiItemList : UiListBox

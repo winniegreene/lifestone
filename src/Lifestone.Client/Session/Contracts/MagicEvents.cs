@@ -45,6 +45,9 @@ public enum SpellbookChange
 
     /// <summary>A spell was learned (GameEvent 0x02C1).</summary>
     Learned,
+
+    /// <summary>The client put a spell on a bar or took one off (it sent AddSpellFavorite or RemoveSpellFavorite; M3 4.2 p1). The next description replaces the bars.</summary>
+    Favorites,
 }
 
 /// <summary>

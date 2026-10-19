@@ -388,6 +388,80 @@ public sealed class ReducerCombatTests
         Assert.Equal(DeathNoticeSource.PlayerKilledBroadcast, h.Of<PlayerDied>()[3].Source);
     }
 
+    // ---- the auto-target (ClientCombatSystem::AutoTarget, 11.6096 0x0056C9D0): raised for 0x01B2 and 0x01B4 in melee or missile mode with the option on
+
+    private static (ReducerHarness H, uint Drudge) WithDrudge(int? mode, uint options = PlayerQualities.AutoTargetOption)
+    {
+        var h = InWorld();
+        h.Reducer.OnPlayerDescription(h.Context, new GameEventHeader(Player, 1, GameEventTypes.PlayerDescription), new PlayerDescriptionMsg { Options1 = options, Options2 = 0 });
+        const uint drudge = 0x80000B01;
+        h.Reducer.OnCreateObject(h.Context, ReducerHarness.Create(drudge, ReducerHarness.Stamps(), ReducerHarness.Position(0x860201AD, 12, 20, 30), name: "Drudge"), isUpdate: false);
+        if (mode is { } m)
+        {
+            SetMode(h, 5, m);
+        }
+
+        Assert.Equal((mode ?? 0, options), (h.State.Self.Qualities.CombatMode, h.State.Self.Qualities.CharacterOptions1));
+        h.ClearEvents();
+        return (h, drudge);
+    }
+
+    [Theory]
+    [InlineData(CombatModes.Melee)]
+    [InlineData(CombatModes.Missile)]
+    public void A_defender_or_evasion_notice_in_a_melee_or_missile_mode_asks_for_the_attacker_to_be_auto_targeted(int mode)
+    {
+        var (h, drudge) = WithDrudge(mode);
+        Send(h, AceM3Writers.DefenderNotification(Player, 10, "Drudge", Slash, 0.3, 14, 4, false, 0));
+        Assert.Equal(new AutoTargetRequested(drudge), Assert.Single(h.Of<AutoTargetRequested>()));
+        h.ClearEvents();
+        Send(h, AceM3Writers.EvasionDefenderNotification(Player, 11, "Drudge"));
+        Assert.Equal(new AutoTargetRequested(drudge), Assert.Single(h.Of<AutoTargetRequested>()));
+    }
+
+    [Theory]
+    [InlineData(CombatModes.NonCombat)]
+    [InlineData(CombatModes.Magic)]
+    public void The_auto_target_is_not_asked_for_in_peace_or_magic_mode_or_with_the_option_off(int mode)
+    {
+        var (h, _) = WithDrudge(mode);
+        Send(h, AceM3Writers.DefenderNotification(Player, 10, "Drudge", Slash, 0.3, 14, 4, false, 0));
+        Assert.Empty(h.Of<AutoTargetRequested>());
+
+        var (off, _) = WithDrudge(CombatModes.Melee, options: 0);
+        Send(off, AceM3Writers.DefenderNotification(Player, 10, "Drudge", Slash, 0.3, 14, 4, false, 0));
+        Assert.Empty(off.Of<AutoTargetRequested>());
+    }
+
+    [Fact]
+    public void An_attacker_the_table_does_not_know_asks_with_no_id_and_logs_the_selectnext_todo()
+    {
+        var (h, _) = WithDrudge(CombatModes.Melee);
+        Send(h, AceM3Writers.DefenderNotification(Player, 10, "Unknown Thing", Slash, 0.3, 14, 4, false, 0));
+        Assert.Equal(new AutoTargetRequested(0), Assert.Single(h.Of<AutoTargetRequested>()));
+        Assert.Contains(h.Log.Lines, l => l.Contains("TODO(m3-autotarget-selectnext)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_selection_takes_the_auto_targeted_attacker_only_when_nothing_is_selected()
+    {
+        var (h, drudge) = WithDrudge(CombatModes.Melee);
+        using var selection = new Lifestone.Client.Play.ObjectSelection();
+        selection.Attach(h.Bus);
+        Send(h, AceM3Writers.DefenderNotification(Player, 10, "Drudge", Slash, 0.3, 14, 4, false, 0));
+        Assert.Equal(drudge, selection.Selected); // combat mode, nothing selected: the attacker
+
+        selection.Select(0x80000B02);
+        Send(h, AceM3Writers.DefenderNotification(Player, 11, "Drudge", Slash, 0.3, 14, 4, false, 0));
+        Assert.Equal(0x80000B02u, selection.Selected); // something selected: no change
+
+        var (peace, _) = WithDrudge(CombatModes.NonCombat);
+        using var peaceSelection = new Lifestone.Client.Play.ObjectSelection();
+        peaceSelection.Attach(peace.Bus);
+        Send(peace, AceM3Writers.DefenderNotification(Player, 10, "Drudge", Slash, 0.3, 14, 4, false, 0));
+        Assert.Equal(0u, peaceSelection.Selected); // peace: no select
+    }
+
     // ---- 0x02CD for the combat mode
 
     private static void SetMode(ReducerHarness h, byte sequence, int mode) =>

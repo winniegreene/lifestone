@@ -178,7 +178,7 @@ public partial class GameServices : Node
         {
             var dats = DatSet.Open(Options.DatDirectory);
             Dats = dats;
-            Textures = new TextureLoader(dats);
+            Textures = new TextureLoader(dats) { OverrideFallback = message => Log.Warn("textures", message) };
             GfxObjMeshes = new GfxObjMeshCache(dats);
             Setups = new SetupCache(dats, GfxObjMeshes);
             CellStructures = new CellStructureLibrary(dats);

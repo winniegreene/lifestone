@@ -19,6 +19,11 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <param name="FightFrameMaxMs">The slowest frame of the whole fight (<c>fight_frame_max_ms</c>; judged against the 75 ms limit since 3.2), or null.</param>
 /// <param name="BsdMinFps">The lowest frames per second sampled in the den (<c>bsd_min_fps</c>, report-only), or null.</param>
 /// <param name="FightSeconds">How long the fight lasted (<c>fight_s</c>, report-only), or null.</param>
+/// <param name="BoltLight">A projectile's light was in the dynamic-light frame for at least 90% of its flight (<c>bolt_light</c>, M3 4.1; <see cref="LightFrameSampler"/>), or null when not sampled.</param>
+/// <param name="DynamicLightsMax">The most dynamic lights in one frame (<c>dyn_lights_max</c>, report-only), or null.</param>
+/// <param name="ViewerLight">The viewer light was in the last frame (<c>viewer_light=on|off</c>; judged since M3 4.2: off fails), or null.</param>
+/// <param name="BlockedPicks">The picks the clear-line rule skipped (<c>blocked_picks</c>, report-only in M3 4.2).</param>
+/// <param name="WallHits">The bolts that exploded short of the target with no damage line (<c>wall_hits</c>, report-only in M3 4.2).</param>
 public readonly record struct FightLegMeasures(
     int Kills,
     long DamageDealt,
@@ -32,11 +37,16 @@ public readonly record struct FightLegMeasures(
     double? CastFrameMaxMs,
     double? FightFrameMaxMs,
     double? BsdMinFps,
-    double? FightSeconds);
+    double? FightSeconds,
+    bool? BoltLight = null,
+    int? DynamicLightsMax = null,
+    bool? ViewerLight = null,
+    int BlockedPicks = 0,
+    int WallHits = 0);
 
 /// <summary>
 /// The fight leg's verdict (<c>--login-check=bsd-fight</c>, M3 3.1 s0): composed from the scenario's failure (or null) and the measures, so it is built and tested without Godot. The line is
-/// <c>bsd-fight done ok=&lt;true|false&gt; kills= damage_dealt= spells_cast= misses= xp_gained= damage_taken= hits_taken= evades= projectiles= cast_frame_max_ms= fight_frame_max_ms= bsd_min_fps= fight_s=[ frame_over_50=yes]</c>
+/// <c>bsd-fight done ok=&lt;true|false&gt; kills= damage_dealt= spells_cast= misses= blocked_picks= wall_hits= xp_gained= damage_taken= hits_taken= evades= projectiles= cast_frame_max_ms= fight_frame_max_ms= bsd_min_fps= fight_s= bolt_light=yes|no dyn_lights_max= viewer_light=on|off[ frame_over_50=yes]</c>
 /// (no name, no account), logged under the <c>logincheck</c> category.
 /// </summary>
 /// <remarks>
@@ -56,7 +66,8 @@ public static class FightLegVerdict
     /// <summary>Composes the leg's verdict from the scenario's failure and the measures.</summary>
     /// <param name="failure">The scenario's or the runner's failure, or null when there was none.</param>
     /// <param name="measures">What the tally and the game measured.</param>
-    public static FightLegOutcome Compose(string? failure, in FightLegMeasures measures)
+    /// <param name="judgeBoltLight">True offline (the stand-in's fight is deterministic): <c>bolt_light=no</c> fails the run. The live leg leaves it report-only in this gate.</param>
+    public static FightLegOutcome Compose(string? failure, in FightLegMeasures measures, bool judgeBoltLight = false)
     {
         var problems = new List<string>();
         if (!string.IsNullOrEmpty(failure))
@@ -76,15 +87,33 @@ public static class FightLegVerdict
 
         AddFrameProblem(problems, "cast_frame_max_ms", measures.CastFrameMaxMs);
         AddFrameProblem(problems, "fight_frame_max_ms", measures.FightFrameMaxMs);
+        // M3 4.2 P4: judged in every leg (the 4.1 gate was report-only). n/a (no flight of MinFlightFrames frames, or no frames sampled) passes live; offline, the deterministic stand-in must show yes.
+        if (measures.BoltLight == false || (judgeBoltLight && measures.BoltLight != true))
+        {
+            problems.Add("bolt_light=" + (measures.BoltLight is null ? "n/a" : "no") + " (a projectile's light in the frame for at least 90% of its flight expected)");
+        }
+
+        if (measures.ViewerLight == false)
+        {
+            problems.Add("viewer_light=off (the viewer light is on by default, SmartBox::set_viewer 11.6096 0x00454640: on expected)");
+        }
+
         var over50 = IsOver(measures.CastFrameMaxMs, FrameWarnMs) || IsOver(measures.FightFrameMaxMs, FrameWarnMs);
 
         var ok = problems.Count == 0;
         var inv = CultureInfo.InvariantCulture;
         var line = string.Create(
             inv,
-            $"bsd-fight done ok={(ok ? "true" : "false")} kills={measures.Kills} damage_dealt={measures.DamageDealt} spells_cast={measures.SpellsCast} misses={measures.Misses} xp_gained={measures.XpGained} damage_taken={measures.DamageTaken} hits_taken={measures.HitsTaken} evades={measures.Evades} projectiles={(measures.Projectiles is { } p ? p.ToString(inv) : "n/a")} cast_frame_max_ms={Ms(measures.CastFrameMaxMs)} fight_frame_max_ms={Ms(measures.FightFrameMaxMs)} bsd_min_fps={Ms(measures.BsdMinFps)} fight_s={(measures.FightSeconds is { } s && !double.IsNaN(s) ? Math.Floor(s).ToString("0", inv) : "n/a")}{(over50 ? " frame_over_50=yes" : string.Empty)}");
+            $"bsd-fight done ok={(ok ? "true" : "false")} kills={measures.Kills} damage_dealt={measures.DamageDealt} spells_cast={measures.SpellsCast} misses={measures.Misses} blocked_picks={measures.BlockedPicks} wall_hits={measures.WallHits} xp_gained={measures.XpGained} damage_taken={measures.DamageTaken} hits_taken={measures.HitsTaken} evades={measures.Evades} projectiles={(measures.Projectiles is { } p ? p.ToString(inv) : "n/a")} cast_frame_max_ms={Ms(measures.CastFrameMaxMs)} fight_frame_max_ms={Ms(measures.FightFrameMaxMs)} bsd_min_fps={Ms(measures.BsdMinFps)} fight_s={(measures.FightSeconds is { } s && !double.IsNaN(s) ? Math.Floor(s).ToString("0", inv) : "n/a")}{LightFields(measures)}{(over50 ? " frame_over_50=yes" : string.Empty)}");
         return new FightLegOutcome(ok, line, problems);
     }
+
+    // A run that sampled no lights (the three are null) prints none of the three fields.
+    private static string LightFields(in FightLegMeasures m) =>
+        m.BoltLight is null && m.DynamicLightsMax is null && m.ViewerLight is null ? string.Empty :
+        " bolt_light=" + (m.BoltLight is { } b ? (b ? "yes" : "no") : "n/a")
+        + " dyn_lights_max=" + (m.DynamicLightsMax is { } d ? d.ToString(CultureInfo.InvariantCulture) : "n/a")
+        + " viewer_light=" + (m.ViewerLight is { } v ? (v ? "on" : "off") : "n/a");
 
     private static bool IsOver(double? value, double limit) => value is { } v && !double.IsNaN(v) && v > limit;
 

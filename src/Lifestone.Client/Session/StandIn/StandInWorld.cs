@@ -41,7 +41,7 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
             or Contracts.ActionKind.Use or Contracts.ActionKind.QueryHealth or Contracts.ActionKind.LogOff or Contracts.ActionKind.Talk
             or Contracts.ActionKind.RaiseAttribute or Contracts.ActionKind.RaiseVital or Contracts.ActionKind.RaiseSkill or Contracts.ActionKind.TrainSkill
             or Contracts.ActionKind.CastSpell or Contracts.ActionKind.SetCombatMode or Contracts.ActionKind.Wield or Contracts.ActionKind.Unwield or Contracts.ActionKind.MoveToPack
-            or Contracts.ActionKind.MergeStack or Contracts.ActionKind.Suicide or Contracts.ActionKind.AddSpellFavorite;
+            or Contracts.ActionKind.MergeStack or Contracts.ActionKind.Suicide or Contracts.ActionKind.AddSpellFavorite or Contracts.ActionKind.RemoveSpellFavorite;
 
     private OutboundTicket Ticket() => new(0, _reducer.Clock.Time.GetTimestamp());
 

@@ -193,11 +193,11 @@ public sealed class FightLegRunnerTests
     [Fact]
     public void The_plan_names_the_three_frames_and_their_files()
     {
-        Assert.Equal(["bolt", "hit", "kill"], FightShotPlan.Names);
+        Assert.Equal(["bolt", "hit", "kill", "viewer", "first"], FightShotPlan.Names);
         Assert.Equal("cache/m3/3-1/fight-bolt.png", FightShotPlan.ShotPath("cache/m3/3-1/fight.png", 0).Replace('\\', '/'));
         Assert.Equal("cache/m3/3-1/fight-hit.png", FightShotPlan.ShotPath("cache/m3/3-1/fight.png", 1).Replace('\\', '/'));
         Assert.Equal("fight-kill.png", FightShotPlan.ShotPath("fight", 2));
-        Assert.Equal([0.15, 0.1, 0.5], FightShotPlan.DelaysSeconds);
+        Assert.Equal([0.15, 0.1, 0.5, 0.0, 0.15], FightShotPlan.DelaysSeconds);
     }
 
     [Fact]
@@ -205,6 +205,7 @@ public sealed class FightLegRunnerTests
     {
         var p = new FightShotPlan();
         p.Begin(projectilesCreated: 4, projectileExplodes: 7, damageLines: 2, kills: 0);
+        p.MarkFailed(4, "the first-bolt frame is not under test here");
         var t = 100.0;
         Assert.Equal(-1, p.Step(t, 4, 7, 2, 0)); // nothing rose
         Assert.False(p.Owed);
@@ -237,10 +238,33 @@ public sealed class FightLegRunnerTests
     }
 
     [Fact]
+    public void The_first_frame_is_due_at_the_first_projectile_created_whatever_it_hits()
+    {
+        var p = new FightShotPlan();
+        p.Begin(projectilesCreated: 4, projectileExplodes: 0, damageLines: 0, kills: 0);
+        var t = 50.0;
+        Assert.Equal(-1, p.Step(t, 4, 0, 0, 0));
+        var triggered = t += Frame;
+        Assert.Equal(-1, p.Step(triggered, 5, 0, 0, 0)); // created, no damage line: the bolt slot waits for one, this slot does not
+        var due = -1;
+        for (var i = 0; i < 100 && due < 0; i++)
+        {
+            due = p.Step(t += Frame, 5, 0, 0, 0);
+        }
+
+        Assert.Equal(4, due);
+        Assert.Equal("first", FightShotPlan.Names[due]);
+        Assert.True(t >= triggered + 0.15);
+        p.MarkTaken(due);
+        Assert.Equal(-1, p.Step(t += Frame, 6, 0, 0, 0)); // once
+    }
+
+    [Fact]
     public void An_explode_on_a_wall_gives_no_hit_frame_and_an_explode_with_a_damage_line_does_in_either_order()
     {
         var p = new FightShotPlan();
         p.Begin(0, 0, 0, 0);
+        p.MarkFailed(4, "the first-bolt frame is not under test here");
         var t = 10.0;
         p.Step(t, 1, 1, 0, 0); // a bolt exploded on a wall: no damage line follows
         for (var i = 0; i < 180; i++) // three seconds later
@@ -281,12 +305,14 @@ public sealed class FightLegRunnerTests
     {
         var late = new FightShotPlan();
         late.Begin(0, 0, 0, 0);
+        late.MarkFailed(4, "the first-bolt frame is not under test here");
         late.Step(1.0, 0, 0, 1, 0); // a damage line
         late.Step(1.0 + FightShotPlan.PairSeconds + 0.5, 0, 1, 1, 0); // an Explode too late to be its hit
         Assert.False(late.Owed);
 
         var p = new FightShotPlan();
         p.Begin(0, 0, 0, 0);
+        p.MarkFailed(4, "the first-bolt frame is not under test here");
         p.Step(1.0, 0, 0, 1, 0);
         p.Step(1.5, 0, 1, 1, 0); // the Explode 0.5 s after the damage line
         Assert.True(p.Owed);
@@ -297,6 +323,7 @@ public sealed class FightLegRunnerTests
     {
         var p = new FightShotPlan();
         p.Begin(0, 0, 0, 0);
+        p.MarkFailed(4, "the first-bolt frame is not under test here");
         var t = 10.0;
         p.Step(t, 0, 1, 1, 1); // the hit and the kill triggers at once (the bolt waits for a projectile created after the damage line)
         p.Step(t += Frame, 1, 1, 1, 1); // the bolt's trigger
@@ -321,6 +348,7 @@ public sealed class FightLegRunnerTests
     {
         var p = new FightShotPlan();
         p.Begin(0, 0, 0, 0);
+        p.MarkFailed(4, "the first-bolt frame is not under test here");
         var t = 0.0;
         p.Step(t, 0, 0, 1, 0); // the first damage line
         p.Step(t += Frame, 1, 0, 1, 0); // the bolt created after it
@@ -347,6 +375,7 @@ public sealed class FightLegRunnerTests
 
         var p = new FightShotPlan();
         p.Begin(0, 0, 0, 0);
+        p.MarkFailed(4, "the first-bolt frame is not under test here");
         p.Step(0, 0, 0, 0, 1);
         p.MarkFailed(2, "the frame could not be saved");
         Assert.False(p.Owed);
@@ -358,6 +387,7 @@ public sealed class FightLegRunnerTests
     {
         var p = new FightShotPlan();
         p.Begin(0, 0, 0, 0);
+        p.MarkFailed(4, "the first-bolt frame is not under test here");
         var t = 0.0;
         for (var i = 0; i < 100; i++)
         {

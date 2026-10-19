@@ -187,6 +187,7 @@ internal sealed class ReducerHarness
         Track<InventoryFailed>();
         Track<CombatEvent>();
         Track<CombatModeChanged>();
+        Track<AutoTargetRequested>();
         Track<PlayerDied>();
         Track<PlayerKilledSomething>();
         Track<MessageDropped>();

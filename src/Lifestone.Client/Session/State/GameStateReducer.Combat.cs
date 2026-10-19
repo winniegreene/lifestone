@@ -21,6 +21,7 @@ internal sealed partial class GameStateReducer
     private double _lastDeathAt = double.NegativeInfinity;
     private DeathNoticeSource _lastDeathSource;
     private bool _killerNoticeLogged;
+    private bool _autoTargetNoAttackerLogged;
 
     /// <summary>
     /// GameEvent 0x01AC VictimNotification: <c>ClientCombatSystem::HandleVictimNotificationEvent</c> (11.6096 0x0056D160): the server's text, chat type 0, nothing for an empty text. Then
@@ -61,14 +62,14 @@ internal sealed partial class GameStateReducer
 
     /// <summary>
     /// GameEvent 0x01B2 DefenderNotification: <c>ClientCombatSystem::HandleDefenderNotificationEvent</c> (11.6096 0x0056D670), chat type 0x15: "Drudge slashes your head for 5 points of
-    /// slashing damage!" (<see cref="CombatText.Defend"/>), then a <see cref="CombatEvent"/>. TODO(m3-combat-autotarget): retail then asks <c>ClientCombatSystem::AutoTarget</c> to select the
-    /// attacker when the player is in a combat mode and has nothing selected; that is selection behaviour for the UI slices.
+    /// slashing damage!" (<see cref="CombatText.Defend"/>), then a <see cref="CombatEvent"/>. Then, as retail, <see cref="RequestAutoTarget"/>.
     /// </summary>
     public void OnDefenderNotification(in InboundContext context, in GameEventHeader header, in DefenderNotificationEvent message)
     {
         var text = CombatText.Defend(message.AttackerName, message.DamageType, message.Percent, message.Damage, message.DamageLocation, message.CriticalHit, message.AttackConditions);
         AddChat(new ChatLine(_clock.Now, ChatKind.System, CombatChatTypes.CombatEnemy, null, 0, text));
         Publish(new CombatEvent(CombatEventKind.DefenseHit, message.AttackerName, message.DamageType, message.Damage, message.Percent, message.CriticalHit, unchecked((int)message.DamageLocation), false, message.AttackConditions, text));
+        RequestAutoTarget(message.AttackerName);
     }
 
     /// <summary>
@@ -84,13 +85,43 @@ internal sealed partial class GameStateReducer
 
     /// <summary>
     /// GameEvent 0x01B4 EvasionDefenderNotification: <c>ClientCombatSystem::HandleEvasionDefenderNotificationEvent</c> (11.6096 0x0056D370), chat type 0x15: "You evaded X!", then a
-    /// <see cref="CombatEvent"/>. TODO(m3-combat-autotarget): retail also auto-targets here, as for 0x01B2.
+    /// <see cref="CombatEvent"/>. Then <see cref="RequestAutoTarget"/>, as for 0x01B2.
     /// </summary>
     public void OnEvasionDefenderNotification(in InboundContext context, in GameEventHeader header, in EvasionDefenderNotificationEvent message)
     {
         var text = "You evaded " + message.AttackerName + "!";
         AddChat(new ChatLine(_clock.Now, ChatKind.System, CombatChatTypes.CombatEnemy, null, 0, text));
         Publish(new CombatEvent(CombatEventKind.DefenseEvaded, message.AttackerName, 0, 0, 0, false, -1, true, 0, text));
+        RequestAutoTarget(message.AttackerName);
+    }
+
+    /// <summary>
+    /// Retail's handlers for 0x01B2 and 0x01B4 call <c>ClientCombatSystem::AutoTarget</c> (11.6096 0x0056C9D0) when the combat mode is melee or missile (not magic) and
+    /// <c>PlayerModule::AutoTarget</c> (0x005D3E90) is on, and only when nothing is selected; the selection checks the last, so this raises <see cref="AutoTargetRequested"/> with the
+    /// attacker. Retail takes the attacker from the player's CurrentAttacker instance id (ACE's private update, not decoded: <c>TODO(m3-autotarget-attacker-id)</c>), here the nearest
+    /// object of the notice's name. Retail's check that the object exists and one more flag test on it are not read (<c>TODO(m3-autotarget-attacker-flag)</c>).
+    /// </summary>
+    private void RequestAutoTarget(string attackerName)
+    {
+        var q = _state.Self.Qualities;
+        if ((q.CombatMode != CombatModes.Melee && q.CombatMode != CombatModes.Missile) || !q.AutoTarget)
+        {
+            return;
+        }
+
+        uint attacker = 0;
+        if (_state.Objects.TryGet(_state.Self.Guid, out var self) && self.Position is { } at)
+        {
+            _state.Objects.NearestNamed(attackerName, at, _state.Self.Guid, out attacker);
+        }
+
+        if (attacker == 0 && !_autoTargetNoAttackerLogged)
+        {
+            _autoTargetNoAttackerLogged = true;
+            _log.Info(SessionLog.Category, "TODO(m3-autotarget-selectnext): no object of the attacker's name is known; retail selects the closest compass item then, nothing is selected here");
+        }
+
+        Publish(new AutoTargetRequested(attacker));
     }
 
     /// <summary>

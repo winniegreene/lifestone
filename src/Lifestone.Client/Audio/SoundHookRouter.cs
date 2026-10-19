@@ -1,3 +1,4 @@
+using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Avatars;
 using Lifestone.Data.Animation;
 using Lifestone.Data.Effects;
@@ -42,6 +43,8 @@ namespace Lifestone.Client.Audio;
 public sealed class SoundHookRouter(ISoundSink sink) : IEffectEventSink, ISoundVoiceCounter
 {
     private readonly RetailSoundPlayer? _player = sink as RetailSoundPlayer;
+
+    private bool _footstepTodoLogged;
 
     /// <summary>DatReaderWriter's <c>Sound.Footstep1</c>.</summary>
     public const uint Footstep1 = 55;
@@ -128,6 +131,13 @@ public sealed class SoundHookRouter(ISoundSink sink) : IEffectEventSink, ISoundV
                 {
                     PlayerFootsteps++;
                     PlayerFootstepsSounded += sounded;
+                    if (sounded == 0 && !_footstepTodoLogged && _player is { } player && player.Log.IsEnabled(LogSeverity.Warning))
+                    {
+                        _footstepTodoLogged = true;
+                        player.Log.Warn(
+                            "audio",
+                            $"TODO(footstep-sound-table): the player's Footstep hook (sound type {effectEvent.Hook switch { SoundTableHook table => table.SoundType, _ => 0u }}) found no wave in its sound table 0x{soundTableId:X8}; the human table has no variant for types 55 and 56 and retail reads the object's own table only (SoundTableHook::Execute 0x005276B0 -> CSoundTable::Lookup 0x00552D20), so the player's footsteps are silent; whether ACE gives the player another table is to be confirmed live by a read-only SELECT. Logged once");
+                    }
                 }
 
                 break;

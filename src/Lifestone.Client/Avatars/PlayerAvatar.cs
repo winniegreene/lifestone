@@ -50,6 +50,18 @@ public sealed class PlayerAvatar
     /// <summary>The first-person camera is on: the body is not drawn (its held items are).</summary>
     public bool FirstPerson { get; set; }
 
+    /// <summary>
+    /// The camera's translucency for the player and the items it holds this frame (0 solid, 1 not drawn; <c>CameraPose.PlayerTranslucency</c>), applied by the avatar set to
+    /// every part as a floor under the part's own (<see cref="FirstPersonFade"/>). Reset it each frame; clamped to 0..1.
+    /// </summary>
+    public float CameraTranslucency
+    {
+        get => _cameraTranslucency;
+        set => _cameraTranslucency = FirstPersonFade.Clamp(value);
+    }
+
+    private float _cameraTranslucency;
+
     /// <summary>The player's position: the body's when bound, else the avatar's.</summary>
     public CellFrame Position => BoundBody?.Position ?? Body.Position;
 

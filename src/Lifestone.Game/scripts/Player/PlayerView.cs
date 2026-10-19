@@ -39,7 +39,7 @@ namespace Lifestone.Game.Player;
 /// <para><b>Translucency (D45, D63; closes <c>TODO(g5-translucency)</c> for the materialise fade).</b> <c>INSTANCE_CUSTOM.w</c> scales the alpha of blended parts. An opaque part
 /// has no blend to scale, so each part has a second batch (<c>PartFadeNN</c>) holding the blended twin of its mesh (<see cref="ActorMeshLibrary.FadeOf"/>: surfaces drawn
 /// SRCALPHA/INVSRCALPHA, no alpha test, no depth write, as retail draws a part with a translucency material); the part is an instance of that batch while its translucency is
-/// strictly between 0 and 1 and of the opaque one otherwise, in exactly one of the two in every frame. Offline the character is never translucent.</para>
+/// strictly between 0 and 1 and of the opaque one otherwise, in exactly one of the two in every frame. The camera's first-person fade comes in the same way: the avatar set floors every part's translucency with the camera's (<c>FirstPersonFade</c>), so this path draws it unchanged (<see cref="AppliedTranslucency"/> reads it back).</para>
 /// <para>Main thread only.</para>
 /// </remarks>
 public sealed partial class PlayerView : Node3D
@@ -94,6 +94,12 @@ public sealed partial class PlayerView : Node3D
     /// <summary>Parts of this frame that wanted the blended twin and were drawn solid in the opaque batch because the mesh had none (<c>TODO(g5-translucency-twin)</c>); 0 when the fade is drawn.</summary>
     public int SolidFadingParts { get; private set; }
 
+    /// <summary>
+    /// The translucency written to the drawn instances' <c>INSTANCE_CUSTOM.w</c> this frame: the largest over the drawn parts, or 1 when the character is not drawn (the camera's fade at 1, first person, a hidden cell). The first-person fade
+    /// check reads it (the camera's translucency reaches the parts through the avatar set, <c>FirstPersonFade</c>).
+    /// </summary>
+    public float AppliedTranslucency { get; private set; } = 1f;
+
     /// <summary>True once any frame drew a fading part solid for want of its twin (<c>TODO(g5-translucency-twin)</c> was logged); the fade checks fail on it.</summary>
     public bool TwinMissing => _translucencyLogged;
 
@@ -108,6 +114,23 @@ public sealed partial class PlayerView : Node3D
 
     /// <summary>Lights in the player's light set this frame (diagnostics).</summary>
     public int LightCount { get; private set; }
+
+    /// <summary>
+    /// The frame's dynamic lights (<c>AvatarSet.DynamicLightFrame</c>, filled by the avatars' advance before this view updates): the bolts, the creatures' own lights and the viewer light. They go ahead of the
+    /// cell's static lights in the player's row (<c>Render::minimize_object_lighting</c> 11.6096 0x0054E090). Null: the static lights alone.
+    /// </summary>
+    public DynamicLightFrame? DynamicLights { get; set; }
+
+    private bool _outdoorLightsLogged;
+
+    /// <summary>Light <paramref name="index"/> of the player's row as the shader gets it (Godot world position, reach, radiance); false past the row's lights. The play-checks judge the row by it.</summary>
+    public bool TryReadLight(int index, out AcVector3 position, out float reach, out AcVector3 radiance)
+    {
+        position = default;
+        reach = 0f;
+        radiance = default;
+        return _lightRow >= 0 && _lightTable.TryReadLight(_lightRow, index, out position, out reach, out radiance);
+    }
 
     /// <summary>Distinct mesh variants held by the two libraries (diagnostics).</summary>
     public int MeshCount => (_outdoor?.Count ?? 0) + (_indoor?.Count ?? 0);
@@ -149,6 +172,7 @@ public sealed partial class PlayerView : Node3D
         _lastOffset = offset;
         if (!TryFindPlayer(frame, out var draw) || !draw.Visible || draw.Translucency >= 1f)
         {
+            AppliedTranslucency = 1f;
             HideAll(); // fully translucent (translucency 1) is invisible, as ServerObjectsLayer treats it (wave 3, dod-6-7-2; the fade itself is drawn by the twin batches below)
             return;
         }
@@ -156,6 +180,7 @@ public sealed partial class PlayerView : Node3D
         var inCell = draw.InEnvCell;
         if (inCell && (_interiors is null || !_interiors.IsCellShown(draw.CellId)))
         {
+            AppliedTranslucency = 1f;
             HideAll();
             return;
         }
@@ -171,12 +196,19 @@ public sealed partial class PlayerView : Node3D
 
         var slot = inCell ? _interiors!.SlotOf(draw.CellId) : 0;
         var lightRow = inCell ? WriteLights(draw, height, radius) : ReleaseLights();
+        if (!inCell && !_outdoorLightsLogged && DynamicLights is { Count: > 0 })
+        {
+            _outdoorLightsLogged = true;
+            Log.Warn("play", "TODO(m3-dynamic-lights-outdoors): outdoors the object shader takes no light row (the sun lights it), so the dynamic lights (a bolt, the viewer light) reach the player in cells only; retail's outdoor condition for them is not read yet");
+        }
+
         var layers = inCell ? InteriorController.CellsLayerMask : 1u;
         var translucency = frame.PartTranslucency.Slice(draw.PartStart, draw.PartCount);
         var anchor = AcCoordinates.LandblockOrigin(LandblockCoord.FromId(draw.AnchorCellId));
         var drawn = 0;
         var twinParts = 0;
         var solidFading = 0;
+        var applied = 0f;
         for (var i = 0; i < parts.Length; i++)
         {
             var batch = _batches[i];
@@ -217,6 +249,7 @@ public sealed partial class PlayerView : Node3D
                 }
 
                 target.Add(transform, new Vector4(slot, lightRow + 1, 0f, translucency[i]), mesh.GetAabb());
+                applied = Math.Max(applied, translucency[i]);
                 drawn++;
             }
 
@@ -225,6 +258,7 @@ public sealed partial class PlayerView : Node3D
         }
 
         DrawnParts = drawn;
+        AppliedTranslucency = drawn > 0 ? applied : 1f;
         TwinParts = twinParts;
         SolidFadingParts = solidFading;
     }
@@ -337,7 +371,7 @@ public sealed partial class PlayerView : Node3D
     }
 
     /// <summary>
-    /// Selects the cell lights that reach the character, converts them to Godot world space and writes the character's row of the
+    /// Selects the dynamic lights (first) and the cell lights that reach the character, converts them to Godot world space and writes the character's row of the
     /// light table. Returns the row (-1 when the table has none left).
     /// </summary>
     private int WriteLights(AvatarDraw draw, float height, float radius)
@@ -356,7 +390,11 @@ public sealed partial class PlayerView : Node3D
         var anchorToCell = new AcVector3((float)(anchorBlock.X - cellBlock.X), (float)(anchorBlock.Y - cellBlock.Y), 0f);
         var center = draw.Frame.Origin + anchorToCell + new AcVector3(0f, 0f, height * 0.5f);
         Span<ObjectLight> set = stackalloc ObjectLight[ObjectLightSets.MaxLights];
-        var count = ObjectLightSets.Select(center, Math.Max(height * 0.5f, radius), _cellLights.Get(draw.CellId), set);
+        var statics = _cellLights.Get(draw.CellId);
+        var sphere = Math.Max(height * 0.5f, radius);
+        var count = DynamicLights is { } dynamic
+            ? ObjectLightSets.Select(center, sphere, draw.CellId, statics, dynamic, set) // the dynamic lights first, then the static ones, 8 at most, every frame
+            : ObjectLightSets.Select(center, sphere, statics, set);
         for (var i = 0; i < count; i++)
         {
             var world = _world.ToRender(cellBlock + set[i].Position);

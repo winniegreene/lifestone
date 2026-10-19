@@ -11,7 +11,8 @@ namespace Lifestone.Client.Audio;
 /// <param name="Windows">All 50 ms windows (the last may be shorter).</param>
 /// <param name="SampleRate">Frames per second.</param>
 /// <param name="Channels">Channels in the file.</param>
-public readonly record struct WaveLevelsResult(double Seconds, double PeakDbfs, double RmsDbfs, int ActiveWindows, int Windows, int SampleRate, int Channels)
+/// <param name="ClippedSamples">The samples (of every channel) at full scale (M3 4.2 x3, cluster-k6 gap 6; report-only): a sample whose magnitude reaches the largest value the format holds (32767 or -32768 of 16 bits, 1.0 of float).</param>
+public readonly record struct WaveLevelsResult(double Seconds, double PeakDbfs, double RmsDbfs, int ActiveWindows, int Windows, int SampleRate, int Channels, long ClippedSamples = 0)
 {
     /// <summary>The share of windows above the floor, from 0 to 1 (0 for an empty recording).</summary>
     public double ActiveShare => Windows == 0 ? 0.0 : ActiveWindows / (double)Windows;
@@ -127,6 +128,8 @@ public static class WaveLevels
         var frames = data.Length / frameBytes;
         var windowFrames = Math.Max(1, (int)Math.Round(WindowSeconds * rate));
         var floorPower = Math.Pow(10.0, floorDbfs / 10.0);
+        var fullScale = isFloat ? 1.0 : 1.0 - (1.0 / (1L << (bits - 1)));
+        var clipped = 0L;
         var peak = 0.0;
         var total = 0.0;
         var windowSum = 0.0;
@@ -144,6 +147,11 @@ public static class WaveLevels
                 if (magnitude > peak)
                 {
                     peak = magnitude;
+                }
+
+                if (magnitude >= fullScale)
+                {
+                    clipped++;
                 }
 
                 var square = value * value;
@@ -170,10 +178,10 @@ public static class WaveLevels
 
         var samples = (long)frames * channels;
         var rms = samples == 0 ? 0.0 : Math.Sqrt(total / samples);
-        return new WaveLevelsResult(frames / (double)rate, ToDbfs(peak), ToDbfs(rms), active, windows, rate, channels);
+        return new WaveLevelsResult(frames / (double)rate, ToDbfs(peak), ToDbfs(rms), active, windows, rate, channels, clipped);
     }
 
-    /// <summary>The audio check's log line: <c>audio recording levels file= seconds= peak_dbfs= rms_dbfs= active_windows= sources=</c>, then <c>windows=</c> (all 50 ms windows) and, when asked for, <c>muted=</c>.</summary>
+    /// <summary>The audio check's log line: <c>audio recording levels file= seconds= peak_dbfs= rms_dbfs= active_windows= sources=</c>, then <c>windows=</c> (all 50 ms windows), <c>clipped_samples=</c> (samples at full scale, report-only) and, when asked for, <c>muted=</c>.</summary>
     /// <param name="file">The recording's path as the run was given it (relative to the repository).</param>
     /// <param name="levels">What <see cref="Analyze"/> measured.</param>
     /// <param name="sources">The per-source counters at the end of the run (<see cref="SoundSourceCounts.Describe"/>).</param>
@@ -181,7 +189,7 @@ public static class WaveLevels
     public static string LevelsLine(string file, in WaveLevelsResult levels, string sources, bool? muted = null) =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"audio recording levels file={file} seconds={levels.Seconds:0.00} peak_dbfs={levels.PeakDbfs:0.0} rms_dbfs={levels.RmsDbfs:0.0} active_windows={levels.ActiveWindows} sources={sources} windows={levels.Windows}{(muted is { } m ? (m ? " muted=true" : " muted=false") : string.Empty)}");
+            $"audio recording levels file={file} seconds={levels.Seconds:0.00} peak_dbfs={levels.PeakDbfs:0.0} rms_dbfs={levels.RmsDbfs:0.0} active_windows={levels.ActiveWindows} sources={sources} windows={levels.Windows} clipped_samples={levels.ClippedSamples}{(muted is { } m ? (m ? " muted=true" : " muted=false") : string.Empty)}");
 
     private static double ToDbfs(double linear) => linear <= 1e-6 ? SilenceDbfs : Math.Max(SilenceDbfs, 20.0 * Math.Log10(linear));
 

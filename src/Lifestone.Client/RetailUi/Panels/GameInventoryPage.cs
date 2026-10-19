@@ -19,7 +19,7 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// <para>
 /// <b>Retail.</b> <c>gmInventoryUI::PostInit</c> (11.6096 0x004A6940) finds the title text, the paperdoll, the backpack and the 3D-items panel; <c>RecvNotice_PlayerDescReceived</c> (0x004A6BC0) sets the title to "Inventory of
 /// &lt;name&gt;" and links the backpack's lists to the pack list; <c>RecvNotice_NewParentContainer</c> (0x004A6C90) titles the pack list "Contents of Backpack" for the player's own pack and "Contents of &lt;container&gt;" for a side
-/// pack; <c>gm3DItemsUI::PostInit</c> (0x004A7190) sets "Contents of Backpack"; <c>gmBackpackUI::SetLoadLevel</c> (0x004A6EA0) puts the load divided by three (0 to 1) on the meter (property 0x69) and "&lt;n&gt;%" with n the
+/// pack; <c>gm3DItemsUI::PostInit</c> (0x004A7190) sets "Contents of Backpack"; <c>gmBackpackUI::SetLoadLevel</c> (0x004A7210) puts the load divided by three (0 to 1) on the meter (property 0x69) and "&lt;n&gt;%" with n the
 /// level times 300 rounded down on the text, <c>RecvNotice_PlayerDescReceived</c> (0x004A7040) and <c>RecvNotice_LoadChanged</c> (0x004A7080) calling it. The load is burden over capacity
 /// (<see cref="EncumbranceSystem.Load"/>; capacity <see cref="EncumbranceSystem.EncumbranceCapacity"/> from the strength with its enchantments and the carrying augmentations, as character information has it, 0x004CC00 family),
 /// so 100 per cent is a full load and the meter is full at three times that.
@@ -28,9 +28,7 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// <b>Lifestone.</b> The page reads <see cref="PlayerInventory"/> (the main pack in order, the side packs, <see cref="PlayerInventory.ItemsIn"/>) and each item's <see cref="WorldObject"/> for its icon fields; it never copies
 /// them. Events mark it dirty (<see cref="InventoryChanged"/>, <see cref="ObjectCreated"/> of a held item, <see cref="QualitiesChanged"/> for the burden); the redraw is once when the page shows and, while shown, once on the
 /// next frame after a change, rebuilding only the cells and texts that differ. A held item whose world object has not arrived (ACE sends the container event first) is left out until it does. Clicking a side pack shows its
-/// contents in the pack list as the model holds them; the model learns a side pack's contents only from item events (no view-contents request is sent in M3, D8), so an unopened side pack shows an empty list:
-/// <c>TODO(m3-inventory-sidepack-contents)</c> (logged once). An item with no valid locations does nothing on a double click (retail uses it: <c>TODO(m3-use-from-pack)</c>); one with several valid locations asks for all of
-/// them, as the gear scenario does (<c>TODO(m3-wield-slot-choice)</c>: retail picks one free slot for a ring or bracelet).
+/// contents in the pack list as the model holds them; the model has a side pack's contents from login (ACE sends every item's CreateObject, <c>Player_Networking.cs</c> 242-254; the reducer adopts them) and from item events, so an empty list is an empty pack (the old unopened-pack warning is gone, 4.2 x4). An item with no valid locations does nothing on a double click (retail uses it: <c>TODO(m3-use-from-pack)</c>); a ring or bracelet asks for its free side (<see cref="WieldSlotChoice"/>, retail's <c>CPlayerSystem::AutoWield</c> 0x005617D0); other masks go out whole.
 /// </para>
 /// </remarks>
 public sealed class GameInventoryPage : IGamePanel, IDisposable
@@ -82,7 +80,6 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
     private string? _titleName; // the character name the title was built for (null: not built yet)
     private string? _contentsName; // the side pack name the contents title was built for (null: not built, or the backpack's)
     private InventoryEntry[] _ownerCell = [];
-    private bool _sidePackTodoLogged;
     private bool _usePackTodoLogged;
 
     private GameInventoryPage(UiLoginContext context, UiTextElement title, UiTextElement contentsTitle, UiTextElement burdenText, UiMeter burdenMeter, UiItemList top, UiItemList sidePacks, UiItemList pack)
@@ -237,12 +234,6 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
                 _contentsName = packName;
                 SetContentsTitle("Contents of " + packName);
             }
-
-            if (contents.Count == 0 && !_sidePackTodoLogged)
-            {
-                _sidePackTodoLogged = true;
-                _context.Manager.Services.Log.Warn("retailui", "TODO(m3-inventory-sidepack-contents): the contents of a side pack are known only from item events; no view-contents request is sent in M3 (D8), so an unopened side pack shows an empty list");
-            }
         }
 
         SetBurden(inventory, self.Qualities);
@@ -343,7 +334,7 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
         }
     }
 
-    /// <summary><c>gmBackpackUI::SetLoadLevel</c> (11.6096 0x004A6EA0).</summary>
+    /// <summary><c>gmBackpackUI::SetLoadLevel</c> (11.6096 0x004A7210).</summary>
     private void SetBurden(PlayerInventory inventory, PlayerQualities q)
     {
         var burden = inventory.Burden ?? 0;
@@ -421,6 +412,13 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
         _sidePacks.ClearSelection();
     }
 
+    /// <summary>The chat line of a refused wield (null: only logged); the shell routes it to the chat.</summary>
+    public Action<string>? HoldNotice { get; set; }
+
+    /// <summary>AutoWieldIsLegal's combat rule: <paramref name="valid"/> holds the Held slot (0x1000000), the mode is not peace and the item is not a caster (ItemType 0x8000).</summary>
+    public static bool HoldRefused(int combatMode, uint valid, uint itemType) =>
+        (valid & (uint)EquipMask.Held) != 0 && combatMode is not (0 or CombatModes.NonCombat) && (itemType & CombatModeRules.ItemTypeCaster) == 0;
+
     /// <summary>A double click on a pack item: wield it at its valid locations (retail's use of a wearable; the gear scenario passes the same mask).</summary>
     private void OnPackActivated(UiItemList list, UiItem cell)
     {
@@ -442,11 +440,18 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
             return;
         }
 
-        if (System.Numerics.BitOperations.PopCount(valid) > 1)
+        if (HoldRefused(session.State.Self.Qualities.CombatMode, valid, obj.ItemType))
         {
-            _context.Manager.Services.Log.Warn("retailui", "TODO(m3-wield-slot-choice): the item has several valid locations; all are asked for, as the gear scenario does (retail picks one free slot for a ring or bracelet)");
+            // CPlayerSystem::AutoWieldIsLegal (11.6096 0x0055FAD0): an item that fits the held slot and is not a caster cannot be held outside peace.
+            var line = "Cannot hold " + obj.Name + " while in combat";
+            _context.Manager.Services.Log.Info("retailui", line);
+            HoldNotice?.Invoke(line);
+            _context.Manager.LogOnce("inventory:wield-held-rule-bit", LogSeverity.Warning, "TODO(m3-wield-held-rule-bit): AutoWieldIsLegal tests bit 0x8000 of the object's item-type word (read here as ItemType Caster, which agrees with GetDefaultCombatMode); not confirmed from the object's virtual getter");
+            return;
         }
 
+        // CPlayerSystem::AutoWield (11.6096 0x005617D0): the first free location, a ring or bracelet to the free side.
+        valid = WieldSlotChoice.Choose(session.State.Self.Inventory, valid);
         session.Actions.Wield(obj.Guid, (EquipMask)valid, ActionSource.Ui);
     }
 }

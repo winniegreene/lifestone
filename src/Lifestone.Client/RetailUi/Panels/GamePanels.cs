@@ -127,6 +127,12 @@ public sealed partial class GamePanels : IDisposable
         ControllerCount++;
     }
 
+    /// <summary>Report-only: the slowest controller's build unit so far and its type (the live gate's 12 ms UI-step rule names the shell build's slow unit by it).</summary>
+    public double LongestControllerMilliseconds { get; private set; }
+
+    /// <summary>The type name of the controller behind <see cref="LongestControllerMilliseconds"/>.</summary>
+    public string LongestControllerName { get; private set; } = string.Empty;
+
     /// <summary>The staged wiring: asks every slice to queue its controllers, then builds them one per unit (yield true after each), registering what they return.</summary>
     public IEnumerator<bool> Build()
     {
@@ -140,7 +146,15 @@ public sealed partial class GamePanels : IDisposable
         QueueC2();
         for (var i = 0; i < _queue.Count; i++)
         {
+            var unitStart = System.Diagnostics.Stopwatch.GetTimestamp();
             var panel = _queue[i](this);
+            var unitMilliseconds = System.Diagnostics.Stopwatch.GetElapsedTime(unitStart).TotalMilliseconds;
+            if (unitMilliseconds > LongestControllerMilliseconds)
+            {
+                LongestControllerMilliseconds = unitMilliseconds;
+                LongestControllerName = panel?.GetType().Name ?? $"queued #{i + 1} (page missing)";
+            }
+
             if (panel is not null)
             {
                 RegisterPage(panel.PanelId, panel);

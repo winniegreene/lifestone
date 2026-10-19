@@ -36,6 +36,9 @@ public sealed record FightOptions
     /// <summary>With <see cref="ArenaHere"/>: the War Magic skill the Flame Bolt level and the range are worked out from (<see cref="DefaultArenaSkill"/>).</summary>
     public uint ArenaSkill { get; init; } = DefaultArenaSkill;
 
+    /// <summary>True: the loop picks the nearest tusker with no check of the line to it (<c>--fight-ignore-line</c>; default false: a clear line is required, M3 4.2 P4).</summary>
+    public bool IgnoreLine { get; init; }
+
     /// <summary>Every problem found while parsing, one line each.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
 
@@ -75,6 +78,9 @@ public sealed record FightOptions
                     }
 
                     break;
+                case "--fight-ignore-line":
+                    o = o with { IgnoreLine = OptionValues.Switch(argument, errors, o.IgnoreLine) };
+                    break;
             }
         }
 
@@ -82,5 +88,5 @@ public sealed record FightOptions
     }
 
     /// <summary>The options as the run logs them, in invariant culture.</summary>
-    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"kills={Kills} seconds={Seconds}{(ArenaHere ? $" arena=here skill={ArenaSkill}" : string.Empty)}");
+    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"kills={Kills} seconds={Seconds}{(IgnoreLine ? " ignore_line=on" : string.Empty)}{(ArenaHere ? $" arena=here skill={ArenaSkill}" : string.Empty)}");
 }

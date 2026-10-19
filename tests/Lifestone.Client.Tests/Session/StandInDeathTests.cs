@@ -262,6 +262,23 @@ public sealed class StandInDeathTests
     }
 
     [Fact]
+    public void The_check_hook_dispels_the_protection_as_a_teleport_does_and_the_line_is_the_same()
+    {
+        using var rig = new Rig(health: 5);
+        rig.PlaceLifestone(new Vector3(1f, 0f, 0f));
+        rig.Bind();
+        var suicide = rig.Session.Actions.Suicide(ActionSource.Host);
+        rig.Run(35.0);
+        Assert.True(suicide.IsCompleted, suicide.Summary);
+        Assert.True(rig.Server.UnderProtection);
+
+        rig.Server.DispelProtectionAsATeleportDoes();
+        rig.Run(2.0);
+        Assert.False(rig.Server.UnderProtection);
+        Assert.Contains("Your actions have dispelled the Lifestone's magic!", rig.Lines(FightTally.MagicChatType));
+    }
+
+    [Fact]
     public void A_teleport_dispels_the_protection_with_ACEs_line()
     {
         using var rig = new Rig(health: 5);
@@ -459,5 +476,22 @@ public sealed class StandInDeathTests
         Assert.Equal(2, bars.Length);
         Assert.Equal<uint>([27], bars[0]);
         Assert.Equal<uint>([82, 27, 81], bars[1]);
+    }
+
+    [Fact]
+    public void RemoveSpellFavorite_takes_a_spell_off_the_bar_as_ACE_does_and_ignores_one_that_is_not_there()
+    {
+        using var rig = new Rig();
+        rig.Cast.Learn(27, 81, 82);
+        rig.Session.Actions.AddSpellFavorite(27, 0, 1, ActionSource.Host);
+        rig.Session.Actions.AddSpellFavorite(81, 1, 1, ActionSource.Host);
+        rig.Session.Actions.AddSpellFavorite(82, 2, 1, ActionSource.Host);
+        rig.Session.Actions.RemoveSpellFavorite(81, 1, ActionSource.Host);
+        rig.Session.Actions.RemoveSpellFavorite(999, 1, ActionSource.Host); // not on the bar
+        rig.Session.Actions.RemoveSpellFavorite(27, 0, ActionSource.Host); // not on that bar
+        rig.Run(1.0);
+
+        var bars = rig.World.WithBars(new PlayerDescriptionMsg()).SpellBars;
+        Assert.Equal<uint>([27, 82], bars[1]);
     }
 }

@@ -14,7 +14,7 @@ using Xunit.Abstractions;
 
 namespace Lifestone.Loopback.Tests.Session;
 
-/// <summary>What a live death-scenario run left behind (shared by <see cref="DeathLiveTests"/> and <see cref="IncomingDamageLiveTests"/>).</summary>
+/// <summary>What a live death-scenario run left behind (shared by <see cref="DeathLiveTests"/>).</summary>
 /// <param name="Result">The headless run's result.</param>
 /// <param name="Scenario">The scenario (its tally and verdict).</param>
 /// <param name="Lines">The scenario's, gear's, WARN and ERROR log lines.</param>
@@ -144,5 +144,26 @@ public sealed class DeathLiveTests(ITestOutputHelper output)
 
         Assert.InRange(tally.VitalsAfterArrivalPercent, 60, 90); // (g)
         Assert.True(tally.HitsTaken >= 1 && tally.DamageTaken > 0, $"hits {tally.HitsTaken} damage {tally.DamageTaken}"); // (h)
+        Assert.True(tally.HealthMinPercent < 100.0, "health_min_pct " + tally.HealthMinPercent + " (the 0x02E9 health fall; the check IncomingDamageLiveTests made, dropped in M3 4.2 p5b C9: this test is DoD 9's loopback evidence)"); // (h2)
+    }
+
+    /// <summary>
+    /// M3 4.2 p1: what it proves. The gear and bars stage twice, each a fresh login. The first run leaves tab I and tab II exactly the owner's lists (the removals and adds ACE took); the second run reads
+    /// the bars from ACE's own PlayerDescription, so <c>bars=ok</c> there means ACE kept the first run's layout and the plan has nothing left to send. Both runs end with the tabs equal to the lists.
+    /// </summary>
+    [LoopbackFact]
+    public void The_mage_spell_bars_tabs_I_and_II_are_the_owners_lists_and_a_second_run_sends_nothing()
+    {
+        var first = DeathLive.Run(output, new DeathOptions(), DeathStages.Gear);
+        Assert.True(first.Result.Ok, first.Result.Failure);
+        Assert.NotNull(first.Scenario.Bars);
+        Assert.Equal(MageSpellBars.BuffTab.ToArray(), first.Scenario.Bars!.BuffTabAtEnd.ToArray());
+        Assert.Equal(MageSpellBars.FightTab.ToArray(), first.Scenario.Bars.FightTabAtEnd.ToArray());
+
+        var second = DeathLive.Run(output, new DeathOptions(), DeathStages.Gear);
+        Assert.True(second.Result.Ok, second.Result.Failure);
+        Assert.Equal("ok", second.Scenario.BarsNote);
+        Assert.Equal(MageSpellBars.BuffTab.ToArray(), second.Scenario.Bars!.BuffTabAtEnd.ToArray());
+        Assert.Equal(MageSpellBars.FightTab.ToArray(), second.Scenario.Bars.FightTabAtEnd.ToArray());
     }
 }

@@ -32,6 +32,9 @@ public sealed class GameSelection : IDisposable
     /// <summary>The selection field of the toolbar (name, meters, stack slider).</summary>
     public const uint FieldId = 0x1000019E;
 
+    /// <summary>The field's state while an object is selected (<c>gmToolbarUI::HandleSelectionChanged</c>: 0x1000000B; a stack above one is 0x1000000C).</summary>
+    public const uint SelectedStateId = 0x1000000B;
+
     /// <summary>The selected object's name.</summary>
     public const uint NameId = 0x1000019F;
 
@@ -53,6 +56,7 @@ public sealed class GameSelection : IDisposable
     private readonly IDisposable _healthSubscription;
     private uint _selected;
     private bool _healthShown;
+    private bool _selectionShown;
     private bool _disposed;
 
     /// <summary>Finds the selection display in the toolbar and the indicator in the SmartBox, and listens for health answers.</summary>
@@ -85,8 +89,14 @@ public sealed class GameSelection : IDisposable
                 "gmToolbarUI: the selection field 0x1000019E, its name 0x1000019F or the health meter 0x100001A1 is missing from the layout; the toolbar shows no selection");
         }
 
-        // With nothing selected the field is hidden (HandleSelectionChanged hides it, and the meters with it).
-        _field?.SetVisible(false);
+        // With nothing selected the field is shown in its base state, the empty panel (HandleSelectionChanged 0x004C0010 calls the field's SetState, 0x00464FA0, with 0; P2).
+        // Retail's PostInit does not hide the stack box and slider, and nothing hides them before the first change: TODO(p2-stack-initial), hidden here (they showed in the empty panel).
+        _field?.SetState(0);
+        foreach (var stack in _stack)
+        {
+            stack.SetVisible(false);
+        }
+
         _healthSubscription = context.Session.Events.Subscribe<HealthUpdated>(OnHealth);
     }
 
@@ -108,8 +118,14 @@ public sealed class GameSelection : IDisposable
     /// <summary>The name showing, or an empty string.</summary>
     public string NameText => _name?.Text ?? string.Empty;
 
-    /// <summary>True while the selection field is showing.</summary>
-    public bool FieldShown => _field?.Visible == true;
+    /// <summary>True while a selection is showing in the field (the field was put in state 0x1000000B; the dat's own state media returns it to state 1, which the element does not have, so its state falls back to 0 after a quarter second: the flag is kept here).</summary>
+    public bool FieldShown => _selectionShown;
+
+    /// <summary>True while the field is visible at all: with nothing selected it is the empty panel (state 0), as retail draws it.</summary>
+    public bool FieldVisible => _field?.Visible == true;
+
+    /// <summary>The field's current state id (0 is the base state: the empty panel).</summary>
+    public uint FieldState => _field?.State ?? 0;
 
     /// <summary>True while the health meter is showing.</summary>
     public bool HealthShown => _healthShown;
@@ -141,7 +157,8 @@ public sealed class GameSelection : IDisposable
         var hadHealth = _healthShown;
         _selected = selected;
         _name?.SetText(string.Empty);
-        _field?.SetVisible(false);
+        _field?.SetState(0); // the empty panel, not hidden (slot 13 of the field is SetState)
+        _selectionShown = false;
         if (hadHealth)
         {
             _health?.SetVisible(false);
@@ -169,7 +186,9 @@ public sealed class GameSelection : IDisposable
             stack.SetVisible(false); // TODO(g5b-stack): the stack slider is not built
         }
 
-        _field.SetVisible(true);
+        _selectionShown = true;
+        _field.SetState(SelectedStateId); // retail picks 0x1000000C for a stack above one (TODO(g5b-stack)), else 0x1000000B
+        // TODO(p2-use-button-state): retail also sets the Use button's state (1 with no selection, 0xD ghosted for a non-usable object); the usable branch's argument is lost in the decompile.
         if (SelectionRules.QueriesHealth(obj))
         {
             Queries++;

@@ -28,7 +28,7 @@ namespace Lifestone.Client.Session.Actions.Trackers;
 /// <see cref="EnchantmentChanged"/> that adds or replaces its spell id on the player (the 0x02C2);</item>
 /// <item>any other spell (a buff or debuff on another target, a heal, a portal, a transfer) has no proof on the wire (the target's enchantments and the spell's chat line are not
 /// ours to read): the cast completes as <see cref="ActionOutcomeKind.Sent"/> when ACE ends it (UseDone 0), <c>TODO(m3-cast-other-target-proof)</c>;</item>
-/// <item>without a spell table the kind is not known: the first of the enchantment and the projectile confirms, and UseDone 0 completes as Sent (<c>TODO(m3-cast-spell-table-host)</c>).</item>
+/// <item>without a spell table the kind is not known: the first of the enchantment and the projectile confirms, and UseDone 0 completes as Sent (<c>TODO(m3-cast-no-spell-table)</c>).</item>
 /// </list></para>
 /// <para>A UseDone with a code is a <see cref="ActionOutcomeKind.ServerError"/> with that code; so is a fizzle (0x0402); so is a UseDone 0 that ends a self or projectile cast
 /// without its effect (ACE's invalid target and its already-stronger buff end that way). The lane stays busy after the outcome until the UseDone: ACE is busy until then, and a
@@ -120,6 +120,14 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
     {
+        // The stance guard (M3 4.2 p3, D40): retail's UI cannot send a cast outside the magic combat mode (the spell window and the cast keys exist only there, RegisterInputMaps 0x0056B760) and its client makes
+        // no check of its own (ClientMagicSystem::CastSpell 0x00568DE0), so ACE refuses it with a silent UseDone. Checked here, at the lane's turn, after any SetCombatMode ahead of it in the Magic lane has been confirmed.
+        // A Lifestone guard; --retail-cast-any-mode sends it as retail's client would.
+        if (!api.RetailCastAnyMode && api.State.Self.Qualities.CombatMode != CombatModes.Magic)
+        {
+            return new ActionOutcome(ActionOutcomeKind.Refused, 0, StanceGuards.CastRefusal);
+        }
+
         _self = api.State.Self.Guid;
         _expect = Classify(api.FindSpell(spellId), target, _self);
         if (target == 0)
@@ -295,7 +303,7 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
                 0,
                 _expect == Expectation.Other
                     ? "the server ended the cast; nothing on the wire proves its effect on another target (TODO(m3-cast-other-target-proof))"
-                    : "the server ended the cast; the spell's kind is unknown without a spell table (TODO(m3-cast-spell-table-host))"));
+                    : "the server ended the cast; the spell's kind is unknown without a spell table (TODO(m3-cast-no-spell-table))"));
         }
 
         // A UseDone 0 that ends a self or projectile cast without its effect is settled by Poll, after the tick's events.
@@ -374,4 +382,13 @@ internal sealed class SetCombatModeTracker(ActionHandle handle, CombatMode mode)
         Resolve(new ActionOutcome(ActionOutcomeKind.ServerError, e.Line.ChatType, "the server cancelled the change (WeenieError ActionCancelled): the wielded weapon does not fit the mode"));
         return true;
     }
+}
+
+/// <summary>
+/// Lifestone's stance guards on the Action API (M3 4.2 p3): the switch <c>--retail-cast-any-mode</c> is per session (<c>GameSession.RetailCastAnyMode</c>, read by <c>CastTracker.Send</c> through the Action API).
+/// </summary>
+public static class StanceGuards
+{
+    /// <summary>The refusal detail of a cast outside the magic combat mode.</summary>
+    public const string CastRefusal = "the player is not in the magic combat mode: retail's UI cannot cast outside it (Lifestone guard; --retail-cast-any-mode sends it and leaves ACE to refuse)";
 }

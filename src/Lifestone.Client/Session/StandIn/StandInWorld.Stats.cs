@@ -94,6 +94,7 @@ internal sealed partial class StandInWorld
                 }
 
                 name = "skill " + id;
+                Placeholder("m3-standin-skill-names", "the stand-in names a skill by its id in a refusal line (no SkillTable names)");
                 (spent, ranks) = (skill.Experience, skill.Ranks);
                 list = skill.AdvancementClass == SpecializedClass ? XpTable?.SpecializedSkillXpList : XpTable?.TrainedSkillXpList;
                 break;
@@ -126,6 +127,8 @@ internal sealed partial class StandInWorld
             return;
         }
 
+        // The raise is answered with its updates only: ACE also tells "Your base X is now N!" (PlayerAttributes/Vitals/Skills raise).
+        Placeholder("m3-standin-raise-chat", "the stand-in sends no 'Your base X is now N!' line after a raise");
         // SpendXP first (0x02CF), then the stat's own update, as ACE enqueues them.
         PrivateInt64(sink, PlayerQualities.AvailableExperienceProperty, q.AvailableExperience - xp);
         spent += xp;
@@ -155,6 +158,7 @@ internal sealed partial class StandInWorld
         var skill = q.TryGetSkill(id, out var known) ? known : new SkillDesc(id, 0, 1, UntrainedClass, 0, 0, 0, 0.0);
         if (skill.AdvancementClass >= TrainedClass)
         {
+            Placeholder("m3-standin-skill-names", "the stand-in names a skill by its id in a refusal line (no SkillTable names)");
             Line(sink, "Failed to train skill " + id + "! You now have " + q.AvailableSkillCredits + " credits available.");
             return;
         }

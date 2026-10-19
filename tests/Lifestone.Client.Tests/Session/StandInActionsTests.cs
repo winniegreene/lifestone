@@ -1,3 +1,4 @@
+using Lifestone.Client.Session.Actions.Trackers;
 using System.Collections.Immutable;
 using DatReaderWriter.Enums;
 using Lifestone.Client.Session;
@@ -218,7 +219,11 @@ public sealed class StandInActionsTests
 
         rig.Learn(Strength);
         rig.Mode(CombatMode.NonCombat);
+        var guarded = rig.Finish(rig.Session.Actions.Cast(Strength, ActionSource.Host), 0.5); // the stance guard (M3 4.2 p3): refused at once, nothing sent
+        Assert.Equal(ActionOutcomeKind.Refused, guarded.Outcome!.Value.Kind);
+        rig.Session.RetailCastAnyMode = true; // retail's client sends it; the stand-in's ACE ends it bare (this rig's session only)
         var peace = rig.Finish(rig.Session.Actions.Cast(Strength, ActionSource.Host));
+
         Assert.Equal((ActionOutcomeKind.ServerError, 0u), (peace.Outcome!.Value.Kind, peace.Outcome.Value.Code));
         Assert.Contains("not in the magic combat mode", peace.Outcome.Value.Detail, StringComparison.Ordinal);
         Assert.Empty(rig.Q.Enchantments.Where(e => e.SpellId == Strength));
@@ -243,6 +248,28 @@ public sealed class StandInActionsTests
     }
 
     [Fact]
+    public void A_wielded_wand_becomes_the_players_child_at_the_right_hand_and_armour_sends_no_parent_event()
+    {
+        using var rig = new Rig();
+        var wand = rig.Spawn(Lifestone.Client.Session.Mage.GearKit.Wand.Wcid);
+        var coat = rig.Spawn(Lifestone.Client.Session.Mage.GearKit.Armour.Single(a => a.Name == "Greater Amuli Shadow Coat").Wcid);
+        rig.World.AnswerLog.Clear();
+
+        rig.Finish(rig.Session.Actions.Wield(wand, EquipMask.Held, ActionSource.Host));
+
+        Assert.Equal(["F749", "02DA", "02CE", "0023"], rig.World.AnswerLog);
+        Assert.True(rig.Session.State.Objects.TryGet(wand, out var held));
+        Assert.Equal(rig.Session.State.Self.Guid, held.Parent!.Value.ParentGuid);
+        Assert.Equal(1, held.Parent.Value.Location);
+        Assert.Null(held.Position);
+        rig.World.AnswerLog.Clear();
+
+        rig.Finish(rig.Session.Actions.Wield(coat, Lifestone.Client.Session.Mage.GearKit.Armour.Single(a => a.Name == "Greater Amuli Shadow Coat").ValidLocations, ActionSource.Host));
+
+        Assert.Equal(["02DA", "02CE", "0023"], rig.World.AnswerLog);
+    }
+
+    [Fact]
     public void A_wield_sends_the_zeros_then_the_location_and_an_unwield_puts_the_item_back_in_the_pack()
     {
         using var rig = new Rig();
@@ -252,7 +279,8 @@ public sealed class StandInActionsTests
         var wield = rig.Finish(rig.Session.Actions.Wield(sword, EquipMask.MeleeWeapon, ActionSource.Host));
 
         Assert.Equal(ActionOutcomeKind.Confirmed, wield.Outcome!.Value.Kind);
-        Assert.Equal(["02DA", "02CE", "0023"], rig.World.AnswerLog);
+        Assert.Equal(["F749", "02DA", "02CE", "0023"], rig.World.AnswerLog); // ACE broadcasts the parent event first (Creature_Equipment.cs 362-363)
+        Assert.True(rig.Session.State.Objects.TryGet(sword, out var held) && held.Parent is { ParentGuid: var holder, Location: 1 } && holder == rig.Session.State.Self.Guid, "the wielded sword is the player's child at the right hand");
         Assert.Equal(new InventoryPlace(InventoryPlaceKind.Equipped, 0, -1, (uint)EquipMask.MeleeWeapon), rig.Session.State.Self.Inventory.Find(sword));
         Assert.Empty(rig.Session.State.Self.Inventory.Pack);
         Assert.Contains(sword, rig.World.Wielded.Keys);

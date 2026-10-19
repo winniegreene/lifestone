@@ -246,6 +246,8 @@ public sealed class LivePhaseBTests(ITestOutputHelper output)
                 Assert.True(Distance(where, last) <= Tolerance, $"ACE has the player {Distance(where, last):F2} m from the last position the client sent");
                 Assert.Equal(forceSeq, where.ForcePositionSeq);
                 Assert.All(soak.Sink.SelfPositions.Skip(positions), p => Assert.Equal(forceSeq, p.ForcePositionSeq));
+                // The soak log's CRC and duplicate counts (M2 DoD 12): the client's side of the link, beside the ACE-side counts the two tests print.
+                output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"soak counts: client CRC failures {soak.Session.Link.ChecksumFailures}, client duplicate server packets dropped {soak.Session.Link.DuplicatesDropped}, link duplicate encrypted deliveries C2S {link.ClientToServer.DuplicateEncryptedDeliveries} S2C {link.ServerToClient.DuplicateEncryptedDeliveries}"));
                 Assert.Equal(0, soak.Session.Link.ChecksumFailures);
                 Assert.Equal(0, soak.Session.Link.GapSkips);
                 Assert.True(link.Socket is { Armed: true }, "the lossy socket was never armed: " + link.Describe());

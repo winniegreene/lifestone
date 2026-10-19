@@ -254,3 +254,12 @@ different terrain normals), `-Stills -Only <ids>` re-checks the world shots in s
 | `Lifestone.Game/scripts/Cinematic/FrameRecorder.cs` | Raw frame capture |
 | `Lifestone.Game/cinematics/hero.json` | The hero shot list |
 | `tools/hero-video.ps1` | Record and edit |
+
+## 8. M3 live takes
+
+The M3 hero video (M3 4.2 h) is filmed at 800x600 on the live backend (D15, D57). The offline preparation and the live takes
+use the scripts under `cache/m3/4-2/hero` (ignored by git): `capture.ps1` films the takes, `edit.ps1` cuts them, `measure.ps1`
+measures the durations and the A/V sync. The capture flashes the in-band clock once so the edit can find the start of each take. `beats.json` holds the anchors of the story: the cast landed, the
+cast confirmed (the projectile), the fight is won, the death (the tuskers killed the player) and the regear done; the anchors are
+the legs' own log lines (`docs/session.md` §30 to §32). `audioOffsetMs` is the measured offset between the recorded sound and the
+picture, applied by the edit; the edit is at most 30 s of action (m3-plan §4.11) and its sync is measured before it is sent.

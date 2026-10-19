@@ -75,9 +75,30 @@ internal sealed partial class GameStateReducer
     public void OnPopup(in InboundContext context, in GameEventHeader header, in PopupEvent message) =>
         AddChat(new ChatLine(_clock.Now, ChatKind.Popup, 0, null, 0, message.Text));
 
-    /// <summary>GameEvent 0x028A WeenieError and 0x028B WeenieErrorWithString (the code in <see cref="ChatLine.ChatType"/>).</summary>
-    public void OnWeenieError(in InboundContext context, in GameEventHeader header, in WeenieErrorEvent message) =>
+    /// <summary>
+    /// GameEvent 0x028A WeenieError and 0x028B WeenieErrorWithString (the code in <see cref="ChatLine.ChatType"/>, the string as sent in <see cref="ChatLine.Text"/>): retail's
+    /// <c>Handle_Communication__WeenieError</c> (11.6096 0x0057BBC0) looks the text up in the client, so the chat shows <see cref="WeenieErrorText"/>'s line for the code
+    /// (<c>ChatLineText</c>). A code the table lacks is logged once (<c>TODO(m3-weenie-error-text)</c>) and shows as <c>WeenieError 0x%04X</c>; a code whose retail text type is
+    /// not read is logged once (<c>TODO(m3-weenie-error-type)</c>).
+    /// </summary>
+    public void OnWeenieError(in InboundContext context, in GameEventHeader header, in WeenieErrorEvent message)
+    {
+        if (!WeenieErrorText.Knows(message.Error))
+        {
+            if (_weenieErrorsLogged.Add(message.Error))
+            {
+                _log.Warn(SessionLog.Category, "TODO(m3-weenie-error-text): a WeenieError code with no known text is shown as its number", new LogField("code", "0x" + message.Error.ToString("X4", System.Globalization.CultureInfo.InvariantCulture)));
+            }
+        }
+        else if (!WeenieErrorText.HasKnownType(message.Error) && _weenieErrorsLogged.Add(message.Error))
+        {
+            _log.Warn(SessionLog.Category, "TODO(m3-weenie-error-type): the retail text type of this WeenieError is not read; it is shown as type 0", new LogField("code", "0x" + message.Error.ToString("X4", System.Globalization.CultureInfo.InvariantCulture)));
+        }
+
         AddChat(new ChatLine(_clock.Now, ChatKind.WeenieError, message.Error, null, 0, message.Text ?? string.Empty));
+    }
+
+    private readonly HashSet<uint> _weenieErrorsLogged = [];
 
     /// <summary>GameEvent 0x02EB CommunicationTransientString.</summary>
     public void OnTransientString(in InboundContext context, in GameEventHeader header, in TransientStringEvent message) =>

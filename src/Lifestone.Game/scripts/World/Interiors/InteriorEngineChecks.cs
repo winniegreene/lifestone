@@ -1,7 +1,9 @@
 using Godot;
 using Lifestone.Client.Interiors;
 using Lifestone.Client.Rendering;
+using Lifestone.Data.Animation;
 using Lifestone.Data.Geometry;
+using Lifestone.Data.World;
 using Lifestone.Game.Core;
 using Lifestone.Game.Render;
 using Lifestone.Game.World.ServerObjects;
@@ -162,6 +164,7 @@ public partial class InteriorEngineChecks : Node
         RenderingServer.GlobalShaderParameterSet(SurfaceLightingCode.IndoorAmbientOn, false);
 
         await CheckDynamicObjects(viewport, shaders);
+        await CheckCellGlow(viewport, shaders);
         await CheckInstanceBudget(viewport, envCell);
 
         viewport.QueueFree();
@@ -244,6 +247,95 @@ public partial class InteriorEngineChecks : Node
         table.Dispose();
         await Frames(2);
     }
+
+    /// <summary>
+    /// The cell glow (M3 4.1 r2): the dynamic-light table, filled from a <see cref="DynamicLightFrame"/>, reaches the EnvCell and CellObject
+    /// variants' vertices. Two lights (AC y = -1, 1 m in front of the quads at x = -8 and x = 4, reach 3 m): the cell quad at -8 shows the burned
+    /// colour (0) plus the lights' per-vertex sum as <see cref="CellObjectLighting.Light"/> sums it on the CPU, the object quads at -4 and the
+    /// cell quad at 0 are out of every reach and show what they showed before, the object quad at 4 adds the sum to its static sum; the static
+    /// and dynamic sums clamp together. Reports <c>dyn_light_cells</c> as the cell counter counts it (a box a light's reach touches).
+    /// </summary>
+    private async Task CheckCellGlow(SubViewport viewport, SurfaceShaders shaders)
+    {
+        foreach (var node in viewport.GetChildren().OfType<MeshInstance3D>().ToArray())
+        {
+            node.QueueFree();
+        }
+
+        await Frames(2);
+        const uint cell = 0x00000100; // landblock (0, 0): its origin is the AC origin
+        var list = new DynamicLightList { ViewerLightEnabled = false };
+        var colour = new AcVector3(1f, 0.5f, 0.25f);
+        list.Upsert(1, cell, new AcVector3(-8f, -1f, 0f), colour, 0.4f, 2f, on: true);
+        list.Upsert(2, cell, new AcVector3(4f, -1f, 0f), colour, 0.4f, 2f, on: true);
+        list.Update(new CellFrame(cell, new AcFrame(AcVector3.Zero, System.Numerics.Quaternion.Identity)), null);
+        var frame = new DynamicLightFrame();
+        frame.Fill(list);
+        Check(frame.Count == 2, "the frame holds the two lights", "2", frame.Count.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        var table = new DynamicLightTable(g => AcToGodot.Position(new AcVector3((float)g.X, (float)g.Y, (float)g.Z))) { Source = frame };
+        var envCell = Solid(shaders, SurfaceLighting.EnvCell);
+        var cellObject = Solid(shaders, SurfaceLighting.CellObject);
+        var near = new CellLight(0, 0, AcVector3.Zero, new AcVector3(-8f, -1f, 0f), colour, 0.4f, 2f);
+        var nearObject = new CellLight(0, 0, AcVector3.Zero, new AcVector3(4f, -1f, 0f), colour, 0.4f, 2f);
+        var glowCell = Quad(-8f, 0f).SubMeshes[0];
+        var glowSums = new AcVector3[glowCell.Positions.Length];
+        CellObjectLighting.Light(glowCell.Positions, glowCell.Normals, [near], glowSums);
+        var glowObject = Quad(4f, 0f).SubMeshes[0];
+        var objectSums = new AcVector3[glowObject.Positions.Length];
+        CellObjectLighting.Light(glowObject.Positions, glowObject.Normals, [nearObject], objectSums);
+        Add(viewport, LitQuad(-8f, 0f, 0f, 0, envCell));
+        Add(viewport, LitQuad(-4f, 0f, 0.1f, 0, cellObject));
+        Add(viewport, LitQuad(0f, 0f, 0f, 0, envCell));
+        Add(viewport, LitQuad(4f, 0f, 0.1f, 0, cellObject));
+        await Frames(4);
+        Check(table.Count == 2 && table.Uploads >= 1, "the table packs and uploads the frame's two lights by itself (no caller flushes it)", "2 lights, >= 1 upload", $"{table.Count} lights, {table.Uploads} uploads");
+
+        var image = viewport.GetTexture().GetImage();
+        ExpectColor(image, 32, "EnvCell quad 1 m from a dynamic light: the burned colour (0) + ambient + the light's per-vertex sum, as the CPU sums it for statics",
+            new Color8(ToByte(0.2 + glowSums[0].X), ToByte(0.2 + glowSums[0].Y), ToByte(0.2 + glowSums[0].Z)));
+        Expect(image, 160, "CellObject quad out of every reach: its static sum + ambient only (0.1 + 0.2)", 77);
+        Expect(image, 288, "EnvCell quad out of every reach: ambient only (0.2)", 51);
+        ExpectColor(image, 416, "CellObject quad 1 m from a dynamic light: static sum + ambient + the light's sum, clamped together",
+            new Color8(ToByte(0.3 + objectSums[0].X), ToByte(0.3 + objectSums[0].Y), ToByte(0.3 + objectSums[0].Z)));
+
+        // The cell counter's test on the same four boxes (each quad 1.6 m wide, 1.6 high, zero deep).
+        var cells = 0;
+        foreach (var centre in new[] { -8f, -4f, 0f, 4f })
+        {
+            var min = new AcVector3(centre - 0.8f, -0.8f, 0f);
+            var max = new AcVector3(centre + 0.8f, 0.8f, 0f);
+            for (var i = 0; i < table.Count; i++)
+            {
+                var p = table.PositionOf(i);
+                if (DynamicLightTexels.ReachesBox(new AcVector3(p.X, p.Y, p.Z), table.ReachOf(i), min, max))
+                {
+                    cells++;
+                    break;
+                }
+            }
+        }
+
+        Check(cells == 2, $"dyn_light_cells={cells.ToString(System.Globalization.CultureInfo.InvariantCulture)}: the cells with a dynamic light in reach are the two nearest a light", "2", cells.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        Log.Info("interiors", "dyn_light_cells", ("dyn_light_cells", cells), ("lights", table.Count), ("uploads", table.Uploads));
+
+        // Lights off: the same frame emptied leaves every quad as it was before the glow.
+        frame.Clear();
+        await Frames(4);
+        image = viewport.GetTexture().GetImage();
+        Expect(image, 32, "no dynamic light: the EnvCell quad shows ambient only (0.2)", 51);
+        Expect(image, 416, "no dynamic light: the CellObject quad shows its static sum + ambient (0.1 + 0.2)", 77);
+        table.Dispose();
+        foreach (var node in viewport.GetChildren().OfType<MeshInstance3D>().ToArray())
+        {
+            node.QueueFree();
+        }
+
+        await Frames(2);
+    }
+
+    private static int ToByte(double value) => (int)Math.Round(Math.Min(1.0, value) * 255.0);
 
     private static DynamicObjectBatch DynamicQuad(SubViewport viewport, SurfaceShaders shaders, SurfaceShaderVariant variant, float centreX, Vector4 custom)
     {
