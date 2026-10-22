@@ -3,9 +3,10 @@
 **A faithful, single-player rebuild of Asheron's Call: a new Godot client for your own game files and a local
 ACEmulator server.**
 
-> **Early development: there is little gameplay yet.** Milestones 1 and 2 are done: you can fly and walk through all of
-> Dereth, rendered from your own game files, and log in to the bundled local server in the retail interface. Lights,
-> sound and a mage's fight (M3) are in progress. See
+> **Early development.** Milestones 1 to 3 are done: you can fly and walk through all of Dereth, rendered from your
+> own game files; log in to the bundled local server in the retail interface; and watch a mage buff, fight and die in
+> the Black Spawn Den, with lights and sound. Milestone 4 (fights and loot) is three waves of four in: a fighter who
+> hunts near Holtburg with melee and missile, loots, heals and trades with vendors. See
 > [Status and roadmap](#status-and-roadmap).
 
 <!--
@@ -36,17 +37,23 @@ What Lifestone is not:
 |---|---|---|
 | **M1: Explore Dereth** | **Done** | The whole world, rendered from your dats, to fly and walk through |
 | **[M2: Log in](docs/milestones/m2-log-in.md)** | **Done** | Log in to the local ACE server, in the retail interface and through retail portal space: your character, movement, server-spawned objects |
-| Core gameplay | Planned | Combat, magic, inventory, NPCs, vendors and quests, with ACE as the authority and their retail panels |
-| Built-in automation | Planned | Auto-buffing, then AFK dungeon hunting and looting ([automation vision](docs/automation-vision.md)) |
-| Polish | Planned | Audio, the remaining UI, packaging |
+| **[M3: Fights and sound](docs/milestones/m3-lights-and-sound.md)** | **Done** | A level-126 mage buffs in all three schools, fights and dies in the Black Spawn Den: casts, projectiles and impacts on screen, dynamic lights, the game's sound, the retail panels with live content |
+| **[M4: Fights and loot](docs/milestones/m4-fights-and-loot.md)** | **In progress** (waves 1-3 of 4 done) | A fighter on the Low B belt and in the forest near Holtburg: melee and missile with the power bar, corpses looted, kits and potions, vendors and appraisal, the shortcut bar; next, auto-buff and the end-of-milestone audit |
+| More gameplay | Planned | NPCs and quests, the remaining panels, more of Dereth's rules through ACE |
+| Built-in automation | Started | The loops that test the game today drive the same action API the automation will use; auto-buff, then AFK hunting and looting ([automation vision](docs/automation-vision.md)) |
+| Polish | Planned | The remaining UI, larger window sizes, packaging |
 
 **Today** you can fly or walk anywhere in Dereth, at any time of day, into building interiors and down into
-dungeons, and watch any spell in the game cast in the spell viewer.
+dungeons, and watch any spell cast in the spell viewer. With the bundled server you log in through the retail
+character screens and portal space, walk among ACE's NPCs and monsters, and play in the retail interface: the chat,
+the vitals, the inventory and paperdoll, the spellbook and spell bars, the combat window and power bar, a corpse's or
+chest's contents, a vendor's window, the examine panel and the shortcut bar. Test loops play two characters for the
+checks: a mage who buffs, fights and dies in the Black Spawn Den, and a fighter who hunts, heals, loots and sells near
+Holtburg.
 
-**Not there yet:** everything the server creates (NPCs, monsters, lifestones, portals, doors, signs, chests) arrives
-with M2, so towns look emptier than in retail. There is no player character in the world and no clothing, no
-collision (walk mode follows the ground), no chat or game UI and no audio. Details: the
-[M1 status and evidence](docs/milestones/m1-explore-dereth.md#status) and the [project goals](docs/goals.md).
+**Not there yet:** quests, fellowships, crafting, housing and most NPC conversations; the panels retail had beyond
+those above answer "Not in Lifestone" for now; only the 800x600 window is tested. Details: each milestone's status
+section, and the [project goals](docs/goals.md).
 
 ## Highlights
 
@@ -63,8 +70,18 @@ collision (walk mode follows the ground), no chat or game UI and no audio. Detai
   at about 16 ms on the development machine.
 - **Spell viewer:** cast any of the 6,266 spells, with the caster's gestures, glows, projectiles and impacts.
 - **Teleport panel** with ACE's towns and places plus curated dungeons and building interiors.
+- **The retail interface, rebuilt from the dats:** the windows, panels and fonts are drawn from the game's own UI
+  layouts, with retail's key map; items show their own icons and models.
+- **Characters in the world:** your character and everyone else's, dressed in their armour and clothing, animated
+  from the retail motion tables, holding what they wield; spells, projectiles and their lights on screen; the game's
+  own sound.
+- **Combat, loot and trade on ACE's rules:** melee, missile and magic through the combat window and the power bar,
+  health meters, deaths with vitae and corpses, looting, healing kits and potions, buying and selling at vendors,
+  appraisal.
+- **A client built around an action API:** the UI, the test loops and (later) the automation all act through the same
+  API, and every action is checked against what the server answers.
 - **Golden viewpoints and a smoke suite:** 18 fixed views for side-by-side comparison with retail, and one command
-  that builds, tests and runs every engine check off-screen.
+  that builds, tests and runs every engine check off-screen, plus loopback tests against the local server.
 
 _No screenshots are stored here, because every image of Lifestone shows retail game data. Run it with your own dats,
 or render the [golden viewpoints](#smoke-suite-and-golden-viewpoints)._
@@ -106,15 +123,14 @@ marks every file as coming from the internet, and PowerShell then refuses the un
 ### 2. Add your data files
 
 Copy the end-of-retail dats from your Asheron's Call installation folder (the one holding `acclient.exe`) into a
-`client` folder at the root of the repository (`<repo>\client`, which git ignores). Copying all four now saves a trip
-at M2:
+`client` folder at the root of the repository (`<repo>\client`, which git ignores):
 
 | File | Needed | Contents |
 |---|---|---|
 | `client_portal.dat` | Required | Models, textures, the region, spell and animation tables (iteration 2072) |
 | `client_cell_1.dat` | Required | Landblocks, buildings and dungeons (iteration 982) |
 | `client_highres.dat` | Recommended | High-resolution textures (iteration 497); without it textures use their standard versions |
-| `client_local_English.dat` | From M2 | Strings and UI layouts (iteration 994); the local server requires it |
+| `client_local_English.dat` | Required to play | Strings and UI layouts (iteration 994); the retail interface and the local server need it |
 
 The game opens them read-only and never modifies them. To check you have the end-of-retail set, look for the
 `dats open` line the game prints at start-up: it should read `iterations=p2072-c982-l994-h497` (portal, cell, local,
@@ -143,6 +159,21 @@ to the processes it starts, so there is nothing to set up in your shell. Game op
 `Get-Help tools\godot.ps1 -Full` lists the launcher's own options (rendering driver, resolution, dat folder,
 off-screen runs, timeouts).
 
+### 4. Play on the local server
+
+The game itself needs the bundled server: ACEmulator and a portable MariaDB, set up once and run as your user on
+127.0.0.1 only ([server/README.md](server/README.md) has the details, the pins and the licences).
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File server\setup-server.ps1   # once: builds ACE, unpacks MariaDB, loads the world
+pwsh -File tools\play.ps1                                               # start the server if needed, log in, play
+pwsh -File tools\play.ps1 -Character "Name"                             # straight into one character
+```
+
+`tools\play.ps1` starts the backend when it is not running, signs in with the account setup created (the game reads
+the password itself; no password ever goes on a command line), shows retail's character screens and enters the world
+through portal space. When the game exits it stops only what it started; `-KeepServer` keeps it running.
+
 ### Controls
 
 **In the world**
@@ -164,16 +195,20 @@ off-screen runs, timeouts).
 
 The time panel (bottom right) sets the time of day and its speed.
 
-**In the game (`--play`, the retail shell)**
+**In the game (`tools\play.ps1`, the retail interface)**
+
+The game uses retail's default key map, read from your dats (movement, the panels, combat). Lifestone adds:
 
 | Input | Action |
 |---|---|
+| `1`-`9`, `Alt`+`1`-`9` | Use the item on shortcut slot 1-9 or 10-18 (drag an item from a pack onto the bar to add it) |
 | `F7` | Lifestone's tools panel: Places (search and teleport), Where am I, Add XP (needs the bundled server with the Lifestone mod) |
 | `Scroll Lock` | Lifestone's automation inspector (read-only) |
 | `Shift`+`Esc` | Log off (retail's End Character Session) |
 | `F3` / `F1` | Performance overlay / About |
 
-`F7` and `Scroll Lock` are keys retail's default key map leaves unbound (`docs/retail-ui.md` section 22.1).
+`F7` and `Scroll Lock` are keys retail's default key map leaves unbound (`docs/retail-ui.md` section 22.1); the number
+keys are retail's own shortcut-bar keys.
 
 **In the spell viewer**
 
@@ -212,7 +247,7 @@ flowchart LR
         game["Lifestone.Game<br/>Godot presentation"]
         net["Lifestone.Net<br/>protocol and session"]
     end
-    subgraph server ["Local server (from M2)"]
+    subgraph server ["Local server"]
         ace["ACEmulator<br/>game rules"]
         db[("MariaDB<br/>ACE world database")]
     end
@@ -236,11 +271,11 @@ flowchart LR
 - **Lifestone.Game** (`src/Lifestone.Game`, Godot 4.7.2 .NET) is presentation only: nodes, meshes, materials, shaders
   and panels. AC's Z-up world becomes Godot's Y-up world in exactly one place, `scripts/Core/AcToGodot.cs`, which also
   reverses the triangle winding.
-- **Lifestone.Net** (from M2) holds the AC network protocol: the transport, the login session and the
+- **Lifestone.Net** holds the AC network protocol: the transport, the login session and the
   message codecs, again with no engine dependency ([protocol](docs/protocol.md)). The game-state model that the UI,
   the automation and the tests drive goes in Lifestone.Client, which uses Lifestone.Net's records but opens no
   sockets.
-- **The server** (`server/`, from M2) builds ACEmulator from source at a pinned release, unpacks a portable MariaDB,
+- **The server** (`server/`) builds ACEmulator from source at a pinned release, unpacks a portable MariaDB,
   loads the pinned ACE world database and runs both as the current user on 127.0.0.1. AC was server-authoritative, so
   this is where the game rules live. See [server/README.md](server/README.md).
 
@@ -258,9 +293,9 @@ flowchart LR
   both checked by SHA-256. There is no plugin loading: the client loads no DLLs or other code from outside its own
   build, and ACE's mod folder (`server/runtime/ace-mods`) is created empty. Customisation will come from data
   profiles and, later, an optional sandboxed script tier with no file or network access.
-- **Automation built in.** The client core is being built as a game-state model plus an action API that the UI, the
-  automation and the tests all drive. Automation will send only the actions a player could, and only to a local
-  server.
+- **Automation built in.** The client core is a game-state model plus an action API that the UI, the test loops and
+  the automation all drive; every action completes only when the server's answer confirms it. Automation sends only
+  the actions a player could, and only to a local server.
 
 ## Repository layout
 
@@ -270,9 +305,9 @@ Directory.Build.props   shared build settings (net10.0, nullable, warnings as er
 global.json             .NET SDK pin
 NuGet.config            packages from nuget.org only
 src/Lifestone.Data/     dat decoding and retail algorithms (no engine)
-src/Lifestone.Client/   engine-agnostic client logic and, from M2, the game-state session layer (no engine, no file I/O)
-src/Lifestone.Net/      the AC network protocol: transport, session, message codecs (from M2)
-src/Lifestone.Headless/ a console host that plays a session without Godot (from M2)
+src/Lifestone.Client/   engine-agnostic client logic, the game-state session layer and the action API (no engine, no file I/O)
+src/Lifestone.Net/      the AC network protocol: transport, session, message codecs
+src/Lifestone.Headless/ a console host that plays a session without Godot (the test loops)
 src/Lifestone.Game/     the Godot project: scenes, scripts, shaders
 tests/                  xUnit tests: Data, Client, Net, the server mod, and the loopback tests that need the local server
 server/                 the localhost ACE and MariaDB backend (setup, start, stop)
@@ -311,7 +346,7 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
   nuget.org only (`NuGet.config`), and new ones are added deliberately.
 - Tests that need the retail dats are reported as skipped, not failed, when the files are missing.
 - `--disable-build-servers` keeps MSBuild and compiler servers from lingering after a build.
-- **Test categories (from M2).** Tests that need the local server carry `[Trait("Category","Loopback")]` and live in
+- **Test categories.** Tests that need the local server carry `[Trait("Category","Loopback")]` and live in
   `tests/Lifestone.Loopback.Tests`; they skip, with the reason, unless the backend is running with the Lifestone
   server mod ready. Long soaks and fuzz runs carry `[Trait("Tier","Soak")]`. The `--filter` in the commands above
   leaves both out, as the smoke suite's test step does; without it the soaks run too (minutes, not seconds). With the
@@ -344,7 +379,7 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
 - `pwsh -File tools\smoke.ps1` is the integration suite: the build, the tests, `--help`, the terrain golden test,
   the four engine check suites, a spell-viewer showcase, the golden viewpoints and the Holtburg-to-Arwic flight, all
   off-screen, with a summary table and logs in `cache\smoke\`. It needs the dats and Godot.
-- **The backend in smoke runs (from M2).** A step that cannot run reports `SKIP` (yellow), which is not a failure.
+- **The backend in smoke runs.** A step that cannot run reports `SKIP` (yellow), which is not a failure.
   `-Backend` decides what the steps that need the local server do:
   - `auto` (the default) runs them only when the backend is already up, and never starts it;
   - `start` starts the backend, then stops what it started;
@@ -369,9 +404,11 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
   - [Goals](docs/goals.md): single-player fidelity, built-in automation, machine safety, data
   - [Automation vision](docs/automation-vision.md): built-in automation, from auto-buffing to AFK hunting
   - [M1: Explore Dereth](docs/milestones/m1-explore-dereth.md): the first milestone, with its status and evidence
-  - [M2: Log in](docs/milestones/m2-log-in.md): the current milestone, including retail portal space and the retail UI
-  - [M2 implementation plan](docs/milestones/m2-plan.md): tracks, owners, contracts, merge order and gates
-  - [Protocol](docs/protocol.md): the AC network protocol as ACE implements it, for M2
+  - [M2: Log in](docs/milestones/m2-log-in.md), with its [plan](docs/milestones/m2-plan.md): the server, the login, retail portal space and the retail UI
+  - [M3: Fights and sound](docs/milestones/m3-lights-and-sound.md), with its [plan](docs/milestones/m3-plan.md): the mage, magic, lights and sound
+  - [M4: Fights and loot](docs/milestones/m4-fights-and-loot.md), with its [plan](docs/milestones/m4-plan.md): the current milestone
+  - [Protocol](docs/protocol.md): the AC network protocol as ACE implements it
+  - [Session](docs/session.md): the game-state model, the action API, the test loops and their verdicts
   - [Local server](server/README.md): setting up and running ACE and MariaDB on 127.0.0.1
 - **Data layer**
   - [Textures](docs/textures.md): decoding and the exact retail render state
@@ -384,6 +421,8 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
   - [Terrain renderer](docs/terrain-renderer.md), [objects](docs/objects.md) (scenery, statics, buildings, living
     statics), [interiors and dungeons](docs/interiors.md), [sky and time of day](docs/sky.md)
   - [Navigation and golden viewpoints](docs/navigation.md), [spell viewer](docs/spell-viewer.md)
+  - [Retail interface](docs/retail-ui.md) and its [data](docs/retail-ui-data.md), [avatars](docs/avatars.md) (characters,
+    motion, held items, effects), [portal space](docs/portal-space.md), [physics](docs/physics.md)
   - [Hero video](docs/hero-video.md): a trailer rendered from your dats
 - **Sources:** [docs/third-party](docs/third-party/) lists the sources behind each area.
 
@@ -447,7 +486,7 @@ Lifestone builds on these works, which keep their own licenses:
 | ACViewer | GPL-3.0 | terrain blending, named locations and test oracles |
 | Godot Engine | MIT | the game engine |
 
-From M2, server setup also builds ACE and downloads MariaDB Server 11.4 (GPL-2.0) on your machine. Neither is stored
+Server setup also builds ACE and downloads MariaDB Server 11.4 (GPL-2.0) on your machine. Neither is stored
 in this repository or redistributed by it, and both run as separate programs; see
 [server/README.md](server/README.md#licensing).
 
