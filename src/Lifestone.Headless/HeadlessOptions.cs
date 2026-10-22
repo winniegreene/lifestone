@@ -21,6 +21,9 @@ internal enum HeadlessScenario
     /// <summary>Find or create the test account's level-126 combat mage and bring it to the template (M3 1.1, <c>MageBuildScenario</c>); idempotent.</summary>
     MageBuild,
 
+    /// <summary>Find or create the test account's level-40 fighter "Holtburg Hunter", bring it to the template, the kit and Holtburg (M4 1.1 s2, <c>FighterBuildScenario</c>); idempotent.</summary>
+    FighterBuild,
+
     /// <summary>Spawn BSD Mage's gear kit, wield its wand and wear its leather set (M3 1.4 s1, <c>GearScenario</c>); idempotent.</summary>
     Gear,
 
@@ -32,6 +35,9 @@ internal enum HeadlessScenario
 
     /// <summary>Gear, the spell bars, a bind at Holtburg's lifestone, the Black Spawn Den, a suicide when buffed, the tuskers' death of the player, the respawn and the gear again (M3 3.2, <c>DeathScenario</c>); changes the character (vitae, dropped items, a corpse).</summary>
     DeathAndRegear,
+
+    /// <summary>The fighter binds at Holtburg's lifestone, goes to the Low B belt, fights until <c>--hunt-kills</c> kills with the Mace or the Shortbow and comes back (M4 1.2 s4a, <c>HuntScenario</c>); changes the character (experience, health potions).</summary>
+    Hunt,
 }
 
 /// <summary>
@@ -84,6 +90,9 @@ internal sealed record HeadlessOptions
     /// <summary>The death loop's option (<c>--death-seconds</c>), used by <c>--scenario=death-and-regear</c>.</summary>
     internal DeathOptions Death { get; init; } = new();
 
+    /// <summary>The hunt loop's options (<c>--hunt-*</c>), used by <c>--scenario=hunt</c>.</summary>
+    internal HuntOptions Hunt { get; init; } = new();
+
     /// <summary>The Session group's values.</summary>
     internal SessionOptions Session { get; init; } = new();
 
@@ -104,6 +113,8 @@ internal sealed record HeadlessOptions
         errors.AddRange(fight.Errors);
         var death = DeathOptions.FromArguments(arguments);
         errors.AddRange(death.Errors);
+        var hunt = HuntOptions.FromArguments(arguments);
+        errors.AddRange(hunt.Errors);
         var o = new HeadlessOptions();
         foreach (var argument in arguments)
         {
@@ -123,10 +134,12 @@ internal sealed record HeadlessOptions
                             ("holtburg-laps", HeadlessScenario.HoltburgLaps),
                             ("academy-exit", HeadlessScenario.AcademyExit),
                             ("mage-build", HeadlessScenario.MageBuild),
+                            ("fighter-build", HeadlessScenario.FighterBuild),
                             ("gear", HeadlessScenario.Gear),
                             ("buff", HeadlessScenario.Buff),
                             ("fight", HeadlessScenario.Fight),
-                            ("death-and-regear", HeadlessScenario.DeathAndRegear)),
+                            ("death-and-regear", HeadlessScenario.DeathAndRegear),
+                            ("hunt", HeadlessScenario.Hunt)),
                     };
                     break;
                 case "--laps":
@@ -202,13 +215,13 @@ internal sealed record HeadlessOptions
             }
         }
 
-        if (o.Scenario is HeadlessScenario.MageBuild or HeadlessScenario.Gear or HeadlessScenario.Buff or HeadlessScenario.Fight or HeadlessScenario.DeathAndRegear && session.Account is { } account && !string.Equals(account, Program.DefaultAccount, StringComparison.OrdinalIgnoreCase))
+        if (o.Scenario is HeadlessScenario.MageBuild or HeadlessScenario.FighterBuild or HeadlessScenario.Gear or HeadlessScenario.Buff or HeadlessScenario.Fight or HeadlessScenario.DeathAndRegear or HeadlessScenario.Hunt && session.Account is { } account && !string.Equals(account, Program.DefaultAccount, StringComparison.OrdinalIgnoreCase))
         {
             // M3 1.1-R5: the build creates and levels a permanent character, so it runs on the default test account only (automation uses accounts.test only).
-            errors.Add($"--account: --scenario={(o.Scenario switch { HeadlessScenario.Gear => "gear", HeadlessScenario.Buff => "buff", HeadlessScenario.Fight => "fight", HeadlessScenario.DeathAndRegear => "death-and-regear", _ => "mage-build" })} runs on the default test account '{Program.DefaultAccount}' only; the value is not shown");
+            errors.Add($"--account: --scenario={(o.Scenario switch { HeadlessScenario.Gear => "gear", HeadlessScenario.Buff => "buff", HeadlessScenario.Fight => "fight", HeadlessScenario.DeathAndRegear => "death-and-regear", HeadlessScenario.Hunt => "hunt", HeadlessScenario.FighterBuild => "fighter-build", _ => "mage-build" })} runs on the default test account '{Program.DefaultAccount}' only; the value is not shown");
         }
 
-        return o with { Session = session, Buff = buff, Fight = fight, Death = death, Errors = errors };
+        return o with { Session = session, Buff = buff, Fight = fight, Death = death, Hunt = hunt, Errors = errors };
     }
 
     private static string? Required(CommandLineArgument argument, List<string> errors, string what)

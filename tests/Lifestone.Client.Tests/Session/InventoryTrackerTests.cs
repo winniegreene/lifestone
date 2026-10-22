@@ -225,15 +225,18 @@ public sealed class InventoryTrackerTests
     }
 
     [Fact]
-    public void A_move_of_an_item_not_held_is_refused_and_a_move_ACE_refuses_is_a_ServerError()
+    public void A_move_of_an_item_not_held_is_a_pick_up_and_a_move_ACE_refuses_is_a_ServerError()
     {
         var r = Rig();
         var stranger = r.Api.MoveToPack(0x80000999, Pack1, 0, ActionSource.Ui);
         var refused = r.Api.MoveToPack(Staff, Pack1, 0, ActionSource.Ui);
         r.Tick();
-        Assert.Equal(ActionOutcomeKind.Refused, stranger.Outcome!.Value.Kind);
-        Assert.Contains("not held", stranger.Outcome.Value.Detail, StringComparison.Ordinal);
+        Assert.Null(stranger.Outcome); // M4 2.1 s2: an item the player does not hold is a pick-up (TODO(m3-pickup) closed): sent first, the lane in call order
+        Assert.Equal(0x80000999u, Assert.Single(r.H.Net.Of(FakeSendKind.PutItemInContainer)).Guid);
 
+        r.Server((p, s) => AceM3Writers.InventoryServerSaysFailed(p, s, 0x80000999, 0)); // the pick-up is refused; the lane then sends the next move
+        r.Tick();
+        Assert.Equal(ActionOutcomeKind.ServerError, stranger.Outcome!.Value.Kind);
         r.Server((p, s) => AceM3Writers.InventoryServerSaysFailed(p, s, Staff, 0));
         r.Tick();
         Assert.Equal((ActionOutcomeKind.ServerError, 0u), (refused.Outcome!.Value.Kind, refused.Outcome.Value.Code));

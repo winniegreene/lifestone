@@ -149,7 +149,7 @@ and answers one reply once ACE has removed the rows. The rules (`Core/CharPurgeR
 
 | Code | Refused when |
 |---|---|
-| `graduated` | the name is `Lifestone Smoke`, `Lifestone Loopback` or `BSD Mage` (any case): the graduated test characters are the baseline and are never purged |
+| `graduated` | the name is `Lifestone Smoke`, `Lifestone Loopback`, `BSD Mage` or `Holtburg Hunter` (any case): the graduated test characters are the baseline and are never purged |
 | `own-character` | the name is the character the caller is playing |
 | `unknown-character` | no character of that name is on the caller's account (another account's characters are never read, so they look the same as no character) |
 | `character-online` | the character is online |

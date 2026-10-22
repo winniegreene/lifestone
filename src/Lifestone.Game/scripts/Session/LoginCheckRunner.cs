@@ -234,6 +234,12 @@ public sealed partial class LoginCheckRunner : Node
             return;
         }
 
+        if (kind == LoginCheckKind.Hunt)
+        {
+            HuntLegRunner.Install(main, services, host, mode, ui); // a kind of its own (M4 1.2 s4b): Holtburg Hunter's hunt on the hunt grounds, never part of 'all'
+            return;
+        }
+
         if (kind == LoginCheckKind.BsdDeath)
         {
             DeathLegRunner.Install(main, services, host, mode, ui); // a kind of its own (M3 3.2): BSD Mage's death and re-gear in the Aluvian den, never part of 'all'

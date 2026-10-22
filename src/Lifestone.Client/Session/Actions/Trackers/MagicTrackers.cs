@@ -341,6 +341,9 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
 /// to the mode asked for (<see cref="CombatModeChanged"/>) confirms. A request for the mode the player is in completes at once as <see cref="ActionOutcomeKind.Local"/>, nothing sent.
 /// ACE refuses a weapon mismatch (a melee mode with a wand wielded) with WeenieError ActionCancelled and puts the player back in peace: that is a
 /// <see cref="ActionOutcomeKind.ServerError"/>; any other silence times out. Lane Magic: ACE fails a cast in progress when the mode changes, so the change waits for a cast's end.
+/// <para>M4 3.1 g: <see cref="CombatModeGuard"/> asks the read model first, so a mode the wielded weapon forbids (melee with a wand or an orb, magic without a caster, missile without a launcher, or a wielded weapon whose
+/// kind the object table cannot tell) is <see cref="ActionOutcomeKind.Refused"/> with the guard's text, which names the item, and nothing is sent (ACE would put the player back in peace and the client would draw the wrong stance for a moment).
+/// The guard is asked when the action's turn comes, after any change ahead of it in the lane has been confirmed.</para>
 /// </summary>
 internal sealed class SetCombatModeTracker(ActionHandle handle, CombatMode mode) : ActionTracker(handle, ActionLane.Magic, ActionPolicy.CombatModeSeconds)
 {
@@ -348,7 +351,16 @@ internal sealed class SetCombatModeTracker(ActionHandle handle, CombatMode mode)
     internal override string WouldSend => "GameAction 0x0053 ChangeCombatMode " + (uint)mode;
 
     /// <inheritdoc/>
-    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api);
+    internal override string? Refusal(ActionApi api)
+    {
+        if (WorldTrackers.NotInWorld(api) is { } notInWorld)
+        {
+            return notInWorld;
+        }
+
+        // A request for the mode the player is in completes Local (Send), whatever it wields; any other is checked against the wielded weapon.
+        return api.State.Self.Qualities.CombatMode == (int)mode ? null : CombatModeGuard.Check(mode, api.State);
+    }
 
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)

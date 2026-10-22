@@ -101,6 +101,11 @@ internal sealed class CastRig : IDisposable
 
     public void Mode(CombatMode mode)
     {
+        if (mode == CombatMode.Magic)
+        {
+            WieldedSetups.Hold(Session, WieldedSetups.Wand); // the combat-mode guard (M4 3.1 g) wants a caster in the hand for the magic mode
+        }
+
         var change = Session.Actions.SetCombatMode(mode, ActionSource.Host);
         Run(1.5);
         Assert.True(change.IsCompleted, change.Summary);

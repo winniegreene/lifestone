@@ -461,4 +461,63 @@ public sealed class ChaseCameraModelTests
 
         Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
+
+    [Theory]
+    [InlineData(60.0)]
+    [InlineData(144.0)]
+    [InlineData(240.0)]
+    public void The_smoothing_settles_within_a_few_millimetres_of_the_wanted_point_at_every_frame_rate(double hertz)
+    {
+        // M4 1.3 s2: the stall threshold was a fixed step per frame, so at 240 Hz the viewer stopped 20 mm short of a 0.30 m stop (the shell-frames fade check's tolerance).
+        var model = new ChaseCameraModel();
+        var dt = 1.0 / hertz;
+        var now = 1.0;
+        model.Update(now, Player(), null);
+        model.Scale = 0.3f / 2.6125f;
+        model.SetDefaultOffsets();
+        CameraPose pose = default;
+        for (var i = 0; i < (int)(hertz * 6.0); i++)
+        {
+            now += dt;
+            pose = model.Update(now, Player(), null);
+        }
+
+        var viewer = Lifestone.Client.Play.DrawInterpolation.InSpaceOf(pose.Viewer, pose.Pivot.CellId);
+        var measured = Vector3.Distance(pose.Pivot.Origin, viewer.Origin);
+        Assert.InRange(measured, 0.3f - 0.01f, 0.3f + 0.01f);
+    }
+
+    [Fact]
+    public void The_retail_camera_still_flag_gives_retail_s_fixed_step_at_240_Hz_and_the_default_scales_it_1_3_R3()
+    {
+        const float Fixed = 0.0004f;
+        Assert.Equal(Fixed, ChaseCameraModel.StillStepMetres(1.0 / 240.0, retail: true), 7);
+        Assert.Equal(Fixed, ChaseCameraModel.StillStepMetres(1.0 / 60.0, retail: true), 7);
+        Assert.Equal(Fixed / 4f, ChaseCameraModel.StillStepMetres(1.0 / 240.0), 7); // the default: scaled against 60 Hz
+        Assert.Equal(Fixed, ChaseCameraModel.StillStepMetres(1.0 / 60.0), 7); // at 60 Hz it equals retail
+        Assert.Equal(Fixed, ChaseCameraModel.StillStepMetres(1.0 / 30.0), 7); // a longer frame keeps the 60 Hz step
+    }
+
+    [Fact]
+    public void The_retail_camera_still_option_is_parsed_and_listed_in_the_help_1_3_R3()
+    {
+        Assert.False(Lifestone.Client.Play.PlayOptions.Parse([]).RetailCameraStill);
+        Assert.True(Lifestone.Client.Play.PlayOptions.Parse(["--retail-camera-still"]).RetailCameraStill);
+        Assert.Contains(Lifestone.Client.Options.OptionCatalog.Play().Options, o => o.Name == "--retail-camera-still");
+    }
+
+    [Fact]
+    public void A_heading_offset_turns_the_viewer_about_the_pivot_at_the_same_distance_1_3_L1()
+    {
+        var model = new ChaseCameraModel();
+        model.SetDefaultOffsets();
+        var plain = model.ViewerOffset;
+        model.SetHeadingOffset(35f);
+        var turned = model.ViewerOffset;
+        Assert.Equal(plain.Length(), turned.Length(), 3);
+        Assert.Equal(plain.Z, turned.Z, 3);
+        Assert.NotEqual(0f, turned.X);
+        model.SetHeadingOffset(0f);
+        Assert.Equal(plain, model.ViewerOffset);
+    }
 }

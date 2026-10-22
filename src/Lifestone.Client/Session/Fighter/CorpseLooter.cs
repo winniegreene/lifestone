@@ -1,0 +1,319 @@
+using System.Globalization;
+using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Session.Contracts;
+
+namespace Lifestone.Client.Session.Fighter;
+
+/// <summary>Where a <see cref="CorpseLooter"/> is: still working, or finished (see <see cref="CorpseLooter.StoppedBy"/>).</summary>
+public enum LootStatus
+{
+    /// <summary>A move is in flight, or entries remain to be judged or waited for.</summary>
+    Running,
+
+    /// <summary>The loop ended: <see cref="CorpseLooter.StoppedBy"/> says why.</summary>
+    Done,
+}
+
+/// <summary>
+/// The shared loot loop (M4 2.2 s0): the hunt's kill (this slice) and the death loop's own corpse (s1) take the contents of a viewed container, one <see cref="IActionApi.PickUp"/> at a time, in the order of
+/// <see cref="ContainerView.Entries"/>. A rule (<see cref="LootRules"/>, or <see cref="LootRules.TakeAll"/>) decides each resolved entry; an entry whose object has not arrived is left until it does.
+/// </summary>
+/// <remarks>
+/// <para><b>One move at a time, no waits of its own.</b> A new move is sent only when the previous handle has an <see cref="ActionHandle.Outcome"/>; the Inventory lane holds each move until the previous one's chain ends
+/// (the return stance and the pickup motion, 1.35 s from a corpse: <c>ItemMoveTracker</c>), so the loop adds no sleep. The live capture (M4 2.2 cap, 2026-10-21) had four moves from one corpse in a row all Confirmed, each 0022
+/// 1.35 s after its send and the next send 1.46 to 1.48 s after the 0022: about 2.8 s per item.</para>
+/// <para><b>Unresolved entries.</b> ACE sends the 0196 before the F745 of every item it names, and the contents may arrive before or after the open's UseDone (the capture: 49129 before 49136): an unresolved entry is
+/// skipped for now and judged when its object arrives. The entries' F745s are in within 3 s of the open (<see cref="UnresolvedCapSeconds"/>, counted from the first <c>Step</c>); an entry still unresolved then is counted
+/// <see cref="LootDecision.NotResolved"/> and left.</para>
+/// <para><b>Outcomes.</b> <see cref="Looted"/> counts Confirmed moves; <see cref="Refused"/> a <see cref="ActionOutcomeKind.ServerError"/> or <see cref="ActionOutcomeKind.Refused"/> or any other ending that is not a confirmation
+/// or a timeout; <see cref="TimedOut"/> the 25 s timeouts. A refusal that names the burden (WeenieError 0x002A, "You are too encumbered to carry that!", or the same text as a transient string) ends the loop
+/// (<see cref="StoppedBy"/> is <c>burden</c>): every later item would be refused the same. Any other refusal is counted and the loop goes on with the next entry. There is no merge case: ACE never joins a stack at pick-up
+/// (the capture's arrows and coins), a looted stack is its own stack with a 0022 (<c>TODO(m4-loot-merge-stacks)</c>: <see cref="StacksBesideHeld"/> counts the looted stacks that have a held stack of their class; nothing here calls
+/// <see cref="IActionApi.MergeStack"/>).</para>
+/// <para><b>Allocation.</b> A <c>Step</c> allocates nothing but log lines, and those only on an event (a move sent or settled, an entry skipped, the end). The handled set grows with the entries.</para>
+/// <para><b>For the death loop (s1):</b> <c>new CorpseLooter(log, category, corpseGuid, LootRules.TakeAll)</c>, then <c>Step(session, session.Clock.Now)</c> each frame until <see cref="LootStatus.Done"/>.</para>
+/// </remarks>
+public sealed class CorpseLooter
+{
+    /// <summary>How long after the first step an entry's object may stay unresolved before it is left (the capture: the F745s were in within 3 s of the open).</summary>
+    public const double UnresolvedCapSeconds = 3.0;
+
+    /// <summary>ACE's WeenieError "You are too encumbered to carry that!" (0x002A), the refusal that ends the loop.</summary>
+    public const uint TooEncumberedCode = 0x002A;
+
+    /// <summary>
+    /// How long an owner steps a draining loop (<see cref="IsDraining"/>) before it gives up on the pick-up in flight: a little over the Action API's own 25 s pick-up timeout (<c>ActionPolicy.PickUpSeconds</c>), after which the handle
+    /// ends <see cref="ActionOutcomeKind.TimedOut"/> by itself, so a drain always ends.
+    /// </summary>
+    public const double DrainSeconds = 26.0;
+
+    private static readonly int ReasonSlots = Enum.GetValues<LootDecision>().Length;
+
+    private readonly ILogSink _log;
+    private readonly string _category;
+    private readonly uint _container;
+    private readonly LootRules _rules;
+    private readonly double _unresolvedCap;
+    private readonly HashSet<uint> _handled = new(32);
+    private readonly int[] _skipped = new int[ReasonSlots];
+    private ActionHandle? _pending;
+    private uint _pendingItem;
+    private int _takenBurden;
+    private int _burdenAtSend;
+    private double _startedAt = double.NaN;
+
+    /// <summary>A loop over the container <paramref name="container"/>.</summary>
+    /// <param name="log">Where the loop logs (one line per move, one per skip, one at the end).</param>
+    /// <param name="category">The log category (the hunt's <c>hunt</c>).</param>
+    /// <param name="container">The viewed container's object id (a corpse or a chest).</param>
+    /// <param name="rules">The rule, or null for <see cref="LootRules.TakeAll"/>.</param>
+    /// <param name="unresolvedCapSeconds">How long an unresolved entry is waited for.</param>
+    public CorpseLooter(ILogSink log, string category, uint container, LootRules? rules = null, double unresolvedCapSeconds = UnresolvedCapSeconds)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(category);
+        ArgumentOutOfRangeException.ThrowIfNegative(unresolvedCapSeconds);
+        _log = log;
+        _category = category;
+        _container = container;
+        _rules = rules ?? LootRules.TakeAll;
+        _unresolvedCap = unresolvedCapSeconds;
+    }
+
+    /// <summary>The container being emptied.</summary>
+    public uint Container => _container;
+
+    /// <summary>The rule in force.</summary>
+    public LootRules Rules => _rules;
+
+    /// <summary>Whether the loop is still working.</summary>
+    public bool IsDone { get; private set; }
+
+    /// <summary>Why the loop ended: <c>end</c> (every entry judged), <c>burden</c> (the server's burden refusal) or <c>closed</c> (the container's view is gone); empty while running.</summary>
+    public string StoppedBy { get; private set; } = string.Empty;
+
+    /// <summary>The moves the server confirmed (a 0022 into the player's pack).</summary>
+    public int Looted { get; private set; }
+
+    /// <summary>The entries the rule left, summed over every reason.</summary>
+    public int Skipped { get; private set; }
+
+    /// <summary>The moves the server refused (or that were never sent), the burden refusal included.</summary>
+    public int Refused { get; private set; }
+
+    /// <summary>The moves that got no answer within their timeout.</summary>
+    public int TimedOut { get; private set; }
+
+    /// <summary>The looted stackables that had a held stack of their own class (<c>TODO(m4-loot-merge-stacks)</c>: they stay separate stacks).</summary>
+    public int StacksBesideHeld { get; private set; }
+
+    /// <summary>The weenie class id of the first looted stack that had a held stack of its class, or 0.</summary>
+    public uint FirstStackBesideHeldWcid { get; private set; }
+
+    /// <summary>The entries left for <paramref name="reason"/>.</summary>
+    public int SkippedBy(LootDecision reason) => _skipped[(int)reason];
+
+    /// <summary>The counts as one line (no names): <c>looted=2 skipped=0 (value=0 type=0 burden=0 held=0 unresolved=0) refused=0 timed_out=0 stopped_by=end</c>.</summary>
+    public string Summary =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"looted={Looted} skipped={Skipped} (value={SkippedBy(LootDecision.Value)} type={SkippedBy(LootDecision.Type)} burden={SkippedBy(LootDecision.Burden)} held={SkippedBy(LootDecision.AlreadyHeld)} unresolved={SkippedBy(LootDecision.NotResolved)}) refused={Refused} timed_out={TimedOut} stopped_by={(StoppedBy.Length == 0 ? "running" : StoppedBy)}");
+
+    /// <summary>One step of the loop on a session; <paramref name="now"/> is the session clock's seconds.</summary>
+    public LootStatus Step(IGameSessionView session, double now)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        return Step(session.State, session.Actions, now);
+    }
+
+    /// <summary>One step of the loop on a read model and an action API (what <see cref="Step(IGameSessionView, double)"/> passes).</summary>
+    /// <param name="state">The session's read model.</param>
+    /// <param name="actions">The Action API the moves go through.</param>
+    /// <param name="now">The session clock's seconds.</param>
+    public LootStatus Step(GameState state, IActionApi actions, double now)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(actions);
+        if (IsDone)
+        {
+            // M4 2.2 fix R3: an abandoned loop with a pick-up in flight only settles it (the count); it sends nothing new.
+            if (_pending is { Outcome: { } late })
+            {
+                Settle(state, late);
+            }
+
+            return LootStatus.Done;
+        }
+
+        if (double.IsNaN(_startedAt))
+        {
+            _startedAt = now;
+        }
+
+        if (_pending is not null)
+        {
+            if (_pending.Outcome is not { } outcome)
+            {
+                return LootStatus.Running;
+            }
+
+            Settle(state, outcome);
+            if (IsDone)
+            {
+                return LootStatus.Done;
+            }
+        }
+
+        if (state.Containers.Viewed is not { } view || view.Guid != _container)
+        {
+            Finish("closed");
+            return LootStatus.Done;
+        }
+
+        var context = LootContext.Of(state, _takenBurden);
+        var waiting = 0;
+        var entries = view.Entries;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            if (_handled.Contains(entry.Guid))
+            {
+                continue;
+            }
+
+            WorldObject? item = null;
+            if (!entry.Resolved || !state.Objects.TryGet(entry.Guid, out item))
+            {
+                waiting++;
+                continue;
+            }
+
+            var decision = _rules.Decide(item, in context);
+            if (decision != LootDecision.Take)
+            {
+                Skip(entry.Guid, item, decision);
+                continue;
+            }
+
+            _pendingItem = entry.Guid;
+            _burdenAtSend = context.Burden;
+            _pending = actions.PickUp(entry.Guid, state.Self.Guid, 0, ActionSource.Host);
+            _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: taking '{item.Name}' 0x{entry.Guid:X8} (wcid {item.Weenie.WeenieClassId}, type 0x{item.ItemType:X}, value {item.Weenie.Value ?? 0}, burden {item.Weenie.Burden ?? 0})"));
+            return LootStatus.Running;
+        }
+
+        if (waiting > 0 && now - _startedAt < _unresolvedCap)
+        {
+            return LootStatus.Running;
+        }
+
+        for (var i = 0; i < entries.Count && waiting > 0; i++)
+        {
+            var entry = entries[i];
+            if (!_handled.Contains(entry.Guid))
+            {
+                Skip(entry.Guid, null, LootDecision.NotResolved);
+            }
+        }
+
+        Finish("end");
+        return LootStatus.Done;
+    }
+
+    /// <summary>
+    /// Ends the loop from outside (the hunt's retreat rule or its time, the death loop's abort): nothing more is sent. A move in flight is kept and settled on later <see cref="Step(GameState, IActionApi, double)"/> calls (a draining
+    /// loop, <see cref="IsDraining"/>): its outcome is counted in <see cref="Looted"/> (or <see cref="Refused"/> or <see cref="TimedOut"/>) as any other, so the owner reads the count once the drain is over (M4 2.2 fix R3).
+    /// </summary>
+    /// <param name="why">Why (the <see cref="StoppedBy"/> value).</param>
+    public void Abandon(string why)
+    {
+        ArgumentNullException.ThrowIfNull(why);
+        if (!IsDone)
+        {
+            Finish(why);
+            if (_pending is not null)
+            {
+                _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: the pick-up of 0x{_pendingItem:X8} is in flight at the abandon; nothing new is sent and its outcome is counted when it settles (draining)"));
+            }
+        }
+    }
+
+    /// <summary>True when the loop was abandoned (or ended) with a pick-up still in flight: the owner steps it until this is false (or <see cref="DrainSeconds"/> pass) and then reads <see cref="Looted"/>.</summary>
+    public bool IsDraining => IsDone && _pending is not null;
+
+    private void Settle(GameState state, ActionOutcome outcome)
+    {
+        var late = IsDone;
+        var guid = _pendingItem;
+        _pending = null;
+        _handled.Add(guid);
+        var known = state.Objects.TryGet(guid, out var item);
+        var name = known ? item!.Name : "?";
+        switch (outcome.Kind)
+        {
+            case ActionOutcomeKind.Confirmed:
+                Looted++;
+                if (known)
+                {
+                    _takenBurden = _burdenAtSend + (item!.Weenie.Burden ?? 0); // the burden the move started from plus the item's: the server's property may or may not show it yet
+                    NoteStack(state, item);
+                }
+
+                _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: took '{name}' 0x{guid:X8} ({Looted} so far{(late ? "; it settled after the loop was abandoned" : string.Empty)})"));
+                break;
+            case ActionOutcomeKind.TimedOut:
+                TimedOut++;
+                _log.Warn(_category, string.Create(CultureInfo.InvariantCulture, $"loot: the pick-up of '{name}' 0x{guid:X8} got no answer within its timeout; counted{(late ? " (after the loop was abandoned)" : ", going on")}"));
+                break;
+            default:
+                Refused++;
+                var burden = !late && outcome.Kind == ActionOutcomeKind.ServerError && (outcome.Code == TooEncumberedCode || (outcome.Detail?.Contains("encumbered", StringComparison.OrdinalIgnoreCase) ?? false));
+                _log.Warn(_category, string.Create(CultureInfo.InvariantCulture, $"loot: the pick-up of '{name}' 0x{guid:X8} ended {outcome.Kind} ({outcome.Detail ?? "no detail"}); counted{(late ? " (after the loop was abandoned)" : burden ? ", the burden limit: stopping" : ", going on")}"));
+                if (burden)
+                {
+                    Finish("burden");
+                }
+
+                break;
+        }
+    }
+
+    /// <summary><c>TODO(m4-loot-merge-stacks)</c>: counts a looted stackable that has another stack of its class in the player's holdings.</summary>
+    private void NoteStack(GameState state, WorldObject item)
+    {
+        if (item.Weenie.MaxStackSize is not > 1)
+        {
+            return;
+        }
+
+        var wcid = item.Weenie.WeenieClassId;
+        foreach (var other in state.Objects.All)
+        {
+            if (other.Guid != item.Guid && other.Weenie.WeenieClassId == wcid && state.Self.Inventory.Find(other.Guid).Held)
+            {
+                StacksBesideHeld++;
+                if (FirstStackBesideHeldWcid == 0)
+                {
+                    FirstStackBesideHeldWcid = wcid;
+                }
+
+                return;
+            }
+        }
+    }
+
+    private void Skip(uint guid, WorldObject? item, LootDecision reason)
+    {
+        _handled.Add(guid);
+        _skipped[(int)reason]++;
+        Skipped++;
+        _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: skipped {(item is null ? "an unresolved entry" : "'" + item.Name + "'")} 0x{guid:X8} ({LootRules.ReasonName(reason)}{(item is null ? string.Empty : ", type 0x" + item.ItemType.ToString("X", CultureInfo.InvariantCulture) + ", value " + (item.Weenie.Value ?? 0).ToString(CultureInfo.InvariantCulture))})"));
+    }
+
+    private void Finish(string why)
+    {
+        IsDone = true;
+        StoppedBy = why;
+        _log.Info(_category, "loot: done " + Summary + " (rule: " + _rules.Describe() + ")");
+    }
+}

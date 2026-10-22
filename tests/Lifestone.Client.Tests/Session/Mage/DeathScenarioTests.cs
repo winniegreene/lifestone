@@ -4,6 +4,7 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Bus;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.StandIn;
@@ -13,6 +14,7 @@ using Lifestone.Data.World;
 using Lifestone.Net.Diagnostics;
 using Lifestone.Net.Dispatch;
 using Lifestone.Net.Messages;
+using Lifestone.Client.Tests.Session.Fighter;
 using Lifestone.Net.Session;
 using Lifestone.Net.Types;
 using Lifestone.ServerTools;
@@ -29,7 +31,7 @@ namespace Lifestone.Client.Tests.Session.Mage;
 /// needs the dats or a server.
 /// </summary>
 [Collection(AllocationMeasurementCollection.Name)]
-public sealed class DeathScenarioTests(ITestOutputHelper output)
+public sealed partial class DeathScenarioTests(ITestOutputHelper output)
 {
     private const uint HoltburgCell = 0xA9B40019;
     private const uint FarCell = 0xA8B40019;
@@ -302,10 +304,14 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
 
         public WorldActionRig R { get; }
 
+        /// <summary>True: the PlayerDescription lists the wand as wielded (M4 3.1 g's combat-mode guard refuses the magic mode for a mage that holds no caster); set it, then call <see cref="Describe"/> and create the object.</summary>
+        public bool HoldsWand { get; set; }
+
         /// <summary>The PlayerDescription (the qualities become known).</summary>
         public void Describe() =>
             R.H.Describe(new PlayerDescriptionMsg
             {
+                Equipped = HoldsWand ? [new EquippedDesc(WieldedSetups.Wand.Guid, (uint)EquipMask.Held, 0)] : [],
                 IntProperties = ImmutableDictionary<uint, int>.Empty.Add(NumDeaths, 0),
                 Attributes = [.. Enumerable.Range(1, 6).Select(i => new AttributeDesc((uint)i, 0, 55, 0))],
                 Vitals = [new VitalDesc(1, 0, 0, 0, 28), new VitalDesc(3, 0, 0, 0, 55), new VitalDesc(5, 0, 0, 0, 55)],
@@ -377,6 +383,97 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
 
         public List<uint> Used { get; } = [];
 
+        // --- the mage's own corpse (M4 2.2 s1): the container, its contents and the way the server answers the trip
+
+        /// <summary>The guid of the last corpse the mage's death created (0 before one).</summary>
+        public uint CorpseGuid { get; private set; }
+
+        /// <summary>The items the corpse holds when the trip opens it (ACE's contents, in the 0196's order).</summary>
+        public List<WorldObject> CorpseItems { get; } = [];
+
+        /// <summary>True: the death creates no corpse object (the tally remembers none).</summary>
+        public bool NoCorpse { get; set; }
+
+        /// <summary>True: the server answers the corpse's Use with a UseDone error and no 0196 (a refused open).</summary>
+        public bool OpenRefused { get; set; }
+
+        /// <summary>True: the corpse's object is deleted when the player leaves for the trip and never comes back (the table forgot it).</summary>
+        public bool CorpseGone { get; set; }
+
+        /// <summary>When set, the corpse is created again this many seconds after the trip's arrival (ACE re-creates it for the client); the default is at once.</summary>
+        public double CorpseBackAfter { get; set; } = 0.2;
+
+        /// <summary>True: the server never answers a pick-up (each one times out).</summary>
+        public bool PickUpSilent { get; set; }
+
+        /// <summary>The items whose pick-up the server never answers (each such pick-up times out, the others are answered).</summary>
+        public HashSet<uint> SilentItems { get; } = [];
+
+        /// <summary>What <see cref="DeathScenario.GuardWhileHeld"/> answered on the last held frame (null: the trip goes on).</summary>
+        public ScenarioStatus? LastGuard { get; private set; }
+
+        /// <summary>True: the trip's place is answered with an error (the mage never leaves).</summary>
+        public bool RefuseTripPlace { get; set; }
+
+        /// <summary>True: the tuskers go on blowing after the trip's arrival (they do not by default: the trip tests are about the trip).</summary>
+        public bool TripBlows { get; set; }
+
+        /// <summary>When above 0, a tusker kill this many seconds after the trip's arrival (the mage dies on the trip).</summary>
+        public double KillOnTripAfter { get; set; }
+
+        /// <summary>
+        /// True: the live order of round 1 (M4 2.2 fix R1): after the respawn's arrival a stamina update of 0 and a mana update of 0 come (the drain of 30 evades reaching the client) BEFORE ACE's 75% restore, which comes 3 s after the teleport.
+        /// </summary>
+        public bool ZeroesBeforeRestore { get; set; }
+
+        /// <summary>True: after the trip's arrival the stamina and mana go to 0 and the health falls (the trip's blows and drains), which must never move the judged vitals.</summary>
+        public bool TripDrainsVitals { get; set; }
+
+        /// <summary>True: <see cref="Frame"/> holds the scenario as the death leg's runner does while a review frame is owed: only <see cref="DeathScenario.GuardWhileHeld"/> runs, never Step.</summary>
+        public bool Held { get; set; }
+
+        /// <summary>The cell the trip's place lands in (the den's arrival by default).</summary>
+        public uint TripCell { get; set; } = DenArrival;
+
+        public List<uint> Opened { get; } = [];
+
+        public List<uint> PickUps { get; } = [];
+
+        public int Closes { get; private set; }
+
+        /// <summary>The seconds the tuskers' death took the player's session clock to (the corpse's age is measured from its F745).</summary>
+        private int _tuskerDeaths;
+        private uint _gameEvent = 500;
+
+        /// <summary>Sets the health to <paramref name="percent"/> of its maximum (a 0x02E9).</summary>
+        public void SetHealth(uint percent) => Vital(2, Max(1) * percent / 100);
+
+        /// <summary>The weenie classes the mod's item verb was asked for, in order (M4 3.1 d1 F2: the decoy top-up).</summary>
+        public List<uint> ItemGrants { get; } = [];
+
+        /// <summary>True: the item verb is never answered (the top-up cannot complete).</summary>
+        public bool GrantsSilent { get; set; }
+
+        private uint _nextGrant = 0x80000D00;
+
+        /// <summary>The spells the mage cast untargeted, by id (M4 3.1 d1 F1: the pre-trip heal).</summary>
+        public List<uint> Casts { get; } = [];
+
+        /// <summary>The health points an untargeted cast heals (the server answers it with the health update and the UseDone, <see cref="CastSeconds"/> after it); 0 heals nothing.</summary>
+        public uint HealPoints { get; set; }
+
+        /// <summary>Seconds from a cast to its health update and UseDone.</summary>
+        public double CastSeconds { get; set; } = 1.0;
+
+        /// <summary>Sets the health to <paramref name="percent"/> of its maximum <paramref name="seconds"/> from now (the regeneration the pre-trip wait waits for).</summary>
+        public void RegenerateTo(double seconds, uint percent) => At(seconds, () => Vital(2, Max(1) * percent / 100));
+
+        /// <summary>One blow of the tuskers now, as <see cref="Damage"/> and <see cref="Lethal"/> say (M4 3.1 d1: what a scripted fight takes while it fights).</summary>
+        public void Hit() => Blow();
+
+        /// <summary>The tuskers kill the player now, in ACE's order (M4 3.1 d1: a second death, after the one the loop waits for).</summary>
+        public void Kill() => Die(suicide: false);
+
         public List<string> Places { get; } = [];
 
         public int Suicides { get; private set; }
@@ -390,6 +487,12 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
             R.Tick(dt);
             Pump();
             R.Tick();
+            if (Held)
+            {
+                LastGuard = scenario.GuardWhileHeld(View);
+                return LastGuard ?? ScenarioStatus.Running;
+            }
+
             return scenario.Step(View, Now);
         }
 
@@ -428,7 +531,44 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
                             break; // the server never answers the place that leaves the den
                         }
 
-                        Arrive(text, text.Contains("poi", StringComparison.Ordinal) ? HoltburgCell : DenCell);
+                        var poi = text.Contains("poi", StringComparison.Ordinal);
+                        var trip = _tuskerDeaths > 0 && !poi; // the place that follows the tuskers' death and is not Holtburg's point of interest is the corpse trip
+                        if (trip && RefuseTripPlace)
+                        {
+                            var refusedId = text[(text.LastIndexOf('#') + 1)..];
+                            R.H.ServerMessage(ToolsWire.Reply(ToolReply.Failure(refusedId, ToolVerbs.PlaceLoc, new ToolError("refused", "no")), "no"));
+                            break;
+                        }
+
+                        if (trip)
+                        {
+                            LeaveForTrip();
+                        }
+
+                        Arrive(text, poi ? HoltburgCell : (trip ? TripCell : DenCell));
+                        if (trip)
+                        {
+                            ArriveOnTrip();
+                        }
+
+                        break;
+                    case FakeSendKind.Use when CorpseGuid != 0 && send.Guid == CorpseGuid:
+                        Opened.Add(send.Guid);
+                        At(0.3, OpenCorpseNow);
+                        break;
+                    case FakeSendKind.PutItemInContainer when CorpseItems.Any(i => i.Guid == send.Guid):
+                        PickUps.Add(send.Guid);
+                        if (!PickUpSilent && !SilentItems.Contains(send.Guid))
+                        {
+                            var item = send.Guid;
+                            At(1.35, () => R.Server((p, sequence) => AceM3Writers.PutObjInContainer(p, sequence, item, WorldActionRig.Player, 0, 0)));
+                        }
+
+                        break;
+                    case FakeSendKind.NoLongerViewingContents:
+                        Closes++;
+                        var closing = send.Guid;
+                        At(0.016, () => R.H.R.Reducer.OnCloseGroundContainer(R.H.R.Context, new GameEventHeader(WorldActionRig.Player, ++_gameEvent, GameEventTypes.CloseGroundContainer), new CloseGroundContainerEvent(closing)));
                         break;
                     case FakeSendKind.Talk when send.Text is { } xpText && xpText.Contains(" xp ", StringComparison.Ordinal):
                         Xp(xpText);
@@ -484,6 +624,21 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
                             }
                         });
                         break;
+                    case FakeSendKind.Talk when send.Text is { } itemText && itemText.Contains(" item ", StringComparison.Ordinal):
+                        if (!GrantsSilent)
+                        {
+                            GrantItem(itemText);
+                        }
+
+                        break;
+                    case FakeSendKind.CastUntargetedSpell:
+                        Casts.Add(send.Guid);
+                        At(CastSeconds, () =>
+                        {
+                            Vital(2, Math.Min(Max(1), Current(1) + HealPoints)); // ACE's heal: the health update, then the UseDone that ends the cast
+                            R.UseDone(0);
+                        });
+                        break;
                     case FakeSendKind.Suicide:
                         Suicides++;
                         At(15.0, () =>
@@ -511,11 +666,45 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
                 }
             }
 
-            if (Tuskers && !_dead && now >= _nextBlow && InDen())
+            if (Tuskers && !_dead && now >= _nextBlow && InDen() && (_tuskerDeaths == 0 || TripBlows))
             {
                 _nextBlow = now + BlowEvery;
                 Blow();
             }
+        }
+
+        /// <summary>
+        /// The mod's item verb as ACE answers it (the wire order of the live gate): the 0022 into the pack and the verb's reply first, the item's CreateObject a bit later. The item is the decoy of that weenie class when it is one
+        /// (its ItemType, value and burden), else a plain light item.
+        /// </summary>
+        private void GrantItem(string text)
+        {
+            var id = text[(text.LastIndexOf('#') + 1)..];
+            var at = text.IndexOf(" item ", StringComparison.Ordinal) + 6;
+            var end = at;
+            while (end < text.Length && char.IsDigit(text[end]))
+            {
+                end++;
+            }
+
+            var wcid = uint.Parse(text[at..end], CultureInfo.InvariantCulture);
+            var guid = _nextGrant++;
+            ItemGrants.Add(wcid);
+            var decoy = DecoyKit.All.FirstOrDefault(d => d.Wcid == wcid);
+            var name = decoy?.Name ?? "Item " + wcid.ToString(CultureInfo.InvariantCulture);
+            var item = LootRulesTests.Item(decoy?.ItemType ?? 0x80, decoy is null ? 10u : (uint)decoy.UnitValue, (ushort)(decoy?.Burden ?? 5), guid, name, wcid);
+            var data = new ItemData(guid, wcid, name, 1, null, 1, false);
+            var placement = (uint)ItemGrants.Count;
+            At(0.2, () =>
+            {
+                R.Server((p, s) => AceM3Writers.PutObjInContainer(p, s, guid, WorldActionRig.Player, placement, 0));
+                R.H.ServerMessage(ToolsWire.Reply(ToolReply.Success(id, ToolVerbs.Item, data), data.Describe()));
+            });
+            At(0.4, () =>
+            {
+                var h = R.H.R;
+                h.Reducer.OnCreateObject(h.Context, item.Created, isUpdate: false);
+            });
         }
 
         /// <summary>The mod's xp verb: the reply, and the vitae leaving the registry two seconds on (<c>UpdateXpVitae</c>, <c>Player_Xp.cs</c> 166-171) when the grant paid it.</summary>
@@ -542,6 +731,66 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
             R.PrivateInt(EffectRules.VitaeCpPoolProperty, pool);
             R.Raw(AceWireWriters.PrivateUpdatePropertyInt64(1, PlayerQualities.TotalExperienceProperty, total));
         }
+
+        /// <summary>ACE's open of a corpse (capture C2): the 0196, the UseDone, then an F745 per item; a refused open is a UseDone error and nothing else.</summary>
+        private void OpenCorpseNow()
+        {
+            if (OpenRefused)
+            {
+                R.UseDone(0x0046);
+                return;
+            }
+
+            var h = R.H.R;
+            var guid = CorpseGuid;
+            h.Reducer.OnViewContents(h.Context, new GameEventHeader(WorldActionRig.Player, ++_gameEvent, GameEventTypes.ViewContents), new ViewContentsEvent(guid, [.. CorpseItems.Select(i => new ViewContentsEntry(i.Guid, 0))]));
+            R.UseDone(0);
+            At(0.1, () =>
+            {
+                foreach (var item in CorpseItems)
+                {
+                    h.Reducer.OnCreateObject(h.Context, item.Created with { Weenie = item.Created.Weenie with { Header = item.Created.Weenie.Header | WeenieHeaderFlags.Container, ContainerId = guid } }, isUpdate: false);
+                }
+            });
+        }
+
+        /// <summary>The player leaves for the corpse: the table forgets the corpse (the client deletes what is out of range after a teleport).</summary>
+        private void LeaveForTrip()
+        {
+            if (CorpseGuid != 0)
+            {
+                R.H.R.Reducer.OnDeleteObject(R.H.R.Context, new DeleteObjectMsg(CorpseGuid, 1));
+            }
+        }
+
+        /// <summary>The player has arrived at the corpse: ACE re-creates it for the client (unless <see cref="CorpseGone"/>), and the trip's own events are scheduled.</summary>
+        private void ArriveOnTrip()
+        {
+            if (CorpseGuid != 0 && !CorpseGone && _corpseCreate is { } create)
+            {
+                At(CorpseBackAfter, () => R.H.R.Reducer.OnCreateObject(R.H.R.Context, create, isUpdate: false));
+            }
+
+            if (KillOnTripAfter > 0)
+            {
+                At(KillOnTripAfter, () =>
+                {
+                    if (!_dead)
+                    {
+                        Die(suicide: false);
+                    }
+                });
+            }
+
+            if (TripDrainsVitals)
+            {
+                At(0.4, () => Vital(4, 0));
+                At(0.8, () => Vital(6, 0));
+                At(1.2, () => Vital(2, Max(1) / 2));
+            }
+        }
+
+        private CreateObjectMsg? _corpseCreate;
 
         private bool InDen() => (R.H.State.Self.Position?.CellId >> 16) == 0x0105 && R.H.State.Self.Travel == SelfTravel.Present;
 
@@ -629,6 +878,7 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
             _nextBlow = double.PositiveInfinity;
             if (!suicide)
             {
+                _tuskerDeaths++;
                 R.Server((p, s) => AceM3Writers.VictimNotification(p, s, "You have been killed by Tusker Slave."));
             }
 
@@ -640,11 +890,23 @@ public sealed class DeathScenarioTests(ITestOutputHelper output)
             R.Server((p, s) => AceM3Writers.MagicPurgeEnchantments(p, s));
             At(3.0, () =>
             {
-                var corpse = ReducerHarness.Create(0x80000900u + (uint)_numDeaths, ReducerHarness.Stamps(), ReducerHarness.Position(R.H.State.Self.Position?.CellId ?? DenArrival, 50, 30), name: "Corpse");
-                h.Reducer.OnCreateObject(h.Context, corpse with { Weenie = corpse.Weenie with { Name = "Corpse of " + R.H.State.Self.Name, ObjectDescriptionFlags = WorldObjectTable.CorpseFlag } }, isUpdate: false);
+                if (!NoCorpse)
+                {
+                    var corpse = ReducerHarness.Create(0x80000900u + (uint)_numDeaths, ReducerHarness.Stamps(), ReducerHarness.Position(R.H.State.Self.Position?.CellId ?? DenArrival, 50, 30), name: "Corpse");
+                    _corpseCreate = corpse with { Weenie = corpse.Weenie with { Name = "Corpse of " + R.H.State.Self.Name, ObjectDescriptionFlags = WorldObjectTable.CorpseFlag } };
+                    CorpseGuid = corpse.Guid;
+                    h.Reducer.OnCreateObject(h.Context, _corpseCreate, isUpdate: false);
+                }
+
                 Land(RespawnCell);
                 _dead = false;
                 _health = Max(1);
+                if (ZeroesBeforeRestore)
+                {
+                    At(0.5, () => Vital(4, 0));
+                    At(1.0, () => Vital(6, 0));
+                }
+
                 At(3.0, () =>
                 {
                     Vital(2, Max(1) * 3 / 4);

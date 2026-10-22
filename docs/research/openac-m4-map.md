@@ -2,7 +2,11 @@
 
 Read 2026-10-19 against OpenAC v0.1.25 @6db05a2 (`vendor-eval/OpenAC`, tag `watch-2026-10-19`;
 [foundation-openac.md](foundation-openac.md) §6). Status: done; the M4 planner re-reads §1 and §2 at each wave
-boundary and the watch (foundation-openac.md §6.4) refreshes §2.
+boundary and the watch (foundation-openac.md §6.4) refreshes §2. **Watch of the M4 planning session (2026-10-19,
+later):** the head is f22b048 (signed, `valid`; tag `watch-2026-10-19b`), 23 commits past 6db05a2; no file under
+`src/AcDream.Core.Net/**` changed, so every §1 row stands and new ports pin f22b048 (m4-plan.md D7); #218 was reverted
+and replaced (the §2 row below, D16); the new issues #227 (luminance auras), #225 (the shield slot with dual wield) and
+#229 (chat tags) name no M4 feature.
 
 [m4-fights-and-loot.md](../milestones/m4-fights-and-loot.md) §5 reads ACE alone and says every message order comes
 from ACE's code, not a capture. OpenAC is a from-scratch client that plays exactly M4's features against ACE, so it is
@@ -22,7 +26,7 @@ OpenAC's bug history to M4's gates. Paths are under `vendor-eval/OpenAC/src/` un
   Lifestone's version cites the retail function and its 11.6096 address (CLAUDE.md, "Data and sources").
 - **reference**: read for shape only; nothing on the page names it as a source of code.
 
-What `src/Lifestone.Net/Messages/` already holds is not listed: Use 0x0036, UseWithTarget 0x0035,
+What `src/Lifestone.Net/Messages/` already holds is not listed (UseWithTarget 0x0035 is not in it: 3.1 s0 wrote it from ACE's `GameActionUseWithTarget.cs:10-15` reader, not from OpenAC, and retail's `CM_Inventory::Event_UseWithTargetEvent` is 11.6096 0x006AD3E0, 11.4186 0x006AC480): Use 0x0036,
 PutItemInContainer 0x0019, GetAndWieldItem 0x001A, StackableMerge 0x0054, the casts 0x0048 and 0x004A, SetStackSize
 0197, InventoryRemoveObject 0024, the 0022 / 0023 / 02CE / 02DA updates, 00A0, 01C7, 01C0, the 01AC-01B4 combat
 events, the PrivateUpdates and PlayerDescription. M4 §5's "Lifestone today" column governs; where it and this page
@@ -56,17 +60,17 @@ fix slice or a named gap in the audit table.
 | #173 | thrown weapons showed no range | DoD 4 | the range reads for thrown weapons as for bows |
 | #198 | combat text omitted some damage output | DoD 3, 5 | every 01AC-01B4 line reaches the chat |
 | #220 | next-monster cycling was limited by elevation | DoD 5 | `NextMonster` cycles by radar range, not height |
-| #219 | items stayed on the hotbar after leaving the inventory | DoD 7 | a sold, dropped or given item leaves the shortcut bar |
-| #221 | dragging the main pack into the salvage bar took every pack | DoD 7, 13 | a pack move moves that pack |
+| #219 | items stayed on the hotbar after leaving the inventory | DoD 7 | a sold, dropped or given item leaves the shortcut bar (applies since M4 3.2: the h1 model and the h2 panel; the row is evicted, one RemoveShortcut is sent, and the slot draws empty; pinned by `GameDragTests.OpenAC_219_an_item_that_leaves_the_inventory_leaves_the_hotbar_and_the_slots_are_drag_sources_and_targets` (the 18 slots are drag sources and targets now) and `GameToolbarTests.A_missing_object_comes_back_unghosted_and_an_item_that_leaves_the_inventory_leaves_the_bar`) |
+| #221 | dragging the main pack into the salvage bar took every pack | DoD 7, 13 | a pack move moves that pack (`GameDragTests.OpenAC_221_*`: a side pack dragged to the main pack sends one `MoveToPack` for that pack; the player's own cell is not draggable; a press on a side pack's cell also opens it, so a drop back on that list is refused as "in itself") |
 | #226 | a carried spell focus blocked inventory completeness | DoD 6 | the pack contents are complete with a focus carried |
-| #206 | a quick press-and-drag picked up the item that was pressed | DoD 13 (Q2) | a drag starts from the pressed item |
-| #146 | a container did not show its full icon when an item hovered over it | DoD 13 | the hover highlight on a pack |
+| #206 | a quick press-and-drag picked up the item that was pressed | DoD 13 (Q2) | a drag starts from the pressed item (`GameDragTests.OpenAC_206_*`) |
+| #146 | a container did not show its full icon when an item hovered over it | DoD 13 | the hover highlight on a pack (`GameDragTests.OpenAC_146_*`: side-pack cell, player's cell, the container window's own cell, paperdoll slot accept and reject) |
 | #214 | logging out near buildings or trees logged back in on top of them | DoD 10 | the loops' logout and login near Holtburg's buildings |
 | #217 | no confirmation before destroying an item to charge a mana stone | DoD 7 | a destroying use asks first (if the item move set includes it; else a named gap) |
 | #139 | lifestone-recall arrival acted before the destination's collision was back | DoD 10 | the hunt loop's recall waits for the arrival (M3 3.2's rule) |
 | #154 | the character could stay stuck in the lifestone after a recall | DoD 10 | the loop moves off the lifestone after every recall |
 | #185 | run speed did not change in real time | DoD 10 | a run buff or burden change takes effect on the next frame |
-| #218 | a shop listing with zero stock is unlimited | DoD 12 | the stock model reads 0 as unlimited |
+| #218 | a shop listing with zero stock was read as unlimited (087f346), then reverted on 2026-10-19 (1c08ff7) for "list every shop row at open, whatever its amount" (38ef960) | DoD 12 | the stock model lists every CreateList row the 0062 carries and reads ACE's packed stack 0xFFFFFF as unlimited (`W/Vendor.cs`, M4 §5.8); never 0 (m4-plan.md D16); checked by `VendorStockTests.OpenAC_218_*` (M4 3.2 s1) |
 | #143 | the mana-cost text had a typo | DoD 11 | the appraisal panel's mana line |
 | #201 | cast recovery after a failed or interrupted cast | DoD 14 | the re-buff driver resumes after a 02C4 or a stance break |
 

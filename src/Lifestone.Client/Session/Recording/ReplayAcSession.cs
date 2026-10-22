@@ -224,7 +224,19 @@ internal sealed class ReplayAcSession : IAcSession
     public OutboundTicket SendUse(uint guid) => Sent(MessageOpcodes.GameAction, GameActionTypes.Use);
 
     /// <inheritdoc/>
+    public OutboundTicket SendUseWithTarget(uint item, uint target) => Sent(MessageOpcodes.GameAction, GameActionTypes.UseWithTarget);
+
+    /// <inheritdoc/>
     public OutboundTicket SendQueryHealth(uint guid) => Sent(MessageOpcodes.GameAction, GameActionTypes.QueryHealth);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendMeleeAttack(uint target, uint height, float power) => Sent(MessageOpcodes.GameAction, GameActionTypes.TargetedMeleeAttack);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendMissileAttack(uint target, uint height, float accuracy) => Sent(MessageOpcodes.GameAction, GameActionTypes.TargetedMissileAttack);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendCancelAttack() => Sent(MessageOpcodes.GameAction, GameActionTypes.CancelAttack);
 
     /// <inheritdoc/>
     public OutboundTicket SendRaiseAttribute(uint attribute, uint xp) => Sent(MessageOpcodes.GameAction, GameActionTypes.RaiseAttribute);
@@ -246,6 +258,39 @@ internal sealed class ReplayAcSession : IAcSession
 
     /// <inheritdoc/>
     public OutboundTicket SendChangeCombatMode(uint mode) => Sent(MessageOpcodes.GameAction, GameActionTypes.ChangeCombatMode);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendNoLongerViewingContents(uint container) => Sent(MessageOpcodes.GameAction, GameActionTypes.NoLongerViewingContents);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendDropItem(uint item) => Sent(MessageOpcodes.GameAction, GameActionTypes.DropItem);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSplitToContainer(uint stack, uint container, int placement, int amount) => Sent(MessageOpcodes.GameAction, GameActionTypes.StackableSplitToContainer);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSplitTo3D(uint stack, int amount) => Sent(MessageOpcodes.GameAction, GameActionTypes.StackableSplitTo3D);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSplitToWield(uint stack, uint equipMask, int amount) => Sent(MessageOpcodes.GameAction, GameActionTypes.StackableSplitToWield);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendGiveObject(uint target, uint item, int amount) => Sent(MessageOpcodes.GameAction, GameActionTypes.GiveObjectRequest);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendBuy(uint vendor, IReadOnlyList<(uint item, uint amount)> items) => Sent(MessageOpcodes.GameAction, GameActionTypes.BuyItems);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSell(uint vendor, IReadOnlyList<(uint item, uint amount)> items) => Sent(MessageOpcodes.GameAction, GameActionTypes.SellItems);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendIdentify(uint guid) => Sent(MessageOpcodes.GameAction, GameActionTypes.IdentifyObject);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendAddShortcut(uint index, uint objectId, uint spellId) => Sent(MessageOpcodes.GameAction, GameActionTypes.AddShortCut);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRemoveShortcut(uint index) => Sent(MessageOpcodes.GameAction, GameActionTypes.RemoveShortCut);
 
     /// <inheritdoc/>
     public OutboundTicket SendSuicide() => Sent(MessageOpcodes.GameAction, GameActionTypes.Suicide);

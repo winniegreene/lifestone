@@ -177,6 +177,133 @@ public sealed class PanelLayoutDumpTests(DatSetFixture fixture) : IClassFixture<
             $"{name} window 0x{window.ElementId:X8} (under {string.Join(" > ", path.Take(path.Count - 1).Select(static e => $"0x{e.ElementId:X8}"))}) holds [{string.Join(", ", classes.Select(c => $"0x{c:X8}"))}], pinned [{string.Join(", ", pinned.Order().Select(c => $"0x{c:X8}"))}]");
     }
 
+    /// <summary>
+    /// M4 2.2 s2: where a corpse's or chest's contents window comes from. <c>gm3DItemsUI</c> (0x10000021) is the pack list and its title inside the inventory page (page 7, element 0x100001CF, instanced from the base element
+    /// 0x100001C4 of layout 0x21000021: title 0x100001C5, item list 0x100001C6, scroll bar 0x100001C7; no art of its own: the page's frame art is the page's), so it is not a window over the world view. The window is
+    /// <c>gmExternalContainerUI</c> (0x1000000D, element 0x1000005D, panel id 0x12), one of the five panel windows of the environment floaty <c>gmFloatyEnvPanelUI</c> (0x1000004E, element 0x100005FD, 610 by 120 at 0,400) of the
+    /// gameplay layout (docs/retail-ui.md section 23.9). Dumped to <c>cache/m4/2-2/</c> (gitignored; derived from the dats, never committed).
+    /// </summary>
+    [RequiresLocalDatsFact]
+    public void The_container_window_is_gmExternalContainerUI_in_the_environment_floaty_and_gm3DItemsUI_is_the_inventory_pages_pack_list()
+    {
+        var layouts = new UiLayouts(fixture.Dats);
+        var root = CheckoutLocator.EnclosingCheckouts(AppContext.BaseDirectory).FirstOrDefault()
+            ?? throw new InvalidOperationException("TODO(panel-layout-dump): the test is not running inside a checkout");
+        var folder = Path.Combine(root, "cache", "m4", "2-2");
+        Directory.CreateDirectory(folder);
+        var gameplay = layouts.GetRootDesc(UiLayoutEnums.GameplayRoot);
+
+        // gm3DItemsUI: inside the inventory page, and the base element of layout 0x21000021 holds the title, the item list and its scroll bar.
+        var itemsPath = new List<UiElementDesc>();
+        Assert.True(FindWithPath(layouts, gameplay, 0x10000021, itemsPath));
+        Assert.Contains(itemsPath, static e => e.ElementId == 0x1000018B); // page 7 (the inventory page)
+        var baseDesc = layouts.AccessElementDesc(0x21000021, 0x100001C4) ?? throw new InvalidDataException("layout 0x21000021 has no element 0x100001C4");
+        var text = new StringBuilder();
+        text.Append("# layout 0x21000021 element 0x100001C4 (the base of gm3DItemsUI), resolved (derived from the dats; never committed)\n");
+        Dump(layouts, baseDesc, 0, text);
+        File.WriteAllText(Path.Combine(folder, "layout-21000021.txt"), text.ToString());
+        var held = new SortedSet<uint>();
+        Classes(layouts, baseDesc, held);
+        Assert.Equal([0x01u, 0x03u, 0x0Bu, 0x0Cu, 0x10000021u, 0x10000031u], held.ToArray()); // the title is a UIElement_Text (0x0C): the container window's title is made from it
+
+        // gmExternalContainerUI: a window of gmFloatyEnvPanelUI, with its own container cell, item rows, scroll bars and close button.
+        var windowPath = new List<UiElementDesc>();
+        Assert.True(FindWithPath(layouts, gameplay, 0x1000000D, windowPath));
+        Assert.Equal([0x10000495u, 0x100005FDu, 0x1000005Du], windowPath.Select(static e => e.ElementId).ToArray()); // root, gmFloatyEnvPanelUI, gmExternalContainerUI
+        Assert.Equal(0x1000004Eu, windowPath[1].Type);
+        var envText = new StringBuilder();
+        envText.Append("# gmFloatyEnvPanelUI window 0x100005FD: the layout subtree, resolved (derived from the dats; never committed)\n");
+        Dump(layouts, windowPath[1], 0, envText);
+        File.WriteAllText(Path.Combine(folder, "layout-envpanel.txt"), envText.ToString());
+        var windowClasses = new SortedSet<uint>();
+        Classes(layouts, windowPath[2], windowClasses);
+        Assert.Equal([0x01u, 0x03u, 0x0Bu, 0x1000000Du, 0x10000031u], windowClasses.ToArray()); // buttons, fields, scroll bars and item lists: no text (the title is made)
+        var window = layouts.RequireFullDesc(windowPath[2]);
+        Assert.Equal([0x10000064u, 0x10000065u, 0x10000068u, 0x10000069u], window.Children.Values.Select(static c => c.ElementId).Order().ToArray()); // the container cell, the sub-container row, the close button, the item row's field
+        Assert.Contains(window.Children.Values, c => c.ElementId == 0x10000068 && layouts.RequireFullDesc(c).Type == 0x01); // the close button (a UIElement_Button; the local desc takes its class from its base)
+        Assert.True(window.BaseState.Properties.TryGetValue(UiPropertyIds.ElementPanelId, out var panelId)); // the panel id the floaty follows
+        Assert.Equal(0x12u, Assert.IsType<UiEnumProperty>(panelId).Value);
+    }
+
+    /// <summary>
+    /// M4 3.2 s4c: where the examine panel comes from. <c>gmExaminationUI</c> (0x1000001C) is a window of the gameplay layout; its subtree is dumped to <c>cache/m4/3-2/layout-examine.txt</c> (gitignored; derived from the dats, never committed).
+    /// </summary>
+    [RequiresLocalDatsFact]
+    public void The_examination_window_is_dumped()
+    {
+        var layouts = new UiLayouts(fixture.Dats);
+        var root = CheckoutLocator.EnclosingCheckouts(AppContext.BaseDirectory).FirstOrDefault()
+            ?? throw new InvalidOperationException("TODO(panel-layout-dump): the test is not running inside a checkout");
+        var folder = Path.Combine(root, "cache", "m4", "3-2");
+        Directory.CreateDirectory(folder);
+        var path = new List<UiElementDesc>();
+        var where = new StringBuilder();
+        foreach (var layoutId in layouts.LayoutIds)
+        {
+            foreach (var element in layouts.GetLayout(layoutId).AllElements())
+            {
+                UiElementDesc full;
+                try
+                {
+                    full = layouts.RequireFullDesc(element);
+                }
+                catch (InvalidDataException)
+                {
+                    continue; // an element whose base is in a layout that has no such top-level element
+                }
+
+                if (full.Type is 0x1000001C or 0x1000004C)
+                {
+                    where.Append(CultureInfo.InvariantCulture, $"layout 0x{layoutId:X8} element 0x{full.ElementId:X8} class 0x{full.Type:X8}\n");
+                    if (path.Count == 0 && full.Type == 0x1000001C)
+                    {
+                        path.Add(full);
+                    }
+                }
+            }
+        }
+
+        WriteIfChanged(Path.Combine(folder, "layout-examine-where.txt"), where.ToString());
+        Assert.True(path.Count > 0, where.ToString());
+        var floatyPath = new List<UiElementDesc>();
+        Assert.True(FindWithPath(layouts, layouts.GetRootDesc(UiLayoutEnums.GameplayRoot), 0x1000004C, floatyPath));
+        var floaty = new StringBuilder();
+        floaty.Append("# path: ").Append(string.Join(" > ", floatyPath.Select(static e => $"0x{e.ElementId:X8} {UiClassRegistry.NameOf(e.Type)}"))).Append((char)10);
+        Dump(layouts, floatyPath[^1], 0, floaty);
+        WriteIfChanged(Path.Combine(folder, "layout-examine-floaty.txt"), floaty.ToString());
+        var text = new StringBuilder();
+        text.Append("# gmExaminationUI window: the layout subtree, resolved (derived from the dats; never committed)\n");
+        text.Append("# path from the gameplay root: ").Append(string.Join(" > ", path.Select(static e => $"0x{e.ElementId:X8} {UiClassRegistry.NameOf(e.Type)}"))).Append('\n');
+        Dump(layouts, path[^1], 0, text);
+        WriteIfChanged(Path.Combine(folder, "layout-examine.txt"), text.ToString());
+    }
+
+    // 3.2-R30: the research dump touches its cache files only when they are missing or differ, so a default run with the dats rewrites nothing.
+    private static void WriteIfChanged(string path, string text)
+    {
+        if (!File.Exists(path) || File.ReadAllText(path) != text)
+        {
+            File.WriteAllText(path, text);
+        }
+    }
+
+    private static void Outline(UiLayouts layouts, UiElementDesc local, int depth, int maxDepth, StringBuilder into)
+    {
+        var d = layouts.RequireFullDesc(local);
+        var b = d.BaseState;
+        into.Append(' ', depth * 2);
+        into.Append(CultureInfo.InvariantCulture, $"0x{d.ElementId:X8} | 0x{d.Type:X8} {UiClassRegistry.NameOf(d.Type)} | {b.X},{b.Y} {b.Width}x{b.Height} | z {b.ZLevel} | {d.Children.Count} children\n");
+        if (depth >= maxDepth)
+        {
+            return;
+        }
+
+        foreach (var child in d.Children.Values)
+        {
+            Outline(layouts, child, depth + 1, maxDepth, into);
+        }
+    }
+
     private static void Dump(UiLayouts layouts, UiElementDesc local, int depth, StringBuilder into)
     {
         var d = layouts.RequireFullDesc(local);

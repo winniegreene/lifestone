@@ -444,9 +444,13 @@ public sealed partial class ServerObjectsLayer : Node3D
         var appearances = avatar.Body.Appearance.Parts;
         for (var i = 0; i < parts.Length; i++)
         {
-            if (parts[i].GfxObjId != 0)
+            // A hidden object's frame carries no GfxObj (its pose is not drawn: GfxObjId 0), so the part's own level-0 GfxObj stands in: the one the first fade frame asks for at close range. Prefetching only the
+            // frame's ids prefetched nothing, and the fade spent its first frames waiting for the meshes (m4-1-2 fade-R1: the twin was drawn two to three frames late).
+            var appearance = appearances[parts[i].PartIndex];
+            var gfxObjId = parts[i].GfxObjId != 0 ? parts[i].GfxObjId : appearance.Chain.NearestGfxObjId;
+            if (gfxObjId != 0)
             {
-                meshes.TryGet(parts[i].GfxObjId, appearances[parts[i].PartIndex], out _);
+                meshes.TryGet(gfxObjId, appearance, out _);
             }
         }
     }

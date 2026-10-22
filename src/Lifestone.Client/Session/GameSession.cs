@@ -123,6 +123,9 @@ public sealed class GameSession : IGameSessionView, IDisposable
     /// <inheritdoc/>
     public IActionApi Actions => _actions;
 
+    /// <inheritdoc/>
+    public AttackSequence Attack => _reducer.Attack;
+
     /// <summary>True for <c>--retail-cast-any-mode</c> (M3 4.2 D40): this session's casts are sent whatever the combat mode, as retail's client sends them. Default false: refused at once. Per session, so no test shares it (4.2 R1).</summary>
     public bool RetailCastAnyMode
     {
@@ -240,6 +243,9 @@ public sealed class GameSession : IGameSessionView, IDisposable
 
     /// <summary>The reducer (tests and the replayer).</summary>
     internal GameStateReducer Reducer => _reducer;
+
+    /// <inheritdoc/>
+    public void CloseVendorWindow() => _reducer.CloseOpenVendor("the player closed the vendor window");
 
     /// <summary>The Action API (tests, the replayer's action notices, the inspector).</summary>
     internal ActionApi ActionApi => _actions;

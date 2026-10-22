@@ -13,6 +13,7 @@ public sealed class SelfState
     /// <summary>A state with no player. Only the session creates one.</summary>
     internal SelfState()
     {
+        Shortcuts.Bind(Inventory);
     }
 
     /// <summary>The player's object id from F746 PlayerCreate, or 0 outside the world.</summary>
@@ -50,4 +51,7 @@ public sealed class SelfState
 
     /// <summary>The player's inventory: the packs, what is wielded or worn, and the burden (empty until the description arrives; M3 1.2 s2).</summary>
     public PlayerInventory Inventory { get; } = new();
+
+    /// <summary>The player's shortcut bar: 18 slots filled from the description's list and changed by the client's own AddShortcut and RemoveShortcut and by an item leaving the inventory (empty until the description arrives; M4 3.2 h1).</summary>
+    public ShortcutBar Shortcuts { get; } = new();
 }

@@ -43,6 +43,7 @@ internal sealed partial record PortHeader(string Path, int Line, string CommentP
         new("eriknihlen/OpenAC", "MIT", "Copyright (c) 2026 Erik Nihlén and OpenAC contributors",
         [
             new("1ee5a08", "1ee5a08581a7f4b0b22effdf911171a76cf4391c", "v0.1.24 (docs/protocol.md, docs/third-party/terrain.md)"),
+            new("f22b048", "f22b04851c5fcc3f38acfe50fb704ca38130c081", "the signed head of M4 D7 (docs/research/foundation-openac.md, docs/third-party/net.md)"),
         ]),
         new("ACEmulator/ACViewer", "GPL-3.0", null,
         [

@@ -68,6 +68,7 @@ public sealed partial class GamePanels : IDisposable
         RegisterB3Classes(registry);
         RegisterC1Classes(registry);
         RegisterC2Classes(registry);
+        RegisterD1Classes(registry);
     }
 
     private static partial void RegisterA1Classes(UiClassRegistry registry);
@@ -86,6 +87,8 @@ public sealed partial class GamePanels : IDisposable
 
     private static partial void RegisterC2Classes(UiClassRegistry registry);
 
+    private static partial void RegisterD1Classes(UiClassRegistry registry);
+
     private partial void QueueA1();
 
     private partial void QueueA2();
@@ -101,6 +104,10 @@ public sealed partial class GamePanels : IDisposable
     private partial void QueueC1();
 
     private partial void QueueC2();
+
+    private partial void QueueD1();
+
+    private partial void QueueD2();
 
     /// <summary>Queues one controller for the staged wiring (called from a slice's <c>Queue&lt;Slice&gt;</c>): <paramref name="build"/> runs in a unit of its own and returns the controller, or null when its page is missing from the layout (log why).</summary>
     public void Queue(Func<GamePanels, IGamePanel?> build)
@@ -144,6 +151,8 @@ public sealed partial class GamePanels : IDisposable
         QueueB3();
         QueueC1();
         QueueC2();
+        QueueD1();
+        QueueD2();
         for (var i = 0; i < _queue.Count; i++)
         {
             var unitStart = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -199,6 +208,7 @@ public sealed partial class GamePanels : IDisposable
 
         _shown.Clear();
         _queue.Clear();
+        DisposeD2();
     }
 
     private void OnPageVisibilityChanged(uint panelId, bool visible)

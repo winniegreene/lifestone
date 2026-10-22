@@ -66,6 +66,7 @@ public sealed partial class PlayChecks
             known.Length >= 2 && answered && handles.TrueForAll(static h => h.Outcome?.Kind == ActionOutcomeKind.Sent),
             $"known_spells={book.Count} asked={known.Length} answered={answered} outcomes=[{string.Join(",", handles.Select(static h => h.Outcome?.Kind.ToString() ?? "none"))}]");
 
+        var caster = await HoldCasterAsync(session); // M4 3.1 g: the magic mode needs a caster in hand (the combat-mode guard); the wand goes back to the pack after the peace row
         var magic = session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
         var inMagic = await WaitFor(() => magic.IsCompleted && q.CombatMode == CombatModes.Magic, 10.0);
         await Frames(4);
@@ -130,6 +131,7 @@ public sealed partial class PlayChecks
             peaceName,
             inPeace && !window.Visible && !window.IsShown && floaty?.Visible == false && !window.Children.Any(static c => c.IsShown),
             $"mode={q.CombatMode} window_visible={window.Visible} window_shown={window.IsShown} floaty_visible={floaty?.Visible}");
+        await StowAsync(session, caster);
 
         if (_framesDirectory is { } directory)
         {
@@ -148,6 +150,7 @@ public sealed partial class PlayChecks
             var earlierTab = window.OpenTab;
             var choice = PanelFramesPlan.OpenSpellcastingFrameTab(window); // M3 3.2 fix B (3.2-R7): the first tab whose bar holds spells, a tab click
             Log.Info(LogCategory, $"spellcasting frame tab={choice.Tab} holds_spells={choice.HoldsSpells} opened={choice.Opened}");
+            HideLightsHud(); // the developer HUD would cover the window (M4 3.2 lane e: both frames of the window are taken without it)
             await Frames(8);
             var shot = window.IsShown && SaveCheckedFrame($"{folder}/{PanelFramesPlan.FileName(frame)}", frame.Name);
             if (!shot)
@@ -155,11 +158,23 @@ public sealed partial class PlayChecks
                 FrameFailed($"{frame.Name}: the window did not show (shown={window.IsShown})");
             }
 
+            // M4 3.2 lane e: the same window on the first tab whose favourites bar holds no spell, so the frame shows the bar's empty slot boxes (c2-spellcasting-empty; review only).
+            var emptyFrame = PanelFramesPlan.SpellcastingEmptyFrame;
+            var emptyChoice = PanelFramesPlan.OpenSpellcastingEmptyFrameTab(window);
+            Log.Info(LogCategory, $"spellcasting empty frame tab={emptyChoice.Tab} holds_spells={emptyChoice.HoldsSpells} opened={emptyChoice.Opened} cells={window.ListOf(emptyChoice.Tab)?.CellCount ?? -1} empty_cells={window.ListOf(emptyChoice.Tab)?.EmptyCount ?? -1}");
+            await Frames(8);
+            var emptyShot = window.IsShown && SaveCheckedFrame($"{folder}/{PanelFramesPlan.FileName(emptyFrame)}", emptyFrame.Name);
+            if (!emptyShot)
+            {
+                FrameFailed($"{emptyFrame.Name}: the window did not show (shown={window.IsShown})");
+            }
+
+            RestoreLightsHud();
             window.OpenTabByClick(earlierTab);
             window.SetCombatMode(restore);
             combat?.SetCombatMode(restoreCombat);
             await Frames(2);
-            Log.Info(LogCategory, $"spellcasting frame done captured={(shot ? 1 : 0)}/1");
+            Log.Info(LogCategory, $"spellcasting frame done captured={(shot ? 1 : 0)}/1 empty_captured={(emptyShot ? 1 : 0)}/1");
         }
     }
 }

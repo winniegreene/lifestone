@@ -221,7 +221,17 @@ internal sealed class StandInResponder
 
         public OutboundTicket SendUse(uint guid) => owner.World?.Use(guid) ?? throw new NotSupportedException(NoServer);
 
+        // M4 3.1 s2: the kit's heal (StandInWorld.Heal.cs; closes TODO(m4-standin-heal)).
+        public OutboundTicket SendUseWithTarget(uint item, uint target) => owner.Record(GameActionTypes.UseWithTarget, item, target, 0).UseWithTarget(item, target);
+
         public OutboundTicket SendQueryHealth(uint guid) => owner.World?.QueryHealth(guid) ?? throw new NotSupportedException(NoServer);
+
+        // M4 1.2 s3: the stand-in's melee swing, missile shot and cancel (StandInWorld.Attack.cs; closes TODO(m4-standin-attack)). The third field of a melee or missile send is the power or accuracy's bits.
+        public OutboundTicket SendMeleeAttack(uint target, uint height, float power) => owner.Record(GameActionTypes.TargetedMeleeAttack, target, height, BitConverter.SingleToUInt32Bits(power)).MeleeAttack(target, height, power);
+
+        public OutboundTicket SendMissileAttack(uint target, uint height, float accuracy) => owner.Record(GameActionTypes.TargetedMissileAttack, target, height, BitConverter.SingleToUInt32Bits(accuracy)).MissileAttack(target, height, accuracy);
+
+        public OutboundTicket SendCancelAttack() => owner.Record(GameActionTypes.CancelAttack, 0, 0, 0).CancelAttack();
 
         public OutboundTicket SendTalk(ReadOnlySpan<char> text) => owner.World is { } world ? world.Talk(text) : throw new NotSupportedException(NoServer);
 
@@ -241,7 +251,34 @@ internal sealed class StandInResponder
 
         public OutboundTicket SendChangeCombatMode(uint mode) => owner.Record(GameActionTypes.ChangeCombatMode, mode, 0, 0).ChangeCombatMode(mode);
 
+        // M4 2.1 s3: the container and item-move sends are answered (StandInWorld.Containers.cs, StandInWorld.Moves.cs; closes TODO(m4-standin-item-moves)).
         // M3 3.2 db: the suicide is the death the stand-in plays (StandInWorld.Death.cs); ACE answers an AddSpellFavorite with nothing, so the stand-in keeps the bar for its next description.
+        public OutboundTicket SendNoLongerViewingContents(uint container) => owner.Record(GameActionTypes.NoLongerViewingContents, container, 0, 0).StopViewing(container);
+
+        public OutboundTicket SendDropItem(uint item) => owner.Record(GameActionTypes.DropItem, item, 0, 0).DropItem(item);
+
+        public OutboundTicket SendSplitToContainer(uint stack, uint container, int placement, int amount) =>
+            owner.Record(GameActionTypes.StackableSplitToContainer, stack, container, unchecked((uint)placement)).SplitToContainer(stack, container, placement, amount);
+
+        public OutboundTicket SendSplitTo3D(uint stack, int amount) => owner.Record(GameActionTypes.StackableSplitTo3D, stack, unchecked((uint)amount), 0).SplitTo3D(stack, amount);
+
+        public OutboundTicket SendSplitToWield(uint stack, uint equipMask, int amount) =>
+            owner.Record(GameActionTypes.StackableSplitToWield, stack, equipMask, unchecked((uint)amount)).SplitToWield(stack, equipMask, amount);
+
+        public OutboundTicket SendGiveObject(uint target, uint item, int amount) =>
+            owner.Record(GameActionTypes.GiveObjectRequest, target, item, unchecked((uint)amount)).Give(target, item, amount);
+
+        // M4 3.2 s3: the vendor, appraisal and shortcut sends are answered (StandInWorld.Vendor.cs, StandInWorld.Appraise.cs; closes TODO(m4-standin-vendor)). A trade needs the visit's vendors (StandInVisit.Vendors); a shortcut change is kept for the next description.
+        public OutboundTicket SendBuy(uint vendor, IReadOnlyList<(uint item, uint amount)> items) => owner.Record(GameActionTypes.BuyItems, vendor, (uint)items.Count, 0).Buy(vendor, items);
+
+        public OutboundTicket SendSell(uint vendor, IReadOnlyList<(uint item, uint amount)> items) => owner.Record(GameActionTypes.SellItems, vendor, (uint)items.Count, 0).Sell(vendor, items);
+
+        public OutboundTicket SendIdentify(uint guid) => owner.Record(GameActionTypes.IdentifyObject, guid, 0, 0).Identify(guid);
+
+        public OutboundTicket SendAddShortcut(uint index, uint objectId, uint spellId) => owner.Record(GameActionTypes.AddShortCut, index, objectId, spellId).AddShortcut(index, objectId, spellId);
+
+        public OutboundTicket SendRemoveShortcut(uint index) => owner.Record(GameActionTypes.RemoveShortCut, index, 0, 0).RemoveShortcut(index);
+
         public OutboundTicket SendSuicide() => owner.Record(GameActionTypes.Suicide, 0, 0, 0).Suicide();
 
         public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => owner.Record(GameActionTypes.AddSpellFavorite, spellId, index, bar).AddSpellFavorite(spellId, index, bar);

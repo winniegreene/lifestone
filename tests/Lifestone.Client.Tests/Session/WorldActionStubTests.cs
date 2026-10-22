@@ -37,7 +37,8 @@ public sealed class WorldActionStubTests
         Assert.Single(r.H.Net.Of(FakeSendKind.CastUntargetedSpell)); // the Magic lane's first
         Assert.Equal(ActionOutcomeKind.Refused, handles[4].Item2.Outcome!.Value.Kind); // an item the model does not hold
         Assert.Equal(ActionOutcomeKind.Refused, handles[3].Item2.Outcome!.Value.Kind);
-        Assert.Equal(ActionOutcomeKind.Refused, handles[5].Item2.Outcome!.Value.Kind);
+        Assert.Null(handles[5].Item2.Outcome); // M4 2.1 s2: a move of an item the model does not hold is a pick-up, sent (TODO(m3-pickup) closed)
+        Assert.Single(r.H.Net.Of(FakeSendKind.PutItemInContainer));
         Assert.DoesNotContain(r.H.Log.Entries, e => e.Severity == LogSeverity.Error);
         Assert.DoesNotContain(handles, x => x.Item2.Outcome?.Kind == ActionOutcomeKind.NotImplemented);
     }
@@ -123,7 +124,7 @@ public sealed class WorldActionStubTests
         // Appended after ToolItem so the recorded values above stay stable.
         Assert.Equal(ActionKind.ToolItem + 1, ActionKind.CastSpell);
         Assert.Equal(
-            [ActionKind.CastSpell, ActionKind.SetCombatMode, ActionKind.Wield, ActionKind.Unwield, ActionKind.MoveToPack, ActionKind.MergeStack, ActionKind.Suicide, ActionKind.AddSpellFavorite, ActionKind.RemoveSpellFavorite],
+            [ActionKind.CastSpell, ActionKind.SetCombatMode, ActionKind.Wield, ActionKind.Unwield, ActionKind.MoveToPack, ActionKind.MergeStack, ActionKind.Suicide, ActionKind.AddSpellFavorite, ActionKind.RemoveSpellFavorite, ActionKind.Attack, ActionKind.MissileAttack, ActionKind.CancelAttack, ActionKind.OpenContainer, ActionKind.CloseContainer, ActionKind.PickUp, ActionKind.Drop, ActionKind.SplitToContainer, ActionKind.SplitTo3D, ActionKind.SplitToWield, ActionKind.Give, ActionKind.UseWithTarget, ActionKind.Drink, ActionKind.AddShortcut, ActionKind.RemoveShortcut, ActionKind.UseShortcut, ActionKind.Identify, ActionKind.OpenVendor, ActionKind.Buy, ActionKind.Sell],
             Enum.GetValues<ActionKind>().Where(k => k > ActionKind.ToolItem));
     }
 

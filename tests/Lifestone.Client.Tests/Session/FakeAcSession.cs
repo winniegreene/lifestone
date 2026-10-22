@@ -19,7 +19,11 @@ internal enum FakeSendKind
     AutonomousPosition,
     Jump,
     Use,
+    UseWithTarget,
     QueryHealth,
+    MeleeAttack,
+    MissileAttack,
+    CancelAttack,
     RaiseAttribute,
     RaiseVital,
     RaiseSkill,
@@ -30,6 +34,17 @@ internal enum FakeSendKind
     GetAndWieldItem,
     PutItemInContainer,
     StackableMerge,
+    NoLongerViewingContents,
+    DropItem,
+    SplitToContainer,
+    SplitTo3D,
+    SplitToWield,
+    GiveObject,
+    Buy,
+    Sell,
+    Identify,
+    AddShortcut,
+    RemoveShortcut,
     Suicide,
     AddSpellFavorite,
     RemoveSpellFavorite,
@@ -53,7 +68,8 @@ internal readonly record struct FakeSend(
     bool Contact = false,
     float Extent = 0,
     Vector3 Velocity = default,
-    uint Amount = 0);
+    uint Amount = 0,
+    IReadOnlyList<(uint item, uint amount)>? Items = null);
 
 /// <summary>
 /// An <see cref="IAcSession"/> for the action tests (step ST9): it records every send in order and sends nothing. The
@@ -157,7 +173,20 @@ internal sealed class FakeAcSession : IAcSession
     public OutboundTicket SendUse(uint guid) => Send(new FakeSend(FakeSendKind.Use, guid));
 
     /// <inheritdoc/>
+    public OutboundTicket SendUseWithTarget(uint item, uint target) =>
+        Send(new FakeSend(FakeSendKind.UseWithTarget, item, Target: target.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)));
+
+    /// <inheritdoc/>
     public OutboundTicket SendQueryHealth(uint guid) => Send(new FakeSend(FakeSendKind.QueryHealth, guid));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendMeleeAttack(uint target, uint height, float power) => Send(new FakeSend(FakeSendKind.MeleeAttack, target, Amount: height, Extent: power));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendMissileAttack(uint target, uint height, float accuracy) => Send(new FakeSend(FakeSendKind.MissileAttack, target, Amount: height, Extent: accuracy));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendCancelAttack() => Send(new FakeSend(FakeSendKind.CancelAttack));
 
     /// <inheritdoc/>
     public OutboundTicket SendRaiseAttribute(uint attribute, uint xp) => Send(new FakeSend(FakeSendKind.RaiseAttribute, attribute, Amount: xp));
@@ -179,6 +208,45 @@ internal sealed class FakeAcSession : IAcSession
 
     /// <inheritdoc/>
     public OutboundTicket SendChangeCombatMode(uint mode) => Send(new FakeSend(FakeSendKind.ChangeCombatMode, Amount: mode));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendNoLongerViewingContents(uint container) => Send(new FakeSend(FakeSendKind.NoLongerViewingContents, container));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendDropItem(uint item) => Send(new FakeSend(FakeSendKind.DropItem, item));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSplitToContainer(uint stack, uint container, int placement, int amount) =>
+        Send(new FakeSend(FakeSendKind.SplitToContainer, stack, Index: placement, Target: container.ToString("X8", System.Globalization.CultureInfo.InvariantCulture), Amount: unchecked((uint)amount)));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSplitTo3D(uint stack, int amount) => Send(new FakeSend(FakeSendKind.SplitTo3D, stack, Amount: unchecked((uint)amount)));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSplitToWield(uint stack, uint equipMask, int amount) =>
+        Send(new FakeSend(FakeSendKind.SplitToWield, stack, Index: unchecked((int)equipMask), Amount: unchecked((uint)amount)));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendGiveObject(uint target, uint item, int amount) =>
+        Send(new FakeSend(FakeSendKind.GiveObject, item, Target: target.ToString("X8", System.Globalization.CultureInfo.InvariantCulture), Amount: unchecked((uint)amount)));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendBuy(uint vendor, IReadOnlyList<(uint item, uint amount)> items) =>
+        Send(new FakeSend(FakeSendKind.Buy, vendor, Items: [.. items]));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSell(uint vendor, IReadOnlyList<(uint item, uint amount)> items) =>
+        Send(new FakeSend(FakeSendKind.Sell, vendor, Items: [.. items]));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendIdentify(uint guid) => Send(new FakeSend(FakeSendKind.Identify, guid));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendAddShortcut(uint index, uint objectId, uint spellId) =>
+        Send(new FakeSend(FakeSendKind.AddShortcut, objectId, Index: unchecked((int)index), Amount: spellId));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRemoveShortcut(uint index) => Send(new FakeSend(FakeSendKind.RemoveShortcut, Index: unchecked((int)index)));
 
     /// <inheritdoc/>
     public OutboundTicket SendSuicide() => Send(new FakeSend(FakeSendKind.Suicide));

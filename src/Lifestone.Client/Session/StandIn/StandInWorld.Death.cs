@@ -110,7 +110,7 @@ internal sealed partial class StandInWorld
     /// <summary>ACE's <c>SuicideMessages</c>.</summary>
     internal static readonly string[] SuicideLines = ["I feel faint...", "My sight is growing dim...", "My life is flashing before my eyes...", "I see a light...", "Oh cruel, cruel world!"];
 
-    /// <summary>The Dead animation's length in seconds (the stand-in does not read the motion table: <c>TODO(m3-standin-corpse)</c>); ACE waits this plus 1 s before the corpse and the teleport.</summary>
+    /// <summary>The Dead animation's length in seconds (the stand-in does not read the motion table: <c>TODO(m4-standin-death-animation)</c>); ACE waits this plus 1 s before the corpse and the teleport.</summary>
     internal const double PlayerDeathAnimationSeconds = 2.0;
 
     /// <summary>The seconds after the arrival at which the vitals return to 75% (<c>ThreadSafeTeleportOnDeath</c>).</summary>
@@ -455,7 +455,7 @@ internal sealed partial class StandInWorld
         InflictVitaePenalty(sink);
         AnswerLog.Add("02C6");
         sink.OnMagicPurgeEnchantments(Context(sink), new GameEventHeader(self.Guid, 0, 0x02C6), default); // AugmentationSpellsRemainPastDeath == 0: every enchantment goes (the vitae is not in the lists)
-        Placeholder("m3-standin-corpse", "ACE waits the Dead animation's length (the motion table's) plus a second before the corpse and the teleport: the stand-in waits " + PlayerDeathAnimationSeconds + " s plus 1");
+        Placeholder("m4-standin-death-animation", "ACE waits the Dead animation's length (the motion table's) plus a second before the corpse and the teleport: the stand-in waits " + PlayerDeathAnimationSeconds + " s plus 1");
         _reducer.StandIn!.At(_reducer.Clock.Now + PlayerDeathAnimationSeconds + 1.0, CorpseAndTeleport);
     }
 

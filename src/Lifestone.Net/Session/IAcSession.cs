@@ -141,9 +141,43 @@ public interface IAcSession : IDisposable
     /// (<see cref="Dispatch.IInboundMessageHandler.OnUseDone"/>).</summary>
     OutboundTicket SendUse(uint guid);
 
+    /// <summary>
+    /// Sends GameAction 0x0035 UseWithTarget {u32 item, u32 target} (in world only), retail <c>CM_Inventory::Event_UseWithTargetEvent</c>
+    /// (11.4186 0x006AC480, 11.6096 0x006AD3E0); the item comes first, as ACE reads it. ACE answers a healing kit with the heal's messages and GameEvent
+    /// 0x01C7 UseDone (<see cref="Dispatch.IInboundMessageHandler.OnUseDone"/>); a kit not held or no target is a silent UseDone 0.
+    /// </summary>
+    /// <param name="item">The GUID of the item used (the healing kit).</param>
+    /// <param name="target">The GUID of its target (the player's own GUID to heal itself).</param>
+    OutboundTicket SendUseWithTarget(uint item, uint target);
+
     /// <summary>Sends GameAction 0x01BF QueryHealth (in world only); ACE answers with GameEvent 0x01C0 UpdateHealth
     /// (<see cref="Dispatch.IInboundMessageHandler.OnUpdateHealth"/>).</summary>
     OutboundTicket SendQueryHealth(uint guid);
+
+    /// <summary>
+    /// Sends GameAction 0x0008 TargetedMeleeAttack {u32 target, u32 height, f32 power} (in world only), retail
+    /// <c>CM_Combat::Event_TargetedMeleeAttack</c> (11.4186 0x006A9C10, 11.6096 0x006AAB70); ACE answers with GameEvent 0x01B8 on a
+    /// repeat, the swing, and 0x01A7 AttackDone (<see cref="Dispatch.IInboundMessageHandler.OnAttackDone"/>).
+    /// </summary>
+    /// <param name="target">The target's GUID.</param>
+    /// <param name="height">The attack height: 1 High, 2 Medium, 3 Low.</param>
+    /// <param name="power">The power bar, 0 to 1 (ACE clamps it; NaN and infinity throw <see cref="ArgumentException"/>).</param>
+    OutboundTicket SendMeleeAttack(uint target, uint height, float power);
+
+    /// <summary>
+    /// Sends GameAction 0x000A TargetedMissileAttack {u32 target, u32 height, f32 accuracy} (in world only), retail
+    /// <c>CM_Combat::Event_TargetedMissileAttack</c> (11.4186 0x006A9D60, 11.6096 0x006AACC0).
+    /// </summary>
+    /// <param name="target">The target's GUID.</param>
+    /// <param name="height">The attack height: 1 High, 2 Medium, 3 Low.</param>
+    /// <param name="accuracy">The accuracy bar, 0 to 1 (ACE clamps it; NaN and infinity throw <see cref="ArgumentException"/>).</param>
+    OutboundTicket SendMissileAttack(uint target, uint height, float accuracy);
+
+    /// <summary>
+    /// Sends GameAction 0x01B7 CancelAttack (no payload; in world only), retail <c>CM_Combat::Event_CancelAttack</c> (11.4186
+    /// 0x006A99E0, 11.6096 0x006AA940).
+    /// </summary>
+    OutboundTicket SendCancelAttack();
 
     /// <summary>
     /// Sends GameAction 0x0045 RaiseAttribute {u32 attribute, u32 xp} (in world only), retail <c>CM_Train::Event_TrainAttribute</c>
@@ -225,6 +259,100 @@ public interface IAcSession : IDisposable
     /// <param name="mergeTo">The target stack's guid (the same weenie class).</param>
     /// <param name="amount">How many units to move from the source to the target (ACE refuses 0 or less).</param>
     OutboundTicket SendStackableMerge(uint mergeFrom, uint mergeTo, int amount);
+
+    /// <summary>
+    /// Sends GameAction 0x0195 NoLongerViewingContents {u32 container} (in world only): the player closed a container; ACE stops
+    /// sending its changes (<c>HandleActionNoLongerViewingContents</c>). TODO(m4-item-move-retail-cites): no 11.6096 sender named yet.
+    /// </summary>
+    /// <param name="container">The container's guid.</param>
+    OutboundTicket SendNoLongerViewingContents(uint container);
+
+    /// <summary>
+    /// Sends GameAction 0x001B DropItem {u32 item} (in world only): drop the item on the ground; ACE answers with the container
+    /// messages and 019A (<c>HandleActionDropItem</c>). TODO(m4-item-move-retail-cites).
+    /// </summary>
+    /// <param name="item">The item's guid.</param>
+    OutboundTicket SendDropItem(uint item);
+
+    /// <summary>
+    /// Sends GameAction 0x0055 StackableSplitToContainer {u32 stack, u32 container, i32 placement, i32 amount} (in world only);
+    /// ACE refuses an amount of 0 or less. TODO(m4-item-move-retail-cites).
+    /// </summary>
+    /// <param name="stack">The stack's guid.</param>
+    /// <param name="container">The container to put the new stack in.</param>
+    /// <param name="placement">The slot in the container (an Int32; 0 is the first slot).</param>
+    /// <param name="amount">How many units to split off.</param>
+    OutboundTicket SendSplitToContainer(uint stack, uint container, int placement, int amount);
+
+    /// <summary>
+    /// Sends GameAction 0x0056 StackableSplitTo3D {u32 stack, i32 amount} (in world only): split units off onto the ground; ACE
+    /// refuses an amount of 0 or less. TODO(m4-item-move-retail-cites).
+    /// </summary>
+    /// <param name="stack">The stack's guid.</param>
+    /// <param name="amount">How many units to split off.</param>
+    OutboundTicket SendSplitTo3D(uint stack, int amount);
+
+    /// <summary>
+    /// Sends GameAction 0x019B StackableSplitToWield {u32 stack, u32 EquipMask, i32 amount} (in world only); ACE refuses an
+    /// amount of 0 or less. TODO(m4-item-move-retail-cites).
+    /// </summary>
+    /// <param name="stack">The stack's guid.</param>
+    /// <param name="equipMask">The <c>EquipMask</c> location to wield the split units at.</param>
+    /// <param name="amount">How many units to split off.</param>
+    OutboundTicket SendSplitToWield(uint stack, uint equipMask, int amount);
+
+    /// <summary>
+    /// Sends GameAction 0x00CD GiveObjectRequest {u32 target, u32 item, i32 amount} (in world only): give an item (or units of a
+    /// stack) to a creature or player; ACE refuses an amount of 0 or less. TODO(m4-item-move-retail-cites).
+    /// </summary>
+    /// <param name="target">The receiver's guid.</param>
+    /// <param name="item">The item's guid.</param>
+    /// <param name="amount">How many units to give.</param>
+    OutboundTicket SendGiveObject(uint target, uint item, int amount);
+
+    /// <summary>
+    /// Sends GameAction 0x005F BuyItems {u32 vendor, u32 count, count x {i32 amount, u32 item}} (in world only), retail
+    /// <c>CM_Vendor::Event_Buy</c> (11.4186 0x006AA0F0, 11.6096 0x006AB050); ACE (<c>Player.HandleActionBuyItem</c>) answers the spend
+    /// (0024 or 0197, 02CD), each created item (F745, 0022, 02CD), the 0062 again and UseDone, or a 00A0 refusal; too few pyreals
+    /// gives no text at all. The guids are the 0062's stock guids; ACE skips an unknown one silently.
+    /// </summary>
+    /// <param name="vendor">The vendor's guid.</param>
+    /// <param name="items">The stock guids and how many of each (ACE reads the amount as an Int32; an amount above Int32.MaxValue throws).</param>
+    OutboundTicket SendBuy(uint vendor, IReadOnlyList<(uint item, uint amount)> items);
+
+    /// <summary>
+    /// Sends GameAction 0x0060 SellItems {u32 vendor, u32 count, count x {i32 amount, u32 item}} (in world only), retail
+    /// <c>CM_Vendor::Event_Sell</c> (11.4186 0x006AA000, 11.6096 0x006AAF60); ACE (<c>Player.HandleActionSellItem</c>) sells and pays on
+    /// the WHOLE stack whatever the amount, then answers 02CD and 0022 per item, the 0062 and the coin stacks.
+    /// </summary>
+    /// <param name="vendor">The vendor's guid.</param>
+    /// <param name="items">The player's item guids and the amounts (ACE reads the amount as an Int32; an amount above Int32.MaxValue throws).</param>
+    OutboundTicket SendSell(uint vendor, IReadOnlyList<(uint item, uint amount)> items);
+
+    /// <summary>
+    /// Sends GameAction 0x00C8 IdentifyObject {u32 guid} (in world only), retail <c>CM_Item::Event_Appraise</c> (11.4186 0x006A8540,
+    /// 11.6096 0x006A94A0); ACE answers GameEvent 0x00C9 (a guid it cannot find gets flags 0 and success 0); a guid of 0 clears the
+    /// appraisal target and gets no reply.
+    /// </summary>
+    /// <param name="guid">The object's guid.</param>
+    OutboundTicket SendIdentify(uint guid);
+
+    /// <summary>
+    /// Sends GameAction 0x019C AddShortCut {u32 index, u32 objectId, u16 spellId, u16 layer} (in world only), retail
+    /// <c>CM_Character::Event_AddShortCut</c> (11.4186 0x006A0EB0, 11.6096 0x006A1CD0); ACE answers nothing and keeps only the object
+    /// (the list comes back in the next login's player description). The index is 0-based.
+    /// </summary>
+    /// <param name="index">The slot, 0-based (retail's bar has 18).</param>
+    /// <param name="objectId">The object's guid.</param>
+    /// <param name="spellId">The layered spell word as the description lists it (spell id in the low 16 bits, layer in the high 16); 0 for an item.</param>
+    OutboundTicket SendAddShortcut(uint index, uint objectId, uint spellId);
+
+    /// <summary>
+    /// Sends GameAction 0x019D RemoveShortCut {u32 index} (in world only), retail <c>CM_Character::Event_RemoveShortCut</c> (11.4186
+    /// 0x006A17C0, 11.6096 0x006A25E0); ACE answers nothing.
+    /// </summary>
+    /// <param name="index">The slot, 0-based.</param>
+    OutboundTicket SendRemoveShortcut(uint index);
 
     /// <summary>
     /// Sends GameAction 0x0279 Suicide (no payload; in world only), retail <c>CM_Character::Event_Suicide</c> (11.4186 0x006A1B00, 11.6096 0x006A2920); ACE

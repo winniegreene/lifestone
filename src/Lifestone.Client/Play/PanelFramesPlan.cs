@@ -4,6 +4,8 @@ using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Widgets;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.StandIn;
+using Lifestone.Client.Session.Tools;
 
 namespace Lifestone.Client.Play;
 
@@ -38,17 +40,39 @@ public static class PanelFramesPlan
     };
 
     /// <summary>
-    /// The review frames of the floaty windows that are not host pages (M3 3.2 pa): the combat window and the power bar, each taken in melee mode, named <c>c1-combat</c> and <c>c1-powerbar</c> (the spellcasting window's
-    /// <c>c2-...</c> frame is pb's, after these). The caller changes the mode (the UI notice, not a session action, so a live run's character is not touched), hides the combat window for the power bar's frame
-    /// (<see cref="WindowFrame.HideCombatWindow"/>: retail draws an advanced-mode bar only with the AdvancedCombatUI option on, which hides the combat window in every mode), drives the power bar
-    /// (<see cref="WindowFrame.DrivePowerBar"/>: M3 has no attack to begin it, so the frame shows it begun by hand at <see cref="WindowFrame.PowerBarLevel"/>, a placeholder the saved frame's log line says,
-    /// <see cref="WindowFrame.Placeholder"/>), takes the shot and puts the mode back.
+    /// The review frames of the floaty windows that are not host pages (M3 3.2 pa, M4 1.3 s1): the combat window and its power meter, each taken in melee mode, named <c>c1-combat</c> and <c>c1-powerbar</c> (the spellcasting
+    /// window's <c>c2-...</c> frame is pb's, after these). <c>c1-combat</c> is taken through the UI's own mode notice (never a session action, so a live run's character is not touched). <c>c1-powerbar</c> is taken during a real attack
+    /// (<see cref="WindowFrame.ByAttack"/>): the stand-in's tusker selected, the Medium button clicked through the UI's own element message, the shot taken while the power charges. The basic combat UI shows the charge in the combat
+    /// window's own meter (power bar mode 1); the bottom power bar window (mode 2) is drawn only under the AdvancedCombatUI option, which Lifestone does not honour, so it is not in the frame.
     /// </summary>
     public static IReadOnlyList<WindowFrame> WindowFrames { get; } =
     [
-        new("c1-combat", 0x1000005C, 2, false),
-        new("c1-powerbar", 0x10000044, 2, true, HideCombatWindow: true, Placeholder: WindowFrame.PowerBarPlaceholder),
+        new("c1-combat", 0x1000005C, 2),
+        new("c1-powerbar", 0x1000005C, 2, ByAttack: true),
     ];
+
+    /// <summary>The stand-in tusker the attack frame fights, and the metres ahead of the player it stands.</summary>
+    public const uint AttackFrameTusker = 0x80000B07;
+
+    /// <summary>See <see cref="AttackFrameTusker"/>.</summary>
+    public const float AttackFrameMetres = 2f;
+
+    /// <summary>The slider position the attack frame asks for (a full bar takes one second to charge, so the shot finds the meter part way).</summary>
+    public const float AttackFramePower = 1f;
+
+    /// <summary>The level the meter must have reached before the attack frame is taken (the shot comes a few frames later).</summary>
+    public const float AttackFrameLevel = 0.3f;
+
+    /// <summary>Puts the attack frame's tusker <see cref="AttackFrameMetres"/> ahead of the player on the stand-in (health 60: the run outlasts the shot).</summary>
+    public static void PlaceAttackFrameTusker(IGameSessionView session, StandInServer server)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(server);
+        var heading = session.State.Self.Position is { } here ? System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY, here.Orientation) : System.Numerics.Vector3.UnitY;
+        heading = new System.Numerics.Vector3(heading.X, heading.Y, 0f);
+        heading = heading.LengthSquared() > 1e-6f ? System.Numerics.Vector3.Normalize(heading) : System.Numerics.Vector3.UnitY;
+        server.PlaceNear(StandInTusker.Make(AttackFrameTusker, default, maxHealth: 60), heading * AttackFrameMetres);
+    }
 
     /// <summary>
     /// The review frame of the spellcasting window (M3 3.2 pb): <c>c2-spellcasting</c>, taken in Magic mode. It is not in <see cref="WindowFrames"/> because pa's play-check loop over that list drives the combat window and the
@@ -56,8 +80,218 @@ public static class PanelFramesPlan
     /// </summary>
     public static WindowFrame SpellcastingFrame { get; } = new("c2-spellcasting", 0x10000061, CombatModes.Magic, false);
 
+    /// <summary>
+    /// The review frame of the spellcasting window with a favourites bar that holds no spell (M4 3.2 lane e): <c>c2-spellcasting-empty</c>, taken in Magic mode on the first tab whose bar the character has no spell on
+    /// (<see cref="OpenSpellcastingEmptyFrameTab"/>). It shows the bar's empty slot boxes. Like <see cref="SpellcastingFrame"/> it is the window's own checks' (<c>PlayChecks.PanelC2.cs</c>); it is not in <see cref="AllWindowFrames"/>.
+    /// </summary>
+    public static WindowFrame SpellcastingEmptyFrame { get; } = new("c2-spellcasting-empty", 0x10000061, CombatModes.Magic, false);
+
     /// <summary>Every floaty window's frame in the order the panel shots take them: pa's <see cref="WindowFrames"/>, then <see cref="SpellcastingFrame"/>.</summary>
     public static IReadOnlyList<WindowFrame> AllWindowFrames { get; } = [.. WindowFrames, SpellcastingFrame];
+
+    /// <summary>
+    /// The offline review frame of the inventory page with a side pack selected and its contents listed (M4 2.2 s2): <c>inventory-sidepack</c>, saved in the frames folder's <c>extra</c> sub-folder by the play-checks. <b>Placeholder
+    /// content:</b> the stand-in announces a "Pack (stand-in placeholder)" holding one Pyreal stack (<c>TODO(m4-standin-side-pack-item)</c>), so the frame shows the page's drawing of a side pack's contents, not a real character's pack.
+    /// </summary>
+    public const string InventorySidePackFrame = "inventory-sidepack";
+
+    /// <summary>
+    /// The offline review frame of the container window over the world view (M4 2.2 s2): <c>container-window</c>, saved in the <c>extra</c> sub-folder by the play-checks' container rows, taken while the stand-in tusker's corpse
+    /// is open, in the stance the rows are in (melee; the combat floaty is hidden while the container window shows, M4 2.2 fix2). <b>Placeholder content:</b> the corpse holds the stand-in's Bowl and Smock (<c>TODO(m4-standin-corpse-contents)</c>) with the stand-in's placeholder icon. The live corpse frame of a real kill is 2.2 s4's.
+    /// </summary>
+    public const string ContainerWindowFrame = "container-window";
+
+    /// <summary>
+    /// The offline stand-in of the hunt's <c>corpse</c> frame (M4 2.2 s4): <c>corpse</c>, saved in the <c>extra</c> sub-folder by the play-checks' container rows, taken like the hunt's own, in the combat stance with the stand-in
+    /// tusker's corpse open and the container window drawn over it (the combat window is hidden while it shows) (the live hunt's frame is <c>HuntUiShotPlan.Names[HuntUiShotPlan.Corpse]</c>, <c>&lt;stem&gt;-corpse.png</c>). <b>Placeholder content:</b> the corpse holds the stand-in's
+    /// Bowl and Smock (<c>TODO(m4-standin-corpse-contents)</c>) with the stand-in's placeholder icon.
+    /// </summary>
+    public const string CorpseFrame = "corpse";
+
+    /// <summary>
+    /// The offline review frame of the container window over a stand-in CHEST (M4 3.2 lane e, D23: no creature corpse): <c>container-chest</c>, saved in the <c>extra</c> sub-folder by the play-checks' loot-rule row, taken while the chest
+    /// (<c>TODO(m4-standin-chest)</c>: a labelled placeholder holding a Bowl, a Pyreal stack and an unvalued item) is open. It shows the item row's three entries and then its empty slot boxes (the empty-slot fill, <see cref="Lifestone.Client.RetailUi.Widgets.UiItemList.UpdateEmptySlots"/>).
+    /// </summary>
+    public const string ContainerChestFrame = "container-chest";
+
+    /// <summary>
+    /// The review frame of the hotbar (M4 3.2 h2): <c>hotbar</c>, the toolbar's lower-right shortcut bar with a Potion of Healing on slot 1 and a Handy Healing Kit on slot 2 and the nine slots' numbers. The play-checks' <c>hotbar</c> row saves it in the
+    /// <c>extra</c> sub-folder (the stand-in's own items, dragged onto the bar through the real router); <c>--play-panel-shots</c> saves <see cref="HotbarShotFile"/> beside the pages' frames (the live character's own bar, whatever it holds).
+    /// </summary>
+    public const string HotbarFrame = "hotbar";
+
+    /// <summary>The review frame of the hotbar while a use runs (M4 3.2 h2): <c>hotbar-cooldown</c>, taken by the play-checks' <c>hotbar</c> row a few frames after the key 1 drank the potion, so slot 1 shows the cooldown overlay (the dats' last step image).</summary>
+    public const string HotbarCooldownFrame = "hotbar-cooldown";
+
+    /// <summary>The panel shots' file for the hotbar (<c>hotbar.png</c>); no page, window or extra frame has the name.</summary>
+    public const string HotbarShotFile = HotbarFrame + ".png";
+
+    /// <summary>The offline frames of placeholder content that 2.2 s2 and s4 and 3.2 lane e add, in the order the play-checks take them (see <see cref="InventorySidePackFrame"/>, <see cref="CorpseFrame"/>, <see cref="ContainerWindowFrame"/> and <see cref="ContainerChestFrame"/>).</summary>
+    public static IReadOnlyList<string> OfflineContentFrames { get; } = [InventorySidePackFrame, CorpseFrame, ContainerWindowFrame, ContainerChestFrame];
+
+    /// <summary>
+    /// The offline review frame of the vendor window (M4 3.2 s4b): <c>vendor-buy-sell</c>, saved in the <c>extra</c> sub-folder by the play-checks' vendor rows, taken with the window open after a Handy Healing Kit was bought through its Buy
+    /// button: Thelnoth's name, his shop's rows with the first selected and its predicted price, the purse after the buy. <b>Placeholder content:</b> the stand-in's Thelnoth and shop (<c>TODO(m4-standin-vendor-model)</c>, <c>TODO(m4-standin-vendor-stock)</c>).
+    /// </summary>
+    public const string VendorBuySellFrame = "vendor-buy-sell";
+
+    /// <summary>The offline frames of the vendor window (M4 3.2 s4b), in the order the play-checks take them.</summary>
+    public static IReadOnlyList<string> VendorContentFrames { get; } = [VendorBuySellFrame];
+
+    /// <summary>How near, in metres, a container object must be for <c>--play-panel-shots</c> to open it for the <see cref="ContainerWindowFrame"/> (M4 2.2 s4).</summary>
+    public const double ContainerFrameMetres = 10.0;
+
+    /// <summary>What the panel shots log when no container object is within <see cref="ContainerFrameMetres"/> (not a failure: the frame is not taken).</summary>
+    public const string NoContainerText = "container-window: n/a (no container within 10 m)";
+
+    /// <summary>
+    /// The frames <c>--play-panel-shots</c> takes after the pages and the floaty windows (M4 2.2 s4), in order: <see cref="ContainerWindowFrame"/>, the container window over a container object within <see cref="ContainerFrameMetres"/>
+    /// (a "Chest", a corpse), opened through <c>IActionApi.OpenContainer</c>, saved once the window shows its entries, then closed. The inventory page (panel 7: the pack list, the backpack column with its side packs, the paperdoll) is a page
+    /// frame like the others and keeps its own file; the shots select the character's first side pack on it when it has one (<see cref="FirstSidePack"/>).
+    /// </summary>
+    public static IReadOnlyList<string> PanelShotExtraFrames { get; } = [ContainerWindowFrame];
+
+    // --- M4 3.2 s4c: the examine panel's frames ----------------------------------------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The examine panel's frame in <c>--play-panel-shots</c> (M4 3.2 s4c; <c>examine-kit.png</c> beside <see cref="ContainerWindowFrame"/>'s file): a Handy Healing Kit in the pack examined through the same entry the item list's right click uses
+    /// (<see cref="GameExaminePanel.Open"/>), saved once the appraisal's answer has filled the window, then closed. <see cref="NoKitText"/> when the pack holds no kit.
+    /// </summary>
+    public const string ExamineKitFrame = "examine-kit";
+
+    /// <summary>The offline review frame of the examine panel on the stand-in (M4 3.2 s4c; <c>examine-kit-standin</c> in the <c>extra</c> sub-folder, taken by the play-checks' examine rows). <b>Placeholder content:</b> the stand-in answers the 00C9 with a labelled subset of ACE's tables (<c>TODO(m4-standin-appraise-tables)</c>).</summary>
+    public const string ExamineStandInFrame = "examine-kit-standin";
+
+    /// <summary>What the panel shots log when the pack holds no kit (not a failure: the frame is not taken).</summary>
+    public const string NoKitText = "examine-kit: n/a (no healing kit in the pack)";
+
+    /// <summary>The frames <c>--play-panel-shots</c> takes for the examine panel (after the container window's): <see cref="ExamineKitFrame"/>.</summary>
+    public static IReadOnlyList<string> ExamineShotFrames { get; } = [ExamineKitFrame];
+
+    /// <summary>The offline frames the play-checks' examine rows take: <see cref="ExamineStandInFrame"/>.</summary>
+    public static IReadOnlyList<string> OfflineExamineFrames { get; } = [ExamineStandInFrame];
+
+    /// <summary>The first object of the player's main pack whose name says it is a healing kit ("Handy Healing Kit", "Adept Healing Kit") or whose weenie class is one (628, 629), or 0 (M4 3.2 s4c).</summary>
+    public static uint KitInPack(GameState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        foreach (var entry in state.Self.Inventory.Pack)
+        {
+            if (state.Objects.TryGet(entry.Guid, out var item) && (item.Name.Contains("Healing Kit", StringComparison.OrdinalIgnoreCase) || item.Weenie.WeenieClassId is 628 or 629))
+            {
+                return entry.Guid;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// The container object nearest the player that is within <paramref name="metres"/> metres, or 0 when there is none (M4 2.2 s4). A container object is one in the world (it has a position and no holder) whose weenie ItemType has the Container bit (0x200: a
+    /// corpse, a chest, a pack on the ground), or that carries the corpse description bit, or that is openable and not a door (the stand-in's placeholder chest announces only the openable bit). The player's own object and other players are not.
+    /// </summary>
+    /// <param name="state">The session's read model.</param>
+    /// <param name="metres">The greatest distance.</param>
+    public static uint ContainerWithin(GameState state, double metres)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        if (state.Self.Position is not { } mine)
+        {
+            return 0;
+        }
+
+        var best = 0u;
+        var bestMetres = double.MaxValue;
+        foreach (var o in state.Objects.All)
+        {
+            if (o.IsSelf || o.Position is not { } theirs || (o.ContainerId is { } holder && holder != 0) || (o.WielderId is { } wielder && wielder != 0) || (o.DescriptionFlags & PlayerBit) != 0)
+            {
+                continue;
+            }
+
+            var container = (o.ItemType & ContainerItemType) != 0 || (o.DescriptionFlags & WorldObjectTable.CorpseFlag) != 0 || ((o.DescriptionFlags & StandInChest.OpenableFlag) != 0 && (o.DescriptionFlags & DoorBit) == 0);
+            if (!container)
+            {
+                continue;
+            }
+
+            var d = PositionAgreement.DistanceMetres(in mine, in theirs);
+            if (d <= metres && d < bestMetres)
+            {
+                best = o.Guid;
+                bestMetres = d;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>The weenie description's ItemType bit of a container (<c>ITEM_TYPE::TYPE_CONTAINER</c>, 0x200).</summary>
+    private const uint ContainerItemType = 0x200;
+
+    /// <summary>The object description bit of a player (<c>BF_PLAYER</c>, 0x8).</summary>
+    private const uint PlayerBit = 0x8;
+
+    /// <summary>The object description bit of a door (<c>BF_DOOR</c>, 0x1000).</summary>
+    private const uint DoorBit = 0x1000;
+
+    /// <summary>
+    /// The side pack the inventory page's frame selects when the character has one (M4 2.2 s4): the first non-empty cell of the page's side-pack column, or 0 when the column is empty (the page then shows the backpack, as it opens).
+    /// </summary>
+    /// <param name="page">The inventory page's controller.</param>
+    public static uint FirstSidePack(GameInventoryPage page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        foreach (var cell in page.SidePackList.Items)
+        {
+            if (cell is UiItem { IsEmpty: false } item)
+            {
+                return item.ItemId;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>The ending of the main-pack shot's file name (M4 3.1 p, <c>m4-panelshot-mainpack</c>): the inventory page's frame is taken twice, with the first side pack selected (<c>7-inventory-backpack-and-paperdoll.png</c>, unchanged) and with the main pack selected (<c>7-inventory-backpack-and-paperdoll-mainpack.png</c>), so a hunter's looted items show in the pack list.</summary>
+    public const string MainPackSuffix = "-mainpack";
+
+    /// <summary>True when <paramref name="frame"/> has a main-pack shot beside its own: the inventory page's (panel 7).</summary>
+    public static bool HasMainPackShot(PanelFrame frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        return frame.Page.PanelId == GameInventoryPage.Panel;
+    }
+
+    /// <summary>The file name of the main-pack shot of <paramref name="frame"/>: its <see cref="FileName(PanelFrame)"/> with <see cref="MainPackSuffix"/> before the extension. Distinct from every page's frame (the pages' names end in their own title).</summary>
+    public static string MainPackFileName(PanelFrame frame)
+    {
+        var name = FileName(frame);
+        return name[..^".png".Length] + MainPackSuffix + ".png";
+    }
+
+    /// <summary>
+    /// True when the inventory page lists the main pack as the shot needs it (M4 3.1 p): the page's open container is the player's own pack and its pack list holds one cell for each of the pack's items whose object has landed
+    /// (an item whose F745 is not in yet is left out by the page, so it is not waited for). The shot is taken once this holds, or after a bounded wait said by name.
+    /// </summary>
+    /// <param name="page">The inventory page's controller.</param>
+    /// <param name="state">The session's read model.</param>
+    public static bool MainPackListed(GameInventoryPage page, GameState state)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(state);
+        var inventory = state.Self.Inventory;
+        var owner = inventory.Owner != 0 ? inventory.Owner : state.Self.Guid;
+        return owner != 0 && page.OpenContainer == owner && page.PackList.OccupiedCount == inventory.Pack.Count(e => state.Objects.Contains(e.Guid));
+    }
+
+    /// <summary>The player's own pack id as the inventory page takes it (<see cref="GameInventoryPage.ShowContents"/>): the inventory's owner, or the player's guid before the owner is named.</summary>
+    /// <param name="state">The session's read model.</param>
+    public static uint MainPackOwner(GameState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        return state.Self.Inventory.Owner != 0 ? state.Self.Inventory.Owner : state.Self.Guid;
+    }
 
     /// <summary>The file name of <paramref name="frame"/>: <c>&lt;name&gt;.png</c>.</summary>
     public static string FileName(WindowFrame frame)
@@ -155,6 +389,22 @@ public static class PanelFramesPlan
         return new SpellcastingTabChoice(tab, true, window.OpenTabByClick(tab));
     }
 
+    /// <summary>
+    /// Opens, for the <c>c2-spellcasting-empty</c> frame, the first tab of <paramref name="window"/> whose bar holds no spell the character knows (a click on its tab button). When every bar holds spells the open tab stays
+    /// (<see cref="SpellcastingTabChoice.HoldsSpells"/> is then true: the frame is not an empty bar and the caller says so).
+    /// </summary>
+    public static SpellcastingTabChoice OpenSpellcastingEmptyFrameTab(GameSpellcastingPanel window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        var tab = window.FirstTabWithoutSpells();
+        if (tab < 0)
+        {
+            return new SpellcastingTabChoice(window.OpenTab, true, true);
+        }
+
+        return new SpellcastingTabChoice(tab, false, window.OpenTabByClick(tab));
+    }
+
     /// <summary>The verdict line of a panel frames run: <c>panel frames done captured=N failures=F</c>.</summary>
     public static string Verdict(int captured, int failures) =>
         string.Create(CultureInfo.InvariantCulture, $"{VerdictText} captured={captured} failures={failures}");
@@ -196,21 +446,8 @@ public sealed record PanelFrame(PanelPage Page, uint TabButton, char Letter, str
 /// <param name="Name">The file name without extension (<c>c1-combat</c>).</param>
 /// <param name="WindowId">The window's element id in the gameplay layout; the frame is taken when it shows.</param>
 /// <param name="CombatMode">The combat mode (<c>CombatModes</c>: 2 melee) the window is shown in.</param>
-/// <param name="DrivePowerBar">True when the frame begins the power bar by hand first (an advanced-mode bar at <see cref="PowerBarLevel"/>) and finishes it after.</param>
-/// <param name="HideCombatWindow">
-/// True when the frame hides the combat window after its mode notice, as the AdvancedCombatUI option does in every mode (<c>gmCombatUI::RecvNotice_SetCombatMode</c>, 11.6096 0x004CD210): retail begins the power bar's
-/// advanced-mode bar (mode 2) only with that option on, so it never draws the basic combat window and that bar together (M3 3.2 review finding 10). The option itself is not set for the frame: it is a player option nothing
-/// in M3 honours (ghosted), and the frames change only the UI's notices.
-/// </param>
-/// <param name="Placeholder">What the frame shows that nothing in M3 produces, written as the <c>placeholder</c> field of the saved frame's log line (CLAUDE.md, Placeholders); null when the frame shows no placeholder.</param>
-public sealed record WindowFrame(string Name, uint WindowId, int CombatMode, bool DrivePowerBar, bool HideCombatWindow = false, string? Placeholder = null)
-{
-    /// <summary>The level the power bar shows in its frame (a placeholder: nothing in M3 charges a bar).</summary>
-    public const float PowerBarLevel = 0.6f;
-
-    /// <summary>The power bar frame's <see cref="Placeholder"/>: the bar is begun by hand at <see cref="PowerBarLevel"/>, nothing in M3 begins it (no melee or missile attack, no jump: <c>TODO(m3-melee-attack)</c>), and the combat window is hidden as the AdvancedCombatUI option hides it.</summary>
-    public const string PowerBarPlaceholder = "the power bar is begun by hand at 0.6 (WindowFrame.PowerBarLevel); nothing in M3 begins it (no melee or missile attack, no jump: TODO(m3-melee-attack)); the combat window is hidden as the AdvancedCombatUI option hides it";
-}
+/// <param name="ByAttack">True when the frame is taken during a real attack on the stand-in's tusker (M4 1.3 s1): the session is put in the mode, the tusker selected and the Medium button clicked, and the shot is taken while the power charges. Nothing is begun by hand.</param>
+public sealed record WindowFrame(string Name, uint WindowId, int CombatMode, bool ByAttack = false);
 
 /// <summary>The tab the spellcasting frame shows (<see cref="PanelFramesPlan.OpenSpellcastingFrameTab"/>).</summary>
 /// <param name="Tab">The tab (0 to 7) that is open for the shot.</param>

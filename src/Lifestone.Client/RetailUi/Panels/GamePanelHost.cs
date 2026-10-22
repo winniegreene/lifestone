@@ -117,7 +117,13 @@ public sealed class GamePanelHost : IUiElementListener
 
         window.SetVisible(false); // PostInit: no panel is shown, so the window is hidden
         window.RegisterForElementMessages(this);
+
+        // M4 3.2 s4c: the examine panel (gmExaminationUI in its floaty) is a window of the gameplay layout, not a page; the shell's pages reach it with GameExaminePanel.Of(context).
+        Examine = GameExaminePanel.Attach(context, window);
     }
+
+    /// <summary>The examine panel of this shell (null when the layout has none): the item lists and the paperdoll open it with <see cref="GameExaminePanel.Open"/>.</summary>
+    public GameExaminePanel? Examine { get; }
 
     /// <summary>The host window (0x100005FF), or null.</summary>
     public UiElement? Window { get; }

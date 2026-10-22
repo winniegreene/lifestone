@@ -21,9 +21,7 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// <c>SetCombatMode</c> does for an unchanged mode was not read).</para>
 /// <para><b>GetDefaultCombatMode.</b> No player object: non-combat. Something in the melee, missile or two-handed slot (<c>0x2500000</c>): missile mode when it is a missile weapon, else melee. Else something in the held
 /// slot (<c>0x1000000</c>): magic when it is a caster (ItemType 0x8000), else the chat line "You can't enter combat mode while wielding the &lt;name&gt;" and non-combat. Nothing wielded: melee (fists).
-/// <b>Deviation (named):</b> retail tells a missile weapon from a melee one by a quality of the weenie that the client does not keep; Lifestone reads the slot (<c>MissileWeapon</c> 0x400000 against
-/// <c>MeleeWeapon</c> and <c>TwoHanded</c>), which agrees for every weapon ACE gives a slot (<c>TODO(m3-combat-use)</c>). A wielded item whose object the table does not hold (its CreateObject has not arrived, or an F747
-/// alone deleted it) has no kind to read: the mode is non-combat, never a guess, and the item is named once (<see cref="MissingObjectTodo"/>).</para>
+/// Retail tells a missile weapon from a melee one by the weapon's own CombatUse (the weenie's type, 2 for a missile weapon): Lifestone reads <c>WeenieDesc.CombatUse</c> (1 Melee and 5 TwoHanded give melee, 2 Missile gives missile; Ammo 3 and Shield 4 are not weapons and leave the slot to decide) and falls back to the slot (<c>MissileWeapon</c> 0x400000 against <c>MeleeWeapon</c> and <c>TwoHanded</c>) only when the description has none, <c>TODO(m3-combat-use-absent)</c>. A wielded item whose object the table does not hold (its CreateObject has not arrived, or an F747 alone deleted it) has no kind to read: the mode is non-combat, never a guess, and the item is named once (<see cref="MissingObjectTodo"/>).</para>
 /// </remarks>
 public static class CombatModeRules
 {
@@ -32,6 +30,9 @@ public static class CombatModeRules
 
     /// <summary>The TODO named, once per item, when the inventory says an item is wielded but the object table has no such object, so the default mode falls back to non-combat and a press does nothing.</summary>
     public const string MissingObjectTodo = "TODO(m3-combat-default-mode-missing)";
+
+    /// <summary>The TODO named, once, when a wielded weapon's description carries no CombatUse and the slot rule decides.</summary>
+    public const string CombatUseAbsentTodo = "TODO(m3-combat-use-absent)";
 
     private const uint WeaponSlots = (uint)(EquipMask.MeleeWeapon | EquipMask.MissileWeapon | EquipMask.TwoHanded);
 
@@ -42,9 +43,16 @@ public static class CombatModeRules
     /// <c>GetDefaultCombatMode</c> with its fallback named: <paramref name="missing"/> is the wielded item the object table has no object for (the mode is then non-combat for want of the item's kind, which the caller names,
     /// <see cref="MissingObjectTodo"/>), or 0.
     /// </summary>
-    public static CombatMode DefaultMode(GameState state, out string? blockedBy, out uint missing)
+    public static CombatMode DefaultMode(GameState state, out string? blockedBy, out uint missing) => DefaultMode(state, out blockedBy, out missing, out _);
+
+    /// <summary>
+    /// <c>GetDefaultCombatMode</c> reading the weapon's own type: <paramref name="combatUseAbsent"/> is true when the weapon's weenie description carried no CombatUse, so the slot rule decided
+    /// (<c>TODO(m3-combat-use-absent)</c>, which the caller names once).
+    /// </summary>
+    public static CombatMode DefaultMode(GameState state, out string? blockedBy, out uint missing, out bool combatUseAbsent)
     {
         ArgumentNullException.ThrowIfNull(state);
+        combatUseAbsent = false;
         blockedBy = null;
         missing = 0;
         var inventory = state.Self.Inventory;
@@ -55,10 +63,22 @@ public static class CombatModeRules
 
         if (inventory.EquippedAt(WeaponSlots) is { } weapon)
         {
-            if (!state.Objects.TryGet(weapon, out _) || !inventory.TryGetEquipped(weapon, out var entry))
+            if (!state.Objects.TryGet(weapon, out var weaponObject) || !inventory.TryGetEquipped(weapon, out var entry))
             {
                 missing = weapon;
                 return CombatMode.NonCombat;
+            }
+
+            // 0x0056C050 asks the weapon's own weenie (its CombatUse, ACE's 1 Melee, 2 Missile, 3 Ammo, 4 Shield, 5 TwoHanded): Missile gives missile mode, a melee or two-handed weapon melee. Ammo and Shield are not weapons: the slot decides.
+            switch (weaponObject.CombatUse)
+            {
+                case 2:
+                    return CombatMode.Missile;
+                case 1 or 5:
+                    return CombatMode.Melee;
+                case null:
+                    combatUseAbsent = true;
+                    break;
             }
 
             return (entry.Location & (uint)EquipMask.MissileWeapon) != 0 ? CombatMode.Missile : CombatMode.Melee;
@@ -96,7 +116,12 @@ public static class CombatModeRules
         var requested = CombatMode.NonCombat;
         if (current is 0 or CombatModes.NonCombat)
         {
-            requested = DefaultMode(session.State, out var blockedBy, out var missing);
+            requested = DefaultMode(session.State, out var blockedBy, out var missing, out var combatUseAbsent);
+            if (combatUseAbsent)
+            {
+                manager.LogOnce("combat:combat-use-absent", LogSeverity.Warning, CombatUseAbsentTodo + ": the wielded weapon's description has no CombatUse; the slot rule (MissileWeapon 0x400000) decides the default combat mode");
+            }
+
             if (missing != 0)
             {
                 var hex = "0x" + missing.ToString("X8", CultureInfo.InvariantCulture);
@@ -188,7 +213,9 @@ public static class CombatModeRules
 /// <summary>
 /// The combat window's holding floaty (<c>gmFloatyCombatPanelUI</c>, class 0x10000054, window 0x100006B5): a plain container that shows while one of its panel windows (a child with a panel id, property 0x10000029: the
 /// combat window 0x1000005C, the spellcasting window 0x10000061) shows and hides when none does. Retail's <c>gmCombatPanelUI</c> hears each child's visibility message (<c>ListenToElementMessage</c>, message 24) and
-/// answers <c>RecvNotice_SetPanelVisibility</c> (11.4186 0x004F5900); Lifestone keeps the one rule that matters here (the container follows its windows) without the host's remembered-panel stack.
+/// answers <c>RecvNotice_SetPanelVisibility</c> (11.4186 0x004F5900); Lifestone keeps the one rule that matters here (the container follows its windows) without the host's remembered-panel stack. The environment floaty
+/// (<see cref="UiFloatyEnvPanel"/>: the container window, the vendor's) sits at the same place (0,400), and retail's host shows one floaty at a time: while the environment floaty shows, this one is hidden, and it shows again when the
+/// environment floaty hides if a window of it still shows (M4 2.2 fix2, 2.2-R12; the host's function for this is not read, <c>TODO(m4-floaty-stack-retail)</c>, address unknown).
 /// </summary>
 public sealed class UiFloatyCombatPanel : UiElement
 {
@@ -201,7 +228,7 @@ public sealed class UiFloatyCombatPanel : UiElement
     {
     }
 
-    /// <summary>Shows the floaty when one of its panel windows is visible, hides it otherwise. Allocation-free.</summary>
+    /// <summary>Shows the floaty when one of its panel windows is visible and the environment floaty beside it is not, hides it otherwise. Allocation-free once the TODO is logged.</summary>
     public void UpdateVisibility()
     {
         var any = false;
@@ -211,10 +238,30 @@ public sealed class UiFloatyCombatPanel : UiElement
             any = children[i].Visible && children[i].TryGetEnumProperty(UiPropertyIds.ElementPanelId, out var id) && id != 0;
         }
 
+        if (any && EnvironmentFloatyShows())
+        {
+            any = false; // one floaty at a time: the environment floaty is over this one's place
+            Manager.LogOnce("floaty:stack", LogSeverity.Warning, "gmFloatyCombatPanelUI: hidden while gmFloatyEnvPanelUI shows (they share the place 0,400; retail's host keeps one floaty at a time with its remembered-panel stack, TODO(m4-floaty-stack-retail), address unknown); it shows again when the environment floaty hides");
+        }
+
         if (Visible != any)
         {
             SetVisible(any);
         }
+    }
+
+    private bool EnvironmentFloatyShows()
+    {
+        var siblings = Parent?.Children;
+        for (var i = 0; siblings is not null && i < siblings.Count; i++)
+        {
+            if (siblings[i] is UiFloatyEnvPanel { Visible: true })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The floaty starts hidden with its windows (<see cref="GameCombatPanel"/> and <see cref="GameSpellcastingPanel"/> hide in their <c>PostInit</c>, which runs before this one's base returns), so no build frame draws it in NonCombat.</summary>
@@ -313,6 +360,8 @@ public sealed class GameCombatPanel : UiElement
     private IDisposable? _modeSubscription;
     private IDisposable? _qualitySubscription;
     private bool _optionsTodoLogged;
+    private PowerBarNotices? _notices;
+    private AttackTick? _tick;
 
     /// <summary>A combat window of <paramref name="init"/>.</summary>
     public GameCombatPanel(in UiElementInit init)
@@ -329,8 +378,14 @@ public sealed class GameCombatPanel : UiElement
     /// <summary>The attack power requested (0..1; the slider's position).</summary>
     public float RequestedPower { get; private set; } = 0.5f;
 
-    /// <summary>How many clicks on an attack button were answered NotInM3.</summary>
-    public int AttackClicks { get; private set; }
+    /// <summary>The attack side (<c>ClientCombatSystem</c>'s request, build and send; M4 1.3 s1), null until <see cref="Attach"/>.</summary>
+    public AttackPowerDriver? Attacks { get; private set; }
+
+    /// <summary>The selected object (0 when none): the target of a click on an attack button. The screen gives the game's selection; a test gives its own.</summary>
+    public Func<uint>? SelectedProvider { get; set; }
+
+    /// <summary>Where the combat system's chat lines go (the screen's chat); null only logs them.</summary>
+    public Action<string>? ChatNotice { get; set; }
 
     /// <summary>True when the player's advanced combat UI option is on (the window never shows then).</summary>
     public bool AdvancedCombatUi => _advancedOption is not null && _options is not null && _options.Get(_advancedOption);
@@ -388,6 +443,22 @@ public sealed class GameCombatPanel : UiElement
         LabelBoxes();
         _modeSubscription = context.Session.Events.Subscribe<CombatModeChanged>(OnCombatModeChanged);
         _qualitySubscription = context.Session.Events.Subscribe<QualitiesChanged>(OnQualitiesChanged);
+        _notices = new PowerBarNotices(this);
+        _tick = new AttackTick(this);
+        Attacks = new AttackPowerDriver(
+            context.Session,
+            _notices,
+            () => context.Manager.Now,
+            () => SelectedProvider?.Invoke() ?? 0u,
+            () => RequestedPower,
+            () => AdvancedCombatUi,
+            line =>
+            {
+                context.Manager.Services.Log.Info("retailui", line);
+                ChatNotice?.Invoke(line);
+            },
+            wanted => _tick.Want(wanted),
+            todo => context.Manager.LogOnce("combat:" + todo[..Math.Min(todo.Length, 48)], LogSeverity.Warning, todo));
         context.Manager.Services.Log.Warn("retailui", "TODO(m3-combat-tooltips): the combat window's check boxes have no tooltips (the _Help strings are not shown)");
         SetCombatMode(context.Session.State.Self.Qualities.CombatMode);
     }
@@ -454,13 +525,8 @@ public sealed class GameCombatPanel : UiElement
         {
             if (id is HighButtonId or MediumButtonId or LowButtonId)
             {
-                AttackClicks++;
-                if (_context is { } context)
-                {
-                    NotInM3.Show(context.Manager.Dialogs, context.Manager.Services.Log, "Melee and missile attacks");
-                    context.Manager.LogOnce("combat:attack", LogSeverity.Warning, "TODO(m3-melee-attack): the combat window's attack buttons have no action to send in M3 (ClientCombatSystem::EndAttackRequest)");
-                }
-
+                // EndAttackRequest (0x0056CE30): the click sends the attack through the Action API (closes TODO(m3-melee-attack)).
+                Attacks?.ReleaseHeight(HeightOf(id));
                 return UiListenResult.Handled;
             }
 
@@ -472,7 +538,8 @@ public sealed class GameCombatPanel : UiElement
         }
         else if (message.MessageId == UiMessageIds.MouseDown && id is HighButtonId or MediumButtonId or LowButtonId)
         {
-            RequestedHeight = id == HighButtonId ? 1 : id == MediumButtonId ? 2 : 3; // SetRequestedAttackHeight
+            RequestedHeight = id == HighButtonId ? 1 : id == MediumButtonId ? 2 : 3; // SetRequestedAttackHeight (0x0056D640): and so StartAttackRequest
+            Attacks?.PressHeight(HeightOf(id));
         }
         else if (message.MessageId == UiMessageIds.ScrollbarPosition && id == SliderId)
         {
@@ -490,8 +557,13 @@ public sealed class GameCombatPanel : UiElement
         _modeSubscription?.Dispose();
         _qualitySubscription?.Dispose();
         _modeSubscription = _qualitySubscription = null;
+        _tick?.Want(false);
+        Attacks?.Dispose();
+        Attacks = null;
         base.OnDeleting();
     }
+
+    private static AttackHeight HeightOf(uint id) => id == HighButtonId ? AttackHeight.High : id == LowButtonId ? AttackHeight.Low : AttackHeight.Medium;
 
     private static uint HeightButtonId(int height) => height switch { 1 => HighButtonId, 3 => LowButtonId, _ => MediumButtonId };
 
@@ -559,6 +631,50 @@ public sealed class GameCombatPanel : UiElement
             box.Saved = value;
             box.Current = value;
         }
+    }
+
+    // The combat system's notices (CM_Character::SendNotice_*): the combat window's own meter for power bar mode 1, the power bar window for the others.
+    private sealed class PowerBarNotices(GameCombatPanel panel) : IPowerBarNotices
+    {
+        private GamePowerBar? _bar;
+
+        private GamePowerBar? Bar => _bar ??= panel.GetWindowRoot()?.GetChildRecursive(GamePowerBar.WindowId) as GamePowerBar;
+
+        public void Begin(PowerBarMode mode) => Bar?.Begin(mode);
+
+        public void SetLevel(PowerBarMode mode, float level)
+        {
+            panel.SetPowerbarLevel(mode, level);
+            Bar?.SetLevel(mode, level);
+        }
+
+        public void Finish(PowerBarMode mode) => Bar?.Finish(mode);
+    }
+
+    // The per-frame hook (UseTime), registered with the manager only while a build or a sent attack waits: an idle window costs nothing.
+    private sealed class AttackTick(GameCombatPanel panel) : IUiTickTarget
+    {
+        private bool _registered;
+
+        public void Want(bool wanted)
+        {
+            if (wanted == _registered)
+            {
+                return;
+            }
+
+            _registered = wanted;
+            if (wanted)
+            {
+                panel.Manager.RegisterTick(this);
+            }
+            else
+            {
+                panel.Manager.UnregisterTick(this);
+            }
+        }
+
+        public void Tick(double now) => panel.Attacks?.Tick();
     }
 
     private void OptionBoxClicked(UiOptionCheckbox box)

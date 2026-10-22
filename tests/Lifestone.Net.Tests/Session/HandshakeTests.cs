@@ -34,7 +34,7 @@ public sealed class HandshakeTests
         Assert.Equal("Hero", list.Characters.Single().Name);
         Assert.False(rig.Machine.HoldsPassword);
         Assert.Equal(1, rig.SocketsOpened);
-        Assert.Contains(rig.Log.At(NetLogLevel.Info), l => l.StartsWith("reached character select: account tester, 1 character(s), DDD p2072 c982 l994 ok", StringComparison.Ordinal));
+        Assert.Contains(rig.Log.At(NetLogLevel.Info), l => l.StartsWith("reached character select: 1 character(s), DDD p2072 c982 l994 ok", StringComparison.Ordinal));
     }
 
     [Fact]

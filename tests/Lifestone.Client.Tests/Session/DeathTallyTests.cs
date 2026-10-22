@@ -205,15 +205,22 @@ public sealed class DeathTallyTests
         // 75% sent before the arrival is not the arrival's (the tally waits for the position after the teleport).
         Vital(HealthCurrent, 28);
         Assert.True(double.IsNaN(_tally.VitalsAfterArrivalPercent));
+        Assert.False(_tally.SampleVitalsAfterArrival()); // not arrived yet: nothing is read
         Arrive();
-        Assert.True(double.IsNaN(_tally.HealthAfterArrivalPercent));
+        Assert.True(double.IsNaN(_tally.FirstHealthAfterArrivalPercent));
 
         // ACE: 75% of each maximum, rounded (28 -> 21, 55 -> 41), one 0x02E9 each, 3 s after the arrival.
         Vital(HealthCurrent, 21);
-        Assert.Equal(75.0, _tally.HealthAfterArrivalPercent, 3);
-        Assert.True(double.IsNaN(_tally.VitalsAfterArrivalPercent)); // not all three yet
+        Assert.Equal(75.0, _tally.FirstHealthAfterArrivalPercent, 3);
+        Assert.False(_tally.FirstVitalsSeen); // not all three yet
         Vital(StaminaCurrent, 41);
         Vital(ManaCurrent, 41);
+        Assert.True(_tally.FirstVitalsSeen);
+        Assert.Equal(41 * 100.0 / 55, _tally.FirstStaminaAfterArrivalPercent, 3);
+        Assert.Equal(41 * 100.0 / 55, _tally.FirstManaAfterArrivalPercent, 3);
+        Assert.True(double.IsNaN(_tally.VitalsAfterArrivalPercent)); // the judged share is read at the end of the vitals wait, not from the first updates
+        Assert.True(_tally.SampleVitalsAfterArrival());
+        Assert.Equal(75.0, _tally.HealthAfterArrivalPercent, 3);
         Assert.Equal(41 * 100.0 / 55, _tally.StaminaAfterArrivalPercent, 3);
         Assert.Equal(41 * 100.0 / 55, _tally.ManaAfterArrivalPercent, 3);
         Assert.InRange(_tally.VitalsAfterArrivalPercent, 74.0, 76.0);
@@ -301,7 +308,7 @@ public sealed class DeathTallyTests
     }
 
     [Fact]
-    public void The_vitals_after_the_arrival_keep_the_first_value_of_each_not_the_regeneration_that_follows()
+    public void The_judged_vitals_are_read_at_the_end_of_the_wait_the_first_updates_are_report_only_and_the_regeneration_that_follows_never_moves_them()
     {
         Started();
         VictimNotice();
@@ -312,24 +319,53 @@ public sealed class DeathTallyTests
         Vital(HealthCurrent, 21);
         Vital(StaminaCurrent, 41);
         Vital(ManaCurrent, 41);
+        Assert.True(_tally.SampleVitalsAfterArrival());
         Assert.InRange(_tally.VitalsAfterArrivalPercent, 74.0, 76.0);
 
         Vital(HealthCurrent, 28); // a minute of regeneration during the regear
         Vital(StaminaCurrent, 55);
         Vital(ManaCurrent, 55);
-        Assert.Equal(75.0, _tally.HealthAfterArrivalPercent, 3);
-        Assert.Equal(41 * 100.0 / 55, _tally.StaminaAfterArrivalPercent, 3);
-        Assert.Equal(41 * 100.0 / 55, _tally.ManaAfterArrivalPercent, 3);
+        Assert.Equal(75.0, _tally.FirstHealthAfterArrivalPercent, 3);
+        Assert.Equal(41 * 100.0 / 55, _tally.FirstStaminaAfterArrivalPercent, 3);
+        Assert.Equal(41 * 100.0 / 55, _tally.FirstManaAfterArrivalPercent, 3);
+        Assert.Equal(75.0, _tally.HealthAfterArrivalPercent, 3); // the wait-end values stay as they were read
         Assert.InRange(_tally.VitalsAfterArrivalPercent, 74.0, 76.0);
 
-        // The next death's arrival takes its own first values (a suicide, then the tuskers).
+        // The next death's arrival is read on its own (a suicide, then the tuskers).
         DeadMotion();
         NumDeaths(2);
         Teleport();
         Assert.True(double.IsNaN(_tally.VitalsAfterArrivalPercent));
+        Assert.True(double.IsNaN(_tally.FirstHealthAfterArrivalPercent));
         Arrive();
         Vital(HealthCurrent, 14);
-        Assert.Equal(50.0, _tally.HealthAfterArrivalPercent, 3);
+        Assert.Equal(50.0, _tally.FirstHealthAfterArrivalPercent, 3);
+        Assert.True(double.IsNaN(_tally.VitalsAfterArrivalPercent)); // not read until the scenario's wait ends
+    }
+
+    [Fact]
+    public void A_stamina_or_mana_update_of_zero_before_ACE_s_restore_is_the_first_value_but_not_the_judged_one_M4_2_2_fix_R1()
+    {
+        // Live round 1 (BSD Mage, 30 evades, no suicide): vitals_pct=0.0. A vital's regeneration or drain tick reached the client after the arrival and before ACE's 75%, which comes 3 s after the teleport.
+        Started();
+        VictimNotice();
+        DeadMotion();
+        NumDeaths(1);
+        Teleport();
+        Arrive();
+        Vital(StaminaCurrent, 0);
+        Vital(ManaCurrent, 0);
+        Vital(HealthCurrent, 21);
+        Assert.True(_tally.FirstVitalsSeen);
+        Assert.Equal(0.0, _tally.FirstStaminaAfterArrivalPercent, 3);
+        Assert.Equal(0.0, _tally.FirstManaAfterArrivalPercent, 3);
+
+        Vital(HealthCurrent, 21); // ACE's restore, three seconds after the teleport
+        Vital(StaminaCurrent, 41);
+        Vital(ManaCurrent, 41);
+        Assert.True(_tally.SampleVitalsAfterArrival());
+        Assert.InRange(_tally.VitalsAfterArrivalPercent, 74.0, 76.0);
+        Assert.Equal(0.0, _tally.FirstStaminaAfterArrivalPercent, 3); // the first values stay report-only
     }
 
     [Fact]

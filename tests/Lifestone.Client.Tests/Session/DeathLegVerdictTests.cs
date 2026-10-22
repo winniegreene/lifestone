@@ -18,7 +18,7 @@ namespace Lifestone.Client.Tests.Session;
 public sealed class DeathLegVerdictTests
 {
     private static readonly Regex Shape = new(
-        @"^bsd-death done ok=(true|false) died=-?\d+ suicides=\d+ vitae=-?\d+ respawn=(lifestone|elsewhere|none) corpse=\d+ purged=\d+ protected=\d+ vitals_pct=([\d.]+|n/a) gear_restored=(yes|no) worn=\d+ hits_taken=-?\d+ damage_taken=-?\d+ evades=\d+ health_min_pct=([\d.]+|n/a) death_s=(\d+|n/a) death_frame_max_ms=([\d.]+|n/a) fight_frame_max_ms=([\d.]+|n/a) deaths=-?\d+ corpses_stale=\d+ protection=(dispelled|expired|none) vitae_paid=(\d+|n/a) vitae_after=(\d+|n/a)$",
+        @"^bsd-death done ok=(true|false) died=-?\d+ suicides=\d+ vitae=-?\d+ respawn=(lifestone|elsewhere|none) corpse=\d+ purged=\d+ protected=\d+ vitals_pct=([\d.]+|n/a) gear_restored=(yes|no) worn=\d+ hits_taken=-?\d+ damage_taken=-?\d+ evades=\d+ health_min_pct=([\d.]+|n/a) death_s=(\d+|n/a) death_frame_max_ms=([\d.]+|n/a) fight_frame_max_ms=([\d.]+|n/a) deaths=-?\d+ corpses_stale=\d+ protection=(dispelled|expired|none) vitae_paid=(\d+|n/a) vitae_after=(\d+|n/a) corpse_looted=(yes|partial|no|skipped) items_recovered=\d+ trip_s=([\d.]+|n/a) trip_abort=[a-z0-9-]+ rebuffed=(yes|no|skipped) den_kills=\d+ decoys=(\d+|n/a) decoy_safe=(yes|no|n/a) decoys_dropped=(\d+|n/a) gear_dropped=(\d+|n/a) decoys_recovered=(\d+|n/a) pretrip_heals=\d+ gear_left=(\d+|n/a)( frame_over_50=yes)?$",
         RegexOptions.CultureInvariant);
 
     private static DeathLegMeasures Good() => new(
@@ -52,7 +52,7 @@ public sealed class DeathLegVerdictTests
         Assert.Empty(outcome.Problems);
         Assert.Matches(Shape, outcome.Line);
         Assert.Equal(
-            "bsd-death done ok=true died=1 suicides=1 vitae=40 respawn=lifestone corpse=1 purged=2 protected=3 vitals_pct=74.5 gear_restored=yes worn=5 hits_taken=11 damage_taken=480 evades=2 health_min_pct=0.0 death_s=63 death_frame_max_ms=38.3 fight_frame_max_ms=41.0 deaths=2 corpses_stale=3 protection=dispelled vitae_paid=n/a vitae_after=n/a",
+            "bsd-death done ok=true died=1 suicides=1 vitae=40 respawn=lifestone corpse=1 purged=2 protected=3 vitals_pct=74.5 gear_restored=yes worn=5 hits_taken=11 damage_taken=480 evades=2 health_min_pct=0.0 death_s=63 death_frame_max_ms=38.3 fight_frame_max_ms=41.0 deaths=2 corpses_stale=3 protection=dispelled vitae_paid=n/a vitae_after=n/a corpse_looted=skipped items_recovered=0 trip_s=n/a trip_abort=none rebuffed=skipped den_kills=0 decoys=n/a decoy_safe=n/a decoys_dropped=n/a gear_dropped=n/a decoys_recovered=n/a pretrip_heals=0 gear_left=n/a",
             outcome.Line);
     }
 
@@ -152,7 +152,7 @@ public sealed class DeathLegVerdictTests
         Assert.True(outcome.Ok);
         Assert.Matches(Shape, outcome.Line);
         Assert.Contains(" vitals_pct=n/a ", outcome.Line, StringComparison.Ordinal);
-        Assert.EndsWith("health_min_pct=n/a death_s=n/a death_frame_max_ms=n/a fight_frame_max_ms=n/a deaths=2 corpses_stale=3 protection=dispelled vitae_paid=n/a vitae_after=n/a", outcome.Line, StringComparison.Ordinal);
+        Assert.EndsWith("health_min_pct=n/a death_s=n/a death_frame_max_ms=n/a fight_frame_max_ms=n/a deaths=2 corpses_stale=3 protection=dispelled vitae_paid=n/a vitae_after=n/a corpse_looted=skipped items_recovered=0 trip_s=n/a trip_abort=none rebuffed=skipped den_kills=0 decoys=n/a decoy_safe=n/a decoys_dropped=n/a gear_dropped=n/a decoys_recovered=n/a pretrip_heals=0 gear_left=n/a", outcome.Line, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -265,5 +265,124 @@ public sealed class DeathLegVerdictTests
         public ActionLog ActionLog { get; } = new();
 
         public LinkStats Link => default;
+    }
+    // --- the corpse trip (M4 2.2 s1): report-only, appended after M3's fields and before frame_over_50
+
+    [Fact]
+    public void The_corpse_fields_follow_the_vitae_fields_and_precede_the_frame_flag()
+    {
+        var yes = DeathLegVerdict.Compose(null, Good() with { CorpseLooted = CorpseLoot.Yes, ItemsRecovered = 3, TripSeconds = 41.26, DeathFrameMaxMs = 55.0 });
+
+        Assert.True(yes.Ok, string.Join("; ", yes.Problems));
+        Assert.Matches(Shape, yes.Line);
+        Assert.EndsWith(" vitae_paid=n/a vitae_after=n/a corpse_looted=yes items_recovered=3 trip_s=41.3 trip_abort=none rebuffed=skipped den_kills=0 decoys=n/a decoy_safe=n/a decoys_dropped=n/a gear_dropped=n/a decoys_recovered=n/a pretrip_heals=0 gear_left=n/a frame_over_50=yes", yes.Line, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(CorpseLoot.Yes, 3, 12.0, "none", "corpse_looted=yes items_recovered=3 trip_s=12.0 trip_abort=none")]
+    [InlineData(CorpseLoot.No, 0, 15.5, "corpse-not-found", "corpse_looted=no items_recovered=0 trip_s=15.5 trip_abort=corpse-not-found")]
+    [InlineData(CorpseLoot.Partial, 2, 90.1, "trip-over-90s", "corpse_looted=partial items_recovered=2 trip_s=90.1 trip_abort=trip-over-90s")] // M4 2.2 fix R2: some of the corpse came back, an abort cut it short
+    [InlineData(CorpseLoot.Partial, 3, 41.2, "none", "corpse_looted=partial items_recovered=3 trip_s=41.2 trip_abort=none")] // the loop ran to its end with a pick-up timed out or refused
+    [InlineData(CorpseLoot.No, 0, 90.1, "trip-over-90s", "corpse_looted=no items_recovered=0 trip_s=90.1 trip_abort=trip-over-90s")]
+    [InlineData(CorpseLoot.Skipped, 0, null, "none", "corpse_looted=skipped items_recovered=0 trip_s=n/a trip_abort=none")]
+    public void The_corpse_fields_never_fail_the_leg_whatever_the_trip_came_to(CorpseLoot loot, int items, double? seconds, string abort, string expected)
+    {
+        var outcome = DeathLegVerdict.Compose(null, Good() with { CorpseLooted = loot, ItemsRecovered = items, TripSeconds = seconds, TripAbort = abort });
+
+        Assert.True(outcome.Ok, string.Join("; ", outcome.Problems));
+        Assert.Empty(outcome.Problems);
+        Assert.Contains(" " + expected, outcome.Line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_run_with_no_trip_reads_skipped_and_the_defaults_are_the_m3_run()
+    {
+        var measures = Good();
+
+        Assert.Equal(CorpseLoot.Skipped, measures.CorpseLooted);
+        Assert.Equal(0, measures.ItemsRecovered);
+        Assert.Null(measures.TripSeconds);
+        Assert.Equal(DeathLegVerdict.TripAbortNone, measures.TripAbort);
+    }
+
+    // --- the death loop's new order (M4 3.1 d1): report-only, appended after trip_abort and before frame_over_50
+
+    private static DeathLegMeasures WithOrderFields() => Good() with
+    {
+        Rebuffed = DeathLegVerdict.RebuffedYes,
+        DenKills = 4,
+        Decoys = 8,
+        DecoySafe = "yes",
+        DecoysDropped = 7,
+        GearDropped = 0,
+        DecoysRecovered = 7,
+        PretripHeals = 2,
+        GearLeft = 1,
+        DeathFrameMaxMs = 55.0,
+    };
+
+    [Fact]
+    public void The_order_fields_follow_trip_abort_in_order_and_precede_the_frame_flag()
+    {
+        var outcome = DeathLegVerdict.Compose(null, WithOrderFields());
+
+        Assert.True(outcome.Ok, string.Join("; ", outcome.Problems));
+        Assert.Matches(Shape, outcome.Line);
+        Assert.EndsWith(" trip_abort=none rebuffed=yes den_kills=4 decoys=8 decoy_safe=yes decoys_dropped=7 gear_dropped=0 decoys_recovered=7 pretrip_heals=2 gear_left=1 frame_over_50=yes", outcome.Line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_field_the_verdict_does_not_own_goes_before_the_frame_flag_as_the_hunt_legs_does_3_1_fix_R21()
+    {
+        var flagged = DeathLegVerdict.Compose(null, WithOrderFields()).Line; // 55 ms: the line ends with the flag
+        var plain = DeathLegVerdict.Compose(null, WithOrderFields() with { DeathFrameMaxMs = 12.0 }).Line;
+
+        Assert.EndsWith(" pretrip_heals=2 gear_left=1 frame_over_50=yes", flagged, StringComparison.Ordinal);
+        Assert.EndsWith(" pretrip_heals=2 gear_left=1 mode_mismatch=2 frame_over_50=yes", DeathLegVerdict.WithField(flagged, "mode_mismatch=2"), StringComparison.Ordinal);
+        Assert.EndsWith(" pretrip_heals=2 gear_left=1", plain, StringComparison.Ordinal);
+        Assert.EndsWith(" pretrip_heals=2 gear_left=1 mode_mismatch=0", DeathLegVerdict.WithField(plain, "mode_mismatch=0"), StringComparison.Ordinal);
+        Assert.Equal(" frame_over_50=yes", DeathLegVerdict.FrameOver50Flag);
+    }
+
+    [Fact]
+    public void The_defaults_read_skipped_zero_and_n_a_so_a_run_that_never_got_there_claims_nothing()
+    {
+        var measures = Good();
+
+        Assert.Equal(DeathLegVerdict.RebuffedSkipped, measures.Rebuffed);
+        Assert.Equal(0, measures.DenKills);
+        Assert.Null(measures.Decoys);
+        Assert.Equal(DeathLegVerdict.NotApplicable, measures.DecoySafe);
+        Assert.Null(measures.DecoysDropped);
+        Assert.Null(measures.GearDropped);
+        Assert.Null(measures.DecoysRecovered);
+        Assert.Null(measures.GearLeft);
+        Assert.EndsWith(" trip_abort=none rebuffed=skipped den_kills=0 decoys=n/a decoy_safe=n/a decoys_dropped=n/a gear_dropped=n/a decoys_recovered=n/a pretrip_heals=0 gear_left=n/a", DeathLegVerdict.Compose(null, measures).Line, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(DeathLegVerdict.RebuffedNo)]
+    [InlineData(DeathLegVerdict.RebuffedSkipped)]
+    [InlineData(DeathLegVerdict.RebuffedYes)]
+    public void The_order_fields_never_fail_the_leg_whatever_they_read(string rebuffed)
+    {
+        var hostile = WithOrderFields() with { Rebuffed = rebuffed, DenKills = 0, DecoySafe = "no", DecoysDropped = 0, GearDropped = 5, DecoysRecovered = 0 };
+
+        var outcome = DeathLegVerdict.Compose(null, hostile);
+
+        Assert.True(outcome.Ok, string.Join("; ", outcome.Problems));
+        Assert.Empty(outcome.Problems);
+        Assert.Contains(" rebuffed=" + rebuffed + " den_kills=0 decoys=8 decoy_safe=no decoys_dropped=0 gear_dropped=5 decoys_recovered=0", outcome.Line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Decoys_off_reads_n_a_in_every_decoy_field_and_the_rest_still_prints()
+    {
+        var off = Good() with { Rebuffed = DeathLegVerdict.RebuffedYes, DenKills = 2 };
+
+        var outcome = DeathLegVerdict.Compose(null, off);
+
+        Assert.True(outcome.Ok, string.Join("; ", outcome.Problems));
+        Assert.Contains(" rebuffed=yes den_kills=2 decoys=n/a decoy_safe=n/a decoys_dropped=n/a gear_dropped=n/a decoys_recovered=n/a", outcome.Line, StringComparison.Ordinal);
     }
 }

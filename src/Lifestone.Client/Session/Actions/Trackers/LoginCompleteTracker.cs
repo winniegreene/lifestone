@@ -25,8 +25,10 @@ namespace Lifestone.Client.Session.Actions.Trackers;
 /// out in the update after the last of them arrives. A safety cap, <see cref="ActionPolicy.LoginCompleteContentsCapSeconds"/> on the
 /// session clock from the call, sends it anyway with a WARNING naming the missing count, so a lost object never strands the player
 /// in portal space. A description whose lists could not be decoded (<see cref="PlayerInventory.ListsComplete"/> false) names no objects: only the
-/// description's arrival is waited for. Retail's behaviour, so there is no flag. TODO(m3-login-complete-side-pack-contents): the contents of a
-/// side pack arrive by ViewContents, not with the description, and are not waited for.</para>
+/// description's arrival is waited for. Retail's behaviour, so there is no flag.</para>
+/// <para><b>Side-pack contents (M4 2.1 s1, <c>m3-login-complete-side-pack-contents</c> closed).</b> ACE names them in a GameEvent 0x0196 per side pack in the first event bundle, before the F745s (capture.md C1),
+/// and the reducer holds them as the pack's contents (<see cref="PlayerInventory.ItemsIn"/>): every entry is an object the call waits for as well, inside the same cap. A focus carried among the side packs
+/// (ContainerType 2) names no contents of its own and blocks nothing (OpenAC #226).</para>
 /// </remarks>
 internal sealed class LoginCompleteTracker(ActionHandle handle) : ActionTracker(handle, ActionLane.Immediate, ActionPolicy.LoginCompleteSeconds)
 {
@@ -119,6 +121,15 @@ internal sealed class LoginCompleteTracker(ActionHandle handle) : ActionTracker(
             for (var i = 0; i < sidePacks.Count; i++)
             {
                 missing += objects.TryGet(sidePacks[i].Guid, out _) ? 0 : 1;
+            }
+
+            for (var i = 0; i < sidePacks.Count; i++)
+            {
+                var contents = inventory.ItemsIn(sidePacks[i].Guid);
+                for (var j = 0; j < contents.Count; j++)
+                {
+                    missing += objects.TryGet(contents[j].Guid, out _) ? 0 : 1;
+                }
             }
 
             var equipped = inventory.Equipped;

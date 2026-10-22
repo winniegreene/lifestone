@@ -8,7 +8,7 @@
     timeout, so silent: Dummy audio):
 
       build                    dotnet build Lifestone.slnx (must report 0 warnings and 0 errors)
-      test                     dotnet test Lifestone.slnx --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive" (must pass): the
+      test                     dotnet test Lifestone.slnx --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure" (must pass): the
                                loopback tests need the backend, the soak tier runs only at merge gates and the Exhaustive tier (the dat
                                sweeps: every GfxObj, landblock and cell) runs through slice-check -Exhaustive (G-A and before a merge). The
                                step writes <OutDir>\test-results\*.trx (per-test timings, VSTest's trx logger) and <OutDir>\test-times.txt (the
@@ -98,18 +98,35 @@
                                prints the line and, with --play-screenshot, the bolt, hit and kill frames)
       login-death              --account=test --login-check=bsd-death (M3 3.2 dd; docs/session.md section 32; needs the local backend with BSD Mage built; runs ONLY with -Backend require, SKIP under
                                auto and start: it changes the character, a death, vitae and dropped items): the game enters BSD Mage, binds it at Holtburg's lifestone, goes to the Black Spawn Den (a suicide
-                               there first when buffed), is killed by the tuskers (--death-seconds, default 600), respawns at the lifestone with vitae and is regeared, then logs off; the Godot run gets 1650 s;
+                               there first when buffed, then a top-up of the decoys it dropped), is killed by the tuskers (--death-seconds, default 600), respawns at the lifestone with vitae, is regeared (the plain kit),
+                               re-buffed (the buff cycle at Holtburg), goes back to the den and fights (--death-fight-kills 4 within --death-fight-seconds 180), heals, goes for its own corpse and takes back what the death
+                               dropped (the decoys of M4 3.1 D20), returns to Holtburg and logs off; the Godot run gets 2500 s (the leg's own limit is 2015 s with the defaults, plus 120 s to log off after a failure, plus a margin);
                                verdict "[logincheck] bsd-death done ok=true died=<n> suicides=<n> vitae=<n> respawn=<lifestone|elsewhere|none> corpse=<n> purged=<n> protected=<n> vitals_pct=<x|n/a>
-                               gear_restored=<yes|no> worn=<n> hits_taken=<n> damage_taken=<n> evades=<n> health_min_pct=<x|n/a> death_s=<s> death_frame_max_ms=<x|n/a> fight_frame_max_ms=<x|n/a> deaths=<n> corpses_stale=<n> protection=<dispelled|expired|none> vitae_paid=<xp|n/a> vitae_after=<pct|n/a>"
-                               (ok judges died=1, respawn=lifestone, gear_restored=yes, hits_taken>=1 and damage_taken>0; every other field is report-only; the step prints the line and, with
-                               --play-screenshot, the hit, dead, corpse and lifestone frames)
+                               gear_restored=<yes|no> worn=<n> hits_taken=<n> damage_taken=<n> evades=<n> health_min_pct=<x|n/a> death_s=<s> death_frame_max_ms=<x|n/a> fight_frame_max_ms=<x|n/a> deaths=<n> corpses_stale=<n> protection=<dispelled|expired|none> vitae_paid=<xp|n/a> vitae_after=<pct|n/a>
+                               corpse_looted=<yes|partial|no|skipped> items_recovered=<n> trip_s=<s|n/a> trip_abort=<reason|none> rebuffed=<yes, no or skipped> den_kills=<n> decoys=<n|n/a> decoy_safe=<yes|no|n/a> decoys_dropped=<n|n/a>
+                               gear_dropped=<n|n/a> decoys_recovered=<n|n/a> pretrip_heals=<n> gear_left=<n|n/a> mode_mismatch=<n>" (ok judges died=1, respawn=lifestone, gear_restored=yes, hits_taken>=1 and damage_taken>0; every other field is report-only,
+                               and the step copies corpse_looted items_recovered trip_s trip_abort rebuffed den_kills decoys decoy_safe decoys_dropped gear_dropped decoys_recovered pretrip_heals gear_left mode_mismatch into the summary as such
+                               (n/a when absent), judged from 3.1's gate by the lead; the step prints the line and, with --play-screenshot, the hit, dead, corpse, corpse-open, lifestone and decoys frames)
+      login-hunt               --account=test --login-check=hunt --hunt-weapon=melee --hunt-kills=3 (M4 1.2 s5, three kills since M4 3.1 s4 so that looted>=1 is judged over two or more kills; docs/session.md
+                               section 27; needs the local backend with Holtburg Hunter built; runs ONLY with -Backend require, SKIP under auto and start: it changes the character, experience and the belt's
+                               creatures): the game enters Holtburg Hunter, goes to the belt south-west of Holtburg, melees until the third kill (--hunt-seconds default 300: the leg stops itself at
+                               300 s of hunting whatever the count, so the step's 1500 s Godot timeout already covers three kills with the recoveries between them and, since M4 3.2, the shop visits: the leg's own limit is 1200 s with --sell and --buy-kits on, 120 s more for a log off after a failure), heals between the kills by the recovery rule
+                               (--heal, --heal-below and the rest, M4 3.1 s3), goes back to Holtburg and logs off; verdict "[logincheck] hunt done ok=true kills=<n> damage_dealt=<n>
+                               swings=<n> shots=<n> hits=<n> misses=<n> returned=<yes|no> fighter=<..> ... corpses_opened=<n> corpse_items=<n> looted=<n> loot_frame_max_ms=<x|n/a> loot_skipped=<n> heals=<n> kit_uses=<n>
+                               potions=<n> ground=<belt|forest> mode_mismatch=<n> ..." (ok judges kills>=1, damage_dealt>0 and, from 3.1, looted>=1 over two or more kills and loot_frame_max_ms; swings shots hits
+                               misses returned fighter attack_frame_max_ms looted loot_skipped loot_frame_max_ms loot_frame_over_50 are copied into the summary report-only; so are, from M4 3.1 s4, heals kit_uses potions
+                               mode_mismatch from the line and heal_failed_rolls heal_points heal_wasted from the hunt detail line (n/a when the leg printed no such field; heals>=1 is judged from M4 3.2 L2, only over a leg that started under the --heal-below trigger with --heal on: the leg's error line then says 'no heal although the hunt started at N% under the T% trigger', and the verdict reads ok=false);
+                               frame_over_50 as for the other judged live legs; the step prints the line)
       spell-showcase           --scene=spellviewer --showcase (four entries; must end with exceptions=0)
       golden-viewpoints        --golden-viewpoints (every viewpoint captured)
       fly-path                 --fly-path=holtburg:arwic:<FlySpeed> (DoD 8: no frame over 50 ms; exit 2 if one is)
       stray-output             no image, video, audio, .bin or .lsrec file appeared under src/ or tests/ during the run
 
     Every step's console output goes to <OutDir>\<nn>-<step>.log, outputs (golden images, terrain-golden diffs) below
-    <OutDir>, and the table to <OutDir>\summary.md. Exits 0 when no step failed and the secret scan found nothing, 1
+    <OutDir>, and the table to <OutDir>\summary.md; <OutDir>\summary.json (M4 1.1 s3) holds the same run as data: the commit, the branch, the test filter,
+    the run's start and end (UTC) and, per step, the verdict, the outcome, the seconds and the errors logged (no detail text, so no path and no account
+    name); a judged live leg's step also carries frame_over_50 (yes|no|n/a) and frame_judge (counted|contended), shown in the md as a "frame_over_50" line (report-only). The build step runs dotnet restore --locked-mode first (the package graph must match the
+    committed packages.lock.json files) and builds with --no-restore. Exits 0 when no step failed and the secret scan found nothing, 1
     otherwise.
 
     A step ends PASS, FAIL or SKIP. SKIP (yellow) is not a failure, and the summary counts it apart: a step that needs
@@ -147,9 +164,11 @@
     from-enter-to-the-arrival-with-a-heavy-player-description and no-ui-step-after-enter-is-over-12-ms; the live legs' frame windows
     (cast_frame_max_ms, fight_frame_max_ms, death_frame_max_ms, enter_to_walk and the teleport windows)) are judged against the machine
     they ran on (M3 4.2 D42): the steps that run them (play-checks, record-audio, login-check, login, login-buff, login-bsd,
-    login-death) sample the Godot processes on the machine (the step's own excluded). When every failure of such a step is a
+    login-death, login-hunt) sample the Godot processes on the machine (the step's own excluded). When every failure of such a step is a
     frame-time check and another Godot run was up during the step, the step is reported, not failed: "PASS (frames=contended)" and
-    the detail names the checks. With no other run it fails as today. -SoloFrames: any frame-time failure fails, and a frame-judged
+    the detail names the checks. With no other run it fails as today. The live legs' rule, settled (M4 1.1 s3): -Backend require implies -SoloFrames, so at the live gate a
+    leg's frame judge counts only when no other engine process is up (a leg waits for a quiet machine and a frame-time failure fails); elsewhere a leg that ran
+    with another engine process up reports frames=contended (the verdict stands, the frame judge is not counted). -SoloFrames: any frame-time failure fails, and a frame-judged
     step does not start while another Godot run is up (it waits at most 10 minutes, one line per minute, then fails as refused).
 
     A Godot step also fails when Lifestone logged an ERROR line during it (the "Errors logged" column), except
@@ -275,11 +294,11 @@ $DotnetRoot = Find-LifestoneDotnetRoot -DotnetRoot $DotnetRoot
 $dotnetExe = Join-Path $DotnetRoot 'dotnet.exe'
 
 $allSteps = @('build', 'test', 'cli-help', 'cli-bad-argument', 'terrain-golden', 'engine-checks', 'interior-engine-checks',
-    'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
+    'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death', 'login-hunt', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
 # The steps that need the local backend (gated by -Backend).
-$backendSteps = @('login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death')
+$backendSteps = @('login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death', 'login-hunt')
 # The steps whose verdict judges frame time: a failure of one of their frame-time checks is judged against the machine (D42, the help above).
-$frameJudgedSteps = @('play-checks', 'record-audio', 'login-check', 'login', 'login-buff', 'login-bsd', 'login-death')
+$frameJudgedSteps = @('play-checks', 'record-audio', 'login-check', 'login', 'login-buff', 'login-bsd', 'login-death', 'login-hunt')
 # The frame-time checks of the play checks (PlayChecks.cs: the ones that compare a frame or a UI step with FrameLimitMilliseconds / MaxUiStepMilliseconds).
 $frameTimeChecks = @(
     'an-unhidden-object-and-the-player-pass-through-intermediate-alpha-and-end-opaque-with-no-frame-over-50-ms',
@@ -290,7 +309,7 @@ $frameTimeChecks = @(
 # The steps -Parallel runs two at a time: backend-free, and never frame-judged (a frame-judged step never shares the machine with them).
 $parallelSteps = @('cli-help', 'cli-bad-argument', 'terrain-golden', 'engine-checks', 'interior-engine-checks', 'sky-checks', 'blend-checks', 'portal-space-checks', 'retail-ui', 'spell-showcase', 'golden-viewpoints')
 # The default test run leaves out the loopback tests (they need the backend), the soak tier (merge gates only) and the Exhaustive tier (the dat sweeps; slice-check -Exhaustive runs it at G-A and before a merge).
-$testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive'
+$testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure'
 # 'pwsh -File' passes '-Only a,b' as one string: split on commas either way.
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Skip = @($Skip | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -456,11 +475,15 @@ function Get-FrameVerdict {
 
 function Get-LiveFrameVerdict {
     <#
-      D42 for the live steps (login-check, login, login-buff, login-bsd, login-death): their frame windows are judged in the game and reach the log as
+      D42 for the live steps (login-check, login, login-buff, login-bsd, login-death, login-hunt): their frame windows are judged in the game and reach the log as
       ERROR lines: 'frame over 50 ms between Enter and walking', 'frame over 50 ms around a server teleport' and a leg's 'the ... leg failed ... why=...'
       whose reasons are all '<window>_frame_max_ms=<x> (at most 75 expected)'. Contended when there is at least one ERROR line and every one of them is such a
-      line, another Godot run was up and -SoloFrames is off. Conservative on purpose (a failure with no ERROR line, or any other ERROR, stays a failure):
-      TODO(p5a-live-frame-contended): the lead's first live gate confirms the legs print nothing else when only a frame window fails.
+      line, another Godot run was up and -SoloFrames is off. Conservative on purpose (a failure with no ERROR line, or any other ERROR, stays a failure).
+      Settled (M4 1.1 s3, closes p5a-live-frame-contended): -Backend require implies -SoloFrames (Get-FrameRule), so at the live gate a live leg's frame
+      judge counts only when no other engine process is up: a leg does not start while another Godot run is up and a frame-time failure then fails, never
+      a contended pass. Under -Backend auto or start without -SoloFrames, a leg that ran with another engine process up reports frames=contended: the
+      verdict stands and the frame judge is not counted (this function). Either way the summary's per-step frame_over_50 and frame judge fields (Get-FrameFields)
+      say whether the leg's 50 ms flag was counted or contended.
     #>
     param([string] $Text, [int] $Others, [bool] $Solo)
     $lines = @([regex]::Matches($Text, 'Z ERROR \[[^\]]*\][^\r\n]*') | ForEach-Object { $_.Value })
@@ -548,6 +571,19 @@ function Get-FrameFlags([string] $Text, [string] $Prefix) {
     return @{ Over50 = $over; Suffix = ('; frame_over_50=' + $flag + $(if ($maxima.Count) { ' ' + ($maxima -join ' ') } else { '' })) }
 }
 
+function Get-FrameFields {
+    <#
+      M4 1.1 s3 (m4-plan.md section 9, the 4.2 k7 rows): the 50 ms flag of a judged live leg and whether its frame judge counts, for the summary (md and json), so the
+      worst-of-three rule reads them. Report-only: the leg still passes on its own verdict. $Flags is Get-FrameFlags' result ($null for a leg whose line carries no
+      flag: login-check, login). Over50: 'yes' or 'no' as the leg printed it, 'n/a' when it printed none. Judge: 'contended' when another Godot run was up while the
+      leg ran (the verdict stands, the frame judge is not counted), else 'counted'. Returns @{ Over50; Judge }.
+    #>
+    param($Flags, $Run)
+    $over = if ($null -eq $Flags -or -not $Flags.Suffix) { 'n/a' } elseif ($Flags.Over50) { 'yes' } else { 'no' }
+    $judge = if ($Run.Others -gt 0) { 'contended' } else { 'counted' }
+    return @{ Over50 = $over; Judge = $judge }
+}
+
 function Get-ErrorCount([string] $text) {
     # Lifestone's own ERROR entries (Log.Error: '<utc>Z ERROR [category] ...'); Godot's engine messages are not counted.
     return ([regex]::Matches($text, 'Z ERROR \[')).Count
@@ -557,11 +593,13 @@ function Add-Result {
     <#
       Records one step. $Errors (Lifestone ERROR lines the step logged; -1 = not counted) above 0 fails the step.
       $PassNote qualifies a pass ('retry', 'attributed') so it is visible in the Result column, not only in Detail.
+      $FrameOver50 ('yes', 'no' or 'n/a') and $FrameJudge ('counted' or 'contended') are set by a judged live leg (M4 1.1 s3, Get-FrameFields) and reach
+      the summary (md and json) per step: report-only, they never fail the step.
       -Skipped records a SKIP: the step did not run ($Detail says why), which is not a failure. -NotRun leaves the Exit
       column empty for a step that did not run (a SKIP, or a FAIL because the backend was not ready).
     #>
     param([string] $Step, [bool] $Pass, [int] $Code, [double] $Seconds, [string] $Detail, [string] $Log = '', [int] $Errors = -1,
-        [string] $PassNote = '', [switch] $Skipped, [switch] $NotRun)
+        [string] $PassNote = '', [switch] $Skipped, [switch] $NotRun, [string] $FrameOver50 = '', [string] $FrameJudge = '')
     if ($Errors -gt 0) {
         $Pass = $false
         $Detail = "$Detail; FAIL: $Errors ERROR line(s) logged"
@@ -577,6 +615,8 @@ function Add-Result {
             Seconds = [math]::Round($Seconds, 1)
             Errors  = if ($Errors -lt 0) { '' } else { "$Errors" }
             Detail  = $Detail
+            FrameOver50 = $FrameOver50
+            FrameJudge  = $FrameJudge
             Log     = if ($Log) { [IO.Path]::GetFileName($Log) } else { '' }
         })
     $colour = if ($outcome -eq 'FAIL') { 'Red' } elseif ($outcome -eq 'SKIP' -or $PassNote) { 'Yellow' } else { 'Green' }
@@ -1106,6 +1146,7 @@ function Add-ReplayedResult {
 
 $strayBefore = if (Test-Wanted 'stray-output') { Get-StrayOutputs } else { @() }
 $suiteTimer = [System.Diagnostics.Stopwatch]::StartNew()
+$suiteStartUtc = [DateTime]::UtcNow
 Write-Host "[smoke] $($frameRule.Text); repository $repoRoot; logs and outputs in $OutDir"
 $wantedBackendSteps = @($backendSteps | Where-Object { Test-Wanted $_ })
 # The step numbers of the table (the loop's rule: build is skipped under -NoBuild, then every wanted step counts), for the -Parallel children.
@@ -1147,6 +1188,11 @@ try {
             Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it kills BSD Mage on the test account (a bind, the den, a death, the respawn and the re-gear; about 10 minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
             continue
         }
+        if ($step -eq 'login-hunt' -and $Backend -ne 'require') {
+            # It fights in Holtburg's belt as Holtburg Hunter (experience gained, the creatures killed): only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
+            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it hunts as Holtburg Hunter on the test account (the belt, the first melee kill; a few minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
+            continue
+        }
         if ($backendSteps -contains $step -and -not (Test-BackendGate $step $timer)) { continue }
         # -Parallel: at the first eligible step the whole batch runs (joined before anything else starts); each eligible step then replays its row here, in the table's order.
         if ($Parallel -gt 1 -and $parallelSteps -contains $step) {
@@ -1161,12 +1207,21 @@ try {
         switch ($step) {
             'build' {
                 $log = Join-Path $OutDir ('{0:00}-build.log' -f $script:stepIndex)
+                # M4 1.1 s3: the restore is locked first (packages.lock.json beside each project, RestorePackagesWithLockFile in Directory.Build.props): a package graph that differs
+                # from the committed lock files fails the build step instead of being rewritten silently. The build then reuses that restore.
+                $restoreLog = Join-Path $OutDir ('{0:00}-restore.log' -f $script:stepIndex)
+                $restoreCode = Invoke-Logged -FileName $dotnetExe -LogPath $restoreLog -TimeoutSeconds 900 `
+                    -Arguments @('restore', (Join-Path $repoRoot 'Lifestone.slnx'), '--locked-mode', '--disable-build-servers', '-nologo')
+                if ($restoreCode -ne 0) {
+                    Add-Result $step $false $restoreCode $timer.Elapsed.TotalSeconds 'dotnet restore --locked-mode failed (the package graph differs from packages.lock.json, or a package is missing); see the restore log' $restoreLog
+                    continue
+                }
                 $code = Invoke-Logged -FileName $dotnetExe -LogPath $log -TimeoutSeconds 900 `
-                    -Arguments @('build', (Join-Path $repoRoot 'Lifestone.slnx'), '--disable-build-servers', '-nologo')
+                    -Arguments @('build', (Join-Path $repoRoot 'Lifestone.slnx'), '--no-restore', '--disable-build-servers', '-nologo')
                 $text = Get-Content -LiteralPath $log -Raw
                 $warnings = if ($text -match '(\d+) Warning\(s\)') { [int]$Matches[1] } else { -1 }
                 $errors = if ($text -match '(\d+) Error\(s\)') { [int]$Matches[1] } else { -1 }
-                Add-Result $step ($code -eq 0 -and $warnings -eq 0 -and $errors -eq 0) $code $timer.Elapsed.TotalSeconds "warnings=$warnings errors=$errors" $log
+                Add-Result $step ($code -eq 0 -and $warnings -eq 0 -and $errors -eq 0) $code $timer.Elapsed.TotalSeconds "restore=locked warnings=$warnings errors=$errors" $log
             }
             'test' {
                 $log = Join-Path $OutDir ('{0:00}-test.log' -f $script:stepIndex)
@@ -1378,7 +1433,8 @@ try {
                 $run = Invoke-Godot $step '--account=test --login-check=all' 1100 '' $defaultSize
                 $verdict = if ($run.Text -match '\[logincheck\] (done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
                 $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] done ok=true ' -and $run.Text -match 'corrections=0 ' -and $run.Text -match 'logoff=ok ' -and $run.Text -match 'logoff_tunnel=held ' -and $run.Text -match 'portal_sounds=ok ') $run
-                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $live.Note) $run.Log $live.Errors $live.PassNote
+                $fields = Get-FrameFields $null $run
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $live.Note) $run.Log $live.Errors $live.PassNote -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
             }
             'login-throwaway' {
                 # --login-check=throwaway (docs/session.md section 28): creates 'Lifestone Throwaway' on the test account through the retail screens, uses the tools panel, deletes, restores,
@@ -1402,7 +1458,8 @@ try {
                 $verdict = if ($run.Text -match '\[logincheck\] (buff done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
                 $flags = Get-FrameFlags $run.Text 'buff'
                 $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] buff done ok=true ') $run
-                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' })
+                $fields = Get-FrameFields $flags $run
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' }) -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
             }
             'login-bsd' {
                 # --login-check=bsd-fight (docs/session.md section 31): the game enters BSD Mage on the test account, tops up the buffs, goes to the Black Spawn Den and fights the tuskers of the arrival's floor
@@ -1412,18 +1469,51 @@ try {
                 $verdict = if ($run.Text -match '\[logincheck\] (bsd-fight done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
                 $flags = Get-FrameFlags $run.Text 'bsd-fight'
                 $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] bsd-fight done ok=true ') $run
-                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' })
+                $fields = Get-FrameFields $flags $run
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' }) -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
             }
             'login-death' {
                 # --login-check=bsd-death (docs/session.md section 32): the game enters BSD Mage on the test account, binds it at Holtburg's lifestone, goes to the Black Spawn Den (a suicide first when any
-                # enchantment but the vitae is active), is killed by the tuskers, respawns at the lifestone and is regeared, then logs off. The test account only; the game reads its password from secrets.json itself.
-                # 1650 s: the leg stops itself at 1205 s with the default --death-seconds (login 60, gear 120, bars 30, bind 90, suicide and respawn 90, the den 30, the wait 600, the respawn 65, the re-gear 120) and
-                # may take 120 s more to log off after a failure; DeathLegRunner.WholeCheckSecondsFor must stay under this so the leg logs off before it reports a failure.
-                $run = Invoke-Godot $step '--account=test --login-check=bsd-death' 1650 '' $defaultSize
+                # enchantment but the vitae is active, then a top-up of the decoys that suicide dropped), is killed by the tuskers, respawns at the lifestone, is regeared, re-buffed, fights at the den, heals,
+                # recovers its corpse and returns, then logs off (M4 3.1 D20). The test account only; the game reads its password from secrets.json itself.
+                # 2500 s: the leg stops itself at 2015 s with the defaults (DeathLegRunner.WholeCheckSecondsFor: M3's 1205 s = login 60, gear 120, bars 30, bind 90, suicide and respawn 90, the den 30, the wait 600,
+                # the respawn 65, the re-gear 120; and M4 3.1's 810 s = the decoy top-up 30, the rebuff 240, the teleport to the den 30, the walk 60, the fight 180, the pre-trip heal 120, the trip 90, the return 60)
+                # and may take 120 s more to log off after a failure; the step's seconds are that sum plus the recovery plus a margin of about 365 s (a test pins timeout >= sum + 120 + 300), so the leg logs
+                # off before it reports a failure. The real run is far shorter (the death wait is about 20 s of its 600 s).
+                # corpse_looted items_recovered trip_s trip_abort (M4 2.2 s1) and rebuffed den_kills decoys decoy_safe decoys_dropped gear_dropped decoys_recovered pretrip_heals gear_left mode_mismatch (M4 3.1 d2; gear_left from the 3.1 fix slice) are
+                # copied below, report-only: they never fail the step (the lead judges them at 3.1's gate; n/a when a field is absent).
+                $run = Invoke-Godot $step '--account=test --login-check=bsd-death' 2500 '' $defaultSize
                 $verdict = if ($run.Text -match '\[logincheck\] (bsd-death done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
                 $flags = Get-FrameFlags $run.Text 'bsd-death'
                 $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] bsd-death done ok=true ') $run
-                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' })
+                $fields = Get-FrameFields $flags $run
+                # Report-only (M4 2.2 s1, M4 3.1 d2): the corpse trip's counters and the decoy loop's fields, copied into the summary (never judged here).
+                $copied = @(foreach ($key in 'corpse_looted', 'items_recovered', 'trip_s', 'trip_abort', 'rebuffed', 'den_kills', 'decoys', 'decoy_safe', 'decoys_dropped', 'gear_dropped', 'decoys_recovered', 'pretrip_heals', 'gear_left', 'mode_mismatch') { if ($verdict -match "(?<![\w])$key=([^\s]+)") { "$key=$($Matches[1])" } else { "$key=n/a" } }) -join ' '
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + "; report-only: $copied" + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' }) -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
+            }
+            'login-hunt' {
+                # --login-check=hunt (M4 1.2; docs/session.md section 27): the game enters Holtburg Hunter on the test account, goes to the belt south-west of Holtburg and melees until the kills are made
+                # (one kill at 1.2, three from M4 3.1 s4: see --hunt-kills below), then goes back and logs off. The test account only; the game reads its password from secrets.json itself. 1500 s (1200 s until M4 3.2 added the shop visits): the leg stops itself at --hunt-seconds (default 300) after
+                # its login, gear and teleport, and may take 120 s more to log off after a failure. The leg judges kills>=1 damage_dealt>0 swings>=1 (M4 1.3: HuntLegVerdict; the missile hunt shots>=1 hits>=1); the step passes on its ok=true.
+                # attack_frame_max_ms (M4 1.3 s2: the slowest frame from an attack's send to its run's Done) is copied below, report-only: it never fails the step in 1.3 (D11, judged from item 2.1).
+                # looted loot_skipped loot_frame_max_ms loot_frame_over_50 (M4 2.2 s0: the loot of the kill's corpse; loot_frame_max_ms is the slowest frame from the corpse's open to its close) are copied the same way,
+                # report-only in 2.2 (judged from 3.1): they never fail the step. loot_frame_over_50 is printed by the leg only when the loot window had a frame over 50 ms, so its absence reads "no".
+                # M4 3.1 s4: --hunt-kills=3 (looted>=1 is judged over two or more kills, HuntLegVerdict.LootJudgeMinKills; the leg stops itself at --hunt-seconds 300 whatever the count, so the 1200 s above already
+                # covers three kills and the recoveries between them: 300 s of hunting, the arrival, the gear and the log off). heals kit_uses potions mode_mismatch (the verdict line) and heal_failed_rolls heal_points
+                # heal_wasted (the hunt detail line) are copied report-only below, n/a when the leg printed no such field (heals>=1 is judged at 3.2's gate; mode_mismatch is lane g's CombatModeWatch).
+                $run = Invoke-Godot $step '--account=test --login-check=hunt --hunt-weapon=melee --hunt-kills=3' 1500 '' $defaultSize
+                $verdict = if ($run.Text -match '\[logincheck\] (hunt done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
+                $flags = Get-FrameFlags $run.Text 'hunt'
+                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] hunt done ok=true ') $run
+                $fields = Get-FrameFields $flags $run
+                # Report-only: the leg's own counters, copied into the summary (never judged here).
+                $copied = @(foreach ($key in 'swings', 'shots', 'hits', 'misses', 'returned', 'fighter', 'attack_frame_max_ms', 'looted', 'loot_skipped', 'loot_frame_max_ms', 'sold', 'bought', 'pyreals', 'appraised', 'vendor_frame_max_ms') { if ($verdict -match "(?<![\w])$key=([^\s]+)") { "$key=$($Matches[1])" } else { "$key=n/a" } }) -join ' '
+                $copied += ' loot_frame_over_50=' + $(if ($verdict -match '(?<![\w])loot_frame_over_50=yes') { 'yes' } else { 'no' })
+                $healCopied = @(foreach ($key in 'heals', 'kit_uses', 'potions', 'mode_mismatch') { if ($verdict -match "(?<![\w])$key=([^\s]+)") { "$key=$($Matches[1])" } else { "$key=n/a" } }) -join ' '
+                $huntDetail = if ($run.Text -match '\[logincheck\] (hunt detail[^\r\n]*)') { $Matches[1] } else { '' }
+                $healDetail = @(foreach ($key in 'heal_failed_rolls', 'heal_points', 'heal_wasted') { if ($huntDetail -match "(?<![\w])$key=([^\s]+)") { "$key=$($Matches[1])" } else { "$key=n/a" } }) -join ' '
+                $copied += " $healCopied $healDetail"
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + "; report-only: $copied" + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' }) -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
             }
             'login' {
                 # The player's own entry point (tools\play.ps1) on the test account (-Offscreen makes it the test account and refuses any other). The backend is the
@@ -1441,7 +1531,8 @@ try {
                 # Only frames this run wrote count (the folder keeps the earlier run's until they are overwritten).
                 $frames = @(Get-ChildItem -LiteralPath $frameDir -Filter '*.png' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTimeUtc -ge $startedAt }).Count
                 $live = Resolve-LiveFrames ($code -eq 0 -and $text -match '\[logincheck\] done ok=true ' -and $text -match 'materialised=true' -and $frames -ge 4 -and $text -match 'shell=ok ' -and $text -match 'spew_portal=yes ' -and $text -match 'logoff_tunnel=held ' -and $text -match 'portal_sounds=ok ') $loginRun
-                Add-Result $step $live.Ok $code $timer.Elapsed.TotalSeconds "$verdict; frames=$frames in docs/screenshots/m2/login$($live.Note)" $log $live.Errors $live.PassNote
+                $fields = Get-FrameFields $null $loginRun
+                Add-Result $step $live.Ok $code $timer.Elapsed.TotalSeconds "$verdict; frames=$frames in docs/screenshots/m2/login$($live.Note)" $log $live.Errors $live.PassNote -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
             }
             'offline-player' {
                 $dir = [IO.Path]::GetRelativePath($repoRoot, (Join-Path $OutDir 'player')) -replace '\\', '/'
@@ -1542,8 +1633,37 @@ $lines.Add($backendLine)
 $lines.Add('')
 $lines.Add($secretsLine)
 if ($script:testTimesLine) { $lines.Add(''); $lines.Add("tests: $($script:testTimesLine) (test-times.txt, test-results\*.trx)") }
+# M4 1.1 s3: the live legs' 50 ms flags, per step (report-only; the worst-of-three rule reads them).
+$flagged = @($script:results | Where-Object { $_.FrameOver50 })
+if ($flagged.Count) {
+    $lines.Add('')
+    $lines.Add('frame_over_50 (report-only): ' + (($flagged | ForEach-Object { if ($_.FrameOver50 -eq 'n/a') { "$($_.Step)=n/a" } else { "$($_.Step)=$($_.FrameOver50) ($($_.FrameJudge))" } }) -join ', '))
+}
 $summary = $lines -join [Environment]::NewLine
 Set-Content -LiteralPath (Join-Path $OutDir 'summary.md') -Value $summary -Encoding utf8
+# M4 1.1 s3: summary.json beside summary.md: the commit, the branch, the test filter, per step the verdict and the duration, the run's start and end (UTC).
+# No paths, no account names and no detail text (which may carry either); the md has the detail.
+if ($StepNumber -eq 0) {
+    $commit = ''; $branch = ''
+    try { $commit = "$(& git -C $repoRoot rev-parse HEAD 2>$null)".Trim(); $branch = "$(& git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null)".Trim() } catch { }
+    $json = [ordered]@{
+        schema     = 1
+        commit     = $commit
+        branch     = $branch
+        filter     = $testFilter
+        backend    = $Backend
+        started_utc = $suiteStartUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        ended_utc  = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        verdict    = $verdict
+        secrets    = $leaks.Hits
+        steps      = @($script:results | ForEach-Object {
+                $step = [ordered]@{ step = $_.Step; verdict = $_.Result; outcome = $_.Outcome; seconds = $_.Seconds; errors_logged = $(if ("$($_.Errors)" -ne '') { [int]$_.Errors } else { $null }) }
+                if ($_.FrameOver50) { $step['frame_over_50'] = $_.FrameOver50; $step['frame_judge'] = $_.FrameJudge }
+                $step
+            })
+    }
+    ConvertTo-Json -InputObject $json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutDir 'summary.json') -Encoding utf8
+}
 if ($ResultsJson) { ConvertTo-Json -InputObject @($script:results) -Depth 4 | Set-Content -LiteralPath $ResultsJson -Encoding utf8 }
 Write-Host ''
 Write-Host $summary

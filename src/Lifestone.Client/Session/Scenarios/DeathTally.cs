@@ -1,12 +1,13 @@
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.Animation;
+using Lifestone.Data.World;
 
 namespace Lifestone.Client.Session.Scenarios;
 
 /// <summary>
 /// What a death did, counted from the player's own messages on the session bus (M3 3.2 s0; plan section 4.8; spec section 5.4, the "death" and "melee on the player" rows): the victim notice (GameEvent 0x01AC), the
 /// Dead motion (F74C), the NumDeaths update (0x02CD, property 43), the vitae (spell 666), the enchantment purges (0x02C6, 0x0312), the corpse (F745 with <see cref="WorldObjectTable.CorpseFlag"/>), the death's teleport
-/// (F751) and the arrival (the position after it), the lifestone protection (0x028A, WeenieError 0x0502), the vitals after the arrival (0x02E9) and the lowest health share, with an embedded <see cref="FightTally"/> for the
+/// (F751) and the arrival (the position after it), the lifestone protection (0x028A, WeenieError 0x0502), the vitals after the arrival (0x02E9; the judged share is read at the end of the respawn's vitals wait, <see cref="SampleVitalsAfterArrival"/>) and the lowest health share, with an embedded <see cref="FightTally"/> for the
 /// blows taken. <see cref="Start"/> subscribes and takes the baselines; <see cref="Dispose"/> unsubscribes (the counters stay readable); <see cref="Reset"/> zeroes them. Nothing allocates per message.
 /// </summary>
 /// <remarks>
@@ -51,6 +52,7 @@ public sealed class DeathTally : IDisposable
     private bool _healthSeen;
     private bool _staminaSeen;
     private bool _manaSeen;
+    private bool _vitalsSampled;
 
     /// <summary>An empty tally with its own <see cref="Fight"/>.</summary>
     public DeathTally()
@@ -88,6 +90,15 @@ public sealed class DeathTally : IDisposable
     /// <summary>The guid of the last corpse counted in <see cref="CorpsesSeen"/>, or 0.</summary>
     public uint LastCorpseGuid { get; private set; }
 
+    /// <summary>
+    /// M4 2.2 s1: the cell and the position (global frame of the cell) the last counted corpse had in its CreateObject, the place the mage died (the object table forgets the corpse after the teleport away), or null until one
+    /// was counted. The corpse trip teleports here.
+    /// </summary>
+    public CellFrame? LastCorpsePosition { get; private set; }
+
+    /// <summary>M4 2.2 s1: the session clock's seconds when the last counted corpse's CreateObject (the F745) arrived, or NaN: the corpse's age is measured from it (ACE's rot floor, <c>PlayerCorpseMinRotSeconds</c>).</summary>
+    public double LastCorpseAt { get; private set; } = double.NaN;
+
     /// <summary>How many times ACE said the lifestone protection was dispelled by an action (<see cref="ProtectionDispelledLine"/>).</summary>
     public int ProtectionDispels { get; private set; }
 
@@ -118,21 +129,39 @@ public sealed class DeathTally : IDisposable
     /// <summary>How many blows met the lifestone protection (0x028A with WeenieError 0x0502).</summary>
     public int ProtectedHits { get; private set; }
 
-    /// <summary>Health current over maximum, in percent, as of the last 0x02E9 for health after the arrival; NaN until one landed.</summary>
+    /// <summary>
+    /// Health current over maximum, in percent, as the scenario read it at the end of the respawn's vitals wait (<see cref="SampleVitalsAfterArrival"/>); NaN until then. M4 2.2 fix R1: this is the value ACE's 75% restore
+    /// has left by then, not the first 0x02E9 after the arrival (see <see cref="FirstHealthAfterArrivalPercent"/>).
+    /// </summary>
     public double HealthAfterArrivalPercent { get; private set; }
 
-    /// <summary>Stamina current over maximum, in percent, as of the last 0x02E9 for stamina after the arrival; NaN until one landed.</summary>
+    /// <summary>Stamina current over maximum, in percent, at the end of the respawn's vitals wait (<see cref="SampleVitalsAfterArrival"/>); NaN until then.</summary>
     public double StaminaAfterArrivalPercent { get; private set; }
 
-    /// <summary>Mana current over maximum, in percent, as of the last 0x02E9 for mana after the arrival; NaN until one landed.</summary>
+    /// <summary>Mana current over maximum, in percent, at the end of the respawn's vitals wait (<see cref="SampleVitalsAfterArrival"/>); NaN until then.</summary>
     public double ManaAfterArrivalPercent { get; private set; }
 
     /// <summary>
-    /// The vitals after the arrival as one share: the lowest of <see cref="HealthAfterArrivalPercent"/>, <see cref="StaminaAfterArrivalPercent"/> and <see cref="ManaAfterArrivalPercent"/> once all three
-    /// 0x02E9 have landed after the arrival (ACE sends 75% for each, <c>Player_Death.cs</c> 262-282); NaN until then, so a partial restore never reads as a complete one.
+    /// The vitals after the arrival as one share: the lowest of <see cref="HealthAfterArrivalPercent"/>, <see cref="StaminaAfterArrivalPercent"/> and <see cref="ManaAfterArrivalPercent"/>, each read from the qualities at the
+    /// end of the respawn's vitals wait by <see cref="SampleVitalsAfterArrival"/>; NaN until then, so a partial restore never reads as a complete one. ACE restores each vital to 75% three seconds after the teleport
+    /// (<c>Player_Death.cs</c> 262-282, <c>AddDelaySeconds(3.0)</c>), so the first 0x02E9 of a vital after the arrival can be a regeneration or a drain tick that came before it (M4 2.2 live round 1: <c>vitals_pct=0.0</c>
+    /// from a stamina or mana update of 0 sent after 30 evades): the value at the end of the wait is the one the judge asked for (the live test's 60 to 90). Later blows, teleports and regeneration never move it; a new
+    /// death's teleport clears it.
     /// </summary>
     public double VitalsAfterArrivalPercent =>
-        _healthSeen && _staminaSeen && _manaSeen ? Math.Min(HealthAfterArrivalPercent, Math.Min(StaminaAfterArrivalPercent, ManaAfterArrivalPercent)) : double.NaN;
+        _vitalsSampled ? Math.Min(HealthAfterArrivalPercent, Math.Min(StaminaAfterArrivalPercent, ManaAfterArrivalPercent)) : double.NaN;
+
+    /// <summary>Health current over maximum, in percent, as of the first 0x02E9 for health after the arrival; NaN until one landed. Report-only (the respawn log line's <c>first health=</c>).</summary>
+    public double FirstHealthAfterArrivalPercent { get; private set; }
+
+    /// <summary>Stamina current over maximum, in percent, as of the first 0x02E9 for stamina after the arrival; NaN until one landed. Report-only.</summary>
+    public double FirstStaminaAfterArrivalPercent { get; private set; }
+
+    /// <summary>Mana current over maximum, in percent, as of the first 0x02E9 for mana after the arrival; NaN until one landed. Report-only.</summary>
+    public double FirstManaAfterArrivalPercent { get; private set; }
+
+    /// <summary>True once all three vitals had a 0x02E9 after the arrival (the three <c>First...AfterArrivalPercent</c> are set): the play-check's wait for ACE's restore on the stand-in.</summary>
+    public bool FirstVitalsSeen => _healthSeen && _staminaSeen && _manaSeen;
 
     /// <summary>The lowest health current over maximum, in percent, seen since <see cref="Start"/> (the baseline counts); NaN while health is unknown.</summary>
     public double HealthMinPercent { get; private set; }
@@ -192,6 +221,8 @@ public sealed class DeathTally : IDisposable
         CorpsesSeen = 0;
         StaleCorpses = 0;
         LastCorpseGuid = 0;
+        LastCorpsePosition = null;
+        LastCorpseAt = double.NaN;
         ProtectionDispels = 0;
         ProtectionExpiries = 0;
         Protection = ProtectionNone;
@@ -200,12 +231,7 @@ public sealed class DeathTally : IDisposable
         ArrivalCell = 0;
         ArrivalFrame = default;
         ProtectedHits = 0;
-        HealthAfterArrivalPercent = double.NaN;
-        StaminaAfterArrivalPercent = double.NaN;
-        ManaAfterArrivalPercent = double.NaN;
-        _healthSeen = false;
-        _staminaSeen = false;
-        _manaSeen = false;
+        ResetVitalsAfterArrival();
         HealthMinPercent = double.NaN;
         _afterDeath = false;
         _awaitingArrival = false;
@@ -347,22 +373,63 @@ public sealed class DeathTally : IDisposable
             return;
         }
 
-        // The first value of each vital after the arrival is ACE's 75% (three 0x02E9 together, Player_Death.cs 262-282); the regeneration that follows (the regear takes about a minute) is not kept (M3 3.2 review R8).
+        // The first 0x02E9 of each vital after the arrival is kept as a report-only figure (M3 3.2 review R8: not the regeneration that follows). It is NOT the judged value: ACE's 75% comes three seconds after the teleport
+        // (Player_Death.cs 262-282) and a regeneration or drain tick can come before it (M4 2.2 fix R1); the judged value is read at the end of the vitals wait (SampleVitalsAfterArrival).
         switch (maxId)
         {
             case 1 when !_healthSeen:
-                HealthAfterArrivalPercent = percent;
+                FirstHealthAfterArrivalPercent = percent;
                 _healthSeen = true;
                 break;
             case 3 when !_staminaSeen:
-                StaminaAfterArrivalPercent = percent;
+                FirstStaminaAfterArrivalPercent = percent;
                 _staminaSeen = true;
                 break;
             case 5 when !_manaSeen:
-                ManaAfterArrivalPercent = percent;
+                FirstManaAfterArrivalPercent = percent;
                 _manaSeen = true;
                 break;
         }
+    }
+
+    /// <summary>
+    /// Reads the three vitals from the player's qualities now and keeps them as <see cref="HealthAfterArrivalPercent"/>, <see cref="StaminaAfterArrivalPercent"/> and <see cref="ManaAfterArrivalPercent"/>: the death scenario calls this at the
+    /// end of the respawn's vitals wait (and of the suicide's), so <see cref="VitalsAfterArrivalPercent"/> is what ACE's restore left, whatever came before it. False, and nothing kept, before a death's arrival or when a vital's current or
+    /// maximum is unknown.
+    /// </summary>
+    /// <returns>True when all three were read.</returns>
+    public bool SampleVitalsAfterArrival()
+    {
+        if (_view is null || !_afterArrival)
+        {
+            return false;
+        }
+
+        var q = _view.State.Self.Qualities;
+        if (!TryShare(q, 1, out var health) || !TryShare(q, 3, out var stamina) || !TryShare(q, 5, out var mana))
+        {
+            return false;
+        }
+
+        HealthAfterArrivalPercent = health;
+        StaminaAfterArrivalPercent = stamina;
+        ManaAfterArrivalPercent = mana;
+        _vitalsSampled = true;
+        return true;
+    }
+
+    private void ResetVitalsAfterArrival()
+    {
+        HealthAfterArrivalPercent = double.NaN;
+        StaminaAfterArrivalPercent = double.NaN;
+        ManaAfterArrivalPercent = double.NaN;
+        FirstHealthAfterArrivalPercent = double.NaN;
+        FirstStaminaAfterArrivalPercent = double.NaN;
+        FirstManaAfterArrivalPercent = double.NaN;
+        _healthSeen = false;
+        _staminaSeen = false;
+        _manaSeen = false;
+        _vitalsSampled = false;
     }
 
     private void OnEnchantment(in EnchantmentChanged e)
@@ -400,6 +467,8 @@ public sealed class DeathTally : IDisposable
 
         CorpsesSeen++;
         LastCorpseGuid = e.Guid;
+        LastCorpsePosition = obj.Position;
+        LastCorpseAt = _view.Clock.Now;
     }
 
     private void OnTeleport(in PlayerTeleportAnnounced e)
@@ -412,12 +481,7 @@ public sealed class DeathTally : IDisposable
         _afterDeath = false;
         _awaitingArrival = true;
         _afterArrival = false;
-        HealthAfterArrivalPercent = double.NaN; // a new death: its own 75% is the first value of each vital after its arrival
-        StaminaAfterArrivalPercent = double.NaN;
-        ManaAfterArrivalPercent = double.NaN;
-        _healthSeen = false;
-        _staminaSeen = false;
-        _manaSeen = false;
+        ResetVitalsAfterArrival(); // a new death: its own restore is read after its own arrival
         DeathTeleports++;
     }
 

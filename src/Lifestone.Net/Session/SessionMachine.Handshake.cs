@@ -82,7 +82,7 @@ internal sealed partial class SessionMachine
         var timestamp = (uint)_time.GetUtcNow().ToUnixTimeSeconds();
         connection.SendLoginRequest(_options.ClientVersion, _account, _password, timestamp);
         Log(NetLogLevel.Info,
-            $"login: LoginRequest for account {_account} sent to {_options.Server} from {connection.Socket.LocalEndPoint} (attempt {_attempt} of {_options.Retry.Attempts})");
+            $"login: LoginRequest sent to {_options.Server} from {connection.Socket.LocalEndPoint} (attempt {_attempt} of {_options.Retry.Attempts})");
     }
 
     /// <summary>A verified cleartext ConnectRequest arrived on a connection that had none.</summary>

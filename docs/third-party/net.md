@@ -13,7 +13,7 @@ nothing; the fixtures N11 captures from the client tap stay under `cache/net-fix
 decision of 2026-10-12).
 
 `Hygiene/NetProvenanceTests.cs` (N13) keeps this page honest: every file of the track whose first line is a port header
-cites OpenAC @1ee5a08 or ACE @95ef426d (DatReaderWriter @a9345f2 for the command table alone) and is named here with
+cites OpenAC @1ee5a08 (every port before M4), OpenAC @f22b048 (the M4 wire, from 1.2 s0) or ACE @95ef426d (DatReaderWriter @a9345f2 for the command table alone) and is named here with
 that source, and `src/Lifestone.Net/THIRD-PARTY-NOTICES.md` names no file that is gone or holds no OpenAC code.
 
 ## Sources
@@ -515,6 +515,63 @@ character, about 2 KB), and the six `GameMessagePrivateUpdate*` writers. The fak
 PlayerCreate, as ACE's `Player.SendSelf` does (`FakeAceScript.PlayerDescription` replaces it), which closes the N4
 `TODO(net)`.
 
+### The M4 combat wire (M4 1.2 s0)
+
+M4 D7 moves the pin for new ports to OpenAC's signed head `eriknihlen/OpenAC@f22b048` (`f22b04851c5fcc3f38acfe50fb704ca38130c081`,
+2026-10-19T20:36Z; the ported files are byte-identical at 1ee5a08 and f22b048, checked with `git show` at both pins); the ports
+above stay at 1ee5a08. Both files were read before they were copied, under the N-process (foundation-openac.md §6.2).
+
+**Decompile check** (§6.2 item 3), run on both source files at f22b048: `grep -nEi "offset|decompil|0x00[4-7]|Retail"`.
+`Messages/AttackTargetRequest.cs`: no match. `Messages/GameEvents.cs`: three matches, all in `ParseMagicLayeredSpellList`'s
+loop (`int offset = 4 + i * 4` and its two uses), nowhere near `ParseAttackDone` or `ParseCombatCommenceAttack`; no
+decompile shape, no retail address, no `Retail` prefix in the ported code. Nothing to re-express.
+
+| Lifestone file (`src/Lifestone.Net/Messages/`) | OpenAC source (`src/AcDream.Core.Net/Messages/`) at f22b048 | Changes beyond the common ones |
+|---|---|---|
+| `Actions/CombatActionCodecs.cs` | `AttackTargetRequest.cs` | The three `Build*` methods that returned a fresh `byte[]` (24, 24 and 12 bytes) became `WriteMeleeAttack`, `WriteMissileAttack` and `WriteCancelAttack` over `PacketWriter` and `GameActionEnvelope.WriteHeader`; the opcode constants moved to `GameActionTypes` (0x0008, 0x000A, 0x01B7). A NaN or infinite power or accuracy is refused before anything is written; OpenAC sends any float and so do these (ACE clamps to 0..1 itself). Each layout is checked against ACE's `GameActionTargetedMeleeAttack`, `GameActionTargetedMissileAttack` and `GameActionCancelAttack` readers (`CombatActionCodecTests`) and cites retail's `CM_Combat::Event_*` senders. |
+| `Combat/AttackEventCodecs.cs` | `GameEvents.cs` (`ParseAttackDone`, `ParseCombatCommenceAttack`) | `TryParse` over `WireReader` on the whole F7B0 message (OpenAC takes the payload and accepts a longer one); `AttackDoneEvent` carries only the WeenieError (OpenAC's `AttackSequence`, always 0, is dropped); the empty 01B8 is the record `CommenceAttackEvent`. Checked against ACE's `GameEventAttackDone` and `GameEventCombatCommenceAttack` (`AttackEventCodecTests`). |
+
+### The M4 container and item-move wire (M4 2.1 s0)
+
+Ported at the same pin as the combat wire above (`eriknihlen/OpenAC@f22b048`; `Messages/GameEvents.cs` and
+`Messages/InventoryActions.cs` are byte-identical at 1ee5a08 and f22b048, read with `git show f22b048:<path>`), under the
+N-process (foundation-openac.md §6.2).
+
+**Decompile check** (§6.2 item 3), run on both source files at f22b048: `grep -nEi "offset|decompil|0x00[4-7]|Retail"`.
+`Messages/GameEvents.cs`: three matches, all in `ParseMagicLayeredSpellList`'s loop (`int offset = 4 + i * 4` and its two uses),
+nowhere near `ParseViewContents` or `ParseCloseGroundContainer`. `Messages/InventoryActions.cs`: one match, a comment line
+(`References: r08 §3 rows 0x0054-0x0056 / 0x019B-0x019D / 0x00CD`), a row reference and no code. No decompile shape, no retail
+address, no `Retail` prefix in the ported code. Nothing to re-express.
+
+| Lifestone file (`src/Lifestone.Net/Messages/`) | OpenAC source (`src/AcDream.Core.Net/Messages/`) at f22b048 | Changes beyond the common ones |
+|---|---|---|
+| `Inventory/ContainerCodecs.cs` | `GameEvents.cs` (`ParseViewContents` 351-366, `ParseCloseGroundContainer` 446) | `TryParse` over `WireReader` on the whole F7B0 message (OpenAC takes the payload and accepts a longer one); the count read with `TryReadCount(8)` so a count beyond the body is malformed and no array is sized from an unchecked count; `ViewContentsEvent` and `ViewContentsEntry` replace OpenAC's `ViewContents` records; `CloseGroundContainerEvent` replaces the bare `uint?`. Checked against ACE's `GameEventViewContents.cs:13-26` and `GameEventCloseGroundContainer.cs:9-13` |
+| `Actions/ItemMoveActionCodecs.cs` | `InventoryActions.cs` (`BuildStackableSplitToContainer` 44-56, `BuildStackableSplitTo3D` 59-68, `BuildStackableSplitToWield` 71-82, `BuildGiveObjectRequest` 84-95, `BuildDropItem` 131-139, `BuildNoLongerViewingContents` 152-160) | The six `Build*` methods that returned a fresh `byte[]` became `Write*` methods over `PacketWriter` and `GameActionEnvelope.WriteHeader`; the opcode constants moved to `GameActionTypes` (0x0195, 0x001B, 0x0055, 0x0056, 0x019B, 0x00CD); the placement and the amounts are `int` (ACE reads Int32, OpenAC takes uint). Checked against ACE's `GameActionNoLongerViewingContents.cs`, `GameActionDropItem.cs`, `GameActionStackableSplitToContainer.cs`, `GameActionStackableSplitTo3D.cs`, `GameActionStackableSplitToWield.cs` (EquipMask read as Int32) and `GameActionGiveObjectRequest.cs`; none of the readers checks the amount (the `Player.HandleAction*` methods refuse 0 or less) |
+
+### The M4 vendor, appraisal and shortcut wire (M4 3.2 s0)
+
+Ported at the same pin as the combat and container wire above (`eriknihlen/OpenAC@f22b048`; `Messages/VendorApproach.cs`,
+`VendorRequests.cs`, `AppraiseRequest.cs` and `AppraiseInfoParser.cs` are byte-identical at 1ee5a08 and f22b048, SHA-256 compared
+from `git show` at both pins), under the N-process (foundation-openac.md §6.2).
+
+**Decompile check** (§6.2 item 3), run on the four source files at f22b048: `grep -nEi "offset|decompil|0x00[4-7]|Retail"`.
+`Messages/VendorApproach.cs`, `AppraiseRequest.cs` and `AppraiseInfoParser.cs`: no match. `Messages/VendorRequests.cs`: eleven
+matches, all in `BuildBuy` and `BuildSell`: the opcode constants `0x005Fu` and `0x0060u` (ACE's own action ids, not retail
+addresses) and the local byte cursor `int offset = 20` and its uses. No decompile shape, no retail address, no `Retail` prefix in
+the ported code. Nothing to re-express.
+
+| Lifestone file (`src/Lifestone.Net/Messages/`) | OpenAC source (`src/AcDream.Core.Net/Messages/`) at f22b048 | Changes beyond the common ones |
+|---|---|---|
+| `Vendor/VendorCodecs.cs` | `VendorApproach.cs` (`TryParse`, `VendorProfile`, `ItemProfile`, `Parsed`) | `TryParse` over `WireReader` on the whole F7B0 message (OpenAC takes the payload and accepts a longer one) that reports why it refused; the profile is flattened into `VendorApproachMsg` and the rows are `VendorEntry` (OpenAC: a nested `VendorProfile`, `ItemProfile` and `Parsed`); the rows' WeenieDesc is `WeenieDescCodec` (OpenAC's `PublicWeenieDescParser` and its own per-row `AlignTo4` are not carried over: the codec's closing Align is the row's); the packed stack is split as ACE writes it (low 24 bits the stack, 0xFFFFFF kept as -1 "unlimited", the high byte the pwdType and 0xFF required; OpenAC sign-extended the low 24 bits and ignored the high byte); the count is checked with `TryReadCount` instead of the 8192 cap and the 12-byte row check; only ACE's closing Align may follow the last row. Checked against ACE's `GameEventApproachVendor.cs:14-63` and `WorldObject_Networking.cs:56-221` (`VendorCodecTests`); the stock rule is OpenAC #218 as m4-plan D16 rewrote it (every row listed, unlimited never 0) |
+| `Actions/VendorActionCodecs.cs` | `VendorRequests.cs` (`BuildBuy`, `BuildSell`), `AppraiseRequest.cs` (`Build`) | The three `Build*` methods that returned a fresh `byte[]` became `WriteBuy`, `WriteSell` and `WriteIdentify` over `PacketWriter` and `GameActionEnvelope.WriteHeader`; the opcode constants moved to `GameActionTypes` (0x005F, 0x0060, 0x00C8); **`BuildBuy`'s trailing u32 alternate-currency id is dropped: ACE's `GameActionBuyItems.cs:12-34` stops after the last item (its alternate-currency read at 29-32 is commented out; so is the one in `GameActionSellItems.cs:12-32`, 64-67, and OpenAC's `BuildSell` writes none)** (retail's `CM_Vendor::Event_Buy` body was not read: `TODO(m4-buy-trailer)`); the items are `(item, amount)` and the amount is an Int32 on the wire (OpenAC's tuple is `(amount, item)` over `int`); an amount above Int32.MaxValue is refused before a sequence is taken. Checked against ACE's `GameActionBuyItems.cs`, `GameActionSellItems.cs` and `GameActionIdentifyObject.cs` (`VendorActionCodecTests`) |
+| `Inventory/AppraiseCodecs.cs` | `AppraiseInfoParser.cs` (`TryParse`, the table, spell book, profile and bitfield readers) | `TryParse` over `WireReader` on the whole F7B0 message that reports the section and the offset where it stopped (OpenAC takes the payload, catches `FormatException` and returns null); the tables are raw dictionaries by property id on `IdentifyResponseMsg` (OpenAC fills a `PropertyBundle` of `AcDream.Core.Items`); the profiles and the three bitfields are Lifestone records; the armour levels stay unsigned (ACE `ArmorLevel` is u32; OpenAC cast to int); a flag bit above 0x4000 is a refusal (`TODO(m4-appraise-section-unknown-flag)`; OpenAC ignored it); a count is checked against the bytes left (OpenAC capped the spell book at 4096); a byte after the last announced section is a refusal. Order and widths checked against ACE's `AppraiseInfo.cs:743-786`, `ArmorProfile.cs`, `CreatureProfile.cs:77-111`, `WeaponProfile.cs:148-165`, `HookProfile.cs`, `ArmorLevel.cs:83-98` and `PackableList.cs` (`AppraiseCodecTests`) |
+
+Written from ACE and not ported (OpenAC's `ShortcutStore.cs` is runtime code and was not read):
+
+| Lifestone file (`src/Lifestone.Net/Messages/`) | ACE (95ef426d, `ACE.Server`) | Retail (11.4186 / 11.6096) |
+|---|---|---|
+| `Actions/ShortcutActionCodecs.cs` | `GameActionAddShortcut.cs`, `GameActionRemoveShortcut.cs`, `Network/Structure/Shortcut.cs:62-71` (`ReadShortcut`), `LayeredSpell.cs:30-37`, `WorldObjects/Player_Character.cs:245-262`, `ACE.Database/Models/Shard/CharacterExtensions.cs:455-480` | `CM_Character::Event_AddShortCut` 0x006A0EB0 / 0x006A1CD0, `CM_Character::Event_RemoveShortCut` 0x006A17C0 / 0x006A25E0; bodies not read |
+
 ### Re-expressed retail behaviour (each type cites its functions)
 
 | Lifestone file | Retail functions | Address |
@@ -549,7 +606,7 @@ PlayerCreate, as ACE's `Player.SendSelf` does (`FakeAceScript.PlayerDescription`
 | `Messages/Events/GameEventCodecs.cs` | `CM_Communication::DispatchUI_HearDirectSpeech` (the Tell's four words), `DispatchUI_PopUpString`, `DispatchUI_WeenieError`, `DispatchUI_WeenieErrorWithString`, `DispatchUI_TransientString`, `CM_Item::DispatchUI_UseDone`, `CM_Combat::DispatchUI_QueryHealthResponse` | 11.4186 0x006A49C0, 0x006A4EA0, 0x006A3AA0, 0x006A5070, 0x006A4FD0, 0x006A8510, 0x006A99A0; 11.6096 0x006A5920, 0x006A5E00, 0x006A48C0, 0x006A5FD0, 0x006A5F30, 0x006A9470, 0x006AA900 |
 | `Messages/Actions/RawMotionStateCodec.cs` | `RawMotionState::Pack` (defaults compared by bits, 5-bit action count, 8-byte actions) | 11.4186 0x0051ED10; 11.6096 0x0051F820 |
 | `Messages/Actions/MovementActionCodecs.cs` | `MoveToStatePack::Pack`, `AutonomousPositionPack::Pack`, `JumpPack::Pack`; their senders `CM_Movement::Event_MoveToState`, `Event_AutonomousPosition`, `Event_Jump` | 11.4186 0x005168F0, 0x00516AF0, 0x00516D10, 0x006AFC00, 0x006AF790, 0x006AFA70; 11.6096 0x005173F0, 0x005175F0, 0x00517810, 0x006B0AD0, 0x006B0660, 0x006B0940 |
-| `Messages/Actions/ObjectActionCodecs.cs` | `CM_Inventory::Event_UseEvent`, `CM_Combat::Event_QueryHealth` | 11.4186 0x006AC3B0, 0x006A9B40; 11.6096 0x006AD310, 0x006AAAA0 |
+| `Messages/Actions/ObjectActionCodecs.cs` | `CM_Inventory::Event_UseEvent`, `CM_Inventory::Event_UseWithTargetEvent` (0x0035 UseWithTarget, M4 3.1 s0: written from ACE's `GameActionUseWithTarget.cs:10-15` reader at 95ef426d, item first then target; not a port, and not in OpenAC), `CM_Combat::Event_QueryHealth` | 11.4186 0x006AC3B0, 0x006AC480, 0x006A9B40; 11.6096 0x006AD310, 0x006AD3E0, 0x006AAAA0 |
 | `Messages/Actions/ChatActionCodecs.cs` | `CM_Communication::Event_Talk`, `CM_Communication::Event_TalkDirectByName` (message, then target) | 11.4186 0x006A45C0, 0x006A4780; 11.6096 0x006A53E0, 0x006A55A0 |
 | `Messages/Self/PlayerDescriptionCodec.cs` | `CPlayerSystem::Handle_PlayerDescription` (qualities, module, contents, placements; a predicted row), `CACQualities::UnPack`, `CBaseQualities::UnPack` (the property tables and their order), `AttributeCache::UnPack`, `Attribute::UnPack`, `SecondaryAttribute::UnPack`, `Skill::UnPack`, `CSpellBook::UnPack`, `SpellBookPage::UnPack` (the two entry forms), `CEnchantmentRegistry::UnPack` (multiplicative, additive, cooldown, vitae), `Enchantment::UnPack`, `PlayerModule::UnPack` (the option sections, the spell-bar count, the defaults, the align; a predicted row), `ShortCutManager::UnPack`, `GenericQualitiesData::UnPack`, `PackObjPropertyCollection::Serialize` (the gameplay options, not decoded) | 11.4186 0x005636A0, 0x00593420, 0x00595F10, 0x005CCFB0, 0x005CABF0, 0x005CAC90, 0x005CAAC0, 0x00595BB0, 0x005CC260, 0x00593FF0, 0x005CB040, 0x005D49D0, 0x005D5820, 0x006B79B0, 0x005D4F80; 11.6096 0x00564440, 0x005941D0, 0x00596E10, 0x005CDF00, 0x005CBB20, 0x005CBBC0, 0x005CBA30, 0x00596AB0, 0x005CD1B0, 0x00594E60, 0x005CBF70, 0x005D5B20, 0x005D6930, 0x006B8880, 0x005D60D0 |
 | `Messages/Self/PrivateUpdateCodec.cs` | `CM_Qualities::DispatchUI_PrivateUpdateInt`, `DispatchUI_PrivateUpdateInt64`, `DispatchUI_PrivateUpdateSkill`, `DispatchUI_PrivateUpdateAttribute`, `DispatchUI_PrivateUpdateAttribute2nd` (0x02E7), `DispatchUI_PrivateUpdateAttribute2ndLevel` (0x02E9) | 11.4186 0x006AEA90, 0x006AEAD0, 0x006AEB20, 0x006AE800, 0x006AE8A0, 0x006AE930; 11.6096 0x006AF960, 0x006AF9A0, 0x006AF9F0, 0x006AF6D0, 0x006AF770, 0x006AF800 |

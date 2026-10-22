@@ -248,6 +248,8 @@ public sealed class LivePhaseBTests(ITestOutputHelper output)
                 Assert.All(soak.Sink.SelfPositions.Skip(positions), p => Assert.Equal(forceSeq, p.ForcePositionSeq));
                 // The soak log's CRC and duplicate counts (M2 DoD 12): the client's side of the link, beside the ACE-side counts the two tests print.
                 output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"soak counts: client CRC failures {soak.Session.Link.ChecksumFailures}, client duplicate server packets dropped {soak.Session.Link.DuplicatesDropped}, link duplicate encrypted deliveries C2S {link.ClientToServer.DuplicateEncryptedDeliveries} S2C {link.ServerToClient.DuplicateEncryptedDeliveries}"));
+                // M4 1.1 s5, report-only: the counts M2 DoD 12 names as one greppable line, read from the net session's own counters (the client's side of the link).
+                output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"soak crc_failures={soak.Session.Link.ChecksumFailures} duplicates={soak.Session.Link.DuplicatesDropped} gap_skips={soak.Session.Link.GapSkips} link_duplicate_deliveries_c2s={link.ClientToServer.DuplicateEncryptedDeliveries} link_duplicate_deliveries_s2c={link.ServerToClient.DuplicateEncryptedDeliveries}"));
                 Assert.Equal(0, soak.Session.Link.ChecksumFailures);
                 Assert.Equal(0, soak.Session.Link.GapSkips);
                 Assert.True(link.Socket is { Armed: true }, "the lossy socket was never armed: " + link.Describe());

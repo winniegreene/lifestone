@@ -35,10 +35,15 @@ The moved helpers keep the namespaces they had (`Lifestone.Data.Tests`, `Lifesto
 - Tests that talk to the localhost backend are `[LoopbackFact]` or `[LoopbackTheory]`. Their class carries
   `[Trait("Category", "Loopback")]` and `[Collection(LoopbackCollection.Name)]`, and they live in
   `tests/Lifestone.Loopback.Tests/<Track>/`. A reflection test enforces this. Default runs exclude them with
-  `--filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive"`; the Exhaustive tier (76 tests, the dat sweeps) has its own slice-check stage (`-Exhaustive`).
+  `--filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure"`; the Exhaustive tier (76 tests, the dat sweeps) has its own slice-check stage (`-Exhaustive`).
 - Loopback classes have no `IClassFixture` (and the Loopback collection no `ICollectionFixture`): xUnit builds fixtures
   before the gate takes the lock and re-probes the backend, even when every test skips. Per-class shared state (one
   login for several tests) is created lazily from inside a test body, after the gate, never in a fixture constructor.
   The reflection test enforces this too.
 - `[Trait("Tier", "Soak")]` marks long tests (fuzzing at full size, the lossy soaks), which default runs exclude.
   `[Trait("Tier", "Exhaustive")]` marks full sweeps over the dats.
+- `[Trait("Tier", "Timing")]` marks a test whose verdict is wall-clock time (a frame budget, a latency, a rate) and so only
+  means something on a quiet machine. The default filter leaves it out; the lead runs it alone (`--filter "Tier=Timing"`), with no other Godot or
+  dotnet process up.
+- `[Trait("Status", "KnownFailure")]` marks a test that is known to fail. It never counts in the green total (the default filter leaves it out),
+  and its `Trait` reason or a comment names the `TODO(...)` row that owns the failure, so it cannot be forgotten. Run them with `--filter "Status=KnownFailure"`.

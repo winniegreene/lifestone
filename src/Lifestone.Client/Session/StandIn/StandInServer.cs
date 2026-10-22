@@ -65,6 +65,26 @@ public sealed class StandInServer
         return at;
     }
 
+    /// <summary>
+    /// Places a chest (<see cref="StandInChest"/>) <paramref name="offset"/> metres from the player, holding <paramref name="items"/> (name, weenie class id, stack) in the order given; the chest opens with a Use (M4 2.1 s3,
+    /// <c>TODO(m4-standin-chest)</c>: a labelled placeholder, the stand-in's world has no chest of its own). Returns where it was placed, or null when the player has no position yet.
+    /// </summary>
+    /// <param name="guid">The chest's object id.</param>
+    /// <param name="offset">Metres from the player.</param>
+    /// <param name="items">What the chest holds.</param>
+    public AcPosition? PlaceChest(uint guid, Vector3 offset, params (string Name, uint Wcid, int Stack)[] items)
+    {
+        var at = PlaceNear(StandInChest.Make(guid), offset);
+        if (at is not null)
+        {
+            var world = World();
+            world.NotePlaceholder("m4-standin-chest", "the chest is a stand-in object (the human Setup, named as a placeholder, weenie 143), not ACE's chest weenie");
+            world.StockChest(guid, items);
+        }
+
+        return at;
+    }
+
     /// <summary>The health fraction (0 to 1) the stand-in holds for the creature <paramref name="guid"/>, or null when it holds no health for it (not a creature with health, or not placed).</summary>
     public float? HealthOf(uint guid) => World().HealthFraction(guid);
 
@@ -123,6 +143,35 @@ public sealed class StandInServer
         get => World().UnhideAfterTeleport;
         set => World().UnhideAfterTeleport = value;
     }
+
+    // --- M4 1.2 s3: the player's attacks, for the play-checks rows (PlayChecks.Attack.cs). The rows send through the Action API (IActionApi.Attack, MissileAttack: s2); these are the stand-in's counters. ---
+
+    /// <summary>The chance that the player's blow or arrow lands: the placeholder 0.85 unless a check sets it (1 makes a row deterministic).</summary>
+    public double PlayerHitRate
+    {
+        get => World().PlayerHitRate;
+        set => World().PlayerHitRate = value;
+    }
+
+    /// <summary>Melee swings the stand-in has played.</summary>
+    public int Swings => World().Swings;
+
+    /// <summary>Arrows the stand-in has launched.</summary>
+    public int ArrowsLaunched => World().ArrowsLaunched;
+
+    /// <summary>Blows and arrows that landed.</summary>
+    public int PlayerHits => World().PlayerHits;
+
+    /// <summary>Attack sequences that have ended (each sent one 01A7 {0x0036}).</summary>
+    public int AttackSequencesEnded => World().AttackSequencesEnded;
+
+    /// <summary>The WeenieError of the last 01A7 the stand-in sent (0 for a swing over, 0x0036 for the sequence over), or null when it has sent none.</summary>
+    public uint? LastAttackDoneError => World().AttackDoneErrors.Count == 0 ? null : World().AttackDoneErrors[^1];
+
+    private StandInResponder Responder() =>
+        _handler is GameStateReducer { LocalResponder: { } responder }
+            ? responder
+            : throw new InvalidOperationException("the stand-in has no responder (this is not an offline stand-in session)");
 
     private StandInWorld World() =>
         _handler is GameStateReducer { LocalResponder.World: { } world }

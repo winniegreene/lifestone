@@ -68,6 +68,7 @@ internal sealed partial class GameStateReducer
         if (existing is null || isUpdate || Sequence16.IsNewer(existing.Stamps.Instance, instance))
         {
             CreateNew(message, parent, recreated: existing is not null);
+            NoteObjectArrived(message.Guid);
             return;
         }
 
@@ -78,6 +79,7 @@ internal sealed partial class GameStateReducer
         }
 
         UpdateExisting(existing, message, parent);
+        NoteObjectArrived(message.Guid);
     }
 
     /// <summary>
@@ -107,6 +109,8 @@ internal sealed partial class GameStateReducer
 
         _state.Objects.Remove(message.Guid);
         ReleaseDeletedHeld(message.Guid);
+        ForgetInViews(message.Guid);
+        ForgetVendor(message.Guid);
         Changed();
         Publish(new ObjectDeleted(message.Guid));
     }
@@ -152,6 +156,10 @@ internal sealed partial class GameStateReducer
         Changed();
         Publish(in moved);
         PublishTravel(travel);
+        if (moved.IsSelf)
+        {
+            CheckVendorRange(); // M4 3.2 s1
+        }
     }
 
     /// <summary>
@@ -660,7 +668,7 @@ internal sealed partial class GameStateReducer
 
         Changed();
         Publish(new ObjectCreated(message.Guid, isSelf, created.InWorld, recreated));
-        // Side-pack contents at login join the inventory model (M3 1.2 s2, TODO(m3-inventory-sidepack-contents)): ACE sends no 0022 for them, only each item's CreateObject. Only during the arrival
+        // Side-pack contents at login: the 0196 ViewContents before the F745s names them (M4 2.1 s1, GameStateReducer.Containers.cs); this adoption is the tolerance for an item no 0196 named (M3 1.2 s2). ACE sends no 0022 for them, only each item's CreateObject. Only during the arrival
         // (before the player is Present): a live grant (a pick-up, a loot, a gear kit into a full main pack's side pack) sends the CreateObject and then the item's own 0022, which the model applies and
         // publishes once as Added at the real slot; adopting at the CreateObject would publish Added and then Moved (M3 1.2 fix R3). A main-pack item is held already by the description. The wielded arm
         // (the item's WielderId is the player: no container) is reachable from here for the same arrival objects.
@@ -793,6 +801,13 @@ internal sealed partial class GameStateReducer
     /// </summary>
     private void LeaveWorld()
     {
+        if (_attack.State != AttackSequenceState.Idle || _attack.Number != 0)
+        {
+            // A sequence left Active by a log off (or a lost final 01A7 before it) must not carry into the next character (review 1.2-R4).
+            _attack.Reset();
+            Publish(_attack.Snapshot);
+        }
+
         var self = _state.Self;
         var objects = _state.Objects;
         if (self.Guid == 0 && objects.Count == 0 && self.Travel == SelfTravel.NotInWorld && _parked.Count == 0)
@@ -821,12 +836,26 @@ internal sealed partial class GameStateReducer
         self.Qualities.Clear();
         self.Spellbook.Clear();
         self.Inventory.Clear();
+        self.Shortcuts.Clear();
+        var closedGround = _state.Containers.ViewedGuid;
+        var closedVendor = DropVendorForLeave();
+        _state.Containers.Clear();
         self.Qualities.ClearSessionOptions();
         _qualityStamps.Clear();
         Changed();
         foreach (var guid in deleted)
         {
             Publish(new ObjectDeleted(guid));
+        }
+
+        if (closedGround != 0)
+        {
+            Publish(new ContainerClosed(closedGround));
+        }
+
+        if (closedVendor != 0)
+        {
+            Publish(new VendorClosed(closedVendor));
         }
 
         PublishTravel(travel);

@@ -359,4 +359,13 @@ public sealed class PlayerQualities
 
     /// <summary>The player's combat mode (<c>PropertyInt</c> 40, <see cref="CombatModes"/>: 1 non-combat, 2 melee, 4 missile, 8 magic); 0 until the server has sent one. Kept current by 0x02CD, which also raises <see cref="CombatModeChanged"/>.</summary>
     public int CombatMode => Ints.TryGetValue(CombatModes.Property, out var v) ? v : 0;
+
+    /// <summary>PropertyInt 20 (ACE's <c>PropertyInt.CoinValue</c>): the pyreals the player carries.</summary>
+    public const uint CoinValueProperty = 20;
+
+    /// <summary>
+    /// The pyreals the player carries (PropertyInt 20, ACE's <c>CoinValue</c>, recomputed by <c>Player.UpdateCoinValue</c> whenever a coin stack is created, changed or removed); 0 until the description or a 0x02CD says. Kept current by
+    /// 0x02CD, which also raises <see cref="CoinValueChanged"/> (M4 3.2 s1). The vendor trackers check a trade's price or payout against its change.
+    /// </summary>
+    public int CoinValue => Ints.TryGetValue(CoinValueProperty, out var v) ? v : 0;
 }

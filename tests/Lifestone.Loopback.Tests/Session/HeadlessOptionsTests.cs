@@ -1,5 +1,6 @@
 using System.Net;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Session.Scenarios;
 using Lifestone.Headless;
 
 namespace Lifestone.Loopback.Tests.Session;
@@ -51,12 +52,13 @@ public sealed class HeadlessOptionsTests
         Assert.True(o.Session.RecordSession);
         Assert.Equal(HeadlessScenario.AcademyExit, HeadlessOptions.Parse(["--scenario=academy-exit"]).Scenario);
         Assert.Equal(HeadlessScenario.MageBuild, HeadlessOptions.Parse(["--scenario=mage-build"]).Scenario);
+        Assert.Equal(HeadlessScenario.FighterBuild, HeadlessOptions.Parse(["--scenario=fighter-build"]).Scenario);
         Assert.Equal(HeadlessScenario.Gear, HeadlessOptions.Parse(["--scenario=gear"]).Scenario);
         Assert.Equal(HeadlessScenario.Buff, HeadlessOptions.Parse(["--scenario=buff"]).Scenario);
     }
 
     [Theory]
-    [InlineData("--scenario=walk", "--scenario: 'walk' is not one of login, holtburg-laps, academy-exit, mage-build, gear, buff, fight, death-and-regear")]
+    [InlineData("--scenario=walk", "--scenario: 'walk' is not one of login, holtburg-laps, academy-exit, mage-build, fighter-build, gear, buff, fight, death-and-regear, hunt")]
     [InlineData("--laps=0", "--laps: '0' is not 1 to 1000")]
     [InlineData("--laps=many", "--laps: 'many' is not an integer")]
     [InlineData("--quit-after=-5", "--quit-after: '-5' is not a positive number of seconds")]
@@ -105,6 +107,48 @@ public sealed class HeadlessOptionsTests
         using var errors = new StringWriter();
         Assert.Equal(Program.BadArgumentsExitCode, Program.Run(["--scenario=gear", "--account=somebody"], output, errors));
         Assert.Contains("gear runs on the default test account", errors.ToString(), StringComparison.Ordinal);
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public void Fighter_build_refuses_any_account_but_the_default_test_account_loudly_and_exits_1_before_anything_runs()
+    {
+        // 1.1 review R9, placed in 1.2 s4a: Holtburg Hunter is built permanently, on accounts.test only.
+        var error = Assert.Single(HeadlessOptions.Parse(["--scenario=fighter-build", "--account=somebody"]).Errors);
+        Assert.Equal("--account: --scenario=fighter-build runs on the default test account 'test' only; the value is not shown", error);
+        Assert.DoesNotContain("somebody", error, StringComparison.Ordinal);
+        Assert.Empty(HeadlessOptions.Parse(["--scenario=fighter-build"]).Errors);
+        Assert.Empty(HeadlessOptions.Parse(["--scenario=fighter-build", "--account=test"]).Errors);
+
+        using var output = new StringWriter();
+        using var errors = new StringWriter();
+        Assert.Equal(Program.BadArgumentsExitCode, Program.Run(["--scenario=fighter-build", "--account=somebody"], output, errors));
+        Assert.Contains("fighter-build runs on the default test account", errors.ToString(), StringComparison.Ordinal);
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public void Hunt_runs_on_the_default_test_account_only_takes_the_hunt_options_and_has_a_hunt_long_default_limit()
+    {
+        // 1.2 s4a: the hunt enters the permanent Holtburg Hunter, so it has the same account rule.
+        var error = Assert.Single(HeadlessOptions.Parse(["--scenario=hunt", "--account=somebody"]).Errors);
+        Assert.Equal("--account: --scenario=hunt runs on the default test account 'test' only; the value is not shown", error);
+        Assert.DoesNotContain("somebody", error, StringComparison.Ordinal);
+        var defaults = HeadlessOptions.Parse(["--scenario=hunt"]);
+        Assert.Empty(defaults.Errors);
+        Assert.Equal(HeadlessScenario.Hunt, defaults.Scenario);
+        Assert.Equal((1, 300.0, HuntWeapon.Melee), (defaults.Hunt.Kills, defaults.Hunt.Seconds, defaults.Hunt.Weapon));
+        var set = HeadlessOptions.Parse(["--scenario=hunt", "--hunt-kills=3", "--hunt-seconds=120", "--hunt-weapon=missile"]);
+        Assert.Empty(set.Errors);
+        Assert.Equal((3, 120.0, HuntWeapon.Missile), (set.Hunt.Kills, set.Hunt.Seconds, set.Hunt.Weapon));
+        Assert.Equal(Program.HuntQuitAfterOverheadSeconds + 120, Program.HuntQuitAfterSeconds(set.Hunt.Seconds));
+        Assert.NotEmpty(HeadlessOptions.Parse(["--scenario=hunt", "--hunt-kills=0"]).Errors);
+        Assert.NotEmpty(HeadlessOptions.Parse(["--scenario=hunt", "--hunt-weapon=spear"]).Errors);
+
+        using var output = new StringWriter();
+        using var errors = new StringWriter();
+        Assert.Equal(Program.BadArgumentsExitCode, Program.Run(["--scenario=hunt", "--account=somebody"], output, errors));
+        Assert.Contains("hunt runs on the default test account", errors.ToString(), StringComparison.Ordinal);
         Assert.Empty(output.ToString());
     }
 

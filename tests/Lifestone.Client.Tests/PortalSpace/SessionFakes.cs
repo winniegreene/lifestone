@@ -119,6 +119,23 @@ internal sealed class FakeActions : IActionApi
 
     public ActionHandle AddSpellFavorite(uint spellId, int index, int bar, ActionSource source = ActionSource.Host) => throw Unexpected();
     public ActionHandle RemoveSpellFavorite(uint spellId, int bar, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle Attack(uint target, AttackHeight height, float power, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle MissileAttack(uint target, AttackHeight height, float accuracy, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle CancelAttack(ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle OpenContainer(uint container, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle CloseContainer(uint container, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle PickUp(uint item, uint container = 0, int placement = 0, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle Drop(uint item, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle SplitToContainer(uint stack, uint container, int placement, int amount, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle SplitTo3D(uint stack, int amount, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle SplitToWield(uint stack, EquipMask location, int amount, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle Give(uint target, uint item, int amount, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public HealHandle UseWithTarget(uint item, uint target, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public HealHandle Drink(uint item, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle AddShortcut(int slot, uint item, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle RemoveShortcut(int slot, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public ActionHandle UseShortcut(int slot, ActionSource source = ActionSource.Host) => throw Unexpected();
+    public IdentifyHandle Identify(uint guid, ActionSource source = ActionSource.Host) => throw Unexpected();
 
     public ActionHandle Talk(string text, ActionSource source) => throw Unexpected();
 

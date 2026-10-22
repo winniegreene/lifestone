@@ -2,6 +2,7 @@ using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Actions;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.Magic;
 
 namespace Lifestone.Client.Session.Mage;
@@ -17,6 +18,12 @@ public enum GearKind
 
     /// <summary>A spell component a cast burns.</summary>
     Component,
+
+    /// <summary>
+    /// M4 3.1 d0 (D20): a death-loop decoy (<see cref="DecoyItem"/>): an ordinary, light, expensive item the mage only carries, so a death drops it and not its gear. One item, no valid location, never wielded; the kit's <c>item</c> top-up spawns a missing one
+    /// (counted by weenie class, one each). Only <see cref="GearKit.WithDecoys(IReadOnlyList{DecoyItem})"/> and <see cref="GearKit.ForDeathLoop"/> put one in a kit.
+    /// </summary>
+    Decoy,
 }
 
 /// <summary>
@@ -198,6 +205,26 @@ public sealed class GearKit
     /// <summary>The armour's lines.</summary>
     public IEnumerable<GearItem> ArmourItems => Items.Where(i => i.Kind == GearKind.Armour);
 
+    /// <summary>The decoys' lines (M4 3.1 d0; none in a plain kit).</summary>
+    public IEnumerable<GearItem> DecoyItems => Items.Where(i => i.Kind == GearKind.Decoy);
+
+    /// <summary>True when the kit carries decoys (<see cref="WithDecoys(IReadOnlyList{DecoyItem})"/>); a plain kit never does.</summary>
+    public bool HasDecoys
+    {
+        get
+        {
+            for (var i = 0; i < Items.Count; i++)
+            {
+                if (Items[i].Kind == GearKind.Decoy)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     /// <summary>The pack slots the kit takes (each line is one stack, so one slot; a stack never exceeds its weenie's maximum).</summary>
     public int Slots => Items.Count;
 
@@ -334,6 +361,50 @@ public sealed class GearKit
         return new GearKit(items, [.. union]);
     }
 
+    /// <summary>
+    /// The death loop's kit (M4 3.1 d0, D20): this kit's lines, then <paramref name="decoys"/> as <see cref="GearKind.Decoy"/> lines (stack 1, no valid location, never wielded). A kit that already has decoys has them replaced, so the call is idempotent. The burden
+    /// and the slots include the decoys; this kit is not changed, and a plain kit (<see cref="Build"/>, <see cref="Of"/>) stays what it was: the buff, fight and login legs never see a decoy.
+    /// </summary>
+    /// <param name="decoys">The decoys (<see cref="DecoyKit.For"/> for a level, <see cref="DecoyKit.All"/> for all eight).</param>
+    public GearKit WithDecoys(IReadOnlyList<DecoyItem> decoys)
+    {
+        ArgumentNullException.ThrowIfNull(decoys);
+        var items = new List<GearItem>(Items.Count + decoys.Count);
+        foreach (var item in Items)
+        {
+            if (item.Kind != GearKind.Decoy)
+            {
+                items.Add(item);
+            }
+        }
+
+        foreach (var decoy in decoys)
+        {
+            items.Add(decoy.ToGearItem());
+        }
+
+        return new GearKit(items, CustomisedComponentIds);
+    }
+
+    /// <summary><see cref="WithDecoys(IReadOnlyList{DecoyItem})"/> with the decoys <see cref="DecoyKit.CountFor"/> asks for at <paramref name="level"/>.</summary>
+    /// <param name="level">The character's level.</param>
+    public GearKit WithDecoys(int level) => WithDecoys(DecoyKit.For(level));
+
+    /// <summary>
+    /// The kit the death loop spawns (M4 3.1 d0, D20): with <see cref="DeathOptions.Decoys"/> on (<c>--death-decoys</c>, the default) <see cref="Build"/>'s kit with the decoys of <see cref="DecoyKit.For"/> at <paramref name="level"/>; off, the plain kit (M3's loop exactly).
+    /// The death scenario calls this; the buff, fight and login legs call <see cref="Build"/>.
+    /// </summary>
+    /// <param name="spells">The SpellTable's spells (<see cref="SpellTableData.Spells"/>).</param>
+    /// <param name="accountName">The account's name (see <see cref="Build"/>).</param>
+    /// <param name="options">The death loop's options.</param>
+    /// <param name="level">The level the decoys are counted for (default <see cref="MageTemplate.TargetLevel"/>, BSD Mage's).</param>
+    public static GearKit ForDeathLoop(IReadOnlyDictionary<uint, SpellInfo> spells, string accountName, DeathOptions options, int level = MageTemplate.TargetLevel)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var kit = Build(spells, accountName);
+        return options.Decoys ? kit.WithDecoys(level) : kit;
+    }
+
     /// <summary>The name and school of a focus item, for the log line.</summary>
     public static string FociName(uint wcid) => wcid switch
     {
@@ -385,7 +456,7 @@ public sealed class GearKit
     public string Describe() =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"items={Items.Count} components={Items.Count - 1 - Armour.Count} customised_components={CustomisedComponentIds.Count} slots={Slots}/{PackCapacity} burden={Burden}/{EncumbranceCapacity(CapacityStrength)}");
+            $"items={Items.Count} components={Items.Count(i => i.Kind == GearKind.Component)} customised_components={CustomisedComponentIds.Count} slots={Slots}/{PackCapacity} burden={Burden}/{EncumbranceCapacity(CapacityStrength)}{(HasDecoys ? " decoys=" + DecoyItems.Count() : string.Empty)}");
 
     private static GearItem ItemOf(GearWeenie w) =>
         new(w.Wcid, w.Name, w.Wcid == Wand.Wcid ? GearKind.Wand : GearKind.Armour, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.Burden, w.Palette, w.Shade);

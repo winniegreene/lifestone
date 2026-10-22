@@ -15,13 +15,16 @@ namespace Lifestone.Client.RetailUi.Core;
 public static class UiHitTester
 {
     /// <summary>The element under (<paramref name="x"/>, <paramref name="y"/>), in <paramref name="element"/>'s own coordinates, or null.</summary>
-    public static UiElement? HitTest(UiElement element, int x, int y)
+    public static UiElement? HitTest(UiElement element, int x, int y) => HitTest(element, x, y, null);
+
+    /// <summary>As <see cref="HitTest(UiElement, int, int)"/>, but <paramref name="ignore"/> and its subtree are not tried (the icon a drag carries under the cursor lets the point through).</summary>
+    public static UiElement? HitTest(UiElement element, int x, int y, UiElement? ignore)
     {
         ArgumentNullException.ThrowIfNull(element);
-        return Recurse(element, x, y, out var hit) ? hit : null;
+        return Recurse(element, x, y, ignore, out var hit) ? hit : null;
     }
 
-    private static bool Recurse(UiElement element, int x, int y, out UiElement? hit)
+    private static bool Recurse(UiElement element, int x, int y, UiElement? ignore, out UiElement? hit)
     {
         hit = null;
         if (!element.Visible)
@@ -33,7 +36,7 @@ public static class UiHitTester
         for (var i = children.Count - 1; i >= 0; i--)
         {
             var child = children[i];
-            if (child.PointIsOverRegion(x, y) && Recurse(child, x - child.Box.X0, y - child.Box.Y0, out hit))
+            if (!ReferenceEquals(child, ignore) && child.PointIsOverRegion(x, y) && Recurse(child, x - child.Box.X0, y - child.Box.Y0, ignore, out hit))
             {
                 return true;
             }

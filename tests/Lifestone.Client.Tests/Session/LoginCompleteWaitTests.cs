@@ -87,6 +87,55 @@ public sealed class LoginCompleteWaitTests
     }
 
     [Fact]
+    public void M4_the_login_order_waits_for_the_side_pack_contents_the_0196s_named_inside_the_same_cap()
+    {
+        // capture.md C1: the 0196s come right after the description, before the F745s; the side pack's contents' F745s come last.
+        const uint item1 = 0x80000B01;
+        const uint item2 = 0x80000B02;
+        var h = new ActionHarness();
+        h.InWorld();
+        h.Describe(new PlayerDescriptionMsg { Inventory = [new ContentDesc(PackA, 1)], Equipped = [] });
+        h.R.Reducer.OnViewContents(
+            h.R.Context,
+            new GameEventHeader(ActionHarness.Amy, 2, GameEventTypes.ViewContents),
+            new ViewContentsEvent(PackA, [new ViewContentsEntry(item1, 0), new ViewContentsEntry(item2, 0)]));
+        var call = h.Api.LoginComplete();
+
+        Create(h, PackA);
+        h.Tick(0.1);
+        Assert.Equal(0, Sent(h)); // the pack is here; its two named items are not
+        Create(h, item1);
+        h.Tick(0.1);
+        Assert.Equal(0, Sent(h));
+        Create(h, item2);
+        h.Tick(0.1);
+        Assert.Equal(1, Sent(h));
+        Assert.DoesNotContain(h.Log.Entries, e => e.Severity >= LogSeverity.Warning);
+        Assert.False(call.IsCompleted);
+    }
+
+    [Fact]
+    public void M4_a_side_pack_item_that_never_arrives_is_given_the_cap_then_sent_with_the_missing_count()
+    {
+        var h = new ActionHarness();
+        h.InWorld();
+        h.Describe(new PlayerDescriptionMsg { Inventory = [new ContentDesc(PackA, 1)], Equipped = [] });
+        h.R.Reducer.OnViewContents(
+            h.R.Context,
+            new GameEventHeader(ActionHarness.Amy, 2, GameEventTypes.ViewContents),
+            new ViewContentsEvent(PackA, [new ViewContentsEntry(0x80000B01, 0)]));
+        Create(h, PackA);
+        h.Api.LoginComplete();
+
+        h.Tick(2.9);
+        Assert.Equal(0, Sent(h));
+        h.Tick(0.2);
+        Assert.Equal(1, Sent(h));
+        var warning = Assert.Single(h.Log.Entries, e => e.Severity == LogSeverity.Warning);
+        Assert.Contains(warning.Fields, f => f.Key == "missing" && Equals(f.Value, 1));
+    }
+
+    [Fact]
     public void A_description_that_arrives_after_the_cue_is_waited_for()
     {
         var h = new ActionHarness();

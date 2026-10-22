@@ -11,12 +11,18 @@ namespace Lifestone.Client.Tests.Session;
 /// </summary>
 public sealed class CombatModeTrackerTests
 {
-    private static WorldActionRig Rig() => new();
+    // M4 3.1 g: a mode the wielded weapon forbids is refused by the combat-mode guard before anything is sent (SetCombatModeTrackerTests), so each row wields what its mode needs.
+    private static WorldActionRig Rig(params Piece[] wielded)
+    {
+        var r = new WorldActionRig();
+        WieldedSetups.Apply(r.H.R, wielded);
+        return r;
+    }
 
     [Fact]
     public void A_change_sends_0x0053_and_is_confirmed_by_the_update_to_that_mode_and_not_by_another()
     {
-        var r = Rig();
+        var r = Rig(WieldedSetups.Wand);
         var change = r.Api.SetCombatMode(CombatMode.Magic, ActionSource.Ui);
         r.Tick();
 
@@ -50,7 +56,7 @@ public sealed class CombatModeTrackerTests
     [Fact]
     public void A_change_ACE_never_answers_times_out_at_5_seconds()
     {
-        var r = Rig();
+        var r = Rig(WieldedSetups.Bow, WieldedSetups.Arrows);
         var change = r.Api.SetCombatMode(CombatMode.Missile, ActionSource.Ui);
         r.Tick();
         r.Tick(4.9);
@@ -63,7 +69,7 @@ public sealed class CombatModeTrackerTests
     [Fact]
     public void ACE_s_ActionCancelled_for_a_weapon_that_does_not_fit_is_a_ServerError()
     {
-        var r = Rig();
+        var r = Rig(WieldedSetups.Mace); // a setup the guard allows: ACE can still refuse a pair it does not like (CheckWeaponCollision), and that stays a ServerError
         var change = r.Api.SetCombatMode(CombatMode.Melee, ActionSource.Ui);
         r.Tick();
         r.WeenieError((uint)Lifestone.Data.Motion.WeenieError.ActionCancelled);
@@ -75,7 +81,7 @@ public sealed class CombatModeTrackerTests
     [Fact]
     public void A_mode_change_waits_for_the_cast_in_flight_and_the_cast_waits_for_the_change()
     {
-        var r = Rig();
+        var r = Rig(WieldedSetups.Wand);
         r.Spells(WorldActionRig.Spell(100, SpellType.Enchantment, SpellFlags.SelfTargeted));
         var toMagic = r.Api.SetCombatMode(CombatMode.Magic, ActionSource.Ui);
         var cast = r.Api.Cast(100, ActionSource.Ui);

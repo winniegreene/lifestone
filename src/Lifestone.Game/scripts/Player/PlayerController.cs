@@ -117,7 +117,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
         _events = events;
         _interiors = interiors;
         _spawn = spawn;
-        CameraModel = new ChaseCameraModel();
+        CameraModel = new ChaseCameraModel { RetailStillStep = PlayOptions.Parse(OS.GetCmdlineUserArgs()).RetailCameraStill }; // --retail-camera-still
         _movement = new MovementBindings(walker.Controller, Clock, () => walker.Controller.AutoRun);
         _cameraKeys = new CameraBindings(CameraModel, Clock, this);
         walker.Controller.Notice += OnNotice;

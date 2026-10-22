@@ -101,7 +101,7 @@ internal sealed partial class SessionMachine
         ZeroPassword();
         var list = CharacterList!;
         Log(NetLogLevel.Info,
-            $"reached character select: account {list.Account}, {list.Characters.Length} character(s), DDD {DescribeIterations(highResAllowed: true)} ok");
+            $"reached character select: {list.Characters.Length} character(s), DDD {DescribeIterations(highResAllowed: true)} ok");
     }
 
     private void OnCharacterErrorMessage(in CharacterErrorMsg error)
@@ -435,6 +435,24 @@ internal sealed partial class SessionMachine
 
         public void OnMagicPurgeBadEnchantments(in InboundContext context, in GameEventHeader header, in MagicPurgeBadEnchantmentsEvent message) =>
             Sink.OnMagicPurgeBadEnchantments(context, header, message);
+
+        public void OnAttackDone(in InboundContext context, in GameEventHeader header, in AttackDoneEvent message) =>
+            Sink.OnAttackDone(context, header, message);
+
+        public void OnCommenceAttack(in InboundContext context, in GameEventHeader header, in CommenceAttackEvent message) =>
+            Sink.OnCommenceAttack(context, header, message);
+
+        public void OnViewContents(in InboundContext context, in GameEventHeader header, in ViewContentsEvent message) =>
+            Sink.OnViewContents(context, header, message);
+
+        public void OnCloseGroundContainer(in InboundContext context, in GameEventHeader header, in CloseGroundContainerEvent message) =>
+            Sink.OnCloseGroundContainer(context, header, message);
+
+        public void OnApproachVendor(in InboundContext context, in GameEventHeader header, VendorApproachMsg message) =>
+            Sink.OnApproachVendor(context, header, message);
+
+        public void OnIdentifyResponse(in InboundContext context, in GameEventHeader header, IdentifyResponseMsg message) =>
+            Sink.OnIdentifyResponse(context, header, message);
 
         // Everything else.
 

@@ -181,6 +181,7 @@ internal sealed partial class GameStateReducer
         q.IsKnown = true;
         ApplyDescriptionSpellbook(message);
         ApplyDescriptionInventory(message);
+        ApplyDescriptionShortcuts(message);
         LogVitalRecords(message, q);
         Changed();
         Publish(new QualitiesChanged(QualityChange.Description, 0));

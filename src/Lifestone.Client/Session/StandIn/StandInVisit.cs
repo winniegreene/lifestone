@@ -273,6 +273,32 @@ public sealed record StandInVisit
     /// </summary>
     public RecordedDescription? Recorded { get; set; }
 
+    /// <summary>
+    /// The stand-in's player is announced with a Handy Healing Kit (20 uses) and five Potions of Healing in its main pack, as the Holtburg Hunter carries them (M4 3.1 s2, <c>TODO(m4-standin-heal-items)</c>: the items are the
+    /// world database's, the art is a placeholder), in the way a recorded description's pack is: listed in the PlayerDescription's pack and created right after the player. Off by default: the existing checks count the pack.
+    /// Turns <see cref="Heals"/> on as well.
+    /// </summary>
+    public bool HealItems { get; set; }
+
+    /// <summary>
+    /// The stand-in holds the two Holtburg vendors, Thelnoth Cort the Healer and Shopkeeper Renald the Elder, at their real cells and positions with a placeholder model, answers a Use of them with their stock and the buy and the sell, and
+    /// announces the player with 10,000 pyreals, a Handy Healing Kit and Leather Bracers (M4 3.2 s3, <c>TODO(m4-standin-vendor-model)</c>, <c>TODO(m4-standin-vendor-stock)</c>, <c>TODO(m4-standin-pyreals)</c>). Off by default: the existing
+    /// checks count the pack. The vendors are the only NPCs the stand-in adds (D23); a check reaches one by <c>place loc</c> into its shop.
+    /// </summary>
+    public bool Vendors { get; set; }
+
+    /// <summary>
+    /// True when the visit's starting health is a placeholder of the rows that use it (M4 3.1 fix, review R24: the play checks' replay visit starts its synthetic player with <see cref="StandInPlayerStats.Health"/> 5 so the heal rows have a partial
+    /// vital): the login burst then logs <c>TODO(m4-standin-start-vitals)</c> once, naming the number. Off by default.
+    /// </summary>
+    public bool StartVitalsPlaceholder { get; set; }
+
+    /// <summary>
+    /// The stand-in answers the heals (<c>StandInWorld.Heal.cs</c>, M4 3.1 s2): a Use of a held Potion of Healing drinks it, and a UseWithTarget of a held Handy Healing Kit on the player heals (the roll, the vitals, the uses, the refusals).
+    /// Off by default: a potion's Use is the bare UseDone it was before 3.1 (the hunt's tests count on a potion that heals nothing) and a UseWithTarget is a <see cref="NotSupportedException"/> naming <c>TODO(m4-standin-heal)</c>.
+    /// </summary>
+    public bool Heals { get; set; }
+
     /// <summary>The F755 scripts the server plays on objects after the unhide (Smartbox queue). None by default.</summary>
     public ImmutableArray<StandInScript> Scripts { get; init; } = [];
 
@@ -617,19 +643,56 @@ public static partial class StandInSessions
 
     private static InboundContext WorldContext(IAcSessionSink sink) => new(0, MessageQueue.SmartBox, Now(sink));
 
-    private static void Enter(IAcSessionSink sink, uint guid, string name, StandInVisit visit)
+    internal static void Enter(IAcSessionSink sink, uint guid, string name, StandInVisit visit)
     {
         sink.OnSessionEvent(SessionEvent.PhaseChanged(Now(sink), SessionPhase.CharacterSelect, SessionPhase.EnteringWorld));
         sink.OnEnterWorldServerReady(Context(sink));
         sink.OnPlayerCreate(WorldContext(sink), new PlayerCreateMsg(guid));
+        SidePackBurst? packs = null;
+        var heal = visit.HealItems ? StandInWorld.HealItems(guid) : new HealItemBurst([], []);
+        if (visit.HealItems)
+        {
+            (sink as GameStateReducer)?.LocalResponder?.World?.NotePlaceholder("m4-standin-heal-items", StandInWorld.HealItemsPlaceholder);
+        }
+
+        if (visit.Vendors)
+        {
+            heal = StandInWorld.WithVendorItems(heal, guid);
+            (sink as GameStateReducer)?.LocalResponder?.World?.NotePlaceholder("m4-standin-vendor-model", StandInWorld.VendorsPlaceholder);
+        }
+
+        if (visit.StartVitalsPlaceholder)
+        {
+            (sink as GameStateReducer)?.LocalResponder?.World?.NotePlaceholder(
+                "m4-standin-start-vitals",
+                $"the player starts with {visit.Stats?.Health.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "an unset"} health, a placeholder of the heal rows (no recorded description and no later vital update; the reconnect rows run on this synthetic description too, not on the machine's recorded character), not a character's");
+        }
+
         if (visit.Recorded is { } recorded)
         {
             // The recorded description as the server sent it (it holds no guid: the event's header names this player).
-            sink.OnPlayerDescription(WorldContext(sink), new GameEventHeader(guid, 1, 0x0013), WithBars(sink, RecordedFor(visit, recorded, sink)));
+            packs = recorded.SidePacks(guid);
+            var sent = WithBars(sink, RecordedFor(visit, recorded, sink));
+            var listed = (packs.Value.Extra.IsDefaultOrEmpty ? ImmutableArray<ContentDesc>.Empty : packs.Value.Listed).AddRange(heal.Listed);
+
+            sink.OnPlayerDescription(WorldContext(sink), new GameEventHeader(guid, 1, 0x0013), listed.IsEmpty ? sent : sent with { Inventory = sent.Inventory.AddRange(listed) });
+            // M4 2.1 s3 (capture.md C1): ACE sends a 0196 per side pack in the first bundle, right after the description and before every CreateObject.
+            if (packs.Value.Added)
+            {
+                (sink as GameStateReducer)?.LocalResponder?.World?.NotePlaceholder(
+                    "m4-standin-side-pack-item",
+                    "the recorded description carries no side pack: the stand-in adds a Pack holding one Pyreal stack, so the 0196 and the contents' CreateObjects of a side pack are exercised");
+            }
+
+            foreach (var view in packs.Value.Views)
+            {
+                sink.OnViewContents(WorldContext(sink), new GameEventHeader(guid, 0, 0x0196), view);
+            }
         }
         else if (visit.Stats is { } stats)
         {
-            sink.OnPlayerDescription(WorldContext(sink), new GameEventHeader(guid, 1, 0x0013), WithBars(sink, Description(stats)));
+            var plain = WithBars(sink, Description(stats));
+            sink.OnPlayerDescription(WorldContext(sink), new GameEventHeader(guid, 1, 0x0013), heal.Listed.IsEmpty ? plain : plain with { Inventory = plain.Inventory.AddRange(heal.Listed) });
         }
 
         sink.OnSessionEvent(SessionEvent.PhaseChanged(Now(sink), SessionPhase.EnteringWorld, SessionPhase.InWorld));
@@ -649,7 +712,18 @@ public static partial class StandInSessions
         if (visit.Recorded is { } contents)
         {
             // The objects the description lists, so that every one of them exists (the portal wait of retail's SendLoginCompleteNotification); the recorded player's guid in them becomes this player's.
-            foreach (var item in contents.ItemsFor(guid))
+            // The order of capture.md C1: the main pack's items (the packs among them), the side packs' contents (container = the pack), then the equipped objects.
+            var carried = new HashSet<uint>(contents.Description.Inventory.Select(c => c.Guid));
+            var items = contents.ItemsFor(guid).ToList();
+            foreach (var item in items.Where(i => carried.Contains(i.Guid)).Concat(heal.Objects).Concat(packs!.Value.Extra).Concat(packs.Value.Contents).Concat(items.Where(i => !carried.Contains(i.Guid))))
+            {
+                sink.OnCreateObject(WorldContext(sink), item, isUpdate: false);
+            }
+        }
+        else if (!heal.Objects.IsEmpty)
+        {
+            // M4 3.1 s2: the kit and the potions of a visit with no recording are created right after the player, the main pack's items as in the recorded burst.
+            foreach (var item in heal.Objects)
             {
                 sink.OnCreateObject(WorldContext(sink), item, isUpdate: false);
             }
@@ -659,11 +733,20 @@ public static partial class StandInSessions
         {
             sink.OnCreateObject(WorldContext(sink), ObjectMessage(obj, new AcPosition(visit.Cell, visit.Origin + obj.Offset, Quaternion.Identity), visit.LookFor(obj.Name)), isUpdate: false);
         }
+
+        if (visit.Vendors)
+        {
+            // M4 3.2 s3: the two vendors stand at their real cells inside their shops (D23: the only NPCs the stand-in adds).
+            foreach (var vendor in StandInWorld.VendorObjects(visit))
+            {
+                sink.OnCreateObject(WorldContext(sink), vendor, isUpdate: false);
+            }
+        }
     }
 
     /// <summary>The description with the favourite-spell bars the stand-in holds since an <c>AddSpellFavorite</c> (M3 3.2 db; <see cref="StandInWorld.WithBars"/>), unchanged when none was added.</summary>
     private static PlayerDescriptionMsg WithBars(IAcSessionSink sink, PlayerDescriptionMsg description) =>
-        (sink as GameStateReducer)?.LocalResponder?.World is { } world ? world.WithBars(description) : description;
+        (sink as GameStateReducer)?.LocalResponder?.World is { } world ? world.WithVendorState(world.WithBars(description)) : description; // M4 3.2 s3: the shortcut list and the purse ride the same funnel
 
     /// <summary>
     /// The CreateObject the server sends for one object of a visit (<paramref name="obj"/>) at <paramref name="position"/>: the visit's objects at their offsets from the player's creation position, and an object a check places (M3 3.1 fb,
@@ -691,7 +774,7 @@ public static partial class StandInSessions
             Name = obj.Name,
             WeenieClassId = obj.WeenieClassId,
             IconId = 0x06000001,
-            ItemType = (obj.DescriptionFlags & Contracts.WorldObjectTable.LifestoneFlag) != 0 ? 0x80u : 0x10u, // Misc for a lifestone (M3 3.2 db: it must not read as a creature); every other stand-in object keeps Creature
+            ItemType = obj.WeenieClassId == StandInChest.Wcid ? 0x200u : (obj.DescriptionFlags & Contracts.WorldObjectTable.LifestoneFlag) != 0 ? 0x80u : 0x10u, // a chest is a Container (M4 2.1 s3); // Misc for a lifestone (M3 3.2 db: it must not read as a creature); every other stand-in object keeps Creature
             ObjectDescriptionFlags = obj.DescriptionFlags | (obj.PortalTo is not null ? 0x40000u : 0u),
             RadarBehavior = 4,
             RadarBlipColor = obj.BlipColor != 0 ? obj.BlipColor : null,
@@ -830,14 +913,14 @@ public static partial class StandInSessions
     private static void Unhide(IAcSessionSink sink, uint guid) =>
         sink.OnSetState(WorldContext(sink), new SetStateMsg(guid, PhysicsState.Gravity | PhysicsState.EdgeSlide, 1, 2));
 
-    /// <summary>The server's teleport of the player: F751 with <paramref name="sequence"/>, then the new position (a newer teleport sequence).</summary>
-    internal static void SendTeleport(IAcSessionSink sink, uint guid, StandInTeleport jump, ushort sequence)
+    /// <summary>The server's teleport of the player: F751 with <paramref name="sequence"/>, then the new position (a newer teleport sequence). ACE sends the position with the object's next position sequence (<c>ObjSeqs</c> increments per update, apart from the teleport's), so <paramref name="positionSequence"/> is the player's current one plus 1 when a run of F748 updates has advanced it (the melee approach); null keeps the scripted visit's.</summary>
+    internal static void SendTeleport(IAcSessionSink sink, uint guid, StandInTeleport jump, ushort sequence, ushort? positionSequence = null)
     {
         sink.OnPlayerTeleport(WorldContext(sink), new PlayerTeleportMsg(sequence));
         var position = new AcPosition(jump.Cell, jump.Origin, Quaternion.Identity);
         sink.OnUpdatePosition(
             WorldContext(sink),
-            new UpdatePositionMsg(guid, PositionFlags.Grounded, position, null, null, 1, sequence, sequence, 1));
+            new UpdatePositionMsg(guid, PositionFlags.Grounded, position, null, null, 1, positionSequence ?? sequence, sequence, 1));
     }
 
     /// <summary>

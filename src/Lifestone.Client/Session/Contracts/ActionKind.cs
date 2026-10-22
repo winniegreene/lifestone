@@ -108,6 +108,78 @@ public enum ActionKind
 
     /// <summary><see cref="IActionApi.RemoveSpellFavorite"/> (M3 4.2 p1).</summary>
     RemoveSpellFavorite,
+
+    /// <summary><see cref="IActionApi.Attack"/> (M4 1.2 s2; appended).</summary>
+    Attack,
+
+    /// <summary><see cref="IActionApi.MissileAttack"/>.</summary>
+    MissileAttack,
+
+    /// <summary><see cref="IActionApi.CancelAttack"/>.</summary>
+    CancelAttack,
+
+    /// <summary><see cref="IActionApi.OpenContainer"/> (M4 2.1 s2; appended).</summary>
+    OpenContainer,
+
+    /// <summary><see cref="IActionApi.CloseContainer"/>.</summary>
+    CloseContainer,
+
+    /// <summary><see cref="IActionApi.PickUp"/>.</summary>
+    PickUp,
+
+    /// <summary><see cref="IActionApi.Drop"/>.</summary>
+    Drop,
+
+    /// <summary><see cref="IActionApi.SplitToContainer"/>.</summary>
+    SplitToContainer,
+
+    /// <summary><see cref="IActionApi.SplitTo3D"/>.</summary>
+    SplitTo3D,
+
+    /// <summary><see cref="IActionApi.SplitToWield"/>.</summary>
+    SplitToWield,
+
+    /// <summary><see cref="IActionApi.Give"/>.</summary>
+    Give,
+
+    /// <summary><see cref="IActionApi.UseWithTarget"/> (M4 3.1 s1; appended).</summary>
+    UseWithTarget,
+
+    /// <summary><see cref="IActionApi.Drink"/>.</summary>
+    Drink,
+
+    /// <summary><see cref="IActionApi.AddShortcut"/> (M4 3.2 h1; appended).</summary>
+    AddShortcut,
+
+    /// <summary><see cref="IActionApi.RemoveShortcut"/>.</summary>
+    RemoveShortcut,
+
+    /// <summary><see cref="IActionApi.UseShortcut"/>: only the refused or not-built answer carries this kind; a routed use returns the underlying action's handle.</summary>
+    UseShortcut,
+    /// <summary><see cref="IActionApi.Identify"/> (M4 3.2 s2; appended).</summary>
+    Identify,
+
+    /// <summary><see cref="IActionApi.OpenVendor"/> (M4 3.2 s1; appended).</summary>
+    OpenVendor,
+
+    /// <summary><see cref="IActionApi.Buy"/>.</summary>
+    Buy,
+
+    /// <summary><see cref="IActionApi.Sell"/>.</summary>
+    Sell,
+}
+
+/// <summary>The height of an attack (ACE's <c>AttackHeight</c>, the value on the wire; retail's group box 0x10000056 selects it).</summary>
+public enum AttackHeight : uint
+{
+    /// <summary>A high attack.</summary>
+    High = 1,
+
+    /// <summary>A medium attack.</summary>
+    Medium = 2,
+
+    /// <summary>A low attack.</summary>
+    Low = 3,
 }
 
 /// <summary>Where an <see cref="ActionHandle"/> is in its life.</summary>

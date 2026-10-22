@@ -159,7 +159,13 @@ public sealed class LoginCheckScenarioTests
         Assert.True(result.Ok, result.Failure);
         Assert.Equal("126", run.Scenario.LevelField); // PlayerQualities.Level (PropertyInt 25)
         Assert.Equal("present", run.Scenario.MageField);
-        Assert.Equal(" level=126 mage_char=present", run.Scenario.ReportFields);
+        Assert.Equal(" level=126 mage_char=present fighter=absent", run.Scenario.ReportFields);
+
+        using var both = new Run(
+            new LoginCheckScenario(SkillClasses, "Amy"),
+            server => server.Characters.Add(new AceCharacter(0x5000000C, "Holtburg Hunter")));
+        Assert.True(both.Finish().Ok);
+        Assert.Equal("present", both.Scenario.FighterField);
     }
 
     [Fact]
@@ -173,7 +179,7 @@ public sealed class LoginCheckScenarioTests
         Assert.True(result.Ok, result.Failure);
         Assert.Equal("?", run.Scenario.LevelField);
         Assert.Equal("absent", run.Scenario.MageField); // Amy, Bo and Cy: no mage
-        Assert.Equal(" level=? mage_char=absent", run.Scenario.ReportFields);
+        Assert.Equal(" level=? mage_char=absent fighter=absent", run.Scenario.ReportFields);
     }
 
     [Fact]
@@ -198,14 +204,17 @@ public sealed class LoginCheckScenarioTests
         // A run that fails at the login stage never read the list or the level: both say n/a and the failure is the login's own.
         using var run = new Run(new LoginCheckScenario(SkillClasses, "Amy"), logIn: false);
         Assert.False(run.Finish().Ok);
-        Assert.Equal(" level=n/a mage_char=n/a", run.Scenario.ReportFields);
+        Assert.Equal(" level=n/a mage_char=n/a fighter=n/a", run.Scenario.ReportFields);
 
         // The pure helpers: the read model's 0 is unknown; the list is read by name.
         Assert.Equal("?", LoginCheckScenario.LevelOf(new PlayerQualities()));
         Assert.Equal("absent", LoginCheckScenario.MageOf([]));
         Assert.Equal("present", LoginCheckScenario.MageOf([new CharacterSlot(1, "Amy", 0), new CharacterSlot(2, "BSD Mage", 0)]));
         Assert.Equal("pending-delete", LoginCheckScenario.MageOf([new CharacterSlot(2, "BSD MAGE", 1)]));
-        Assert.Equal(" level=126 mage_char=present", LoginCheckScenario.Fields("126", "present"));
+        Assert.Equal("absent", LoginCheckScenario.FighterOf([new CharacterSlot(1, "Amy", 0)]));
+        Assert.Equal("present", LoginCheckScenario.FighterOf([new CharacterSlot(3, "holtburg HUNTER", 0)]));
+        Assert.Equal("pending-delete", LoginCheckScenario.FighterOf([new CharacterSlot(3, "Holtburg Hunter", 1)]));
+        Assert.Equal(" level=126 mage_char=present fighter=present", LoginCheckScenario.Fields("126", "present", "present"));
     }
 
     [Fact]

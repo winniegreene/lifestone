@@ -21,6 +21,10 @@ namespace Lifestone.Game.RetailUi;
 /// <para><b>Focus</b> (<c>CInputManager_WIN32::Activate</c>): <c>NOTIFICATION_APPLICATION_FOCUS_OUT</c> and
 /// <c>NOTIFICATION_APPLICATION_FOCUS_IN</c> call <see cref="UiInputRouter.SetClientActive"/>, since neither Windows nor Godot sends the
 /// releases a window misses while it has no focus; the mouse leaving the window calls <see cref="UiInputRouter.MouseLeave"/>.</para>
+/// <para><b>Drag and drop</b> (M4 2.2 s3, D4; <see cref="UiDrag"/>, <c>TODO(m4-retail-drag)</c>): the feed needs no drag code of its own, because the router's mouse path is the drag's. The button press, the motion and the release below reach
+/// <see cref="UiInputRouter.MouseButton"/> and <see cref="UiInputRouter.MouseMove"/>, which arm, begin, carry and end the drag (a release that ends a drag is taken, so the world never sees it); Escape reaches <see cref="UiInputRouter.KeyDown"/>,
+/// which cancels a drag that is on and takes the key; a lost focus cancels it through <see cref="UiInputRouter.SetClientActive"/>. The carried icon is a top-layer element of the UI runtime that follows the pointer (no Godot node), and no
+/// event allocates: the logical position is a value tuple and the router works on its own fields. <see cref="DragActive"/> tells a host that an item is being carried.</para>
 /// </remarks>
 public partial class RetailUiInput : Node
 {
@@ -30,6 +34,9 @@ public partial class RetailUiInput : Node
 
     /// <summary>The router this feeds.</summary>
     public UiInputRouter Router => _router;
+
+    /// <summary>True while an item is being carried by the pointer (the router's <see cref="UiDrag"/> is dragging).</summary>
+    public bool DragActive => _router.Drag.Phase == Lifestone.Client.RetailUi.UiDragPhase.Dragging;
 
     /// <summary>False stops the feed (nothing reaches the router, nothing is handled); the layer sets it while it is hidden.</summary>
     public bool Enabled { get; set; } = true;

@@ -35,6 +35,15 @@ public interface IGameSessionView
     /// <summary>The audit log of completed actions (a ring of <see cref="ActionLog.Capacity"/> entries).</summary>
     ActionLog ActionLog { get; }
 
+    /// <summary>The player's attack sequence (M4 1.2 s1): Idle until the first swing or launch, then the server-driven run of swings or shots up to the 0x01A7 that ends it. <see cref="AttackChanged"/> follows every change.</summary>
+    AttackSequence Attack => NoAttack;
+
+    /// <summary>What <see cref="Attack"/> reads for a view that keeps none (a test fake, a session without a reducer): an Idle sequence nothing ever changes.</summary>
+    private static readonly AttackSequence NoAttack = new();
+
+    /// <summary>The ammunition the player wields (wcid, guid, stack), or null when none is (M4 1.2 s1). Read from the inventory, so it follows 0x0197 and the wield and unwield messages.</summary>
+    HeldAmmo? Ammo => HeldAmmo.Of(State);
+
     /// <summary>A snapshot of the network link's counters (all zero for an offline session).</summary>
     LinkStats Link { get; }
 
@@ -64,4 +73,23 @@ public interface IGameSessionView
     /// link status reads as the time since it last heard from the server (<c>LinkStatusHolder::GetConnectionStatus</c>, 11.6096 0x004116E0).
     /// </summary>
     double? SecondsSinceLastServerPacket => Link.LastReceivedTimestamp == 0 ? null : Math.Max(0, Clock.Now - Clock.ToSeconds(Link.LastReceivedTimestamp));
+
+    /// <summary>
+    /// The latest appraisal of <paramref name="guid"/> (GameEvent 0x00C9; M4 3.2 s2), for the examine panel: the item list's examine and the paperdoll's figure click send <see cref="IActionApi.Identify"/> and show this
+    /// when the handle completes (<see cref="IdentifyHandle.Result"/>). False when the player has not appraised the object this session or the bounded cache (<see cref="AppraisalCache.Capacity"/>) dropped it.
+    /// </summary>
+    /// <param name="guid">The object's guid.</param>
+    /// <param name="appraisal">The appraisal, or null.</param>
+    bool TryGetAppraisal(uint guid, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Appraisal? appraisal) => State.Appraisals.TryGet(guid, out appraisal);
+
+    /// <summary>The vendor the player has open (M4 3.2 s1): the last 0062's stock and prices, or null when none is open. <see cref="VendorOpened"/>, <see cref="VendorStockChanged"/> and <see cref="VendorClosed"/> follow it.</summary>
+    VendorStock? Vendor => State.Vendor;
+
+    /// <summary>
+    /// The player closed the vendor window: the model's open vendor closes with it, so the window and the model agree (3.2-R23; <c>gmVendorUI::RecvNotice_CloseVendor</c> 11.6096 0x004C0F40 is a client-side close too, ACE has no close message).
+    /// Publishes <see cref="VendorClosed"/>; does nothing when none is open. A view without a model ignores it.
+    /// </summary>
+    void CloseVendorWindow()
+    {
+    }
 }

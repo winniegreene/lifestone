@@ -39,6 +39,12 @@ public sealed class UiStagedRoot
     /// <summary>The phase the longest unit ended in (report-only).</summary>
     public string LongestUnitPhase { get; private set; } = string.Empty;
 
+    /// <summary>The collector's pause inside the longest unit, in milliseconds (report-only; <see cref="GC.GetTotalPauseDuration"/> before and after the unit).</summary>
+    public double LongestUnitGcPauseMilliseconds { get; private set; }
+
+    /// <summary>Collections per generation (0, 1, 2) that ran inside the longest unit (report-only).</summary>
+    public (int Gen0, int Gen1, int Gen2) LongestUnitGcCollections { get; private set; }
+
     /// <summary>The longest single unit so far, in milliseconds (a host budgets by it: a unit cannot be split).</summary>
     public double LongestUnitMilliseconds { get; private set; }
 
@@ -50,7 +56,10 @@ public sealed class UiStagedRoot
     {
         while (!Done)
         {
-            var gcBefore = GC.CollectionCount(0) + GC.CollectionCount(1) + GC.CollectionCount(2);
+            var gc0 = GC.CollectionCount(0);
+            var gc1 = GC.CollectionCount(1);
+            var gc2 = GC.CollectionCount(2);
+            var gcPause = GC.GetTotalPauseDuration();
             var started = _timestamp();
             var more = _work.MoveNext();
             var ended = _timestamp();
@@ -58,7 +67,12 @@ public sealed class UiStagedRoot
             if (unitMilliseconds > LongestUnitMilliseconds)
             {
                 LongestUnitMilliseconds = unitMilliseconds;
-                LongestUnitPhase = Phase + ((GC.CollectionCount(0) + GC.CollectionCount(1) + GC.CollectionCount(2)) != gcBefore ? " (a GC ran in it)" : string.Empty); // report-only: what the slowest unit was doing (the unit ended at the phase set before its yield)
+                var d0 = GC.CollectionCount(0) - gc0;
+                var d1 = GC.CollectionCount(1) - gc1;
+                var d2 = GC.CollectionCount(2) - gc2;
+                LongestUnitGcCollections = (d0, d1, d2);
+                LongestUnitGcPauseMilliseconds = (GC.GetTotalPauseDuration() - gcPause).TotalMilliseconds;
+                LongestUnitPhase = Phase + (d0 + d1 + d2 != 0 ? " (a GC ran in it)" : string.Empty); // report-only: what the slowest unit was doing (the unit ended at the phase set before its yield)
             }
 
             Units++;

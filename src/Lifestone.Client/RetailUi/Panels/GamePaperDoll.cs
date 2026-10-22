@@ -17,7 +17,7 @@ public readonly record struct PaperDollSlot(uint ElementId, uint Mask, int Side,
 
 /// <summary>
 /// The paperdoll of the inventory page (panel 7, <c>gmPaperDollUI</c> 0x10000024, element 0x100001CD; M3 2.2 slice b2, docs/milestones/m3-plan.md section 4.6): each worn or wielded item (<see cref="PlayerInventory.Equipped"/>) in the
-/// slot of its equip location, on b1's <see cref="UiItem"/>; a double click on one takes it off through <see cref="IActionApi.MoveToPack"/>. Read-only otherwise (D13: no drag and drop in M3).
+/// slot of its equip location, on b1's <see cref="UiItem"/>; a double click on one takes it off through <see cref="IActionApi.MoveToPack"/>. Read-only otherwise, except the drag and drop of M4 2.2 s3 (D4: a worn item is a drag source and each slot takes a dropped item; see <see cref="ClickMap"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -43,12 +43,12 @@ public readonly record struct PaperDollSlot(uint ElementId, uint Mask, int Side,
 /// </para>
 /// <para>
 /// Not built, each a named TODO logged once: <c>TODO(m3-paperdoll-part-lighting)</c> (<c>ApplyPartSelectionLighting</c> 0x004A4010: the body part lights
-/// when the cursor is over an item), <c>TODO(m3-aetheria)</c> (<c>UpdateAetheria</c> 0x004A41C0: the three sigil slots appear only with an Aetheria-bearing item), <c>TODO(m3-paperdoll-clickmap)</c> (the click mask over the
-/// figure: select and examine the item under the cursor, <c>CreateClickMap</c> 0x004A4BC0), <c>TODO(m3-paperdoll-tooltips)</c> (<c>UpdateItemSlotTooltip</c> 0x004A5200), <c>TODO(m3-paperdoll-checkbox-targets)</c> (which two
+/// when the cursor is over an item), <c>TODO(m3-aetheria)</c> (<c>UpdateAetheria</c> 0x004A41C0: the three sigil slots appear only with an Aetheria-bearing item), <c>TODO(m4-paperdoll-figure-select)</c> (the right button examines since M4 3.2 s4c) (the click mask over the
+/// figure: select and examine the item under the cursor, <c>CreateClickMap</c> 0x004A4BC0; <c>TODO(m3-paperdoll-clickmap)</c> is closed for the slots in M4 2.2 s3, see <see cref="ClickMap"/>), <c>TODO(m3-paperdoll-tooltips)</c> (<c>UpdateItemSlotTooltip</c> 0x004A5200), <c>TODO(m3-paperdoll-checkbox-targets)</c> (which two
 /// elements the checkbox's handler toggles is read from raw member offsets: taken as the viewport and the click-mask button).
 /// </para>
 /// </remarks>
-public sealed class GamePaperDoll : IGamePanel, IUiElementListener, IDisposable
+public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDisposable
 {
     /// <summary>The panel id of the page (the inventory page).</summary>
     public const uint Panel = 7;
@@ -108,6 +108,7 @@ public sealed class GamePaperDoll : IGamePanel, IUiElementListener, IDisposable
     private readonly UiItemList[] _lists;
     private readonly uint[] _shown;
     private readonly IDisposable[] _subscriptions;
+    private readonly GamePaperDollDrop[] _drops;
     private bool _dirty = true;
     private bool _slotsView;
     private bool _todosLogged;
@@ -126,9 +127,17 @@ public sealed class GamePaperDoll : IGamePanel, IUiElementListener, IDisposable
         _checkbox = checkbox;
         _lists = lists;
         _shown = new uint[lists.Length];
+        _drops = new GamePaperDollDrop[lists.Length];
+        var drag = context.Manager.Input.Drag;
         for (var i = 0; i < lists.Length; i++)
         {
             lists[i].ItemActivated += OnSlotActivated;
+            lists[i].ItemExamined += OnSlotExamined; // M4 3.2 s4c: a right click on a worn item examines it
+
+            // M4 2.2 s3 (D4, closes TODO(m3-paperdoll-clickmap) for the slots): a worn item is a drag source (to a pack, a side pack, another slot or the world view) and each slot takes a dropped item it can hold (ClickMap).
+            lists[i].DragSource = true;
+            _drops[i] = new GamePaperDollDrop(context, SlotTable[i]);
+            drag.RegisterTarget(lists[i], _drops[i]);
         }
 
         // PostInit (0x004A56D0) hides the armour slots and shows the figure; a host that cannot serve the figure (no view data or view host) leaves the page on the slots view.
@@ -342,6 +351,12 @@ public sealed class GamePaperDoll : IGamePanel, IUiElementListener, IDisposable
             return UiListenResult.Handled;
         }
 
+        // M4 3.2 s4c (closes TODO(m4-paperdoll-figure-click)): the right button over the figure examines the worn item under the mouse (message 28, parameter 8 of gmPaperDollUI::ListenToElementMessage 0x004A5FA0).
+        if (message.MessageId == UiMessageIds.MouseDown && message.ElementId == ClickMaskId && message.Param1 == UiMouseActions.Right)
+        {
+            return ExamineFigureAtMouse() ? UiListenResult.Handled : UiListenResult.Default;
+        }
+
         return UiListenResult.Default;
     }
 
@@ -354,9 +369,13 @@ public sealed class GamePaperDoll : IGamePanel, IUiElementListener, IDisposable
         }
 
         _page.UnregisterForElementMessages(this);
+        var drag = _context.Manager.Input.Drag;
         for (var i = 0; i < _lists.Length; i++)
         {
             _lists[i].ItemActivated -= OnSlotActivated;
+            _lists[i].ItemExamined -= OnSlotExamined;
+            drag.UnregisterTarget(_lists[i]);
+            _lists[i].DragSource = false;
         }
 
         _attachment?.Dispose();
@@ -411,6 +430,9 @@ public sealed class GamePaperDoll : IGamePanel, IUiElementListener, IDisposable
         }
     }
 
+    /// <summary>A right click on a worn item examines it (<c>ClientUISystem::ExamineObject</c>): the examine panel opens and asks the server (M4 3.2 s4c).</summary>
+    private void OnSlotExamined(UiItemList list, UiItem cell) => GameExaminePanel.Of(_context)?.Open(cell.ItemId);
+
     /// <summary>A double click on a worn item takes it off: <c>ItemHolder::UseObject</c> ends in <c>CPlayerSystem::PlaceInBackpack</c> (see the class remarks), which is <see cref="IActionApi.MoveToPack"/> with container 0.</summary>
     private void OnSlotActivated(UiItemList list, UiItem cell)
     {
@@ -440,7 +462,7 @@ public sealed class GamePaperDoll : IGamePanel, IUiElementListener, IDisposable
         var log = _context.Manager.Services.Log;
         log.Warn("retailui", "TODO(m3-paperdoll-part-lighting): the body part under an item does not light when the cursor is over it (ApplyPartSelectionLighting 0x004A4010)");
         log.Warn("retailui", "TODO(m3-aetheria): the sigil slots always show (retail's UpdateAetheria 0x004A41C0 shows them only for an Aetheria-bearing item)");
-        log.Warn("retailui", "TODO(m3-paperdoll-clickmap): the button over the figure selects and examines nothing (CreateClickMap 0x004A4BC0)");
+        log.Warn("retailui", "TODO(m4-paperdoll-figure-select): the left button over the figure selects nothing (retail sets the selected object, gmPaperDollUI::ListenToElementMessage 0x004A5FA0); the right button examines the worn item under the mouse (M4 3.2 s4c closed TODO(m4-paperdoll-figure-click))");
         log.Warn("retailui", "TODO(m3-paperdoll-tooltips): the slots have no tooltips (UpdateItemSlotTooltip 0x004A5200)");
         log.Warn("retailui", "TODO(m3-paperdoll-sharp): the figure's view does not use CreatureMode::UseSharpMode (PostInit 0x004A56D0); it draws with creature mode's ordinary filtering");
         log.Warn("retailui", "TODO(m3-paperdoll-checkbox-targets): the slots checkbox toggles the viewport and the click-mask button; retail's handler names them only by member offset");

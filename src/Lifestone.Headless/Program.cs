@@ -66,6 +66,9 @@ internal static class Program
     /// <summary>The default time limit of the mage build (seconds): about forty steps on loopback, the experience grant and the learns among them.</summary>
     internal const double MageBuildQuitAfterSeconds = 600;
 
+    /// <summary>The default time limit of the fighter build (seconds): the mage build's steps plus the kit's grants, the wields and the place to Holtburg.</summary>
+    internal const double FighterBuildQuitAfterSeconds = 600;
+
     /// <summary>The default limit of <c>--scenario=gear</c>: the login, a whole kit's requests at the tools lane's 2 a second (about 30 s), the wields and the log off.</summary>
     internal const double GearQuitAfterSeconds = 300;
 
@@ -77,13 +80,32 @@ internal static class Program
 
     /// <summary>
     /// What <c>--scenario=death-and-regear</c> needs besides <c>--death-seconds</c>, in seconds: the gear (about 120 s with the spell bars), the bind at Holtburg's lifestone (teleport, settle, the Use: 120 s), the den (60 s),
-    /// a suicide (ACE's five lines 3 s apart, the death, the arrival and the vitals: 120 s), the respawn, the vitals and the regear (150 s), and the log off (120 s), with margin.
+    /// a suicide (ACE's five lines 3 s apart, the death, the arrival and the vitals: 120 s), the respawn, the vitals and the regear (150 s), and the log off (120 s), with margin. M4 2.2 s1 adds the corpse trip after the respawn
+    /// (a teleport to the corpse and its settle, the open, the loot at about 2.8 s an item, the teleport back: up to about 110 s); the margin of this overhead covers it, so the number stays.
     /// </summary>
     internal const double DeathQuitAfterOverheadSeconds = 900;
 
-    /// <summary>The default limit of <c>--scenario=death-and-regear</c>: <see cref="DeathQuitAfterOverheadSeconds"/> plus <c>--death-seconds</c>.</summary>
+    /// <summary>
+    /// What the stages the death loop added after the respawn need besides the fight's own <c>--death-fight-seconds</c>, in seconds (M4 3.1 d2, review R19; the game leg's budget, <c>DeathLegRunner.WholeCheckSecondsFor</c>): the decoy top-up 30, the rebuff 240, the
+    /// teleport back to the den 30, the walk to the tuskers 60, the pre-trip heal 120, the corpse trip 90 and the return 60 = 630. Without it a headless run on the defaults whose rebuff waits out its mana and whose fight takes its seconds was stopped by the host in the trip.
+    /// </summary>
+    internal const double DeathQuitAfterNewStagesSeconds = 630;
+
+    /// <summary>
+    /// The default limit of <c>--scenario=death-and-regear</c>: <see cref="DeathQuitAfterOverheadSeconds"/> (the 900 s of M4 2.2) plus <see cref="DeathQuitAfterNewStagesSeconds"/> plus <c>--death-fight-seconds</c> plus <c>--death-seconds</c>, the formula of the loopback
+    /// tests' <c>DeathLive.QuitAfterSecondsFor</c> (a ceiling: the real run takes about a third of it). 2,310 s with the defaults.
+    /// </summary>
     /// <param name="deathSeconds">The wait among the tuskers (<c>--death-seconds</c>).</param>
-    internal static double DeathQuitAfterSeconds(double deathSeconds) => DeathQuitAfterOverheadSeconds + deathSeconds;
+    /// <param name="fightSeconds">The fight stage's limit (<c>--death-fight-seconds</c>).</param>
+    internal static double DeathQuitAfterSeconds(double deathSeconds, double fightSeconds = DeathOptions.DefaultFightSeconds) =>
+        DeathQuitAfterOverheadSeconds + DeathQuitAfterNewStagesSeconds + fightSeconds + deathSeconds;
+
+    /// <summary>What <c>--scenario=hunt</c> needs besides <c>--hunt-seconds</c>, in seconds: the login (60), the bind (90), the potions and regeneration (up to 240), the weapon swap (30), the teleports and settles (60), the wind-down and the log off (120). The corpse sequence and its loot (M4 2.2 s0: about 2.8 s an item) run inside <c>--hunt-seconds</c>, which abandons them at its end.</summary>
+    internal const double HuntQuitAfterOverheadSeconds = 600;
+
+    /// <summary>The default limit of <c>--scenario=hunt</c>: <see cref="HuntQuitAfterOverheadSeconds"/> plus <c>--hunt-seconds</c>.</summary>
+    /// <param name="huntSeconds">The hunt's time (<c>--hunt-seconds</c>).</param>
+    internal static double HuntQuitAfterSeconds(double huntSeconds) => HuntQuitAfterOverheadSeconds + huntSeconds;
 
     /// <summary>The account the headless host uses when <c>--account</c> is not given (D10).</summary>
     internal const string DefaultAccount = "test";
@@ -293,10 +315,12 @@ internal static class Program
             {
                 HeadlessScenario.AcademyExit => AcademyExitQuitAfterSeconds,
                 HeadlessScenario.MageBuild => MageBuildQuitAfterSeconds,
+                HeadlessScenario.FighterBuild => FighterBuildQuitAfterSeconds,
                 HeadlessScenario.Gear => GearQuitAfterSeconds,
                 HeadlessScenario.Buff => BuffQuitAfterSeconds,
                 HeadlessScenario.Fight => FightQuitAfterSeconds,
-                HeadlessScenario.DeathAndRegear => DeathQuitAfterSeconds(options.Death.Seconds),
+                HeadlessScenario.DeathAndRegear => DeathQuitAfterSeconds(options.Death.Seconds, options.Death.FightSeconds),
+                HeadlessScenario.Hunt => HuntQuitAfterSeconds(options.Hunt.Seconds),
                 _ => HeadlessRunOptions.DefaultQuitAfterSeconds,
             },
             LifestoneVersion = typeof(Program).Assembly.GetName().Version?.ToString(),
@@ -342,6 +366,15 @@ internal static class Program
 
                     scenario = new MageBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log);
                 }
+                else if (options.Scenario == HeadlessScenario.FighterBuild)
+                {
+                    if (options.Session.Character is not null || options.CreateCharacter is not null)
+                    {
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=fighter-build (the fighter is always the template's character)");
+                    }
+
+                    scenario = new FighterBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log);
+                }
                 else if (options.Scenario == HeadlessScenario.Gear)
                 {
                     if (options.Session.Character is not null || options.CreateCharacter is not null)
@@ -379,7 +412,31 @@ internal static class Program
                     }
 
                     log.Info("headless", "building the Black Spawn Den's collision and floor graph for the death wait's walk");
-                    scenario = new DeathScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Death, DenWalk.Create(dats, log), log, stages: options.Death.Stages ?? DeathStages.All, approach: HoltburgApproach.Create(dats, log)) { LevelXp = DeathScenario.LevelXpOf(XpTableData.Load(dats)) };
+                    scenario = new DeathScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Death, DenWalk.Create(dats, log), log, stages: options.Death.Stages ?? DeathStages.All, approach: HoltburgApproach.Create(dats, log), buff: options.Buff, fight: new FightOptions { Kills = options.Death.FightKills, Seconds = options.Death.FightSeconds }) { LevelXp = DeathScenario.LevelXpOf(XpTableData.Load(dats)) };
+                }
+                else if (options.Scenario == HeadlessScenario.Hunt)
+                {
+                    if (options.Session.Character is not null || options.CreateCharacter is not null)
+                    {
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=hunt (the fighter is always the template's character)");
+                    }
+
+                    // The cell centres' heights come from the retail dats (the terrain sampler the client's ground heights use); read once per cell and kept.
+                    var heights = new Dictionary<uint, float?>();
+                    scenario = new HuntScenario(
+                        options.Hunt,
+                        log,
+                        cell =>
+                        {
+                            if (!heights.TryGetValue(cell.CellId, out var height))
+                            {
+                                heights[cell.CellId] = height = Lifestone.Client.Session.Fighter.HuntGround.TerrainHeight(dats, cell);
+                            }
+
+                            return height;
+                        },
+                        ground: options.Hunt.GroundRow,
+                        follow: new Lifestone.Client.Session.Scenarios.HuntFollow(dats, log));
                 }
                 else if (options.CreateCharacter is { } create)
                 {
@@ -435,6 +492,16 @@ internal static class Program
         {
             // Additive to the frozen headless line: the mage's own verdict fields come first (no name, no account).
             output.WriteLine("mage-build " + mage.VerdictFields());
+        }
+
+        if (scenario is FighterBuildScenario fighter)
+        {
+            output.WriteLine("fighter-build " + fighter.VerdictFields());
+        }
+
+        if (scenario is HuntScenario huntRun)
+        {
+            output.WriteLine("hunt " + huntRun.VerdictFields());
         }
 
         if (scenario is GearScenario gear)

@@ -432,7 +432,9 @@ public sealed class FightScenarioTests
                 Skills = skills.ToImmutable(),
                 Vitals = vitals.ToImmutable(),
                 Spells = known.ToImmutableDictionary(id => id, _ => 2f),
+                Equipped = [new EquippedDesc(WieldedSetups.Wand.Guid, (uint)EquipMask.Held, 0)], // M4 3.1 g: the mage holds its wand, as the combat-mode guard needs for the magic mode
             });
+            WieldedSetups.Create(R.H.R, WieldedSetups.Wand);
         }
 
         private void Regenerate(double now)

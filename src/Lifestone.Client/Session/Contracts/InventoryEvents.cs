@@ -67,3 +67,18 @@ public readonly record struct InventoryChanged(
 /// <param name="Item">The item the action was about.</param>
 /// <param name="Error">The <c>WeenieError</c> (0 when the server gave none, as ACE does for most refusals).</param>
 public readonly record struct InventoryFailed(uint Item, uint Error) : IGameEvent;
+
+/// <summary>The player opened the ground container <see cref="Container"/> (a corpse or chest): its GameEvent 0x0196 ViewContents arrived (M4 2.1 s1). Its entries may not have objects yet (<see cref="ContainerView.IsResolved"/>).</summary>
+/// <param name="Container">The container's object id.</param>
+public readonly record struct ContainerOpened(uint Container) : IGameEvent;
+
+/// <summary>The viewed ground container <see cref="Container"/> closed: GameEvent 0x0052 (the server's close, also after the client's 0x0195), a second open that replaced it, its deletion, or leaving the world (M4 2.1 s1).</summary>
+/// <param name="Container">The container's object id.</param>
+public readonly record struct ContainerClosed(uint Container) : IGameEvent;
+
+/// <summary>
+/// The set of entries of <see cref="Container"/> (the viewed ground container or a side pack), or whether they are resolved, changed (M4 2.1 s1): a 0196 named them, an item moved in or out, or an
+/// entry's F745 arrived. Read <see cref="GameState.Containers"/> for the entries.
+/// </summary>
+/// <param name="Container">The container's object id.</param>
+public readonly record struct ContainerContentsChanged(uint Container) : IGameEvent;

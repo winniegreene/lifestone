@@ -12,8 +12,9 @@ namespace Lifestone.Client.RetailUi.Widgets;
 /// As a drop target (<c>UIElement_Field::MouseOverTop</c>, 11.4186 0x00472360, 11.6096 0x00472720, and
 /// <c>CatchDroppedItem</c>, 11.4186 0x00472450, 11.6096 0x00472810), a container field (property 0x36) with drag rollover
 /// (0x70) shows <see cref="UiStateIds.DragRolloverAccept"/> or <see cref="UiStateIds.DragRolloverReject"/> while an item is
-/// dragged over it, and goes back to its old state when the item leaves or drops. Dragging UI items is not built in M2
-/// (the manager never has a dragged item; a loud TODO in the input router), so a field never enters those states yet.
+/// dragged over it, and goes back to its old state when the item leaves or drops. Since M4 2.2 s3 the router has a dragged item
+/// (<see cref="UiDrag"/>: <c>UiInputRouter.DragElement</c> is the pressed <see cref="UiItem"/> cell while a drag is on); the item cells show the states through
+/// <see cref="EnterDragRollover"/> and <see cref="LeaveDragRollover"/>, which this field's <c>MouseOverTop</c> uses too.
 /// </para>
 /// </remarks>
 public class UiField : UiElement
@@ -47,23 +48,40 @@ public class UiField : UiElement
             }
 
             var disallow = TryGetBoolProperty(UiPropertyIds.ElementDisallowDragIn, out var d) && d;
-            var accept = DragDropCallback?.Invoke(dragged, this) == true && !disallow;
-            var state = accept ? UiStateIds.DragRolloverAccept : UiStateIds.DragRolloverReject;
-            if (state != State)
-            {
-                if (!_rolloverStateChange)
-                {
-                    _rolloverStateChange = true;
-                    _oldState = State;
-                }
-
-                SetState(state);
-            }
+            EnterDragRollover(DragDropCallback?.Invoke(dragged, this) == true && !disallow);
         }
-        else if (_rolloverStateChange)
+        else
         {
-            SetState(_oldState);
-            _rolloverStateChange = false;
+            LeaveDragRollover();
         }
+    }
+
+    /// <summary>The field takes the accept or reject drag-rollover state (a state the desc lacks becomes the base state, as <see cref="UiElement.SetState"/>), remembering the state it had.</summary>
+    protected void EnterDragRollover(bool accept)
+    {
+        var state = accept ? UiStateIds.DragRolloverAccept : UiStateIds.DragRolloverReject;
+        if (state != State)
+        {
+            if (!_rolloverStateChange)
+            {
+                _rolloverStateChange = true;
+                _oldState = State;
+            }
+
+            SetState(state);
+        }
+    }
+
+    /// <summary>The field goes back to the state it had before <see cref="EnterDragRollover"/>; true when it had changed.</summary>
+    protected bool LeaveDragRollover()
+    {
+        if (!_rolloverStateChange)
+        {
+            return false;
+        }
+
+        SetState(_oldState);
+        _rolloverStateChange = false;
+        return true;
     }
 }

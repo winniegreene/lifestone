@@ -447,6 +447,24 @@ public static class InboundDispatcher
 
                 return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x01C0 UpdateHealth: not exactly a GUID and a health fraction");
 
+            case GameEventTypes.AttackDone:
+                if (AttackEventCodecs.TryParseAttackDone(body, out var attackDone))
+                {
+                    handler.OnAttackDone(context, header, attackDone);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x01A7 AttackDone: not exactly one u32 WeenieError");
+
+            case GameEventTypes.CombatCommenceAttack:
+                if (AttackEventCodecs.TryParseCommenceAttack(body))
+                {
+                    handler.OnCommenceAttack(context, header, default);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x01B8 CombatCommenceAttack: carries a payload (it is the envelope alone)");
+
             case GameEventTypes.PlayerDescription:
                 if (PlayerDescriptionCodec.TryParse(body, out var description, out var reason))
                 {
@@ -493,6 +511,42 @@ public static class InboundDispatcher
                 }
 
                 return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x00A0 InventoryServerSaysFailed: not exactly an item GUID and a WeenieError");
+
+            case GameEventTypes.ViewContents:
+                if (ContainerCodecs.TryParseViewContents(body, out var viewContents))
+                {
+                    handler.OnViewContents(context, header, viewContents);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0196 ViewContents: not exactly a container, a count and that many item and container-type pairs");
+
+            case GameEventTypes.CloseGroundContainer:
+                if (ContainerCodecs.TryParseCloseGroundContainer(body, out var closeGroundContainer))
+                {
+                    handler.OnCloseGroundContainer(context, header, closeGroundContainer);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0052 CloseGroundContainer: not exactly one u32 GUID");
+
+            case GameEventTypes.ApproachVendor:
+                if (VendorCodecs.TryParseApproachVendor(body, out var approachVendor, out var approachVendorReason))
+                {
+                    handler.OnApproachVendor(context, header, approachVendor);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0062 ApproachVendor: " + approachVendorReason);
+
+            case GameEventTypes.IdentifyObjectResponse:
+                if (AppraiseCodecs.TryParseIdentifyResponse(body, out var identifyResponse, out var identifyResponseReason))
+                {
+                    handler.OnIdentifyResponse(context, header, identifyResponse);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x00C9 IdentifyObjectResponse: " + identifyResponseReason);
 
             case GameEventTypes.VictimNotification:
                 if (CombatCodecs.TryParseVictim(body, out var victimNotification))

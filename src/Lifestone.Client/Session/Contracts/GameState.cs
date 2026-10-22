@@ -15,6 +15,7 @@ public sealed class GameState
     /// <summary>An empty state, before login. Only the session creates one.</summary>
     internal GameState()
     {
+        Containers = new ContainerViews(Self.Inventory, Objects);
     }
 
     /// <summary>The session's phase (the network session's phases; an offline session reports the phase of its stand-in data).</summary>
@@ -51,6 +52,9 @@ public sealed class GameState
     /// <summary>Every object the server created and has not deleted, the player's own included.</summary>
     public WorldObjectTable Objects { get; } = new();
 
+    /// <summary>The containers the player sees: the viewed ground container (a corpse or chest, at most one) and the side packs' contents (M4 2.1 s1).</summary>
+    public ContainerViews Containers { get; }
+
     /// <summary>The chat lines received and the client's own notices.</summary>
     public ChatLog Chat { get; } = new();
 
@@ -59,6 +63,23 @@ public sealed class GameState
 
     /// <summary>Rises by one with every change the reducer applies: a cheap "did anything change" check.</summary>
     public long Version { get; internal set; }
+
+    /// <summary>The latest appraisal of each object the player appraised (GameEvent 0x00C9; M4 3.2 s2), bounded by <see cref="AppraisalCache.Capacity"/>.</summary>
+    public AppraisalCache Appraisals { get; } = new();
+
+    /// <summary>The vendor the player has open (the last GameEvent 0x0062 ApproachVendor), or null (M4 3.2 s1). Closed by the rule in <see cref="VendorClosed"/>.</summary>
+    public VendorStock? Vendor { get; internal set; }
+
+    private readonly Dictionary<uint, uint> _vendorMasks = [];
+
+    /// <summary>
+    /// The item-type mask of the last 0062 read from a vendor of weenie class <paramref name="weenieClassId"/> this session, or null when none was (3.2-R16). Kept after the vendor closes, so the loot rule can read Renald the Elder's mask while another vendor is open or none is.
+    /// </summary>
+    /// <param name="weenieClassId">The vendor's weenie class id (Renald the Elder 718).</param>
+    public uint? VendorMaskOf(uint weenieClassId) => _vendorMasks.TryGetValue(weenieClassId, out var mask) ? mask : null;
+
+    /// <summary>Remembers the mask a vendor of <paramref name="weenieClassId"/> sent.</summary>
+    internal void RememberVendorMask(uint weenieClassId, uint mask) => _vendorMasks[weenieClassId] = mask;
 }
 
 /// <summary>Where the DDD data check is (<see cref="GameState.DataCheck"/>; docs/protocol.md §4.2).</summary>

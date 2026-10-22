@@ -66,6 +66,7 @@ public sealed partial class PlayChecks
 
         var learn = session.Tools.LearnSpells([spell.Id], ActionSource.Host);
         var learned = await WaitFor(() => learn.IsCompleted, 10.0);
+        var caster = await HoldCasterAsync(session); // M4 3.1 g: the magic mode needs a caster in hand (the combat-mode guard); the wand stays in hand through the whole-loop check below and goes back to the pack after it
         var mode = session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
         var modeDone = await WaitFor(() => mode.IsCompleted, 10.0);
         Check(setupName, learned && modeDone && session.State.Self.Qualities.CombatMode == CombatModes.Magic, $"spell={spell.Name} id={spell.Id} power={spell.Power} learn={learn.Outcome?.Kind} mode={mode.Outcome?.Kind} combat_mode={session.State.Self.Qualities.CombatMode}");
@@ -158,6 +159,7 @@ public sealed partial class PlayChecks
         var peace = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
         await WaitFor(() => peace.IsCompleted, 10.0);
         await FightLoopChecksAsync(session, server, dats);
+        await StowAsync(session, caster);
     }
 
     /// <summary>The stand-in tusker of the whole-loop check (a second one: the first is gone two seconds after it died).</summary>

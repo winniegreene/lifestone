@@ -202,6 +202,12 @@ public static class GameEventTypes
     /// <summary>KillerNotification (the player killed something; M3 1.2 s0).</summary>
     public const uint KillerNotification = 0x01AD;
 
+    /// <summary>AttackDone {u32 WeenieError} (ACE <c>GameEventAttackDone</c>; M4 1.2 s0).</summary>
+    public const uint AttackDone = 0x01A7;
+
+    /// <summary>CombatCommenceAttack (no payload; ACE <c>GameEventCombatCommenceAttack</c>; M4 1.2 s0).</summary>
+    public const uint CombatCommenceAttack = 0x01B8;
+
     /// <summary>AttackerNotification (the player's own hit; M3 1.2 s0).</summary>
     public const uint AttackerNotification = 0x01B1;
 
@@ -240,6 +246,18 @@ public static class GameEventTypes
 
     /// <summary>MagicPurgeBadEnchantments (M3 1.2 s0).</summary>
     public const uint MagicPurgeBadEnchantments = 0x0312;
+
+    /// <summary>CloseGroundContainer {u32 container} (ACE <c>GameEventCloseGroundContainer</c>; M4 2.1 s0).</summary>
+    public const uint CloseGroundContainer = 0x0052;
+
+    /// <summary>ViewContents {u32 container, u32 count, count x {u32 item, u32 ContainerType}} (ACE <c>GameEventViewContents</c>; M4 2.1 s0).</summary>
+    public const uint ViewContents = 0x0196;
+
+    /// <summary>ApproachVendor {vendor, type mask, value range, deals magic, rates, alternate currency, stock} (ACE <c>GameEventApproachVendor</c>; M4 3.2 s0).</summary>
+    public const uint ApproachVendor = 0x0062;
+
+    /// <summary>IdentifyObjectResponse {guid, flags, success, the flagged appraisal sections} (ACE <c>GameEventIdentifyObjectResponse</c>; M4 3.2 s0).</summary>
+    public const uint IdentifyObjectResponse = 0x00C9;
 }
 
 /// <summary>The GameAction types (inside <see cref="MessageOpcodes.GameAction"/>) M2 sends.</summary>
@@ -251,6 +269,10 @@ public static class GameActionTypes
     /// <summary>Use {u32 GUID}.</summary>
     public const uint Use = 0x0036;
 
+    /// <summary>UseWithTarget {u32 item, u32 target}: the item first (<c>CM_Inventory::Event_UseWithTargetEvent</c>, 11.4186 0x006AC480, 11.6096
+    /// 0x006AD3E0; ACE <c>GameActionUseWithTarget</c>; M4 3.1 s0).</summary>
+    public const uint UseWithTarget = 0x0035;
+
     /// <summary>Tell {String16L text, String16L target name}: the message comes first (retail
     /// <c>CM_Communication::Event_TalkDirectByName</c>, 11.4186 0x006A4780, 11.6096 0x006A55A0; ACE
     /// <c>GameActionTell</c>).</summary>
@@ -261,6 +283,18 @@ public static class GameActionTypes
 
     /// <summary>QueryHealth {u32 GUID}.</summary>
     public const uint QueryHealth = 0x01BF;
+
+    /// <summary>TargetedMeleeAttack {u32 target, u32 height, f32 power} (<c>CM_Combat::Event_TargetedMeleeAttack</c>, 11.4186
+    /// 0x006A9C10, 11.6096 0x006AAB70; ACE <c>GameActionTargetedMeleeAttack</c>; M4 1.2 s0).</summary>
+    public const uint TargetedMeleeAttack = 0x0008;
+
+    /// <summary>TargetedMissileAttack {u32 target, u32 height, f32 accuracy} (<c>CM_Combat::Event_TargetedMissileAttack</c>, 11.4186
+    /// 0x006A9D60, 11.6096 0x006AACC0; ACE <c>GameActionTargetedMissileAttack</c>; M4 1.2 s0).</summary>
+    public const uint TargetedMissileAttack = 0x000A;
+
+    /// <summary>CancelAttack (no payload; <c>CM_Combat::Event_CancelAttack</c>, 11.4186 0x006A99E0, 11.6096 0x006AA940; ACE
+    /// <c>GameActionCancelAttack</c>; M4 1.2 s0).</summary>
+    public const uint CancelAttack = 0x01B7;
 
     /// <summary>RaiseVital {u32 vital, u32 xp} (ACE <c>GameActionRaiseVital</c>).</summary>
     public const uint RaiseVital = 0x0044;
@@ -282,6 +316,44 @@ public static class GameActionTypes
 
     /// <summary>StackableMerge {u32 merge from, u32 merge to, i32 amount} (ACE <c>GameActionStackableMerge</c>).</summary>
     public const uint StackableMerge = 0x0054;
+
+    /// <summary>DropItem {u32 item} (ACE <c>GameActionDropItem</c>; M4 2.1 s0).</summary>
+    public const uint DropItem = 0x001B;
+
+    /// <summary>StackableSplitToContainer {u32 stack, u32 container, i32 placement, i32 amount} (ACE <c>GameActionStackableSplitToContainer</c>; M4 2.1 s0).</summary>
+    public const uint StackableSplitToContainer = 0x0055;
+
+    /// <summary>StackableSplitTo3D {u32 stack, i32 amount} (ACE <c>GameActionStackableSplitTo3D</c>; M4 2.1 s0).</summary>
+    public const uint StackableSplitTo3D = 0x0056;
+
+    /// <summary>GiveObjectRequest {u32 target, u32 item, i32 amount} (ACE <c>GameActionGiveObjectRequest</c>; M4 2.1 s0).</summary>
+    public const uint GiveObjectRequest = 0x00CD;
+
+    /// <summary>NoLongerViewingContents {u32 container} (ACE <c>GameActionNoLongerViewingContents</c>; M4 2.1 s0).</summary>
+    public const uint NoLongerViewingContents = 0x0195;
+
+    /// <summary>StackableSplitToWield {u32 stack, u32 EquipMask, i32 amount} (ACE <c>GameActionStackableSplitToWield</c>; M4 2.1 s0).</summary>
+    public const uint StackableSplitToWield = 0x019B;
+
+    /// <summary>BuyItems {u32 vendor, u32 count, count x {i32 amount, u32 item}} (<c>CM_Vendor::Event_Buy</c>, 11.4186 0x006AA0F0, 11.6096
+    /// 0x006AB050; ACE <c>GameActionBuyItems</c>; M4 3.2 s0).</summary>
+    public const uint BuyItems = 0x005F;
+
+    /// <summary>SellItems {u32 vendor, u32 count, count x {i32 amount, u32 item}} (<c>CM_Vendor::Event_Sell</c>, 11.4186 0x006AA000, 11.6096
+    /// 0x006AAF60; ACE <c>GameActionSellItems</c>; M4 3.2 s0).</summary>
+    public const uint SellItems = 0x0060;
+
+    /// <summary>IdentifyObject {u32 guid} (<c>CM_Item::Event_Appraise</c>, 11.4186 0x006A8540, 11.6096 0x006A94A0; ACE
+    /// <c>GameActionIdentifyObject</c>; M4 3.2 s0).</summary>
+    public const uint IdentifyObject = 0x00C8;
+
+    /// <summary>AddShortCut {u32 index, u32 object, u16 spell, u16 layer} (<c>CM_Character::Event_AddShortCut</c>, 11.4186 0x006A0EB0, 11.6096
+    /// 0x006A1CD0; ACE <c>GameActionAddShortcut</c>; M4 3.2 s0).</summary>
+    public const uint AddShortCut = 0x019C;
+
+    /// <summary>RemoveShortCut {u32 index} (<c>CM_Character::Event_RemoveShortCut</c>, 11.4186 0x006A17C0, 11.6096 0x006A25E0; ACE
+    /// <c>GameActionRemoveShortcut</c>; M4 3.2 s0).</summary>
+    public const uint RemoveShortCut = 0x019D;
 
     /// <summary>CastUntargetedSpell {u32 spell id} (ACE <c>GameActionMagicCastUnTargetedSpell</c>).</summary>
     public const uint CastUntargetedSpell = 0x0048;

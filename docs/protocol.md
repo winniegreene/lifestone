@@ -433,10 +433,15 @@ M2: log in, create or select a character, enter the world at Holtburg, see objec
 | EA60 | AdminEnvirons (u32 environ id) | S→C | decoded and applied (M3 1.3 s2b: the sound options play from the UI sound table, the fog options are published and logged, the fog is not drawn: `TODO(m3-environs-fog)`; `TODO(m3-admin-environs)` is closed; docs/session.md section 15) | `GameMessageAdminEnvirons.cs` |
 | GM 0x0024 | InventoryRemoveObject (u32 guid) | S→C | decoded, applied (M3 1.2 s2) | `InventoryCodecs` |
 | GM 0x0197 | stack size (u8 seq, guid, stack, value) | S→C | decoded, applied (M3 1.2 s2) | `InventoryCodecs` |
+| GM 0x01A7 | AttackDone (u32 WeenieError: 0 ends one swing, and ACE repeats the run; 0x0036 or another code ends the run) | S→C | decoded, applied (M4 1.2 s1) | `Messages/Combat/AttackEventCodecs.cs`; `W/Player_Melee.cs` 226, 289 |
+| GM 0x01B8 | CombatCommenceAttack (no payload; opens each repeat of a run) | S→C | decoded, applied (M4 1.2 s1) | `Messages/Combat/AttackEventCodecs.cs` |
 | GM 0x019E | PlayerKilled (String16L, victim, killer) | S→C | decoded, applied (M3 1.2 s3) | `CombatCodecs` |
 | GM 0x02CE | public int property (u8 seq, guid, property, i32; CurrentWieldedLocation among them) | S→C | decoded, applied (M3 1.2 s2) | `InventoryCodecs` |
 | GM 0x02DA | public instance property (u8 seq, guid, property, u32; Container 2 and Wielder 3) | S→C | decoded, applied (M3 1.2 s2) | `InventoryCodecs` |
 | F7B1 / 0x00A1 | LoginComplete | C→S | must | `GameAction/Actions/GameActionLoginComplete.cs` |
+| F7B1 / 0x0008 | TargetedMeleeAttack {target, height, power} | C→S | sent (M4 1.2 s0) | `CombatActionCodecs.cs` (port of OpenAC `AttackTargetRequest.cs` at f22b048); ACE clamps power to 0..1 (`W/Player_Melee.cs` 90) |
+| F7B1 / 0x000A | TargetedMissileAttack {target, height, accuracy} | C→S | sent (M4 1.2 s0) | `CombatActionCodecs.cs`; ACE clamps accuracy to 0..1 (`W/Player_Missile.cs` 82) |
+| F7B1 / 0x01B7 | CancelAttack | C→S | sent (M4 1.2 s0) | `CombatActionCodecs.cs` |
 | F7B1 / 0xF61C | MoveToState | C→S | must | `GameActionMoveToState.cs`, `Motion/MoveToState.cs`, `Motion/RawMotionState.cs`, `Motion/MotionItem.cs` |
 | F7B1 / 0xF753 | AutonomousPosition | C→S | must | `GameActionAutonomousPosition.cs` |
 | F7B1 / 0xF61B | Jump | C→S | should | `GameActionJump.cs`, `Structure/JumpPack.cs` |
@@ -449,6 +454,14 @@ M2: log in, create or select a character, enter the world at Holtburg, see objec
 | F7B1 / 0x0046 | RaiseSkill (u32 skill, u32 experience) | C→S | should (M3 1.1) | `GameActionRaiseSkill.cs` |
 | F7B1 / 0x0047 | TrainSkill (u32 skill, i32 credits) | C→S | should (M3 1.1) | `GameActionTrainSkill.cs` |
 | F7B1 / 0x0054 | StackableMerge (u32 mergeFrom, u32 mergeTo, i32 amount); retail sender `CM_Inventory::Event_StackableMerge` (11.4186 0x006ABE70, 11.6096 0x006ACDD0). ACE answers 0x0024 then 0x0197 for a whole source stack, 0x0197 for the source then for the target for a partial merge, or 0x00A0 for the refusals that tell; no F747 and no 0x02CD (docs/session.md section 7). Implemented: the codec, `SendStackableMerge`, the `MergeStack` tracker, the stand-in. Tests: `InventoryActionCodecTests`, `WorldSendTests`, `MergeStackTrackerTests`, `StandInMergeTests` | C→S | should (M3 1.4 fix A) | `GameActionStackableMerge.cs` |
+| GE 0x0196 ViewContents | S→C | should (M4 2.1 s0) | decoded and applied, M4 2.1 s0: {u32 container, u32 count, count × {u32 item guid, u32 ContainerType}} (§5.3). Ported from OpenAC f22b048 (`GameEvents.cs`, `ParseViewContents`) and checked against ACE `GameEventViewContents.cs` |
+| GE 0x0052 CloseGroundContainer | S→C | should (M4 2.1 s0) | decoded and applied, M4 2.1 s0: {u32 container} (§5.3). Ported from OpenAC `GameEvents.cs` (`ParseCloseGroundContainer`) and checked against ACE `GameEventCloseGroundContainer.cs` |
+| GA 0x0195 NoLongerViewingContents | C→S | should (M4 2.1 s0) | sent, M4 2.1 s0: {u32 container} (§5.4). Ported from OpenAC `InventoryActions.cs` and checked against ACE |
+| GA 0x001B DropItem | C→S | should (M4 2.1 s0) | sent, M4 2.1 s0: {u32 item} (§5.4). Ported from OpenAC `InventoryActions.cs`, checked against ACE |
+| GA 0x0055 StackableSplitToContainer | C→S | should (M4 2.1 s0) | sent, M4 2.1 s0: {u32 stack, u32 container, i32 placement, i32 amount} (§5.4). Ported and checked as above |
+| GA 0x0056 StackableSplitTo3D | C→S | should (M4 2.1 s0) | sent, M4 2.1 s0: {u32 stack, i32 amount} (§5.4). Ported and checked as above |
+| GA 0x019B StackableSplitToWield | C→S | should (M4 2.1 s0) | sent, M4 2.1 s0: {u32 stack, u32 EquipMask, i32 amount} (§5.4). Ported and checked as above |
+| GA 0x00CD GiveObjectRequest | C→S | should (M4 2.1 s0) | sent, M4 2.1 s0: {u32 target, u32 item, i32 amount} (§5.4). Ported and checked as above |
 | F653 | CharacterLogOff | C→S and S→C | must | `CharacterHandler.CharacterLogOff`, `GameMessageCharacterLogOff.cs` |
 | F7B1 / 0x01E9 → GameEvent 0x01EA | PingRequest / PingResponse | C→S / S→C | skip | `GameActionPingRequest.cs`, `GameEventPingResponse.cs` |
 
@@ -641,12 +654,27 @@ No trailing Align. A 4-byte multiple happens by construction (`PositionPack.cs`)
 - **Inventory (GE 0022, 0023, 019A, 00A0).** 0022 is item, container, placement and container type; 0023 is item and equip mask; 019A is item; 00A0 is item and WeenieError.
 - **Combat and death (GE 01AC, 01AD, 01B1 to 01B4).** 01AC, 01AD, 01B3 and 01B4 are one String16L; 01B1 is String16L, u32 damage type, f64 percent, u32 damage, u32 critical, u64 attack conditions; 01B2 is the same with a u32 damage location after the damage, then ACE's Align (a no-op).
 - **The quality stamp.** The per-object quality stamp (`WTimeStamper::UpdateTS`, 0x006B3CB0) applies to 02CE, 02DA and 0197.
+- **Containers (GE 0196, 0052; M4 2.1 s0).** 0196 is {container, count, count × {item guid, ContainerType}}; ContainerType is 0 NonContainer, 1 Container (WeenieType.Container) or 2 Foci (RequiresPackSlot). ACE sorts the entries by PlacementPosition (`GameEventViewContents.cs` 13-26). 0052 is {container} (`GameEventCloseGroundContainer.cs` 9-13). The reducer's use of them is in §6 and §15 of docs/session.md.
 - **Wield order.** ACE's wield (`Player_Inventory.cs:297-306`) sends 02DA Wielder 0 and 02CE CurrentWieldedLocation 0 before GE 0023 names the location; the unwield (400-405) sends the same two zeros before the 0022 into the pack. Membership is therefore taken from 0023 and 0022 only.
 - **Applied by the reducer.** 0022, 0023, 019A, 0024, 0197, 02CE, 02DA and 00A0 (`GameStateReducer.Inventory.cs`; section 15 of docs/session.md). Container, Wielder and WieldedLocation are the properties they set; Burden is read, but the server sends no capacity (`TODO(m3-burden-capacity)`).
+
+#### Vendor and appraisal (M4 3.2 s0)
+
+- **GameEvent 0x0062 ApproachVendor:** u32 vendor, u32 type mask, u32 min value, u32 max value, u32 DealMagicalItems, f32 BuyPrice (the rate the vendor pays), f32 SellPrice (the rate it charges), u32 alternate-currency wcid, u32 alternate-currency count, String16L plural name, u32 numItems, then per row an i32 packed stack (`stack & 0xFFFFFF | -1 << 24`: the low 24 bits are the stack, 0xFFFFFF is unlimited supply, the high byte is the pwdType and always 0xFF), the object's guid and its PublicWeenieDesc block, then ACE's closing Align (ACE `GameEventApproachVendor.cs:14-63`; decoded by `VendorCodecs`; retail `VendorProfile::UnPack` 11.6096 0x005D2D20, `ItemProfile::UnPack` 0x005D2910, bodies not read).
+- **GameEvent 0x00C9 IdentifyObjectResponse:** u32 guid, u32 flags, u32 success (0 is a result), then by flag bit in ACE's fixed order the Int (0x1), Int64 (0x2000), Bool (0x2), Float (0x4, f64 values), String (0x8) and DataId (0x1000) tables (u16 count, u16 bucket count, count x {u32 key, value}, rows sorted by key % buckets then key; buckets 16 for ints, 8 for the rest), the SpellBook (0x10: u32 count and the ids, an item enchantment or'ed 0x80000000), the Armor (0x80: 8 x f32), Creature (0x100: flags, health, max health, ten attribute words when flag 0x8, two u16 masks when flag 0x1), Weapon (0x20: four u32, five f64, one u32) and Hook (0x40: three u32) profiles, the armour (0x200), weapon (0x800) and resist (0x400) u16 highlight and u16 colour pairs in that order, and the nine u32 ArmorLevels (0x4000) (ACE `AppraiseInfo.cs:743-786`; decoded by `AppraiseCodecs`; retail `AppraisalProfile::UnPack` 11.6096 0x005B4A30, body not read).
+- **The vendor's rows in the live order (capture C1, C2; cache/m4/3-2/capture.md, gitignored):** the 0062 arrives 0.65 to 1.04 s after the UseDone of the Use that opened the shop, and again after every trade: before the coins in C1's sale and before a buy's UseDone (C1), after the UseDone in C2's sale. A GE 0x02BD follows every 0062 at once (`TODO(m4-ge-02bd)`).
 
 ### 5.4 World-phase, client-to-server layouts
 
 These are retail layouts, checked against the 11.4186 decompilation; ACE reads them.
+
+**Item moves (M4 2.1 s0; sent by the Action API).** GA 0x0195 NoLongerViewingContents {u32 container}; 0x001B DropItem {u32 item};
+0x0055 StackableSplitToContainer {u32 stack, u32 container, i32 placement, i32 amount}; 0x0056 StackableSplitTo3D {u32 stack,
+i32 amount}; 0x019B StackableSplitToWield {u32 stack, u32 EquipMask, i32 amount}; 0x00CD GiveObjectRequest {u32 target,
+u32 item, i32 amount}. The readers take each field as written (signed or unsigned as listed) and none checks the amount:
+ACE's Player handlers refuse an amount of 0 or less (SplitTo3D and Give also send a transient string, "Split amount not
+valid!" and "Give amount not valid!"). The retail senders are not cited yet (`TODO(m4-item-move-retail-cites)`, none named at
+11.6096).
 
 **F61C MoveToState** (sent on every change in input state): RawMotionState, then Position (u32 cell, 3 × f32 origin, 4 × f32 W, X, Y, Z), then u16 instance, u16 server-control, u16 teleport, u16 force-position (each echoing the player's latest values), then u8 (bit0 = contact/on-ground, bit1 = standing long-jump), then Align. Sources: `CMInterpPrim.c RawMotionState::Pack`, `CPackClasses.c MoveToStatePack::Pack`, `ACE Motion/MoveToState.cs`.
 
@@ -687,6 +715,7 @@ Running is forward = WalkForward plus current hold key = Run (2). ACE turns that
 - **The four stat actions (M3 1.1; `StatActionCodecs`):** F7B1 {sequence, type} then two 32-bit words, 20 bytes in all. **0x0044 RaiseVital** {u32 vital: the maximum's id 1, 3 or 5, u32 experience} (`CM_Train::Event_TrainAttribute2nd`, 11.4186 0x006A8040, 11.6096 0x006A8FA0); **0x0045 RaiseAttribute** {u32 attribute 1 to 6, u32 experience} (`Event_TrainAttribute`, 0x006A7F30 / 0x006A8E90); **0x0046 RaiseSkill** {u32 skill, u32 experience} (`Event_TrainSkill`, 0x006A8150 / 0x006A90B0); **0x0047 TrainSkill** {u32 skill, **i32** credits} (`Event_TrainSkillAdvancementClass`, 0x006A8260 / 0x006A91C0). The experience is unsigned because level 126 costs 4,286,609,098, which an i32 cannot hold (ACE reads `ReadUInt32` for it and `ReadInt32` for the credits). ACE answers in its own order: 0x02CF available experience first (SpendXP), then the stat's private update (0x02E3 attribute, 0x02E7 vital, 0x02DD skill; a train adds 0x02CD credits and a chat line), and refuses most bad requests silently; docs/session.md section 29 has what each completes on.
 - **0x005D Tell:** String16L message, then String16L target, both ASCII and the target non-empty (`CM_Communication::Event_TalkDirectByName`, 11.4186 0x006A4780, 11.6096 0x006A55A0).
 - Talk: its text is the last field, so it may be Windows-1252.
+- **The vendor and shortcut actions (M4 3.2 s0):** **GA 0x005F BuyItems** and **0x0060 SellItems**: u32 vendor, u32 count, then per item an i32 amount and a u32 guid, in that order, and nothing after the last item (ACE reads no alternate-currency word: it is commented out in `GameActionBuyItems.cs:29-32`); **0x00C8 IdentifyObject:** u32 guid (0 clears the appraisal target and gets no reply); **0x019C AddShortCut:** u32 index (0-based), u32 object, u16 spell, u16 layer; **0x019D RemoveShortCut:** u32 index. Retail senders `CM_Vendor::Event_Buy` 0x006AB050, `Event_Sell` 0x006AAF60, `CM_Item::Event_Appraise` 0x006A94A0, `CM_Character::Event_AddShortCut` 0x006A1CD0, `Event_RemoveShortCut` 0x006A25E0 (11.6096; bodies not read).
 
 ---
 
@@ -867,7 +896,7 @@ All four defects are fixed (N2, N7); `docs/third-party/net.md`, "Defects fixed i
 
 ### 9.1 What to vendor (MIT; keep OpenAC's LICENSE text in `src/Lifestone.Net/THIRD-PARTY-NOTICES.md` and a header in each copied file)
 
-Copy with `AcDream.Core.Net` replaced by `Lifestone.Net`. Line counts are from the pinned commit.
+Copy with `AcDream.Core.Net` replaced by `Lifestone.Net`. Line counts are from the pinned commit. The M4 wire's ports (the 0x0008, 0x000A and 0x01B7 sends and the GameEvents 0x01A7 and 0x01B8 of section 5.1) pin OpenAC's signed head f22b048 (2026-10-19), not 1ee5a08: `NetProvenanceTests` and `tests/Lifestone.Client.Tests/Repository/PortHeaders.cs` list the f22b048 pin.
 
 | Area | OpenAC source → Lifestone.Net | Changes |
 |---|---|---|
@@ -880,6 +909,8 @@ Copy with `AcDream.Core.Net` replaced by `Lifestone.Net`. Line counts are from t
 | World codecs | `Messages/{CreateObject, PublicWeenieDescBody, PhysicsSpawnData, DeleteObject, UpdatePosition, UpdateMotion, VectorUpdate, SetState, ParentEvent, PickupEvent, ObjDescEvent, PrivateUpdatePosition}.cs` | Replace `AcDream.Core.Items` and `Physics` types with small Lifestone records; defect 2 |
 | Movement | `Messages/{MoveToState, RawMotionStatePacker, AutonomousPosition, JumpAction}.cs` + `AcDream.Core/Physics/RawMotionState.cs` (181) | Defect 1 |
 | Later | `Messages/PlayerDescriptionParser.cs` (684), `GameEvents.cs`, `PrivateUpdate*.cs` | Decouple from Core |
+
+The M4 3.2 s0 ports (`VendorCodecs`, `VendorActionCodecs`, `AppraiseCodecs`) are from OpenAC f22b048; the four source files are byte-identical at 1ee5a08. Two ways in which OpenAC and ACE differ: `BuildBuy` appends a u32 alternate-currency id that ACE never reads (dropped), and `VendorApproach` sign-extends the packed stack's low 24 bits where ACE writes a pwdType in the high byte (kept as a check).
 
 Do **not** vendor:
 

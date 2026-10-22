@@ -52,6 +52,7 @@ public static partial class OptionCatalog
         Buff(), // the buff cycle's four options (M3 2.1 s0b; OptionCatalog.Buff.cs)
         Fight(), // the fight loop's two options (M3 3.1 lane fa; OptionCatalog.Fight.cs)
         Death(), // the death loop's one option (M3 3.2 lane da; OptionCatalog.Death.cs)
+        Hunt(), // the hunt loop's three options (M4 1.2 s4a; OptionCatalog.Hunt.cs)
         Lights(), // the viewer light (M3 4.1 s0; OptionCatalog.Lights.cs)
     ]);
 

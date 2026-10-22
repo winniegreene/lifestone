@@ -137,6 +137,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             _staged = manager.BeginRootElement(UiLayoutEnums.GameplayRoot.LayoutEnum, UiLayoutEnums.GameplayRoot.ElementId);
             if (_staged is not null)
             {
+                BeginNoGcWindow();
                 if (context.Notices is { } notices)
                 {
                     notices.ExpectWindows = true;
@@ -177,6 +178,83 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
 
     /// <summary>The frames that built the shell when it is staged (0 when it was built at once).</summary>
     public int BuildFrames { get; private set; }
+
+    /// <summary>Report-only (M4 1.1 s4): the collector's work inside the build's own frames (StepBuild), the total pause in milliseconds and the collections per generation, so a probe reads the shell's GC share.</summary>
+    public (double PauseMilliseconds, int Gen0, int Gen1, int Gen2) BuildGc => (_buildGcPause, _buildGc0, _buildGc1, _buildGc2);
+
+    /// <summary>Report-only: the collector's pause in the slowest wiring unit, in milliseconds.</summary>
+    public double LongestWiringUnitGcPauseMilliseconds { get; private set; }
+
+    /// <summary>Report-only: what the no-GC window did ("off", "refused", "held" or "ended early"); its sizing is in <see cref="NoGcWindowSizing"/>.</summary>
+    public string NoGcWindowReport => _noGc.Report;
+
+    /// <summary>Report-only: the heap count the window was sized for and the bytes it asked for, and "UNDERSIZED" when the cap cut the request (by the per-heap estimate the window may end early on that many heaps; this machine's 32 heaps held 11 MiB under a 512 MiB request, so the estimate is conservative).</summary>
+    public string NoGcWindowSizing => $"heaps {_noGc.Heaps} ({_noGc.HeapSource}), requested {_noGc.RequestedBytes / (1024 * 1024)} MiB{(_noGc.Undersized ? $", UNDERSIZED: {_noGc.Heaps} heaps need more than the {NoGcWindow.CapBytes / (1024 * 1024)} MiB cap by the per-heap estimate, the window may end early; the held or ended-early state is the measurement" : string.Empty)}";
+
+    private readonly NoGcWindow _noGc = new();
+    private long _allocStart;
+
+    // Test seam (internal, set only by the test assembly's module initializer): the window is off under the test host unless a test turns it on.
+    internal static bool NoGcWindowEnabled = true;
+
+    private void BeginNoGcWindow()
+    {
+        _allocStart = GC.GetAllocatedBytesForCurrentThread();
+        if (NoGcWindowEnabled)
+        {
+            _noGc.Begin();
+        }
+    }
+
+    private void EndNoGcWindow() => _noGc.End();
+
+    // M4 1.1 fix (R2): the first collection after the window ends, measured on the game thread's frames (Update), report-only.
+    private bool _postWindowWatching;
+    private int _postWindowFrames;
+    private int _postGc0;
+    private int _postGc1;
+    private int _postGc2;
+    private TimeSpan _postPause;
+
+    /// <summary>Report-only: the first collection after the no-GC window ended ("pending" until one runs; "gen1 6.2 ms, 3 frames after Complete"; "none in N frames").</summary>
+    public string PostWindowGcReport { get; private set; } = "pending";
+
+    private const int PostWindowGcWatchFrames = 900;
+
+    private void WatchPostWindowGc()
+    {
+        if (!_postWindowWatching)
+        {
+            return;
+        }
+
+        _postWindowFrames++;
+        var gc0 = GC.CollectionCount(0);
+        var gc1 = GC.CollectionCount(1);
+        var gc2 = GC.CollectionCount(2);
+        var pause = GC.GetTotalPauseDuration();
+        if (gc0 != _postGc0 || gc1 != _postGc1 || gc2 != _postGc2)
+        {
+            var generation = gc2 != _postGc2 ? 2 : gc1 != _postGc1 ? 1 : 0;
+            var milliseconds = (pause - _postPause).TotalMilliseconds; // every thread's pause since the last frame's snapshot: the first collection's, as none ran before it
+            PostWindowGcReport = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"gen{generation} {milliseconds:0.0} ms, {_postWindowFrames} frames after Complete");
+            _postWindowWatching = false;
+            _context.Manager.Services.Log.Info(UiElementManager.Category, $"the in-game shell: first collection after the no-gc window ({NoGcWindowReport}): {PostWindowGcReport} (collections gen0/1/2 {gc0 - _postGc0}/{gc1 - _postGc1}/{gc2 - _postGc2}; TODO(m3-ui-step-gc-margin) closes only if this is under the 12 ms margin)");
+            return;
+        }
+
+        _postPause = pause;
+        if (_postWindowFrames >= PostWindowGcWatchFrames)
+        {
+            PostWindowGcReport = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"none in {_postWindowFrames} frames");
+            _postWindowWatching = false;
+        }
+    }
+
+    private double _buildGcPause;
+    private int _buildGc0;
+    private int _buildGc1;
+    private int _buildGc2;
 
     /// <summary>The longest single unit of the staged build (an element, an initialize or a controller), in milliseconds; 0 when it was built at once.</summary>
     public double LongestBuildUnitMilliseconds => Math.Max(_staged?.LongestUnitMilliseconds ?? 0.0, _longestWiringUnit);
@@ -329,6 +407,12 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
     private void Complete()
     {
         IsBuilt = true;
+        EndNoGcWindow();
+        _postGc0 = GC.CollectionCount(0);
+        _postGc1 = GC.CollectionCount(1);
+        _postGc2 = GC.CollectionCount(2);
+        _postPause = GC.GetTotalPauseDuration();
+        _postWindowWatching = !_disposed;
         if (_context.Notices is { } notices)
         {
             notices.ExpectWindows = false;
@@ -341,7 +425,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             UiElementManager.Category,
             _staged is null
                 ? $"the in-game shell was built: root {rootMilliseconds:0.0} ms, wiring {wiringMilliseconds:0.0} ms"
-                : $"the in-game shell was built over {BuildFrames} frames (budget {BuildBudgetMilliseconds:0.0} ms a frame): root {rootMilliseconds:0.0} ms, wiring {wiringMilliseconds:0.0} ms, longest frame {LongestBuildFrameMilliseconds:0.0} ms, longest unit {LongestBuildUnitMilliseconds:0.0} ms (staged unit ended in '{_staged?.LongestUnitPhase}'; wiring unit #{_longestWiringUnitIndex} took {_longestWiringUnit:0.0} ms; slowest controller {PanelControllers?.LongestControllerName} {PanelControllers?.LongestControllerMilliseconds:0.0} ms), {System.Diagnostics.Stopwatch.GetElapsedTime(_buildStart).TotalMilliseconds:0} ms from the start");
+                : $"the in-game shell was built over {BuildFrames} frames (budget {BuildBudgetMilliseconds:0.0} ms a frame): root {rootMilliseconds:0.0} ms, wiring {wiringMilliseconds:0.0} ms, longest frame {LongestBuildFrameMilliseconds:0.0} ms, longest unit {LongestBuildUnitMilliseconds:0.0} ms (staged unit ended in '{_staged?.LongestUnitPhase}'; wiring unit #{_longestWiringUnitIndex} took {_longestWiringUnit:0.0} ms; staged unit gc {_staged?.LongestUnitGcPauseMilliseconds:0.0} ms {_staged?.LongestUnitGcCollections}; wiring unit gc {LongestWiringUnitGcPauseMilliseconds:0.0} ms; build gc {_buildGcPause:0.0} ms gen0/1/2 {_buildGc0}/{_buildGc1}/{_buildGc2}; no-gc window {NoGcWindowReport} (start {_noGc.StartMilliseconds:0.0} ms, {NoGcWindowSizing}, allocated {(GC.GetAllocatedBytesForCurrentThread() - _allocStart) / 1024} KiB); post-window gc is measured on the frames after this line and logged when it runs; slowest controller {PanelControllers?.LongestControllerName} {PanelControllers?.LongestControllerMilliseconds:0.0} ms), {System.Diagnostics.Stopwatch.GetElapsedTime(_buildStart).TotalMilliseconds:0} ms from the start");
         if (_placeholders.Count > 0)
         {
             manager.LogOnce(
@@ -353,6 +437,30 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
 
     // One frame of the staged build: units of work (an element, an initialize, a controller) until the budget is spent.
     private void StepBuild()
+    {
+        var gc0 = GC.CollectionCount(0);
+        var gc1 = GC.CollectionCount(1);
+        var gc2 = GC.CollectionCount(2);
+        var gcPause = GC.GetTotalPauseDuration();
+        try
+        {
+            StepBuildUnits();
+        }
+        catch
+        {
+            EndNoGcWindow(); // a build that throws must not leave the process's collector held off (R3)
+            throw;
+        }
+        finally
+        {
+            _buildGc0 += GC.CollectionCount(0) - gc0;
+            _buildGc1 += GC.CollectionCount(1) - gc1;
+            _buildGc2 += GC.CollectionCount(2) - gc2;
+            _buildGcPause += (GC.GetTotalPauseDuration() - gcPause).TotalMilliseconds;
+        }
+    }
+
+    private void StepBuildUnits()
     {
         var start = System.Diagnostics.Stopwatch.GetTimestamp();
         var deadline = start + (long)(BuildBudgetMilliseconds * System.Diagnostics.Stopwatch.Frequency / 1000.0);
@@ -388,6 +496,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             }
 
             var unit = System.Diagnostics.Stopwatch.GetTimestamp();
+            var unitGcPause = GC.GetTotalPauseDuration();
             var more = _wiring.MoveNext();
             var ended = System.Diagnostics.Stopwatch.GetTimestamp();
             var unitMilliseconds = System.Diagnostics.Stopwatch.GetElapsedTime(unit, ended).TotalMilliseconds;
@@ -395,6 +504,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             if (unitMilliseconds > _longestWiringUnit)
             {
                 _longestWiringUnit = unitMilliseconds;
+                LongestWiringUnitGcPauseMilliseconds = (GC.GetTotalPauseDuration() - unitGcPause).TotalMilliseconds;
                 _longestWiringUnitIndex = _wiringUnitIndex; // report-only: the Nth Wire() yield (1-based) was the slowest
             }
 
@@ -541,6 +651,10 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         {
             StepBuild();
         }
+        else
+        {
+            WatchPostWindowGc();
+        }
 
         Chat?.Update();
         RadarUi?.Update();
@@ -589,6 +703,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         }
 
         _disposed = true;
+        EndNoGcWindow();
         _subscription.Dispose();
         if (_staged is { Done: false } half)
         {

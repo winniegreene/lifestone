@@ -57,6 +57,7 @@ internal sealed partial class GameStateReducer : IAcSessionSink
         _bus = bus;
         _clock = clock;
         _log = log;
+        WireAttack(); // the player's own swing F74C (M4 1.2 s2, closes TODO(m4-attack-wire-ctor)): wired from the start, so the bus's handler count is the same from the first event
     }
 
     /// <summary>The state this reducer writes.</summary>

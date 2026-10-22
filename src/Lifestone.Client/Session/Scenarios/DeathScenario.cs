@@ -27,7 +27,8 @@ namespace Lifestone.Client.Session.Scenarios;
 /// enchantment's expiry among them, are ignored and counted); <c>den-place</c>, <c>den-teleporting</c>, <c>den-settle</c> (the floor rule of D12: a settle off the floor fails); <c>unbuff</c>,
 /// <c>unbuff-dying</c>, <c>unbuff-arrival</c>, <c>unbuff-vitals</c> (the suicide, its death, the death's teleport, the arrival and ACE's 3 s of vitals; then the den stages again); <c>death-mode</c>, <c>death-wait</c> (non-combat among
 /// the tuskers; <see cref="IFightWalk"/> walks to the nearest tusker cell first and on to the next tour cell when no blow came in <see cref="IdleLegSeconds"/> s; the walk is ticked from <c>den-teleporting</c> to <c>death-wait</c>
-/// and nowhere else, and a leg still running when the death or the StopAfterHits stop comes is abandoned); <c>respawn</c>, <c>respawn-vitals</c>; <c>regear</c>; <c>logging-off</c>, <c>quitting</c>, <c>done</c>. With
+/// and nowhere else, and a leg still running when the death or the StopAfterHits stop comes is abandoned); <c>respawn</c>, <c>respawn-vitals</c>; M4 2.2 s1: <c>corpse-teleporting</c>, <c>corpse-settle</c>, <c>corpse-seek</c>, <c>corpse-opening</c>, <c>corpse-looting</c>, <c>corpse-closing</c>, <c>corpse-return</c>, <c>corpse-return-settle</c> (the trip back for the mage's own corpse, <c>DeathScenario.Corpse.cs</c>; skipped, named, by <c>--death-recover-corpse off</c> or a failed precondition); <c>regear</c>; M4 3.1 d1: <c>unbuff-decoys</c> (after <c>unbuff-vitals</c>: the decoys the suicide dropped are spawned again, <c>DeathScenario.TopUp.cs</c>), <c>rebuff</c>, <c>rebuff-peace</c>, <c>fight</c> and <c>pretrip-heal</c> (Heal Self VII and regeneration before the trip when the health share is the one failing precondition, <c>DeathScenario.Heal.cs</c>) (the composed inner
+/// <see cref="FightScenario"/>; the order, the freeze of the judged measures and the decoy fields are in <c>DeathScenario.Order.cs</c>: after <c>respawn-vitals</c> the order is <c>regear</c>, <c>rebuff</c>, <c>fight</c>, <c>corpse-*</c> with the fight on, M4 2.2's <c>corpse-*</c>, <c>regear</c> with it off); <c>logging-off</c>, <c>quitting</c>, <c>done</c>. With
 /// <c>endSession: false</c> (the game's leg, the tests) it ends at <c>done</c> in the world.</para>
 /// <para><b>What counts.</b> <c>died</c> is the 0x01AC victim notices: a suicide sends none (<c>Player_Death.cs</c> 299-345), so the suicide's death is <c>suicides=1</c>, in <c>deaths</c> (the NumDeaths delta) and, through its
 /// purge, in <c>purged</c>. The tally is not reset after the suicide, so every counter is the run's; <c>respawn</c> reads the last arrival.</para>
@@ -37,7 +38,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// away from the lifestone the bind used (or, when the run did not bind, with no lifestone near: <c>respawn=elsewhere</c>, the arrival cell named) and a re-gear that leaves the kit not wielded.</para>
 /// <para>Per-step code allocates nothing but log lines on events: the handlers are subscribed once and the health share is formatted only when it crosses a 10% step.</para>
 /// </remarks>
-public sealed class DeathScenario : IScenario, IDisposable
+public sealed partial class DeathScenario : IScenario, IDisposable
 {
     /// <summary>The scenario's token (<c>--scenario=death-and-regear</c>).</summary>
     public const string ScenarioName = "death-and-regear";
@@ -196,8 +197,11 @@ public sealed class DeathScenario : IScenario, IDisposable
     /// <param name="endSession">True: log off and quit when done. False: end at <c>done</c> in the world.</param>
     /// <param name="stages">The stages to run (<see cref="DeathStages.All"/>).</param>
     /// <param name="approach">The walk that takes the player to the lifestone before the Use (<see cref="HoltburgApproach"/> in the headless host, dd's game walk in the game), or null: the Use is sent from where the player stands, which ACE answers only when the player is already in range.</param>
-    public DeathScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, DeathOptions death, IFightWalk? walk, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, DeathStages stages = DeathStages.All, IApproachWalk? approach = null)
-        : this(GearKit.Build(spells ?? throw new ArgumentNullException(nameof(spells)), account), spells, death, walk, log, arrivalSeconds, endSession, stages, approach)
+    /// <param name="buff">M4 3.1 d1: the buff cycle's options for the rebuff stage, or null for the cycle's defaults.</param>
+    /// <param name="fight">M4 3.1 d1: the fight's options for the fight stage, or null for <see cref="FightOptions"/> with <see cref="DeathOptions.FightKills"/> and <see cref="DeathOptions.FightSeconds"/>.</param>
+    /// <param name="fightFactory">M4 3.1 d1: how the composed inner fight scenario is made (default <see cref="DefaultFightLeg"/>, the real <see cref="FightScenario"/>); the tests give a scripted one.</param>
+    public DeathScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, DeathOptions death, IFightWalk? walk, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, DeathStages stages = DeathStages.All, IApproachWalk? approach = null, BuffOptions? buff = null, FightOptions? fight = null, FightLegFactory? fightFactory = null)
+        : this(GearKit.ForDeathLoop(spells ?? throw new ArgumentNullException(nameof(spells)), account, death ?? throw new ArgumentNullException(nameof(death))), spells, death, walk, log, arrivalSeconds, endSession, stages, approach, buff, fight, fightFactory)
     {
     }
 
@@ -211,7 +215,10 @@ public sealed class DeathScenario : IScenario, IDisposable
     /// <param name="endSession">True: log off and quit when done. False: end at <c>done</c> in the world.</param>
     /// <param name="stages">The stages to run.</param>
     /// <param name="approach">The walk that takes the player to the lifestone before the Use, or null.</param>
-    public DeathScenario(GearKit kit, IReadOnlyDictionary<uint, SpellInfo> spells, DeathOptions death, IFightWalk? walk, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, DeathStages stages = DeathStages.All, IApproachWalk? approach = null)
+    /// <param name="buff">M4 3.1 d1: the buff cycle's options for the rebuff stage, or null for the cycle's defaults.</param>
+    /// <param name="fight">M4 3.1 d1: the fight's options for the fight stage, or null for <see cref="FightOptions"/> with <see cref="DeathOptions.FightKills"/> and <see cref="DeathOptions.FightSeconds"/>.</param>
+    /// <param name="fightFactory">M4 3.1 d1: how the composed inner fight scenario is made (default <see cref="DefaultFightLeg"/>), or null.</param>
+    public DeathScenario(GearKit kit, IReadOnlyDictionary<uint, SpellInfo> spells, DeathOptions death, IFightWalk? walk, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, DeathStages stages = DeathStages.All, IApproachWalk? approach = null, BuffOptions? buff = null, FightOptions? fight = null, FightLegFactory? fightFactory = null)
     {
         ArgumentNullException.ThrowIfNull(kit);
         ArgumentNullException.ThrowIfNull(spells);
@@ -219,6 +226,10 @@ public sealed class DeathScenario : IScenario, IDisposable
         ArgumentNullException.ThrowIfNull(log);
         (_kit, _spells, _options, _walk, _endSession, _stages, _arrivalSeconds, _log) = (kit, spells, death, walk, endSession, stages, arrivalSeconds, log);
         _approach = approach;
+        _regearKit = kit.HasDecoys ? kit.WithDecoys([]) : kit; // M4 3.1 d1: the decoys the death dropped are on the corpse; a regear that spawned them would carry a second copy of each
+        _buffOptions = buff ?? new BuffOptions();
+        _fightOptions = fight ?? new FightOptions { Kills = death.FightKills, Seconds = death.FightSeconds };
+        _fightFactory = fightFactory ?? DefaultFightLeg;
         _gear = (stages & DeathStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) : null;
         _exit = new DenExit(log, LogCategory);
         _holtburg = _exit.Destination;
@@ -344,12 +355,19 @@ public sealed class DeathScenario : IScenario, IDisposable
         var measures = _view is null
             ? new DeathLegMeasures(_tally.VictimNotices, _suicides, _tally.Deaths, _tally.VitaePercent, DeathRespawn.None, _tally.CorpsesSeen, _tally.Purges, _tally.ProtectedHits, null, _gearRestored, worn, _tally.HitsTaken, _tally.DamageTaken, _tally.Evades, null, seconds, deathFrameMaxMs, fightFrameMaxMs, _tally.StaleCorpses, _tally.Protection, _vitaePaid, _vitaeAfter)
             : DeathLegVerdict.Measure(_tally, _view.State.Objects, _suicides, _gearRestored, worn, seconds, deathFrameMaxMs, fightFrameMaxMs, BoundLifestone);
+        if (_atRespawn is { } atRespawn)
+        {
+            // M4 2.2 s1 and 3.1 d1: the stages after the respawn ran (the regear, the rebuff, the fight, the corpse trip), so M3's tally-derived measures stay as the respawn's vitals wait left them (their blows, teleports and old corpses
+            // must not move died=, deaths=, vitae=, vitals_pct=, hits_taken=, health_min_pct= or protection=).
+            measures = atRespawn with { GearRestored = _gearRestored, Worn = worn, DeathSeconds = seconds, DeathFrameMaxMs = deathFrameMaxMs, FightFrameMaxMs = fightFrameMaxMs };
+        }
+
         if (_respawn is { } kept)
         {
             measures = measures with { Respawn = kept }; // the respawn stage's classification stands (it was taken at the arrival plus the vitals wait, in the world)
         }
 
-        return measures;
+        return measures with { CorpseLooted = CorpseLooted, ItemsRecovered = ItemsRecovered, TripSeconds = TripElapsedSeconds, TripAbort = _tripAbort, Rebuffed = _rebuffed, DenKills = _denKills, Decoys = DecoysCarried, DecoySafe = DecoySafeField, DecoysDropped = DecoysDropped, GearDropped = GearDropped, DecoysRecovered = DecoysRecovered, PretripHeals = _pretripHeals, GearLeft = GearLeft };
     }
 
     /// <summary>
@@ -489,6 +507,7 @@ public sealed class DeathScenario : IScenario, IDisposable
                     case ScenarioStatus.Succeeded:
                         _gearFields = _gear.VerdictFields();
                         _log.Info(LogCategory, "gear done (" + _gearFields + ")");
+                        RunDecoyCheck(session);
                         Enter("bars", clock);
                         break;
                 }
@@ -526,6 +545,8 @@ public sealed class DeathScenario : IScenario, IDisposable
                 return ArrivalStep(session, clock, "unbuff: ", "unbuff-vitals");
             case "unbuff-vitals":
                 return UnbuffVitalsStep(session, clock);
+            case "unbuff-decoys":
+                return UnbuffDecoysStep(session, clock);
 
             case "death-mode":
                 return DeathModeStep(session, clock);
@@ -537,10 +558,37 @@ public sealed class DeathScenario : IScenario, IDisposable
             case "respawn-vitals":
                 return RespawnVitalsStep(session, clock);
 
+            case "corpse-teleporting":
+                return CorpseTeleportingStep(session, clock);
+            case "corpse-settle":
+                return CorpseSettleStep(session, clock);
+            case "corpse-seek":
+                return CorpseSeekStep(session, clock);
+            case "corpse-opening":
+                return CorpseOpeningStep(session, clock);
+            case "corpse-looting":
+                return CorpseLootingStep(session, clock);
+            case "corpse-closing":
+                return CorpseClosingStep(session, clock);
+            case "corpse-return":
+                return CorpseReturnStep(session, clock);
+            case "corpse-return-settle":
+                return CorpseReturnSettleStep(session, clock);
+
             case "regear-settle":
                 return RegearSettleStep(session, clock);
             case "regear":
                 return RegearStep(session, now, clock);
+
+            case "pretrip-heal":
+                return PretripHealStep(session, clock);
+
+            case "rebuff":
+                return RebuffStep(session, now);
+            case "rebuff-peace":
+                return RebuffPeaceStep(session, clock);
+            case "fight":
+                return FightStep(session, now);
 
             case "leave-den":
                 return LeaveDenStep(session, clock);
@@ -599,6 +647,7 @@ public sealed class DeathScenario : IScenario, IDisposable
         _chatSubscription?.Dispose();
         _qualitiesSubscription?.Dispose();
         _approach?.Dispose();
+        _inner?.Dispose();
         _walk?.Dispose();
     }
 
@@ -640,10 +689,9 @@ public sealed class DeathScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
-        if (from <= DeathStages.Regear && (_stages & DeathStages.Regear) != 0 && !_stopped && !_diedEarly)
+        if (from <= DeathStages.Regear && RegearOn)
         {
-            _regear = new GearScenario(_kit, _log, _arrivalSeconds, endSession: false, cast: false, _spells);
-            Enter("regear-settle", clock);
+            StartRegear(clock);
             return ScenarioStatus.Running;
         }
 
@@ -967,9 +1015,21 @@ public sealed class DeathScenario : IScenario, IDisposable
 
         _unbuffNote = "suicide";
         _afterSuicide = true;
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"unbuff: the mage is unbuffed (vitae {_tally.VitaePercent}%, vitals {_tally.VitalsAfterArrivalPercent:0}%)"));
-        return Begin(DeathStages.Den, session, clock);
+        _ = _tally.SampleVitalsAfterArrival(); // the suicide's own restore, read at the end of its wait as the respawn's is (M4 2.2 fix R1)
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"unbuff: the mage is unbuffed (vitae {_tally.VitaePercent}%, {VitalsText(_tally)})"));
+        return BeginDecoyTopUp(session, clock); // M4 3.1 d1 F2: the suicide dropped items too: the decoys the pack lacks are spawned again before the den stages run again
     }
+
+    /// <summary>
+    /// The vitals after an arrival for the log: the judged share (each vital at the end of the vitals wait) and, report-only, the first 0x02E9 of each vital after the arrival beside the wait-end values, so a run shows when
+    /// a regeneration or drain update came before ACE's 75% (M4 2.2 fix R1). A figure not read is <c>n/a</c>.
+    /// </summary>
+    internal static string VitalsText(DeathTally tally) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"vitals {Share(tally.VitalsAfterArrivalPercent)}% (first health={Share(tally.FirstHealthAfterArrivalPercent)} stamina={Share(tally.FirstStaminaAfterArrivalPercent)} mana={Share(tally.FirstManaAfterArrivalPercent)}; at_wait_end health={Share(tally.HealthAfterArrivalPercent)} stamina={Share(tally.StaminaAfterArrivalPercent)} mana={Share(tally.ManaAfterArrivalPercent)})");
+
+    private static string Share(double percent) => double.IsNaN(percent) ? "n/a" : percent.ToString("0", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// The enchantments in the registry that a death's purge removes. ACE's <c>Die</c> sends the 0x02C6 and calls <c>RemoveAllEnchantments</c> (<c>Player_Death.cs</c> 211-216; <c>EnchantmentManager.cs</c> 358-365), which
@@ -1028,6 +1088,7 @@ public sealed class DeathScenario : IScenario, IDisposable
             return Fail(session, "death: the wait must walk to the tuskers but has no walker; TODO(m3-fight-no-walker)");
         }
 
+        CountDecoysAtDeath(session);
         _deathStart = clock;
         _lastBlowAt = clock;
         _blowMark = Blows();
@@ -1172,11 +1233,12 @@ public sealed class DeathScenario : IScenario, IDisposable
         var respawn = DeathLegVerdict.ClassifyRespawn(_tally, session.State.Objects, bound);
         _respawn = respawn; // the verdict keeps this classification and this arrival: a later re-measure never replaces it (the tally's arrival can be overwritten by a later position; after the log off the object table is empty)
         _respawnCell = _tally.ArrivalCell;
+        _ = _tally.SampleVitalsAfterArrival(); // M4 2.2 fix R1: the judged vitals are each vital's value at the END of this wait (ACE's 75% comes 3 s after the teleport, after any regeneration or drain tick), not the first update
         _log.Info(
             LogCategory,
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"respawn: {respawn.ToString().ToLowerInvariant()} (arrival cell 0x{_tally.ArrivalCell:X8}, classified against {(bound is { } b ? "the lifestone the bind used in cell 0x" + b.CellId.ToString("X8", CultureInfo.InvariantCulture) : "any lifestone object: this run did not bind")}, vitae {_tally.VitaePercent}%, vitals {_tally.VitalsAfterArrivalPercent:0}%, corpses {_tally.CorpsesSeen}, purges {_tally.Purges}, protected {_tally.ProtectedHits})"));
+                $"respawn: {respawn.ToString().ToLowerInvariant()} (arrival cell 0x{_tally.ArrivalCell:X8}, classified against {(bound is { } b ? "the lifestone the bind used in cell 0x" + b.CellId.ToString("X8", CultureInfo.InvariantCulture) : "any lifestone object: this run did not bind")}, vitae {_tally.VitaePercent}%, {VitalsText(_tally)}, corpses {_tally.CorpsesSeen}, purges {_tally.Purges}, protected {_tally.ProtectedHits})"));
         if (_diedEarly)
         {
             _log.Info(LogCategory, "respawn: " + respawn.ToString().ToLowerInvariant() + " (report-only under StopAfterHits)");
@@ -1188,7 +1250,7 @@ public sealed class DeathScenario : IScenario, IDisposable
             return Fail(session, string.Create(CultureInfo.InvariantCulture, $"respawn: respawn={respawn.ToString().ToLowerInvariant()}: the player arrived in cell 0x{_tally.ArrivalCell:X8} {(bound is { } at ? "more than " + DeathLegVerdict.LifestoneRadiusMetres.ToString("0", CultureInfo.InvariantCulture) + " m from the lifestone the bind used (cell 0x" + at.CellId.ToString("X8", CultureInfo.InvariantCulture) + ")" : "with no lifestone object within " + DeathLegVerdict.LifestoneRadiusMetres.ToString("0", CultureInfo.InvariantCulture) + " m")} (the bind to Holtburg's lifestone did not hold, D34)"));
         }
 
-        return Begin(DeathStages.Regear, session, clock);
+        return BeginPost(session, clock); // M4 3.1 d1: the measures freeze here, then the stages after the respawn in their order (DeathScenario.Order.cs)
     }
 
     // ------------------------------------------------------------------------------------------------ the regear
@@ -1255,13 +1317,13 @@ public sealed class DeathScenario : IScenario, IDisposable
             case ScenarioStatus.Succeeded:
                 _regearFields = _regear.VerdictFields();
                 _gearRestored = _regearFields.Contains("gear=wielded", StringComparison.Ordinal) && ParseWorn(_regearFields) == 5;
-                _log.Info(LogCategory, $"regear done ({_regearFields}); gear_restored={(_gearRestored ? "yes" : "no")}; the corpse is not looted (D8)");
+                _log.Info(LogCategory, $"regear done ({_regearFields}); gear_restored={(_gearRestored ? "yes" : "no")}; {RegearCorpseNote()}");
                 if (!_gearRestored)
                 {
                     return Fail(session, "regear: gear_restored=no (" + _regearFields + ")");
                 }
 
-                return Conclude(session, clock);
+                return NextPost(session, clock);
         }
 
         return ScenarioStatus.Running;
@@ -1469,6 +1531,7 @@ public sealed class DeathScenario : IScenario, IDisposable
 
         _walk?.Abandon();
         _approach?.Abandon();
+        _inner?.Dispose(); // the composed fight scenario follows the session and holds the shared walk: M4 3.1 d1
         _log.Error(LogCategory, why);
         FreezeMeasures(session);
         _log.Info(LogCategory, "verdict " + VerdictFields());

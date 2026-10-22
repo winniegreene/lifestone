@@ -249,6 +249,44 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
     }
 
     [Fact]
+    public void A_kit_item_already_in_the_pack_is_wielded_and_not_spawned_again_so_the_top_up_spawns_only_what_the_death_destroyed()
+    {
+        // M4 2.2 s1: the death loop's corpse trip puts the dropped kit items back in the pack, unwielded. The re-gear counts them by weenie class (PlayerTools.SpawnGear), requests nothing for them and wields them.
+        using var rig = new Rig();
+        var kit = GearKit.Of([Wand(), .. GearKit.Armour.Select(Armour)]);
+        var first = new GearScenario(kit, rig.Log, endSession: false, cast: false);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(first));
+        Assert.Equal("gear=wielded worn=5 kit=6/6 gear_steps=12 topup=0 cast=n/a", first.VerdictFields());
+
+        var coat = GearKit.Armour.Single(a => a.Name == "Greater Amuli Shadow Coat");
+        foreach (var wcid in new[] { GearKit.Wand.Wcid, coat.Wcid })
+        {
+            var guid = rig.Inventory.Equipped.Select(e => e.Guid).First(g => rig.Session.State.Objects.TryGet(g, out var o) && o.Weenie.WeenieClassId == wcid);
+            var off = rig.Session.Actions.Unwield(guid, ActionSource.Host);
+            Pump(rig, 3);
+            Assert.Equal(ActionOutcomeKind.Confirmed, off.Outcome!.Value.Kind);
+        }
+
+        Assert.True(InPack(rig, GearKit.Wand.Wcid) && InPack(rig, coat.Wcid));
+        Assert.Equal(4, rig.Inventory.Equipped.Count);
+        var sentBefore = rig.Responder.ActionSends.Count;
+
+        var again = new GearScenario(kit, rig.Log, endSession: false, cast: false);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(again));
+
+        // No request for what the pack held (gear_steps counts the grants and the wields: two wields, no grant), no second copy, everything wielded again.
+        Assert.Equal("gear=wielded worn=5 kit=6/6 gear_steps=2 topup=0 cast=n/a", again.VerdictFields());
+        Assert.Equal(2, again.SentWields.Count);
+        Assert.DoesNotContain(again.SentWields, w => w.StartsWith("take off", StringComparison.Ordinal));
+        Assert.Contains(rig.Log.Lines, l => l.Contains("kit in the pack:", StringComparison.Ordinal) && l.Contains("requested=0 held=6", StringComparison.Ordinal));
+        Assert.Equal(6, rig.Inventory.Equipped.Count);
+        Assert.Empty(rig.Inventory.Pack);
+        Assert.Equal(1, rig.Session.State.Objects.All.Count(o => o.Weenie.WeenieClassId == GearKit.Wand.Wcid));
+        Assert.Equal(1, rig.Session.State.Objects.All.Count(o => o.Weenie.WeenieClassId == coat.Wcid));
+        Assert.True(rig.Responder.ActionSends.Count > sentBefore);
+    }
+
+    [Fact]
     public void A_worn_piece_that_covers_no_kit_place_is_left_on()
     {
         const uint Cloak = 31_001;
@@ -722,5 +760,113 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         var second = new GearScenario(spells, "gear-test-account", rig.Log, endSession: false);
         Assert.Equal(ScenarioStatus.Succeeded, rig.Run(second));
         Assert.Equal("gear=wielded worn=5 kit=59/59 gear_steps=0 topup=0 cast=n/a", second.VerdictFields());
+    }
+
+    // ---------------------------------------------------------------- M4 3.1 d0 (D20): the decoys in the gear scenario
+
+    private static Dictionary<uint, StandInItemKind> DecoyWeenies() => DecoyKit.All.ToDictionary(d => d.Wcid, d => new StandInItemKind(d.Name, null));
+
+    private static GearKit SmallDecoyKit(int decoys = 8) => SmallKit().WithDecoys(DecoyKit.All.Take(decoys).ToList());
+
+    [Fact]
+    public void A_decoy_kit_spawns_the_eight_by_the_item_top_up_never_wields_one_and_keeps_the_verdict_fields_of_the_plain_kit()
+    {
+        using var rig = new Rig(items: DecoyWeenies());
+        var scenario = new GearScenario(SmallDecoyKit(), rig.Log, endSession: false);
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        var verdict = scenario.VerdictFields();
+        Assert.Matches(Verdict, verdict);
+        // The seven lines of the small plain kit and the eight decoys: kit counts them all (15/15); gear_steps stays the wand's and the armour's (6 requests and 6 wields); topup the scarabs'.
+        Assert.Equal("gear=wielded worn=5 kit=15/15 gear_steps=12 topup=1 cast=n/a", verdict);
+        Assert.Equal(8, scenario.DecoyGrants);
+        Assert.Equal(1, scenario.TopUp);
+        Assert.Equal(6, scenario.SentWields.Count); // the wand and the five pieces: no decoy was wielded
+        Assert.DoesNotContain(scenario.SentWields, w => DecoyKit.All.Any(d => w.Contains(d.Name, StringComparison.Ordinal)));
+        Assert.Equal(6, rig.Inventory.Equipped.Count);
+        Assert.All(DecoyKit.All, d => Assert.False(WornWcid(rig, d.Wcid), d.Name + " is worn"));
+        Assert.All(DecoyKit.All, d => Assert.True(InPack(rig, d.Wcid), d.Name + " is not in the pack"));
+        Assert.Equal(8, rig.Session.State.Objects.All.Count(o => DecoyKit.IsDecoy(o.Weenie.WeenieClassId)));
+        Assert.Empty(scenario.MissingKit);
+    }
+
+    [Fact]
+    public void A_rerun_of_the_decoy_kit_sends_nothing_and_a_partly_held_set_spawns_exactly_the_decoys_not_held()
+    {
+        using var rig = new Rig(items: DecoyWeenies());
+        var first = new GearScenario(SmallDecoyKit(3), rig.Log, endSession: false, cast: false);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(first));
+        Assert.Equal("gear=wielded worn=5 kit=10/10 gear_steps=12 topup=1 cast=n/a", first.VerdictFields());
+        Assert.Equal(3, first.DecoyGrants);
+
+        // All eight now: the three held are not asked for again, the five others are, one each.
+        var more = new GearScenario(SmallDecoyKit(), rig.Log, endSession: false, cast: false);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(more));
+        Assert.Equal("gear=wielded worn=5 kit=15/15 gear_steps=0 topup=0 cast=n/a", more.VerdictFields());
+        Assert.Equal(5, more.DecoyGrants);
+        Assert.Empty(more.SentWields);
+        Assert.All(DecoyKit.All, d => Assert.Equal(1, rig.Session.State.Objects.All.Count(o => o.Weenie.WeenieClassId == d.Wcid)));
+
+        var sends = rig.Responder.ActionSends.Count;
+        var again = new GearScenario(SmallDecoyKit(), rig.Log, endSession: false, cast: false);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(again));
+        Assert.Equal("gear=wielded worn=5 kit=15/15 gear_steps=0 topup=0 cast=n/a", again.VerdictFields());
+        Assert.Equal(0, again.DecoyGrants);
+        Assert.Equal(sends, rig.Responder.ActionSends.Count);
+    }
+
+    [Fact]
+    public void A_plain_kit_has_no_decoy_grants_and_spawns_no_decoy_so_its_verdict_is_what_it_was()
+    {
+        using var rig = new Rig(items: DecoyWeenies());
+        var scenario = new GearScenario(SmallKit(), rig.Log, endSession: false);
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.Equal("gear=wielded worn=5 kit=7/7 gear_steps=12 topup=1 cast=n/a", scenario.VerdictFields());
+        Assert.Equal(0, scenario.DecoyGrants);
+        Assert.All(DecoyKit.All, d => Assert.False(InPack(rig, d.Wcid)));
+    }
+
+    [Fact]
+    public void A_decoy_the_server_cannot_make_fails_the_spawn_and_is_named()
+    {
+        // The stand-in knows no decoy weenie (the visit names none): every decoy request is refused, which fails the spawn with the weenie's own words; nothing is wielded.
+        using var rig = new Rig();
+        var scenario = new GearScenario(SmallDecoyKit(2), rig.Log, endSession: false, cast: false);
+
+        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
+
+        Assert.StartsWith("spawning: ", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("Massive Mana Charge", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("UnknownWcid", scenario.Failure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_worn_decoy_is_taken_off_when_it_holds_a_place_the_armour_needs_and_goes_to_the_pack()
+    {
+        // The Skull Cap (a decoy, ValidLocations HeadWear) worn by someone: it is no kit piece, so the helm's place is cleared as for any other worn piece that is not the kit's.
+        const uint SkullCap = 25522;
+        using var rig = new Rig(items: DecoyWeenies());
+        var made = rig.Session.Tools.SpawnItem(SkullCap, null, ActionSource.Host);
+        Pump(rig, 2);
+        Assert.True(made.IsCompleted, made.Summary);
+        var guid = made.Result!.Guid;
+        Pump(rig, 1);
+        var wear = rig.Session.Actions.Wield(guid, EquipMask.HeadWear, ActionSource.Host);
+        Pump(rig, 2);
+        Assert.Equal(ActionOutcomeKind.Confirmed, wear.Outcome!.Value.Kind);
+        Assert.True(WornWcid(rig, SkullCap));
+
+        var scenario = new GearScenario(SmallDecoyKit(), rig.Log, endSession: false, cast: false);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.Equal(1, scenario.SentWields.Count(w => w.StartsWith("take off", StringComparison.Ordinal)));
+        Assert.False(WornWcid(rig, SkullCap));
+        Assert.True(InPack(rig, SkullCap));
+        Assert.Equal(5, WornPieces(rig));
+        Assert.Equal(7, scenario.DecoyGrants); // the Skull Cap was held (worn), so seven were spawned
+        Assert.StartsWith("gear=wielded worn=5 kit=15/15", scenario.VerdictFields(), StringComparison.Ordinal);
     }
 }

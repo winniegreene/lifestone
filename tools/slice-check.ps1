@@ -10,10 +10,14 @@
     Stages, in order (-Stages picks a subset; the default is build,test,steps, plus exhaustive with -Exhaustive and smoke with -Smoke):
 
       build       dotnet build Lifestone.slnx --disable-build-servers; detail = warning and error counts (0 and 0 to pass)
-      test        dotnet test Lifestone.slnx --no-build --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive"; detail = passed/failed/skipped
+      test        dotnet test Lifestone.slnx --no-build --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure"; detail = passed/failed/skipped
                   totals, the passed count of each test assembly and the slowest tests (the VSTest trx logger's per-test timings,
                   top 20 in cache\slice-check\test-times.txt). -MinTests N fails the stage when fewer than N tests passed (the
-                  "count never decreases" gate: N is the DEFAULT count; the Exhaustive tier is counted by its own stage)
+                  "count never decreases" gate: N is the DEFAULT count; the Exhaustive tier is counted by its own stage). Without
+                  -MinTests the floor is the baseline file tests\Shared\test-count-baseline.json (M4 1.1 s3: "default" for this stage, "exhaustive" for the
+                  exhaustive stage; the lead writes it at each merge, a slice never lowers it); an explicit -MinTests wins, and the detail names the
+                  floor's source ("floor 7968 (baseline file)" or "(-MinTests)"). Tier=Timing (the lead runs it alone) and Status=KnownFailure (never in
+                  the green total) are left out of the default filter
       exhaustive  dotnet test Lifestone.slnx --no-build --filter "Tier=Exhaustive": the dat sweeps (every GfxObj, landblock and cell),
                   left out of the default filter because they cost about 55 s of an 85 s run. -Exhaustive adds the stage; -Smoke implies
                   it (G-A); the lead runs it before a merge. Per-test timings as above (exhaustive-times.txt)
@@ -87,8 +91,10 @@ $allStages = @('build', 'test', 'exhaustive', 'steps', 'smoke')
 # retail-ui-checks is the name slices use for the retail UI layer's checks; smoke runs them inside its retail-ui step.
 $stepAliases = @{ 'retail-ui-checks' = 'retail-ui' }
 # The default tests leave out the loopback tests (backend), the soak tier (merge gates) and the Exhaustive tier (its own stage).
-$testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive'
+$testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure'
 $exhaustiveFilter = 'Tier=Exhaustive'
+# M4 1.1 s3: the count never decreases. The baseline file is the default floor; an explicit -MinTests wins (and is the only floor of the default count when given).
+$baselineFile = Join-Path $repoRoot 'tests\Shared\test-count-baseline.json'
 $maxFailureLines = 15
 $clock = [Diagnostics.Stopwatch]::StartNew()
 
@@ -125,6 +131,20 @@ $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $script:ok = $true
+
+function Read-TestBaseline {
+    # {default, exhaustive} from tests\Shared\test-count-baseline.json; a missing or unreadable file is an error, never a silent zero floor.
+    if (-not (Test-Path -LiteralPath $baselineFile)) { throw "The test-count baseline file is missing: tests\Shared\test-count-baseline.json (pass -MinTests <n> to override)." }
+    $json = Get-Content -LiteralPath $baselineFile -Raw | ConvertFrom-Json
+    foreach ($key in 'default', 'exhaustive') {
+        if ($null -eq $json.$key -or [int]$json.$key -lt 0) { throw "tests\Shared\test-count-baseline.json has no '$key' count." }
+    }
+    return @{ Default = [int]$json.default; Exhaustive = [int]$json.exhaustive }
+}
+$baseline = Read-TestBaseline
+$minTestsSource = if ($PSBoundParameters.ContainsKey('MinTests')) { '-MinTests' } else { 'baseline file' }
+if ($minTestsSource -eq 'baseline file') { $MinTests = $baseline.Default }
+$exhaustiveMinimum = $baseline.Exhaustive
 
 function Strip-Ansi([string] $text) { [regex]::Replace($text, '\x1b\[[0-9;]*[A-Za-z]', '') }
 
@@ -217,6 +237,7 @@ function Invoke-TestRun([string] $stage, [string] $filter, [int] $minimum) {
         }
     }
     $detail = "$passed passed ($($perAssembly -join ', ')), $failed failed, $skipped skipped"
+    if ($minimum -gt 0) { $detail += "; floor $minimum ($(if ($stage -eq 'exhaustive') { 'baseline file' } else { $minTestsSource }))" }
     $pass = $code -eq 0 -and $failed -eq 0 -and $perAssembly.Count -gt 0
     $failure = @()
     if ($pass -and $minimum -gt 0 -and $passed -lt $minimum) {
@@ -378,7 +399,7 @@ function Invoke-SmokeStage {
     if ($testRow) {
         $count = if ($testRow.Detail -match 'passed=(\d+) failed=(\d+) skipped=(\d+)') { @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3]) } else { @(0, 0, 0) }
         $pass = $testRow.Result -like 'PASS*' -and $count[0] -gt 0
-        $detail = "$($count[0]) passed, $($count[1]) failed, $($count[2]) skipped (smoke's test step)" + $(if ($testRow.Detail -match ';\s*(top \d+ slowest.*)$') { "; $($Matches[1])" } else { '' })
+        $detail = "$($count[0]) passed, $($count[1]) failed, $($count[2]) skipped (smoke's test step)$(if ($MinTests -gt 0) { "; floor $MinTests ($minTestsSource)" })" + $(if ($testRow.Detail -match ';\s*(top \d+ slowest.*)$') { "; $($Matches[1])" } else { '' })
         $failure = @()
         if ($pass -and $MinTests -gt 0 -and $count[0] -lt $MinTests) {
             $pass = $false; $detail += "; below -MinTests $MinTests"
@@ -411,7 +432,7 @@ foreach ($stage in 'test', 'exhaustive', 'steps', 'smoke') {
     switch ($stage) {
         # With the smoke stage its test step is the run's test (below): no second dotnet test.
         'test' { if ($Stages -notcontains 'smoke') { Invoke-TestRun 'test' $testFilter $MinTests | Out-Null } }
-        'exhaustive' { Invoke-TestRun 'exhaustive' $exhaustiveFilter 0 | Out-Null }
+        'exhaustive' { Invoke-TestRun 'exhaustive' $exhaustiveFilter $exhaustiveMinimum | Out-Null }
         'steps' { Invoke-StepsStage $stepList }
         'smoke' { Invoke-SmokeStage }
     }

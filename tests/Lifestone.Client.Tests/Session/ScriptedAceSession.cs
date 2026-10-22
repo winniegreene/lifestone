@@ -516,6 +516,22 @@ internal sealed class ScriptedAceSession : IAcSession
     /// <inheritdoc/>
     public OutboundTicket SendTrainSkill(uint skill, int credits) => StatAction(GameActionTypes.TrainSkill, skill, unchecked((uint)credits));
 
+    /// <inheritdoc/>
+    public OutboundTicket SendUseWithTarget(uint item, uint target) => WorldAction(GameActionTypes.UseWithTarget, item, target, 0, 2);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendMeleeAttack(uint target, uint height, float power) => WorldAction(GameActionTypes.TargetedMeleeAttack, target, height, BitConverter.SingleToUInt32Bits(power), 3);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendMissileAttack(uint target, uint height, float accuracy) => WorldAction(GameActionTypes.TargetedMissileAttack, target, height, BitConverter.SingleToUInt32Bits(accuracy), 3);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendCancelAttack()
+    {
+        WorldActionSends.Add((GameActionTypes.CancelAttack, 0, 0, 0));
+        return Action(GameActionTypes.CancelAttack, _ => { });
+    }
+
     /// <summary>Every magic, combat-mode and inventory action sent (M3 1.2 s4a): the game action type and its fields in wire order; no behaviour answers them.</summary>
     public List<(uint Type, uint First, uint Second, uint Third)> WorldActionSends { get; } = [];
 
@@ -527,6 +543,42 @@ internal sealed class ScriptedAceSession : IAcSession
 
     /// <inheritdoc/>
     public OutboundTicket SendChangeCombatMode(uint mode) => WorldAction(GameActionTypes.ChangeCombatMode, mode, 0, 0, 1);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendNoLongerViewingContents(uint container) => WorldAction(GameActionTypes.NoLongerViewingContents, container, 0, 0, 1);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendDropItem(uint item) => WorldAction(GameActionTypes.DropItem, item, 0, 0, 1);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSplitToContainer(uint stack, uint container, int placement, int amount) =>
+        WorldAction(GameActionTypes.StackableSplitToContainer, stack, container, unchecked((uint)placement), 3);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSplitTo3D(uint stack, int amount) => WorldAction(GameActionTypes.StackableSplitTo3D, stack, unchecked((uint)amount), 0, 2);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSplitToWield(uint stack, uint equipMask, int amount) =>
+        WorldAction(GameActionTypes.StackableSplitToWield, stack, equipMask, unchecked((uint)amount), 3);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendGiveObject(uint target, uint item, int amount) =>
+        WorldAction(GameActionTypes.GiveObjectRequest, target, item, unchecked((uint)amount), 3);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendBuy(uint vendor, IReadOnlyList<(uint item, uint amount)> items) => WorldAction(GameActionTypes.BuyItems, vendor, (uint)items.Count, 0, 2);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSell(uint vendor, IReadOnlyList<(uint item, uint amount)> items) => WorldAction(GameActionTypes.SellItems, vendor, (uint)items.Count, 0, 2);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendIdentify(uint guid) => WorldAction(GameActionTypes.IdentifyObject, guid, 0, 0, 1);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendAddShortcut(uint index, uint objectId, uint spellId) => WorldAction(GameActionTypes.AddShortCut, index, objectId, spellId, 3);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRemoveShortcut(uint index) => WorldAction(GameActionTypes.RemoveShortCut, index, 0, 0, 1);
 
     /// <inheritdoc/>
     public OutboundTicket SendSuicide()

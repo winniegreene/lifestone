@@ -19,7 +19,7 @@ public sealed class SliceCheckAndSmokeTests
 
     private static string StepPaths => File.ReadAllText(RepositoryFiles.PathOf("tools", "lib", "StepPaths.psd1"));
 
-    private const string DefaultFilter = "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive";
+    private const string DefaultFilter = "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure";
 
     // ------------------------------------------------------------------------------------------ C1: the default filter and the Exhaustive stage
 
@@ -39,7 +39,7 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("[switch] $Exhaustive", script, StringComparison.Ordinal);
         Assert.Matches(@"\$allStages = @\('build', 'test', 'exhaustive', 'steps', 'smoke'\)", script);
         Assert.Contains("if ($Exhaustive -or $Smoke) { \"exhaustive\" }", script, StringComparison.Ordinal);
-        Assert.Contains("'exhaustive' { Invoke-TestRun 'exhaustive' $exhaustiveFilter 0 | Out-Null }", script, StringComparison.Ordinal);
+        Assert.Contains("'exhaustive' { Invoke-TestRun 'exhaustive' $exhaustiveFilter $exhaustiveMinimum | Out-Null }", script, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------------------------------------ C6: per-test timings
@@ -112,6 +112,69 @@ public sealed class SliceCheckAndSmokeTests
         Assert.DoesNotContain("login-buff", script, StringComparison.Ordinal); // BuffLegJudgesTests: slice-check never runs the live legs
         Assert.DoesNotContain("login-death", script, StringComparison.Ordinal);
         Assert.DoesNotContain("login-bsd", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("login-hunt", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_smoke_step_login_hunt_is_a_judged_backend_step_after_login_death_that_skips_unless_the_backend_is_required()
+    {
+        // M4 1.2 s5: login-hunt on login-bsd's pattern (it changes Holtburg Hunter: experience and the belt's creatures), the melee leg; M4 3.1 s4: three kills, so looted>=1 is judged over two or more.
+        var script = Smoke;
+        var steps = Regex.Match(script, @"\$allSteps = @\(([^)]*)\)", RegexOptions.Singleline).Groups[1].Value;
+        var backend = Regex.Match(script, @"\$backendSteps = @\(([^)]*)\)").Groups[1].Value;
+        var judged = Regex.Match(script, @"\$frameJudgedSteps = @\(([^)]*)\)").Groups[1].Value;
+
+        foreach (var list in new[] { steps, backend, judged })
+        {
+            Assert.Contains("'login-hunt'", list, StringComparison.Ordinal);
+            Assert.True(list.IndexOf("'login-death'", StringComparison.Ordinal) < list.IndexOf("'login-hunt'", StringComparison.Ordinal), "login-hunt comes after login-death");
+        }
+
+        // The skip under -Backend auto (and start) comes before the backend gate and records a SKIP.
+        var skip = script.IndexOf("if ($step -eq 'login-hunt' -and $Backend -ne 'require')", StringComparison.Ordinal);
+        var gate = script.IndexOf("if ($backendSteps -contains $step -and -not (Test-BackendGate", StringComparison.Ordinal);
+        Assert.True(skip > 0 && skip < gate, "the login-hunt skip rule must come before the backend gate");
+        Assert.Contains("-Skipped", script[skip..gate], StringComparison.Ordinal);
+        Assert.Contains("continue", script[skip..gate], StringComparison.Ordinal);
+
+        var body = script[script.IndexOf("'login-hunt' {", StringComparison.Ordinal)..];
+        body = body[..body.IndexOf("'login' {", StringComparison.Ordinal)];
+        Assert.Contains("--account=test --login-check=hunt --hunt-weapon=melee --hunt-kills=3", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("--hunt-kills=1", body, StringComparison.Ordinal); // a one-kill leg is never judged on looted (HuntLegVerdict.LootJudgeMinKills)
+        Assert.Contains("hunt done ok=true", body, StringComparison.Ordinal); // the step passes on the leg's own verdict
+        Assert.Contains("'swings', 'shots', 'hits', 'misses', 'returned', 'fighter', 'attack_frame_max_ms'", body, StringComparison.Ordinal); // copied, report-only (attack_frame_max_ms from 1.3 s3)
+        Assert.Contains("-FrameOver50 $fields.Over50 -FrameJudge $fields.Judge", body, StringComparison.Ordinal);
+        Assert.Contains("swings>=1", body, StringComparison.Ordinal); // M4 1.3 s3: the comment says the leg judges the swings
+        Assert.Contains("report-only: it never fails the step in 1.3", body, StringComparison.Ordinal); // attack_frame_max_ms is copied, never judged here (D11)
+        Assert.DoesNotContain("attack_frame_max_ms=", body, StringComparison.Ordinal); // a field name in the copy list, never a judged "=" comparison
+
+        // M4 2.2 s4: the loot of the kill's corpse is copied beside it, report-only (judged from 3.1): looted, loot_skipped and loot_frame_max_ms by key, loot_frame_over_50 by its presence in the verdict (the leg prints it only when over).
+        Assert.Contains("'looted', 'loot_skipped', 'loot_frame_max_ms'", body, StringComparison.Ordinal);
+        Assert.Contains("loot_frame_over_50=yes", body, StringComparison.Ordinal);
+        Assert.Contains("report-only in 2.2 (judged from 3.1)", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("looted=", body, StringComparison.Ordinal); // a name in the copy list, never a judged comparison
+        Assert.Contains("looted loot_skipped loot_frame_max_ms loot_frame_over_50", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal); // the help line names them
+        Assert.Contains("login-hunt ", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal); // its help line
+
+        // M4 3.1 s4: the recovery fields and lane g's mode_mismatch are copied report-only, n/a when the line lacks them: the verdict line's by key, the detail line's by key from the hunt detail line.
+        Assert.Contains("'heals', 'kit_uses', 'potions', 'mode_mismatch'", body, StringComparison.Ordinal);
+        Assert.Contains("'heal_failed_rolls', 'heal_points', 'heal_wasted'", body, StringComparison.Ordinal);
+        Assert.Contains(@"\[logincheck\] (hunt detail[^\r\n]*)", body, StringComparison.Ordinal);
+        Assert.Contains("$copied += \" $healCopied $healDetail\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"$key=n/a\"", body, StringComparison.Ordinal);
+        Assert.Contains("the step's 1500 s Godot timeout already covers three kills", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal); // the header says it was checked
+        Assert.Contains("heals kit_uses potions", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal);
+        Assert.Contains("mode_mismatch=<n>", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal);
+        Assert.Contains("1500 '' $defaultSize", body, StringComparison.Ordinal); // the Godot timeout of the leg: the 1200 s whole check (3.2-R15: with the shop visits) and the 120 s recovery log off, rounded up
+        Assert.Contains("'sold', 'bought', 'pyreals', 'appraised', 'vendor_frame_max_ms'", body, StringComparison.Ordinal); // 3.2-R17: DoD 12's pyreals=<delta> shows in the summary (report-only)
+    }
+
+    [Fact]
+    public void The_summary_shows_na_with_no_judge_suffix_for_a_leg_that_prints_no_flag()
+    {
+        // M4 1.2 s5 (1.1 review R14): login-check and login print no frame_over_50 flag, so their summary entry is "n/a", not "n/a (counted)".
+        var script = Smoke;
+        Assert.Contains("if ($_.FrameOver50 -eq 'n/a') { \"$($_.Step)=n/a\" } else { \"$($_.Step)=$($_.FrameOver50) ($($_.FrameJudge))\" }", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -399,6 +462,13 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("[string] $UserDataSlot = ''", godot, StringComparison.Ordinal);
         Assert.Contains("$dataRoot = if ($UserDataSlot) { Join-Path $repoRoot \"cache\\godot\\slot-$UserDataSlot\" } else { Join-Path $repoRoot 'cache\\godot' }", godot, StringComparison.Ordinal);
         Assert.Contains("[switch] $IsolateUserData", godot, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void M4_2_2_fix2_R11_the_death_step_help_names_all_four_corpse_looted_values()
+    {
+        Assert.Contains("corpse_looted=<yes|partial|no|skipped>", Smoke, StringComparison.Ordinal);
+        Assert.DoesNotContain("<yes|no|skipped>", Smoke, StringComparison.Ordinal); // the third value the fix slice's R2 added (DeathLegVerdict.CorpseLoot.Partial)
     }
 
     // ------------------------------------------------------------------------------------------ helpers

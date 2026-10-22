@@ -382,7 +382,7 @@ public sealed partial class UiElementManager
     public UiElement? HitTest(int x, int y)
     {
         var (ox, oy) = DisplayOrigin;
-        return UiHitTester.HitTest(RootElement, x - ox - RootElement.Box.X0, y - oy - RootElement.Box.Y0);
+        return UiHitTester.HitTest(RootElement, x - ox - RootElement.Box.X0, y - oy - RootElement.Box.Y0, Input.Drag.IconRoot);
     }
 
     /// <summary>

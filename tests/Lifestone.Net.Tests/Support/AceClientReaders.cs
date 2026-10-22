@@ -241,6 +241,21 @@ internal static class AceClientReaders
         }
     }
 
+    /// <summary>
+    /// 0x0035 UseWithTarget (<c>GameActionUseWithTarget.cs:10-15</c>): a u32 <c>sourceObjectGuid</c> (the item), then a u32 <c>targetObjectGuid</c>; ACE hands both to
+    /// <c>Player.HandleActionUseWithTarget</c> and reads nothing more.
+    /// </summary>
+    public static (uint Sequence, uint ActionType, uint Source, uint Target, int Unread) ReadUseWithTarget(byte[] message)
+    {
+        var (sequence, actionType, reader) = ReadGameAction(message);
+        using (reader)
+        {
+            var source = reader.ReadUInt32();
+            var target = reader.ReadUInt32();
+            return (sequence, actionType, source, target, Unread(reader));
+        }
+    }
+
     /// <summary>0x0015 Talk (<c>GameActionTalk</c>): one String16L read by UTF-8 characters.</summary>
     public static (uint Sequence, string Text, int Unread) ReadTalk(byte[] message)
     {

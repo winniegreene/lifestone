@@ -35,6 +35,8 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
 
     private const string Smoke = "Lifestone Smoke";
 
+    private const string Hunter = "Holtburg Hunter";
+
     private const string Throwaway = "Lifestone Throwaway";
 
     private const string NotOnTheAccount = "Lifestone Nobody";
@@ -58,6 +60,7 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
             (Throwaway, ToolErrors.NotPendingDeletion),
             (Smoke, ToolErrors.Graduated),
             (Caller, ToolErrors.Graduated),
+            (Hunter, ToolErrors.Graduated),
             (NotOnTheAccount, ToolErrors.UnknownCharacter),
         ];
         Assert.Equal(expected, leg.Refusals);
@@ -135,7 +138,7 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
 
         private readonly IReadOnlyList<uint> _skillClasses;
         private readonly Action<string> _log;
-        private readonly Queue<(string Name, string Code)> _refusalsToAsk = new([(Throwaway, ToolErrors.NotPendingDeletion), (Smoke, ToolErrors.Graduated), (Caller, ToolErrors.Graduated), (NotOnTheAccount, ToolErrors.UnknownCharacter)]);
+        private readonly Queue<(string Name, string Code)> _refusalsToAsk = new([(Throwaway, ToolErrors.NotPendingDeletion), (Smoke, ToolErrors.Graduated), (Caller, ToolErrors.Graduated), (Hunter, ToolErrors.Graduated), (NotOnTheAccount, ToolErrors.UnknownCharacter)]);
         private readonly List<(string Name, string Code)> _refusals = [];
         private ActionHandle? _pending;
         private ToolHandle<CharPurgeResult>? _purge;

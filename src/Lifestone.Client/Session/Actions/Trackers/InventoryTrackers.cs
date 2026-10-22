@@ -101,8 +101,8 @@ internal sealed class UnwieldTracker(ActionHandle handle, uint item) : Inventory
 }
 
 /// <summary>
-/// <see cref="IActionApi.MoveToPack"/>: GameAction 0x0019 {item, container, placement} (container 0 is the player's guid: the main pack). Refused at once unless the model
-/// has the player holding the item (in a pack or equipped). Confirmed by the 0x0022 that puts it into that container (<see cref="InventoryChangeKind.Moved"/>, or
+/// <see cref="IActionApi.MoveToPack"/>: GameAction 0x0019 {item, container, placement} (container 0 is the player's guid: the main pack) for an item the player holds; an item
+/// it does not hold is a <see cref="PickUpTracker"/> (M4 2.1 s2 closed <c>TODO(m3-pickup)</c>: the held-item guard is gone). Confirmed by the 0x0022 that puts it into that container (<see cref="InventoryChangeKind.Moved"/>, or
 /// <see cref="InventoryChangeKind.Unwielded"/> for an equipped item); an item put into a container that is not the player's (a chest) is reported by the reducer as
 /// <see cref="InventoryChangeKind.Removed"/> with that container, which confirms too.
 /// </summary>
@@ -114,8 +114,7 @@ internal sealed class MoveToTracker(ActionHandle handle, uint item, uint contain
     internal override string WouldSend => "GameAction 0x0019 PutItemInContainer " + ActionText.Hex(Item) + " into " + ActionText.Hex(container) + " slot " + placement;
 
     /// <inheritdoc/>
-    protected override string? Precondition(InventoryPlace place, ActionApi api) =>
-        place.Held ? null : "the item " + ActionText.Hex(Item) + " is not held by the player";
+    protected override string? Precondition(InventoryPlace place, ActionApi api) => null; // M4 2.1 s2: no held-item guard; an item the player does not hold is a pick-up (ActionApi.MoveToPack)
 
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)

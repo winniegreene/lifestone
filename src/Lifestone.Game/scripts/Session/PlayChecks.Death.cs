@@ -77,11 +77,12 @@ public sealed partial class PlayChecks
         Check(diedName, killed && tally.VictimNotices == 1 && tally.DeadMotions >= 1 && tally.HitsTaken >= 1, $"died={tally.VictimNotices} dead_motions={tally.DeadMotions} deaths={tally.Deaths} hits_taken={tally.HitsTaken} damage_taken={tally.DamageTaken} evades={tally.Evades} health_min_pct={tally.HealthMinPercent:0.#} seconds={seconds:0.#}");
 
         // The corpse (after the Dead animation plus a second), the arrival, and the vitals three seconds later.
-        var arrived = killed && await WaitFor(() => tally.HasArrival && tally.CorpsesSeen >= 1 && !double.IsNaN(tally.VitalsAfterArrivalPercent), 30.0);
+        var arrived = killed && await WaitFor(() => tally.HasArrival && tally.CorpsesSeen >= 1 && tally.FirstVitalsSeen, 30.0);
+        _ = tally.SampleVitalsAfterArrival(); // M4 2.2 fix R1: the judged vitals are read when the restore is in (the scenario reads them at the end of its vitals wait)
         var respawn = DeathLegVerdict.ClassifyRespawn(tally, session.State.Objects);
         Check(respawnName, arrived && respawn == DeathRespawn.Lifestone && tally.CorpsesSeen == 1 && tally.DeathTeleports == 1, $"respawn={respawn} corpse={tally.CorpsesSeen} teleports={tally.DeathTeleports} arrival_cell=0x{tally.ArrivalCell:X8}");
         var vitals = tally.VitalsAfterArrivalPercent;
-        Check(vitaeName, arrived && tally.VitaePercent > 0 && vitals is >= 70.0 and <= 80.0 && tally.Purges >= 1, $"vitae={tally.VitaePercent} vitals_pct={vitals:0.#} (health {tally.HealthAfterArrivalPercent:0.#} stamina {tally.StaminaAfterArrivalPercent:0.#} mana {tally.ManaAfterArrivalPercent:0.#}) purged={tally.Purges}");
+        Check(vitaeName, arrived && tally.VitaePercent > 0 && vitals is >= 70.0 and <= 80.0 && tally.Purges >= 1, $"vitae={tally.VitaePercent} vitals_pct={vitals:0.#} (health {tally.HealthAfterArrivalPercent:0.#} stamina {tally.StaminaAfterArrivalPercent:0.#} mana {tally.ManaAfterArrivalPercent:0.#}; first {tally.FirstHealthAfterArrivalPercent:0.#}/{tally.FirstStaminaAfterArrivalPercent:0.#}/{tally.FirstManaAfterArrivalPercent:0.#}) purged={tally.Purges}");
 
         // The tusker is still beside the lifestone: its next blow meets the protection (0x028A 0x0502).
         var protectedBlow = arrived && await WaitFor(() => tally.ProtectedHits >= 1, 30.0);
@@ -221,6 +222,8 @@ public sealed partial class PlayChecks
             buffs += enchantment.SpellId == DeathTally.VitaeSpell ? 0 : 1;
         }
 
+        // M4 3.1 d2: the stages are named, never left to the defaults: Gear, Bind, Den, Corpse, Rebuff and Fight (the new order's stages after the respawn) are OFF here, and so are the options that would turn them on (--death-decoys, --death-rebuff, --death-fight), because
+        // the arena-here run has no teleports, no inventory to spawn decoys into and no real den to fight in (D23: this check's stand-in tusker is the existing one and no slice adds another). The loop's new order is proved live by the lead and offline by DeathScenarioTests' scripted rigs.
         var stages = DeathStages.Death | DeathStages.Regear | (buffs == 0 ? DeathStages.Unbuff : DeathStages.None);
         Check(setupName, bound && session.State.Self.Position is not null, $"lifestone_placed={stone is not null} present={stonePresent} bound={bound} enchantments={buffs} stages={stages}");
         if (!bound)
@@ -233,7 +236,7 @@ public sealed partial class PlayChecks
         server.DispelProtectionAsATeleportDoes();
         var shell = _ui?.Screens?.Flow.CurrentScreen as GamePlayScreen;
         var watch = new DeathWatch { PlayerSetup = avatars.Player?.Body.Setup.Id ?? 0 };
-        using var scenario = new DeathScenario(table.Spells, "stand-in-death-loop", new DeathOptions { Seconds = DeathLoopWaitSeconds }, new StandInStillWalk(), GodotLogSink.Instance, endSession: false, stages: stages);
+        using var scenario = new DeathScenario(table.Spells, "stand-in-death-loop", new DeathOptions { Seconds = DeathLoopWaitSeconds, Decoys = false, Rebuff = false, Fight = false }, new StandInStillWalk(), GodotLogSink.Instance, endSession: false, stages: stages);
         using var deathSampler = new DeathFrameSampler();
         deathSampler.Start(session);
         var fightSampler = new FightFrameSampler();

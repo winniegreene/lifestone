@@ -35,6 +35,8 @@ public sealed partial class GamePanels
 
             if (root?.GetChildRecursive(GameCombatPanel.WindowId) is GameCombatPanel combat)
             {
+                combat.SelectedProvider = () => p.Screen.SelectionUi?.Selected ?? 0u; // the target of a click on an attack button (M4 1.3)
+                combat.ChatNotice = toolbar?.ChatNotice;
                 combat.Attach(p.Context, p.Screen.Options, toolbar);
             }
             else

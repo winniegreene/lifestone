@@ -121,6 +121,16 @@ internal sealed partial class SessionMachine
         return SendAction(connection, writer);
     }
 
+    public OutboundTicket SendUseWithTarget(uint item, uint target)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendUseWithTarget");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ObjectActionCodecs.WriteUseWithTarget(writer, connection.NextActionSequence, item, target);
+        return SendAction(connection, writer);
+    }
+
     public OutboundTicket SendQueryHealth(uint guid)
     {
         EnterGameThread(capture: false);
@@ -128,6 +138,36 @@ internal sealed partial class SessionMachine
         var connection = _connection!;
         var writer = BeginMessage();
         ObjectActionCodecs.WriteQueryHealth(writer, connection.NextActionSequence, guid);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendMeleeAttack(uint target, uint height, float power)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendMeleeAttack");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        CombatActionCodecs.WriteMeleeAttack(writer, connection.NextActionSequence, target, height, power);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendMissileAttack(uint target, uint height, float accuracy)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendMissileAttack");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        CombatActionCodecs.WriteMissileAttack(writer, connection.NextActionSequence, target, height, accuracy);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendCancelAttack()
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendCancelAttack");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        CombatActionCodecs.WriteCancelAttack(writer, connection.NextActionSequence);
         return SendAction(connection, writer);
     }
 
@@ -228,6 +268,118 @@ internal sealed partial class SessionMachine
         var connection = _connection!;
         var writer = BeginMessage();
         InventoryActionCodecs.WriteStackableMerge(writer, connection.NextActionSequence, mergeFrom, mergeTo, amount);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendNoLongerViewingContents(uint container)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendNoLongerViewingContents");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ItemMoveActionCodecs.WriteNoLongerViewingContents(writer, connection.NextActionSequence, container);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendDropItem(uint item)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendDropItem");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ItemMoveActionCodecs.WriteDropItem(writer, connection.NextActionSequence, item);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendSplitToContainer(uint stack, uint container, int placement, int amount)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendSplitToContainer");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ItemMoveActionCodecs.WriteSplitToContainer(writer, connection.NextActionSequence, stack, container, placement, amount);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendSplitTo3D(uint stack, int amount)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendSplitTo3D");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ItemMoveActionCodecs.WriteSplitTo3D(writer, connection.NextActionSequence, stack, amount);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendSplitToWield(uint stack, uint equipMask, int amount)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendSplitToWield");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ItemMoveActionCodecs.WriteSplitToWield(writer, connection.NextActionSequence, stack, equipMask, amount);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendGiveObject(uint target, uint item, int amount)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendGiveObject");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ItemMoveActionCodecs.WriteGiveObject(writer, connection.NextActionSequence, target, item, amount);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendBuy(uint vendor, IReadOnlyList<(uint item, uint amount)> items)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendBuy");
+        VendorActionCodecs.ValidateTrade(items);
+        var connection = _connection!;
+        var writer = BeginMessage();
+        VendorActionCodecs.WriteBuy(writer, connection.NextActionSequence, vendor, items);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendSell(uint vendor, IReadOnlyList<(uint item, uint amount)> items)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendSell");
+        VendorActionCodecs.ValidateTrade(items);
+        var connection = _connection!;
+        var writer = BeginMessage();
+        VendorActionCodecs.WriteSell(writer, connection.NextActionSequence, vendor, items);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendIdentify(uint guid)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendIdentify");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        VendorActionCodecs.WriteIdentify(writer, connection.NextActionSequence, guid);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendAddShortcut(uint index, uint objectId, uint spellId)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendAddShortcut");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ShortcutActionCodecs.WriteAddShortcut(writer, connection.NextActionSequence, index, objectId, spellId);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendRemoveShortcut(uint index)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendRemoveShortcut");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ShortcutActionCodecs.WriteRemoveShortcut(writer, connection.NextActionSequence, index);
         return SendAction(connection, writer);
     }
 

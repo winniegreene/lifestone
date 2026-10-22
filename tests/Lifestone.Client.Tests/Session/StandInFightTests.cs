@@ -204,11 +204,11 @@ public sealed class StandInFightTests
         Assert.Equal(1, fight.World.Kills);
         Assert.InRange(casts, 3, 5); // 400 health, 96 to 158 a blow
 
-        // The last bolt: impact, then the notice (OnDeath), the Dead motion (Die), then the two experience updates (the player's queued action). The tusker is removed once its animation has played; every bolt is deleted.
+        // The last bolt: impact, then the notice (OnDeath), the Dead motion (Die), then the two experience updates (the player's queued action). The corpse and the tusker's removal follow once its animation has played; every bolt is deleted.
         var tags = fight.Tags;
         var notice = Array.IndexOf(tags, "01AD");
         Assert.Equal(["F74B", "F755", "F74E", "01AD", "F74C", "02CF", "02CF"], tags[(notice - 3)..(notice + 4)]);
-        Assert.Equal(casts, tags.Count(t => t == "F745"));
+        Assert.Equal(casts + 1, tags.Count(t => t == "F745")); // every bolt, and the creature's corpse (M4 2.1 s3: the corpse comes with the tusker's removal, one tick)
         Assert.Equal(casts - 1, tags.Count(t => t == "F7E0")); // no line for the killing blow (SpellProjectile.cs 857-861)
         Assert.Equal(casts + 1, tags.Count(t => t == "F747"));
         var noticeAt = fight.Rig.First("01AD");
@@ -259,7 +259,7 @@ public sealed class StandInFightTests
         fight.Rig.Run(7.0);
 
         // The second bolt arrives while the dead tusker still stands (it goes two seconds after its Dead motion): no impact, no notice, and its own deletion at the range.
-        Assert.Equal(1, fight.Tags.Count(t => t == "F745"));
+        Assert.Equal(2, fight.Tags.Count(t => t == "F745")); // the second bolt, and the first kill's corpse two seconds after its Dead motion
         Assert.DoesNotContain("F74B", fight.Tags);
         Assert.DoesNotContain("01AD", fight.Tags);
         Assert.Equal(StandInWorld.MaxMissileRange / FlameBoltSpeed, fight.Rig.Timeline.Last(e => e.Tag == "F747").At - fight.Rig.First("F745"), 0.03);

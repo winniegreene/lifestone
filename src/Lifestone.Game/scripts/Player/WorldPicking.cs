@@ -144,11 +144,19 @@ public sealed class WorldPicking : ISelectionProjector
     }
 
     /// <inheritdoc/>
-    public bool TryProject(uint guid, out ScreenRect rect, out bool onScreen)
+    public bool TryProject(uint guid, out ScreenRect rect, out bool onScreen) => TryProjectCore(guid, false, out rect, out onScreen);
+
+    /// <summary>As <see cref="TryProject"/>, but the player's own avatar can be projected too (the review hunt frames judge whether the player hides the target; nothing else asks).</summary>
+    /// <param name="guid">The object.</param>
+    /// <param name="rect">Its selection box.</param>
+    /// <param name="onScreen">False when behind the camera or outside the view.</param>
+    public bool TryProjectIncludingPlayer(uint guid, out ScreenRect rect, out bool onScreen) => TryProjectCore(guid, true, out rect, out onScreen);
+
+    private bool TryProjectCore(uint guid, bool allowPlayer, out ScreenRect rect, out bool onScreen)
     {
         rect = default;
         onScreen = false;
-        if (_avatars() is not { } avatars || !avatars.TryGet(guid, out var avatar) || avatar.IsPlayer || !IsPickable(avatar, _layer()) || !TryBounds(avatar, out var centre, out var radius) || !TryView(out var view))
+        if (_avatars() is not { } avatars || !avatars.TryGet(guid, out var avatar) || (avatar.IsPlayer && !allowPlayer) || !IsPickable(avatar, _layer()) || !TryBounds(avatar, out var centre, out var radius) || !TryView(out var view))
         {
             return false;
         }
@@ -157,8 +165,46 @@ public sealed class WorldPicking : ISelectionProjector
         return true;
     }
 
-    private static bool IsPickable(Avatar avatar, ServerObjectsLayer? layer) =>
-        avatar.Body is { IsDrawn: true, Parent: null } && (layer is null || layer.IsDrawn(avatar.Guid));
+    private static bool IsPickable(Avatar avatar, ServerObjectsLayer? layer) => Refusal(avatar, layer) is null;
+
+    // M4 3.1 p (m4-hunt-frame-camera): the layer never draws the player (ServerObjectsLayer._Process skips IsPlayer), so the layer test is not asked for it; see SelectionProjectionRules.
+    private static string? Refusal(Avatar avatar, ServerObjectsLayer? layer) =>
+        SelectionProjectionRules.Refusal(avatar.IsPlayer, avatar.Body.IsDrawn, avatar.Body.Parent is not null, layer is null || layer.IsDrawn(avatar.Guid));
+
+    /// <summary>
+    /// Why the selection box of <paramref name="guid"/> cannot be projected now, as a phrase naming the input (M4 3.1 p, <c>m4-hunt-frame-camera</c>: the hunt logs it once when the player's box is missing), or null when it can.
+    /// </summary>
+    /// <param name="guid">The object.</param>
+    /// <param name="allowPlayer">True when the player's own avatar may be projected (<see cref="TryProjectIncludingPlayer"/>).</param>
+    public string? WhyNotProjected(uint guid, bool allowPlayer)
+    {
+        if (_avatars() is not { } avatars)
+        {
+            return "the session has no avatar set";
+        }
+
+        if (!avatars.TryGet(guid, out var avatar))
+        {
+            return $"the avatar set has no avatar for 0x{guid:X8} (its player is 0x{avatars.PlayerGuid:X8})";
+        }
+
+        if (avatar.IsPlayer && !allowPlayer)
+        {
+            return "the player's own avatar is not selectable";
+        }
+
+        if (Refusal(avatar, _layer()) is { } refusal)
+        {
+            return refusal;
+        }
+
+        if (!TryBounds(avatar, out _, out _))
+        {
+            return "the selection sphere has no radius";
+        }
+
+        return TryView(out _) ? null : "the view has no size";
+    }
 
     /// <summary>The object selection sphere in render space.</summary>
     private bool TryBounds(Avatar avatar, out AcVector3 centre, out float radius)

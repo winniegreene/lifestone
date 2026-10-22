@@ -295,7 +295,7 @@ $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = 'false'; $env:DOTNET_GENERATE_ASPNET_CERT
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'; $env:DOTNET_NOLOGO = '1'
 
 dotnet build Lifestone.slnx --disable-build-servers
-dotnet test Lifestone.slnx --disable-build-servers --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive"
+dotnet test Lifestone.slnx --disable-build-servers --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure"
 ```
 
 Or in Git Bash:
@@ -304,7 +304,7 @@ Or in Git Bash:
 export DOTNET_ROOT="$(cygpath -u "$LOCALAPPDATA")/Microsoft/dotnet"; export PATH="$DOTNET_ROOT:$PATH"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_ADD_GLOBAL_TOOLS_TO_PATH=false DOTNET_GENERATE_ASPNET_CERTIFICATE=false
 dotnet build Lifestone.slnx --disable-build-servers
-dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive'
+dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure'
 ```
 
 - The build treats every warning as an error, with the analysers pinned to the .NET 10 defaults. Packages come from
@@ -317,6 +317,12 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
   leaves both out, as the smoke suite's test step does; without it the soaks run too (minutes, not seconds). With the
   backend running ([server/README.md](server/README.md)), `--filter "Category=Loopback&Tier!=Soak"` runs
   the loopback tests, and `--filter "Tier=Soak"` runs the soaks.
+- **Timing and known-failure traits (M4).** `[Trait("Tier","Timing")]` marks a test that measures wall-clock time and is
+  only meaningful on a quiet machine; the default filter leaves it out and the lead runs it alone (`--filter "Tier=Timing"`),
+  never beside another Godot or dotnet run. `[Trait("Status","KnownFailure")]` marks a test that is known to fail; it is never
+  in the green total, and each one names its TODO row in the test's reason, so the failure stays visible in the plan. Both are
+  left out of the default filter of `dotnet test`, `tools\smoke.ps1` and `tools\slice-check.ps1`; run one with
+  `--filter "Status=KnownFailure"`. No test carries either trait yet.
 
 ### Slice check
 

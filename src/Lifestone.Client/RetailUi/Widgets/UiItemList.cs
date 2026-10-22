@@ -1,5 +1,6 @@
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.RetailUi.Core;
+using Lifestone.Client.RetailUi.Dialogs;
 using Lifestone.Data.Ui;
 
 namespace Lifestone.Client.RetailUi.Widgets;
@@ -17,11 +18,17 @@ namespace Lifestone.Client.RetailUi.Widgets;
 /// that is full it answers null. <c>ItemList_Flush</c> (0x004E49F0) empties every cell, clears the open container and the selection.
 /// </para>
 /// <para>
+/// <b>Empty slots of a list that grows</b> (M4 3.2 lane e, <c>UpdateEmptySlots</c> 11.6096 0x004E4390, narrows <c>TODO(m3-itemlist-empty-fill)</c>: the pages that call it show the slots). A list whose cell count is -1 holds the items it is given, and a
+/// single-row one (maximum columns 0x5F of -1: the container window's item row, the spellcasting window's bars) shows empty slot boxes after them to the edge of its width, so a corpse's window and a favourites bar read as rows of slots;
+/// <see cref="UpdateEmptySlots"/> makes and trims them. A page calls it after it fills or empties the list: the fill is the list's, the page decides when (the spellbook page's list shows no empty slots and does not call it).
+/// </para>
+/// <para>
 /// <b>Mouse.</b> <c>ListenToElementMessage</c> (0x004E59E0) hears the mouse-down message the cell under the mouse sends: a left button selects it (<c>HandleSingleSelection</c> 0x004E3EE0 first when the list shows each item once, flag
-/// 0x10000052; then retail sets the selected object, and a container list opens the item in its child list), the double left button uses it (a pack: wield, <see cref="ItemActivated"/>), the right button examines it.
-/// Retail's selection is the player's one selected object; here a list keeps its own (<c>TODO(m3-selected-object)</c>) and tells the owner. No drag and drop (D13: the runtime has none; the drag handlers, drop release,
-/// drag scrolling and <c>AcceptDragObject</c> are not built), no vendor, salvage or shortcut list, no use of a double-clicked item (<c>TODO(m3-itemlist-use)</c>), no examination (<c>TODO(m3-itemlist-examine)</c>), no
-/// empty-slot fill of a list that grows (<c>UpdateEmptySlots</c> 0x004E4390, <c>TODO(m3-itemlist-empty-fill)</c>: no M3 page has one) and no cache of removed cells (nothing removes one).
+/// 0x10000052; then retail sets the selected object, and a container list opens the item in its child list), the double left button uses it (<see cref="ItemActivated"/>: the owner decides, a pack page wields a wearable item and uses any other, M4 2.2 s2), the right button selects it and examines it (the examine panel is item 3.2's, so it answers the <see cref="NotInM4"/> dialog, <c>TODO(m4-itemlist-examine)</c>).
+/// Retail's selection is the player's one selected object; here a list keeps its own (<c>TODO(m3-selected-object)</c>) and tells the owner. <b>Drag and drop</b> (M4 2.2 s3, D4): a list whose owner sets
+/// <see cref="DragSource"/> lets <see cref="UiDrag"/> carry one of its cells, and an owner registers a list as a drop target with <see cref="UiDrag.RegisterTarget"/>; retail's drag handlers, drop release, drag scrolling and
+/// <c>AcceptDragObject</c> have no address in the docs (<c>TODO(m4-retail-drag)</c>), so the behaviour is re-expressed and the drag scrolling is not built. No vendor, salvage or shortcut list, no examination (<c>TODO(m4-itemlist-examine)</c>; <c>TODO(m3-itemlist-use)</c> is closed: the page that owns the list uses the item), no
+/// empty-slot fill of a column or a grid that grows (<see cref="UpdateEmptySlots"/> keeps retail's rule: a column only loses its trailing empty cells) and no cache of removed cells (nothing removes one).
 /// </para>
 /// </remarks>
 public class UiItemList : UiListBox
@@ -43,6 +50,18 @@ public class UiItemList : UiListBox
 
     /// <summary>Property 0x10000052: each item shows once (a select deselects the same item elsewhere in the list).</summary>
     public const uint SingleSelectionProperty = 0x10000052;
+
+    /// <summary>Property 0x10000017: a list that grows keeps one empty cell after its last item (<c>UpdateEmptySlots</c>).</summary>
+    public const uint NeedsEmptySlotProperty = 0x10000017;
+
+    /// <summary>The width of a cell before the list has one (<c>UIElement_ItemList</c>'s constructor, 11.6096 0x004E4730: cells 32 by 32).</summary>
+    public const int DefaultCellWidth = 32;
+
+    /// <summary>What the not-built dialog calls the examine panel (<see cref="NotInM4"/>: "The examine panel is built in M4 3.2").</summary>
+    public const string ExaminePanelFeature = "The examine panel";
+
+    /// <summary>The M4 item that builds the examine panel.</summary>
+    public const string ExaminePanelItem = "3.2";
 
     /// <summary>The number of cells made at once when the list is first shown.</summary>
     public const int InitialCells = 24;
@@ -67,8 +86,14 @@ public class UiItemList : UiListBox
     /// <summary>A cell was selected by a left click (<c>HandleSingleSelection</c> and the selected object); the cell may be empty only if it was clicked while mouse-visible, which an empty cell is not.</summary>
     public event Action<UiItemList, UiItem>? ItemSelected;
 
-    /// <summary>A cell was double clicked with the left button (retail uses the item; the owner decides, a pack wields it).</summary>
+    /// <summary>A cell was double clicked with the left button (retail uses the item; the owner decides: a pack page wields a wearable item and uses any other, a container window picks the item up).</summary>
     public event Action<UiItemList, UiItem>? ItemActivated;
+
+    /// <summary>A right click on a non-empty cell (after it is selected): the list's owner examines the item (M4 3.2 s4c). With no subscriber the list answers the not-built dialog.</summary>
+    public event Action<UiItemList, UiItem>? ItemExamined;
+
+    /// <summary>True when a press on one of this list's items may start a drag (set by the page that owns the list; the player's own cell and the container's own cell are not sources).</summary>
+    public bool DragSource { get; set; }
 
     /// <summary>The number of cells the list has (<c>m_listItems.m_num</c>).</summary>
     public int CellCount => Items.Count;
@@ -110,7 +135,7 @@ public class UiItemList : UiListBox
         _containerList = TryGetBoolProperty(ContainerListProperty, out var container) && container;
         _singleSelection = TryGetBoolProperty(SingleSelectionProperty, out var single) && single;
         _fixedSlots = TryGetIntegerProperty(FixedSlotsProperty, out var slots) ? slots : -1;
-        Manager.LogOnce("itemlist:todos", LogSeverity.Warning, "UIElement_ItemList is built for display, selection and double click only (D13): TODO(m3-itemlist-use) TODO(m3-itemlist-examine) TODO(m3-itemlist-empty-fill) TODO(m3-uiitem-extras: shortcut number, sell and trade marks, cooldown, drag icon) TODO(m3-selected-object: the list keeps its own selection, retail's is the player's one selected object)");
+        Manager.LogOnce("itemlist:todos", LogSeverity.Warning, "UIElement_ItemList is built for display, selection, double click and the minimal drag (M4 2.2 s3, TODO(m4-retail-drag)): TODO(m4-itemlist-examine) TODO(m3-itemlist-empty-fill: only the container window's row and the spellcasting bars call UpdateEmptySlots; the spellbook page's list and the other lists show none) TODO(m3-uiitem-extras: shortcut number, sell and trade marks, cooldown) TODO(m3-selected-object: the list keeps its own selection, retail's is the player's one selected object)");
     }
 
     /// <summary><c>UIElement_ItemList::OnVisibilityChanged</c> (11.6096 0x004E4990): shown, the list makes its cells (the first few at once, the rest over frames).</summary>
@@ -136,6 +161,62 @@ public class UiItemList : UiListBox
             RequestFrame();
         }
     }
+
+    /// <summary>
+    /// <c>UIElement_ItemList::UpdateEmptySlots</c> (11.6096 0x004E4390; 11.4186 0x004E3700) for a list that grows (the cell count, property 0x10000015, is -1) while the list is visible. A single-row list (maximum columns 0x5F of -1) is
+    /// padded with empty cells, <c>ItemList_AddEmptySlot</c> (0x004E4340), until its cells fill its width (whole cells only: the width divided by the cell width), and trailing empty cells beyond the width are removed; with
+    /// property 0x10000017 set it also keeps one empty cell after a last cell that holds an item. A column (maximum rows 0x60 of -1) only loses its trailing empty cells. Cells that hold an item or a spell are never touched, and
+    /// the list is never padded past its width, so a long list scrolls as before. The cell width is the first cell's (<see cref="DefaultCellWidth"/> before there is one).
+    /// </summary>
+    public void UpdateEmptySlots()
+    {
+        if (!Visible || _fixedSlots != -1)
+        {
+            return;
+        }
+
+        var maxColumns = TryGetIntegerProperty(UiPropertyIds.ListBoxMaxColumns, out var columns) ? columns : 0;
+        var maxRows = TryGetIntegerProperty(UiPropertyIds.ListBoxMaxRows, out var rows) ? rows : -1;
+        if (maxColumns == -1)
+        {
+            var cellWidth = Items.Count > 0 && Items[0] is UiItem { Box.Width: > 0 } first ? first.Box.Width : DefaultCellWidth;
+            var width = Box.Width;
+            var total = cellWidth * CellCount;
+            if (total < width)
+            {
+                for (var n = (width - total) / cellWidth; n > 0; n--)
+                {
+                    if (CreateCell() is null)
+                    {
+                        return; // no cell template: the list logged it
+                    }
+                }
+            }
+            else if (total > width)
+            {
+                for (var n = (cellWidth - width + total - 1) / cellWidth; n > 0 && TrimEmptyTail(); n--)
+                {
+                }
+            }
+
+            if (TryGetBoolProperty(NeedsEmptySlotProperty, out var needsEmpty) && needsEmpty && Items.Count > 0 && Items[^1] is UiItem { IsEmpty: false })
+            {
+                CreateCell();
+            }
+        }
+        else if (maxRows == -1)
+        {
+            for (var n = CellCount; n > 0 && TrimEmptyTail(); n--)
+            {
+            }
+        }
+    }
+
+    /// <summary>The number of empty cells the list holds now (a test counts the drawn empty slots).</summary>
+    public int EmptyCount => CellCount - OccupiedCount;
+
+    /// <summary>Removes the last cell when it is empty (true), else leaves it (false).</summary>
+    private bool TrimEmptyTail() => Items.Count > 0 && Items[^1] is UiItem { IsEmpty: true } last && DeleteItem(last);
 
     /// <summary>Makes empty cells until the list has <paramref name="count"/> (at most the fixed number). True when it has that many.</summary>
     public bool EnsureCells(int count)
@@ -271,7 +352,16 @@ public class UiItemList : UiListBox
                     ItemActivated?.Invoke(this, cell);
                     break;
                 case UiMouseActions.Right:
-                    Manager.LogOnce("itemlist:examine", LogSeverity.Warning, "TODO(m3-itemlist-examine): a right click on an item examines it in retail (ClientUISystem::ExamineObject); the examination panel is not in M3 (D8), so nothing happens");
+                    // A right click selects the item and examines it (ClientUISystem::ExamineObject): the owner of the list examines (M4 3.2 s4c: the examine panel); a list with no owner for it answers the not-built dialog.
+                    Select(cell);
+                    if (ItemExamined is { } examined)
+                    {
+                        examined(this, cell);
+                        break;
+                    }
+
+                    Manager.LogOnce("itemlist:examine", LogSeverity.Warning, "TODO(m4-itemlist-examine): a right click on an item examines it in retail (ClientUISystem::ExamineObject); this list has no examine owner (the inventory page, the paperdoll slots and the container window's lists have one), so the item is selected and a message dialog says so; nothing is sent");
+                    NotInM4.Show(Manager.Dialogs, Manager.Services.Log, ExaminePanelFeature, ExaminePanelItem);
                     break;
             }
         }

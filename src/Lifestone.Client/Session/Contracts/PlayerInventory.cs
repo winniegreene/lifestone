@@ -279,6 +279,37 @@ public sealed class PlayerInventory
     }
 
     /// <summary>
+    /// Replaces the contents of the side pack <paramref name="pack"/> with what a 0196 ViewContents named, in its order and with its ContainerType (a foci keeps type 2). An entry held elsewhere (the main pack, another
+    /// side pack) moves here: the server's word is the latest. An entry that is a side pack or equipped is left where it is. False when <paramref name="pack"/> is not one of the player's side packs.
+    /// </summary>
+    internal bool SetContents(uint pack, IReadOnlyList<InventoryEntry> entries)
+    {
+        if (pack == Owner || !_contents.TryGetValue(pack, out var list))
+        {
+            return false;
+        }
+
+        list.Clear();
+        foreach (var entry in entries)
+        {
+            var at = Find(entry.Guid);
+            if (at.Kind is InventoryPlaceKind.SidePack or InventoryPlaceKind.Equipped)
+            {
+                continue;
+            }
+
+            if (at.Held)
+            {
+                Remove(entry.Guid, keepQualities: true);
+            }
+
+            list.Add(entry);
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Puts the item in <paramref name="container"/> (the player or a known side pack) at <paramref name="placement"/>, taking it from wherever it was held (the equipped list too), and returns where it was.
     /// </summary>
     internal InventoryPlace PutInContainer(uint guid, uint containerType, uint container, int placement)

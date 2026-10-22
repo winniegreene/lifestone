@@ -14,7 +14,8 @@ namespace Lifestone.Client.Session.State;
 /// <remarks>
 /// The lines are retail's, re-expressed from <c>ClientCombatSystem</c>'s handlers (11.6096 addresses beside each handler; the 11.4186 bodies were read only to learn how the line is
 /// composed). Retail adds a newline to every line because its scroll is one text buffer; a <see cref="ChatLine"/> is a line already, so it is left off. Retail also skips a line when
-/// <c>gmCCommunicationSystem::IsSquelched</c> says the other party's name is squelched for chat type 6; the client has no squelch list yet: TODO(m3-squelch-combat).
+/// <c>gmCCommunicationSystem::IsSquelched</c> says the other party's name is squelched for chat type 6; the client has no squelch list yet: TODO(m3-squelch-combat) stays a named TODO at the
+/// 0x01B1 and 0x01B3 handlers below (no squelch list in M4; M4 1.2 s1 left it unchanged).
 /// </remarks>
 internal sealed partial class GameStateReducer
 {
@@ -22,6 +23,102 @@ internal sealed partial class GameStateReducer
     private DeathNoticeSource _lastDeathSource;
     private bool _killerNoticeLogged;
     private bool _autoTargetNoAttackerLogged;
+    private bool _attackWired;
+
+    /// <summary>The player's attack sequence (<see cref="IGameSessionView.Attack"/>). Reading it wires the reducer's own-motion subscription (see <see cref="WireAttack"/>).</summary>
+    internal AttackSequence Attack
+    {
+        get
+        {
+            WireAttack();
+            return _attack;
+        }
+    }
+
+    private readonly AttackSequence _attack = new();
+
+    /// <summary>
+    /// Subscribes, once, to the player's own F74C (<see cref="ObjectMotionChanged"/>, which the world reducer publishes after it stored the motion): an attack motion starts or continues the
+    /// <see cref="Attack"/> sequence (M4 1.2 s1). It is done by subscription because the F74C handler lives in another file; every entry point of the attack state calls this, and <c>GameSession</c>'s constructors call it, so it is wired before the first swing and the
+    /// bus handler count is the same from the start (a test counts handlers across a log off).
+    /// </summary>
+    internal void WireAttack()
+    {
+        if (_attackWired)
+        {
+            return;
+        }
+
+        _attackWired = true;
+        _bus.Subscribe((in ObjectMotionChanged e) => OnOwnMotion(in e));
+    }
+
+    private void OnOwnMotion(in ObjectMotionChanged e)
+    {
+        if (!e.IsSelf || e.Motion.MovementType != MovementType.Interpreted || e.Motion.Forward is not { } forward)
+        {
+            return; // the MoveToObject / TurnToObject F74C that follows a send is a different movement type: not a swing
+        }
+
+        if (AttackMotions.IsMeleeSwing(forward))
+        {
+            PublishAttack(_attack.OnSwing(e.Motion.StickyGuid ?? 0));
+        }
+        else if (AttackMotions.IsMissileLaunch(forward))
+        {
+            PublishAttack(_attack.OnLaunchMotion(e.Motion.StickyGuid ?? 0));
+        }
+    }
+
+    private void PublishAttack(bool changed)
+    {
+        if (changed)
+        {
+            Changed();
+            Publish(_attack.Snapshot);
+        }
+    }
+
+    /// <summary>
+    /// GameEvent 0x01A7 AttackDone {WeenieError}: {0} ends one swing (ACE repeats by itself), 0x0036 or any other code ends the sequence (<see cref="AttackSequence"/>). ACE: W/Player_Melee.cs 226 and
+    /// 275-280 (<c>OnAttackDone</c>); the retail handler is <c>TODO(m4-attack-done-retail-cite)</c>.
+    /// </summary>
+    public void OnAttackDone(in InboundContext context, in GameEventHeader header, in AttackDoneEvent message)
+    {
+        WireAttack();
+        // Every 0x01A7 is published, changed or not (M4 1.2 s4b, closes TODO(m4-attack-done-event)): a tracker sees a refusal that follows a Done at once.
+        if (_attack.OnAttackDone(message.WeenieError))
+        {
+            Changed();
+        }
+
+        Publish(_attack.Snapshot);
+    }
+
+    /// <summary>GameEvent 0x01B8 CombatCommenceAttack: ACE sends it before each repeat after the first (W/Player_Melee.cs 285-290): the next swing or launch is starting.</summary>
+    public void OnCommenceAttack(in InboundContext context, in GameEventHeader header, in CommenceAttackEvent message)
+    {
+        WireAttack();
+        PublishAttack(_attack.OnCommence());
+    }
+
+    /// <summary>Notes the defender of a 0x01B1 or 0x01B3 as the sequence's target name (and the nearest object of that name as its id when none is known).</summary>
+    private void NoteAttackDefender(string name)
+    {
+        WireAttack();
+        if (!_attack.Active)
+        {
+            return;
+        }
+
+        uint guid = 0;
+        if (_attack.Target == 0 && _state.Objects.TryGet(_state.Self.Guid, out var self) && self.Position is { } at)
+        {
+            _state.Objects.NearestNamed(name, at, _state.Self.Guid, out guid);
+        }
+
+        PublishAttack(_attack.OnDefender(name, guid));
+    }
 
     /// <summary>
     /// GameEvent 0x01AC VictimNotification: <c>ClientCombatSystem::HandleVictimNotificationEvent</c> (11.6096 0x0056D160): the server's text, chat type 0, nothing for an empty text. Then
@@ -55,9 +152,11 @@ internal sealed partial class GameStateReducer
     /// </summary>
     public void OnAttackerNotification(in InboundContext context, in GameEventHeader header, in AttackerNotificationEvent message)
     {
+        // TODO(m3-squelch-combat): retail skips this line for a squelched defender name; there is no squelch list in M4.
         var text = CombatText.Attack(message.DefenderName, message.DamageType, message.Percent, message.Damage, message.CriticalHit, message.AttackConditions);
         AddChat(new ChatLine(_clock.Now, ChatKind.System, CombatChatTypes.CombatSelf, null, 0, text));
         Publish(new CombatEvent(CombatEventKind.AttackLanded, message.DefenderName, message.DamageType, message.Damage, message.Percent, message.CriticalHit, -1, false, message.AttackConditions, text));
+        NoteAttackDefender(message.DefenderName);
     }
 
     /// <summary>
@@ -78,9 +177,11 @@ internal sealed partial class GameStateReducer
     /// </summary>
     public void OnEvasionAttackerNotification(in InboundContext context, in GameEventHeader header, in EvasionAttackerNotificationEvent message)
     {
+        // TODO(m3-squelch-combat): retail skips this line for a squelched defender name; there is no squelch list in M4.
         var text = message.DefenderName + " evaded your attack.";
         AddChat(new ChatLine(_clock.Now, ChatKind.System, CombatChatTypes.CombatSelf, null, 0, text));
         Publish(new CombatEvent(CombatEventKind.AttackEvaded, message.DefenderName, 0, 0, 0, false, -1, true, 0, text));
+        NoteAttackDefender(message.DefenderName);
     }
 
     /// <summary>
@@ -99,7 +200,7 @@ internal sealed partial class GameStateReducer
     /// Retail's handlers for 0x01B2 and 0x01B4 call <c>ClientCombatSystem::AutoTarget</c> (11.6096 0x0056C9D0) when the combat mode is melee or missile (not magic) and
     /// <c>PlayerModule::AutoTarget</c> (0x005D3E90) is on, and only when nothing is selected; the selection checks the last, so this raises <see cref="AutoTargetRequested"/> with the
     /// attacker. Retail takes the attacker from the player's CurrentAttacker instance id (ACE's private update, not decoded: <c>TODO(m3-autotarget-attacker-id)</c>), here the nearest
-    /// object of the notice's name. Retail's check that the object exists and one more flag test on it are not read (<c>TODO(m3-autotarget-attacker-flag)</c>).
+    /// living creature of the notice's name (M4 1.3 s2: <see cref="WorldObjectTable.NearestLivingCreatureNamed"/> skips a dead one and a non-creature). Retail's check that the object exists and one more flag test on it are not read (<c>TODO(m3-autotarget-attacker-flag)</c>).
     /// </summary>
     private void RequestAutoTarget(string attackerName)
     {
@@ -112,13 +213,13 @@ internal sealed partial class GameStateReducer
         uint attacker = 0;
         if (_state.Objects.TryGet(_state.Self.Guid, out var self) && self.Position is { } at)
         {
-            _state.Objects.NearestNamed(attackerName, at, _state.Self.Guid, out attacker);
+            _state.Objects.NearestLivingCreatureNamed(attackerName, at, _state.Self.Guid, out attacker);
         }
 
         if (attacker == 0 && !_autoTargetNoAttackerLogged)
         {
             _autoTargetNoAttackerLogged = true;
-            _log.Info(SessionLog.Category, "TODO(m3-autotarget-selectnext): no object of the attacker's name is known; retail selects the closest compass item then, nothing is selected here");
+            _log.Info(SessionLog.Category, "TODO(m3-autotarget-selectnext): no living creature of the attacker's name is known; retail selects the closest compass item then, nothing is selected here");
         }
 
         Publish(new AutoTargetRequested(attacker));
@@ -179,10 +280,13 @@ internal sealed partial class GameStateReducer
         var value = unchecked((int)message.Value);
         if (message.Key != CombatModes.Property)
         {
+            var coinsBefore = q.CoinValue;
             q.Ints[message.Key] = value;
+            NoteCoinValue(message.Key, coinsBefore, value); // M4 3.2 s1: GameStateReducer.Vendor.cs
             return;
         }
 
+        WireAttack();
         var previous = q.CombatMode;
         q.Ints[message.Key] = value;
         if (previous != value)

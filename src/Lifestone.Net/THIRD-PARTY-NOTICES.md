@@ -10,7 +10,10 @@ The only other third-party code in Lifestone.Net is two enums' names and values 
 ports in the tests (OpenAC's transport tests and ACE's `CryptoSystem` oracle) carry their own headers and are listed in
 `docs/third-party/net.md`.
 
-The files that hold OpenAC code:
+Since M4 1.2 s0 two files also hold code from the same repository at a second commit, the signed head
+`f22b04851c5fcc3f38acfe50fb704ca38130c081` (see the second table below); the files in the first table stay at `1ee5a08`.
+
+The files that hold OpenAC code at `1ee5a08`:
 
 | Lifestone.Net file | OpenAC source (`src/AcDream.Core.Net/`) |
 |---|---|
@@ -91,3 +94,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+The files that hold OpenAC code at `f22b048` (M4 D7; OpenAC source `src/AcDream.Core.Net/`):
+
+| Lifestone.Net file | OpenAC source (`src/AcDream.Core.Net/`) |
+|---|---|
+| `Messages/Actions/CombatActionCodecs.cs` | `Messages/AttackTargetRequest.cs` |
+| `Messages/Combat/AttackEventCodecs.cs` | `Messages/GameEvents.cs` (`ParseAttackDone`, `ParseCombatCommenceAttack`) |
+| `Messages/Inventory/ContainerCodecs.cs` | `Messages/GameEvents.cs` (`ParseViewContents`, `ParseCloseGroundContainer`) |
+| `Messages/Actions/ItemMoveActionCodecs.cs` | `Messages/InventoryActions.cs` (`BuildStackableSplitToContainer`, `BuildStackableSplitTo3D`, `BuildStackableSplitToWield`, `BuildGiveObjectRequest`, `BuildDropItem`, `BuildNoLongerViewingContents`) |
+| `Messages/Vendor/VendorCodecs.cs` | `Messages/VendorApproach.cs` |
+| `Messages/Actions/VendorActionCodecs.cs` | `Messages/VendorRequests.cs` (`BuildBuy`, `BuildSell`), `Messages/AppraiseRequest.cs` |
+| `Messages/Inventory/AppraiseCodecs.cs` | `Messages/AppraiseInfoParser.cs` |

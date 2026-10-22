@@ -309,6 +309,11 @@ public partial class UiElement : IInputActionSink, IUiGlobalListener
         }
     }
 
+    /// <summary>
+    /// Forgets that <paramref name="button"/> went down on the element, with no release message and no click: the press became a drag that ended elsewhere (<see cref="UiDrag"/>), so a later press starts afresh.
+    /// </summary>
+    internal void CancelMouseDown(uint button) => _mouseDown.Remove(button);
+
     /// <summary><c>UIRegion::NotifyMouseUp</c> (11.4186 0x0069FE80, 11.6096 0x006A0D00): a button that went down on the element came up.</summary>
     internal void NotifyMouseUp(int x, int y, uint button)
     {

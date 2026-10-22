@@ -410,7 +410,7 @@ public sealed class ReducerInventoryTests
         var before = r.Harness.Log.Entries.Count;
         r.Send(AceM3Writers.PublicUpdateInstanceId(1, Sword, 38, 0x80000777));
         r.Send(AceM3Writers.PublicUpdateInstanceId(2, Sword, 38, 0x80000778));
-        var logged = r.Harness.Log.Entries.Skip(before).Where(e => e.Message.Contains("m3-inventory-instance-properties", StringComparison.Ordinal)).ToList();
+        var logged = r.Harness.Log.Entries.Skip(before).Where(e => e.Message.Contains("instance property the reducer does not apply", StringComparison.Ordinal)).ToList();
         Assert.Single(logged);
         Assert.Equal(LogSeverity.Info, logged[0].Severity);
     }

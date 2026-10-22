@@ -248,6 +248,26 @@ public sealed class FightTallyTests
         });
     }
 
+    [Fact]
+    public void A_hunts_damage_taken_includes_a_creatures_spell_line_review_1_2_R3()
+    {
+        // The live melee run of 2026-10-20: 01B2 blows summed 32 and "Tumerok Warrior bashes you for 32 points with Shock Wave II." (a Magic line) was never counted: 32 of the 64 points lost.
+        var h = new ReducerHarness();
+        h.EnterWorld();
+        Describe(h);
+        var tally = new HuntTally();
+        tally.Start(new View(h));
+
+        Magic(h, "Tumerok Warrior bashes you for 32 points with Shock Wave II.");
+        Magic(h, "You scorch Tusker Slave for 87 points with Flame Bolt VII."); // damage dealt: not taken
+
+        Assert.Equal(32, tally.DamageTaken);
+        Assert.Equal(32, tally.SpellDamageTaken);
+        Assert.Equal(0, tally.HitsTaken);
+        tally.Reset();
+        Assert.Equal(0, tally.DamageTaken + tally.SpellDamageTaken);
+    }
+
     private static (ReducerHarness H, FightTally Tally) Started()
     {
         var h = new ReducerHarness();

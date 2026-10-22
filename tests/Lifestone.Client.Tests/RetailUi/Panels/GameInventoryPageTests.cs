@@ -1,11 +1,14 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
+using Lifestone.Client.Play;
 using Lifestone.Client.RetailUi.Core;
+using Lifestone.Client.RetailUi.Dialogs;
 using Lifestone.Client.RetailUi.Flow;
 using Lifestone.Client.RetailUi.Input;
 using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Rendering;
 using Lifestone.Client.RetailUi.Screens;
+using Lifestone.Client.RetailUi.Text;
 using Lifestone.Client.RetailUi.Widgets;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.StandIn;
@@ -34,6 +37,8 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixtur
     private const uint Pack = 0x80000110;
     private const uint Gem = 0x80000111;
     private const uint Dagger = 0x80000104;
+    private const uint Gem2 = 0x80000112;
+    private const uint Focus = 0x80000113;
     private const uint MeleeWeapon = 0x00100000;
 
     private sealed class Game(LoginRig rig, GamePlayScreen screen, IInboundMessageHandler handler) : IDisposable
@@ -60,6 +65,18 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixtur
 
         public void Put(uint item, uint container, uint placement) =>
             handler.OnInventoryPutObjInContainer(Context, new GameEventHeader(Player, ++_event, 0x0022), new InventoryPutObjInContainerEvent(item, container, placement, 0));
+
+        /// <summary>GameEvent 0x0196 ViewContents: the server's naming of a container's entries (it comes before their F745s at login and on a pack's arrival).</summary>
+        public void View(uint container, params (uint Guid, uint Type)[] entries) =>
+            handler.OnViewContents(Context, new GameEventHeader(Player, ++_event, 0x0196), new ViewContentsEvent(container, [.. entries.Select(static e => new ViewContentsEntry(e.Guid, e.Type))]));
+
+        /// <summary>The player enters with a description naming these entries of its pack (type 1: a side pack, 2: a focus) and nothing else (the stand-in's own inventory is replaced).</summary>
+        public void Describe(params ContentDesc[] pack)
+        {
+            handler.OnPlayerCreate(Context, new PlayerCreateMsg(Player));
+            Create(ReducerHarness.Create(Player, ReducerHarness.Stamps(), ReducerHarness.Position(0x860201AD), state: PhysicsState.Hidden | PhysicsState.Gravity, name: "Tester"));
+            handler.OnPlayerDescription(Context, new GameEventHeader(Player, ++_event, 0x0013), new PlayerDescriptionMsg { Attributes = [new AttributeDesc(1, 0, 100, 0)], Inventory = [.. pack] });
+        }
 
         public void Open()
         {
@@ -472,12 +489,11 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixtur
     }
 
     [RequiresLocalDatsFact]
-    public void A_double_click_on_a_wearable_pack_item_wields_it_through_the_action_api_and_an_item_with_no_valid_locations_does_nothing()
+    public void A_double_click_on_a_wearable_pack_item_wields_it_through_the_action_api_and_an_item_with_no_valid_locations_is_used()
     {
         using var g = Enter(populate: true);
         g.Open();
         var session = g.Rig.Session;
-        var before = session.ActionLog.Total;
         var sword = g.Page.PackList.CellAt(0)!;
         DoubleClick(g, sword);
         g.Frames(2);
@@ -488,9 +504,188 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixtur
         Assert.Equal(ActionSource.Ui, wielded[0].Source);
         Assert.Contains($"item=0x{Sword:X8} location=0x{MeleeWeapon:X8}", wielded[0].Summary, StringComparison.OrdinalIgnoreCase);
 
-        DoubleClick(g, g.Page.PackList.CellAt(1)!); // the pyreals: no valid locations
+        // M4 2.2 s2 (TODO(m3-use-from-pack) closed): the pyreals have no valid locations, so retail uses them. Use goes out as the person's; the wield above stays the only Wield.
+        Assert.Equal(0, g.Page.Uses);
+        DoubleClick(g, g.Page.PackList.CellAt(1)!);
         g.Frames(2);
-        Assert.Equal(before + 1, session.ActionLog.Total);
+        var use = Assert.IsType<ActionHandle>(g.Page.LastUse);
+        Assert.Equal(1, g.Page.Uses);
+        Assert.Equal((ActionKind.Use, ActionSource.Ui), (use.Kind, use.Source));
+        Assert.Contains($"guid=0x{Pyreal:X8}", use.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(Enumerable.Range(0, session.ActionLog.Count).Select(i => session.ActionLog[i]), static e => e.Kind == ActionKind.Wield);
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_double_click_on_a_side_pack_cell_opens_it_as_before_and_uses_and_wields_nothing()
+    {
+        using var g = Enter(populate: true);
+        g.Open();
+        var page = g.Page;
+        DoubleClick(g, page.SidePackList.CellAt(0)!);
+        g.Frames(2);
+        Assert.Equal(Pack, page.OpenContainer);
+        Assert.Equal("Contents of Pack", page.ContentsTitle);
+        Assert.Equal(0, page.Uses);
+        Assert.Null(page.LastUse);
+        Assert.DoesNotContain(Enumerable.Range(0, g.Rig.Session.ActionLog.Count).Select(i => g.Rig.Session.ActionLog[i]), static e => e.Kind is ActionKind.Wield or ActionKind.Use);
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_right_click_selects_the_item_and_examines_it_sending_the_Identify_and_no_use()
+    {
+        // M4 3.2 s4c (closes TODO(m4-itemlist-examine); the old row answered the not-built dialog): the examine panel opens and asks the server, with the Ui source; nothing is used and no dialog opens.
+        using var g = Enter(populate: true);
+        g.Open();
+        var page = g.Page;
+        var examine = Assert.IsType<GameExaminePanel>(g.Host.Examine);
+        var cell = page.PackList.CellAt(0)!;
+        RightClick(g, cell);
+        g.Frames(2);
+
+        Assert.Equal(Sword, page.PackList.SelectedItemId);
+        Assert.Empty(g.Rig.Manager.Dialogs.OpenDialogs);
+        Assert.True(examine.IsOpen);
+        Assert.Equal(Sword, examine.ShownGuid);
+        Assert.Equal(ActionKind.Identify, examine.LastIdentify!.Kind);
+        Assert.Equal(ActionSource.Ui, examine.LastIdentify.Source);
+        Assert.Equal(0, page.Uses);
+    }
+
+    // ------------------------------------------------------------------ a side pack's contents (M4 2.2 s2)
+
+    private static uint[] Packed(GameInventoryPage page) => [.. page.PackList.Items.Cast<UiItem>().Where(static c => !c.IsEmpty).Select(static c => c.ItemId)];
+
+    [RequiresLocalDatsFact]
+    public void A_side_packs_0196_before_its_F745s_lists_each_item_as_its_object_lands_in_the_packs_order()
+    {
+        // Login (capture C1): the 0196 names the pack's entries before the pack's F745 and before every F745 of its contents.
+        using var g = Enter(populate: false);
+        g.Describe(new ContentDesc(Pack, 1));
+        g.View(Pack, (Gem, 0), (Gem2, 0));
+        g.Open();
+        var page = g.Page;
+        page.ShowContents(Pack);
+        g.Frames(2);
+        Assert.Equal(Pack, page.OpenContainer);
+        Assert.Empty(Packed(page)); // no object has landed: nothing is listed, and nothing is guessed
+        Assert.DoesNotContain(page.SidePackList.Items.Cast<UiItem>(), static c => !c.IsEmpty); // the pack's own F745 has not landed either
+
+        var refreshes = page.Refreshes;
+        g.Create(Item(Pack, "Pack", 0x060011D2, 0x200));
+        g.Frames(2);
+        Assert.Equal("Contents of Pack", page.ContentsTitle);
+        Assert.Empty(Packed(page));
+        Assert.True(page.Refreshes > refreshes);
+
+        g.Create(Item(Gem2, "Second Gem", 0x060011D0, 0x8, container: Pack));
+        g.Frames(2);
+        Assert.Equal([Gem2], Packed(page)); // the entry whose object landed; the first entry is left out until it does
+        g.Create(Item(Gem, "Gem", 0x060011D0, 0x8, container: Pack));
+        g.Frames(2);
+        Assert.Equal([Gem, Gem2], Packed(page)); // the pack's order, not the order the objects arrived in
+        Assert.Equal(2, g.Rig.Session.State.Containers.TryGet(Pack, out var view) ? view.Entries.Count : -1);
+        Assert.True(view!.IsResolved);
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_0196_alone_redraws_the_open_pack_and_an_item_moved_into_it_by_a_0022_is_listed_at_the_slot_the_server_named()
+    {
+        using var g = Enter(populate: true);
+        g.Open();
+        var page = g.Page;
+        Assert.True(g.Rig.Click(page.SidePackList.CellAt(0)!));
+        g.Frames(2);
+        Assert.Equal([Gem], Packed(page));
+
+        // A 0196 that names an entry whose object is not there changes the model's contents and nothing visible: the page still redraws for it (ContainerContentsChanged), and lists no guess.
+        var refreshes = page.Refreshes;
+        g.View(Pack, (Gem, 0), (Gem2, 0));
+        g.Frames(2);
+        Assert.True(page.Refreshes > refreshes);
+        Assert.Equal([Gem], Packed(page));
+        g.Create(Item(Gem2, "Second Gem", 0x060011D0, 0x8, container: Pack));
+        g.Frames(2);
+        Assert.Equal([Gem, Gem2], Packed(page));
+
+        // A 0022 puts the dagger in the pack at slot 0: it is listed first, and the page shows it without a click.
+        g.Create(Item(Dagger, "Dagger", 0x060011D1, MeleeWeapon, valid: MeleeWeapon));
+        g.Frames(2);
+        g.Put(Dagger, Pack, 0);
+        g.Frames(2);
+        Assert.Equal([Dagger, Gem, Gem2], Packed(page));
+        Assert.Equal(Pack, page.OpenContainer);
+
+        // A 0022 back to the main pack takes it out of the list.
+        g.Put(Gem, Player, 0);
+        g.Frames(2);
+        Assert.Equal([Dagger, Gem2], Packed(page));
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_focus_carried_with_a_pack_hides_none_of_the_packs_entries_OpenAC_226()
+    {
+        using var g = Enter(populate: false);
+        g.Describe(new ContentDesc(Pack, 1), new ContentDesc(Focus, 2));
+        g.View(Pack, (Gem2, 2), (Gem, 0)); // a foci-typed entry in the pack, then an ordinary one
+        g.View(Focus);
+        g.Create(Item(Pack, "Pack", 0x060011D2, 0x200));
+        g.Create(Item(Focus, "Focus", 0x060011CF, 0x8));
+        g.Create(Item(Gem2, "Gem Focus", 0x060011D0, 0x8, container: Pack));
+        g.Create(Item(Gem, "Gem", 0x060011D0, 0x8, container: Pack));
+        g.Open();
+        var page = g.Page;
+        g.Frames(2);
+
+        Assert.Equal([Pack, Focus], page.SidePackList.Items.Cast<UiItem>().Where(static c => !c.IsEmpty).Select(static c => c.ItemId)); // both are in the column
+        Assert.True(g.Rig.Click(page.SidePackList.CellAt(0)!));
+        g.Frames(2);
+        Assert.Equal([Gem2, Gem], Packed(page)); // the pack is complete
+        Assert.Equal("Contents of Pack", page.ContentsTitle);
+
+        Assert.True(g.Rig.Click(page.SidePackList.CellAt(1)!));
+        g.Frames(2);
+        Assert.Equal(Focus, page.OpenContainer);
+        Assert.Equal("Contents of Focus", page.ContentsTitle);
+        Assert.Empty(Packed(page));
+    }
+
+    [RequiresLocalDatsFact]
+    public void The_panel_shots_main_pack_shot_waits_for_the_main_pack_to_list_its_items_and_never_for_a_side_pack_M4_3_1_p()
+    {
+        // m4-panelshot-mainpack: the shot's plan (PanelFramesPlan.MainPackListed) over the real page. The first shot selects the side pack; the second puts the page on the player's own pack, where a looted item is listed.
+        using var g = Enter(populate: true);
+        g.Open();
+        var page = g.Page;
+        var state = g.Rig.Session.State;
+        var frame = Assert.Single(PanelFramesPlan.FramesFor([GameInventoryPage.Panel]));
+        Assert.True(PanelFramesPlan.HasMainPackShot(frame));
+        Assert.Equal(Player, PanelFramesPlan.MainPackOwner(state));
+
+        Assert.Equal(Pack, PanelFramesPlan.FirstSidePack(page)); // the first shot's pack
+        page.ShowContents(Pack);
+        g.Frames(2);
+        Assert.False(PanelFramesPlan.MainPackListed(page, state)); // the side pack is open: the main-pack shot does not take it for the main pack
+        Assert.Equal([Gem], Packed(page));
+
+        // The hunter's loot lands in the main pack while the side pack shows (the 0022 a server sends after a corpse's item is taken).
+        g.Create(Item(Gem2, "Looted Gem", 0x060011D0, 0x8));
+        g.Put(Gem2, Player, 3);
+        g.Frames(2);
+        Assert.False(PanelFramesPlan.MainPackListed(page, state));
+
+        page.ShowContents(PanelFramesPlan.MainPackOwner(state)); // what the shot does after the first frame
+        Assert.False(PanelFramesPlan.MainPackListed(page, state)); // the page has not redrawn yet: the shot waits for the list, not for a frame count
+        g.Frames(2);
+        Assert.True(PanelFramesPlan.MainPackListed(page, state));
+        Assert.Equal("Contents of Backpack", page.ContentsTitle);
+        Assert.Equal([Sword, Pyreal, Wand, Gem2], Packed(page)); // the looted item is in the list
+        Assert.Equal(state.Self.Inventory.Pack.Count, page.PackList.OccupiedCount);
+
+        // An entry the description names whose object has not landed is left out by the page, so the plan does not wait for it.
+        g.Handler.OnPlayerDescription(g.Context, new GameEventHeader(Player, 90, 0x0013), new PlayerDescriptionMsg { Attributes = [new AttributeDesc(1, 0, 100, 0)], Inventory = [new ContentDesc(Sword, 0), new ContentDesc(Pyreal, 0), new ContentDesc(Wand, 0), new ContentDesc(Gem2, 0), new ContentDesc(Dagger, 0)] });
+        g.Frames(2);
+        Assert.True(PanelFramesPlan.MainPackListed(page, state));
+        Assert.Throws<ArgumentNullException>(() => PanelFramesPlan.MainPackListed(null!, state));
     }
 
     [Fact]
@@ -529,6 +724,14 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixtur
         g.Frames(2);
         Assert.Single(lines);
         Assert.Equal(1, wield());
+    }
+
+    private static void RightClick(Game g, UiItem cell)
+    {
+        var box = cell.ScreenBox;
+        g.Rig.Manager.Input.MouseMove((box.X0 + box.X1) / 2, (box.Y0 + box.Y1) / 2);
+        g.Rig.Manager.Input.MouseButton(UiMouseButton.Right, down: true);
+        g.Rig.Manager.Input.MouseButton(UiMouseButton.Right, down: false);
     }
 
     private static void DoubleClick(Game g, UiItem cell)

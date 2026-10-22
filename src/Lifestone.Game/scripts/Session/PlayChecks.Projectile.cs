@@ -44,6 +44,7 @@ public sealed partial class PlayChecks
         Visit.ProjectileSetup ??= id => Lifestone.Data.Magic.AceWorldExtract.Load().ProjectilesBySpell.TryGetValue(id, out var projectile) ? projectile.SetupId : null;
         var learn = session.Tools.LearnSpells([FlameBoltSpellId, ShockWaveSpellId], ActionSource.Host);
         var learned = await WaitFor(() => learn.IsCompleted, 10.0);
+        var caster = await HoldCasterAsync(session); // M4 3.1 g: the magic mode needs a caster in hand (the combat-mode guard); the wand goes back to the pack with the return to peace below
         var magic = session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
         var inMagic = await WaitFor(() => magic.IsCompleted, 10.0) && session.State.Self.Qualities.CombatMode == CombatModes.Magic;
 
@@ -75,6 +76,7 @@ public sealed partial class PlayChecks
         // Back to peace, so the checks after this one find the character as they did.
         var peace = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
         await WaitFor(() => peace.IsCompleted, 10.0);
+        await StowAsync(session, caster);
     }
 
     /// <summary>Casts <paramref name="spellId"/> and follows its projectile frame by frame from the CreateObject to the F747 (20 s at most).</summary>

@@ -104,7 +104,10 @@ public enum DeathNoticeSource
 /// <param name="Source">The message that raised it.</param>
 public readonly record struct PlayerDied(string Text, uint Killer, DeathNoticeSource Source) : IGameEvent;
 
-/// <summary>GameEvent 0x01AD KillerNotification: the player killed something (a player: ACE sends it for player kills only). Raised after its text is in the chat.</summary>
+/// <summary>
+/// GameEvent 0x01AD KillerNotification: the player landed the last damage on something. ACE sends it to any player who lands the killing blow, creature or player
+/// (<c>W/Creature_Death.cs</c> 68-76: <c>lastDamagerInfo.IsPlayer</c>); capture.md C1 saw it for an Adult Reedshark. Raised after its text is in the chat.
+/// </summary>
 /// <param name="Text">The server's message ("You have killed X").</param>
 public readonly record struct PlayerKilledSomething(string Text) : IGameEvent;
 

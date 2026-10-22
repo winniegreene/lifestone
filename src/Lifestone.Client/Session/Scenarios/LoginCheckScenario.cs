@@ -2,6 +2,7 @@ using System.Globalization;
 using Lifestone.Client.Audio;
 using Lifestone.Client.Avatars;
 using Lifestone.Client.Movement.Routes;
+using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.World;
@@ -213,11 +214,17 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
     /// </summary>
     public string MageField { get; private set; } = LoginCheckShell.NotApplicable;
 
-    /// <summary>The two report-only fields as the verdict line carries them: <c> level=&lt;n|?&gt; mage_char=&lt;present|absent|pending-delete&gt;</c> (they never fail the check).</summary>
-    public string ReportFields => Fields(LevelField, MageField);
+    /// <summary>
+    /// Whether the account's character list holds <see cref="FighterTemplate.CharacterName"/> (case-insensitive), for the verdict line's <c>fighter=</c> (M4 1.1 s5, report-only):
+    /// the same rule as <see cref="MageField"/>.
+    /// </summary>
+    public string FighterField { get; private set; } = LoginCheckShell.NotApplicable;
 
-    /// <summary>The report-only fields (M3 1.1 s4) with their leading space, for appending to the verdict line.</summary>
-    public static string Fields(string level, string mage) => string.Create(CultureInfo.InvariantCulture, $" level={level} mage_char={mage}");
+    /// <summary>The report-only fields as the verdict line carries them: <c> level=&lt;n|?&gt; mage_char=&lt;present|absent|pending-delete&gt; fighter=&lt;present|absent|pending-delete&gt;</c> (they never fail the check).</summary>
+    public string ReportFields => Fields(LevelField, MageField, FighterField);
+
+    /// <summary>The report-only fields (M3 1.1 s4, <c>fighter=</c> M4 1.1 s5) with their leading space, for appending to the verdict line.</summary>
+    public static string Fields(string level, string mage, string fighter) => string.Create(CultureInfo.InvariantCulture, $" level={level} mage_char={mage} fighter={fighter}");
 
     /// <summary>
     /// The report-only sound fields (M3 1.3 s3) with their leading space: <c> sounds_server=&lt;n|n/a&gt; sounds_hooks=&lt;n|n/a&gt; sounds_ui=&lt;n|n/a&gt; ambient=&lt;n|n/a&gt;</c>,
@@ -262,12 +269,17 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
     }
 
     /// <summary>The <c>mage_char=</c> value for a character list: <c>present</c>, <c>pending-delete</c> or <c>absent</c> (the name is compared case-insensitively).</summary>
-    public static string MageOf(IEnumerable<CharacterSlot> characters)
+    public static string MageOf(IEnumerable<CharacterSlot> characters) => ListedAs(characters, MageTemplate.CharacterName);
+
+    /// <summary>The <c>fighter=</c> value for a character list: <c>present</c>, <c>pending-delete</c> or <c>absent</c> (the name is compared case-insensitively).</summary>
+    public static string FighterOf(IEnumerable<CharacterSlot> characters) => ListedAs(characters, FighterTemplate.CharacterName);
+
+    private static string ListedAs(IEnumerable<CharacterSlot> characters, string name)
     {
         ArgumentNullException.ThrowIfNull(characters);
         foreach (var c in characters)
         {
-            if (string.Equals(c.Name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
             {
                 return c.PendingDeletion ? "pending-delete" : "present";
             }
@@ -444,6 +456,7 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
         if (MageField == LoginCheckShell.NotApplicable)
         {
             MageField = MageOf(session.State.Characters.Entries);
+            FighterField = FighterOf(session.State.Characters.Entries);
         }
 
         foreach (var c in session.State.Characters.Entries)

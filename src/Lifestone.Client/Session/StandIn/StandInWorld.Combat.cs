@@ -45,7 +45,7 @@ internal sealed partial class StandInWorld
     /// <summary>See <see cref="PlaceholderBodyHeight"/>.</summary>
     internal const float PlaceholderProjectileRadius = 0.1f;
 
-    /// <summary>The seconds between the Dead motion and the creature's removal (the Dead animation's length in ACE; a placeholder: the stand-in does not read the creature's motion table; <c>TODO(m3-standin-corpse)</c>).</summary>
+    /// <summary>The seconds between the Dead motion and the creature's removal (the Dead animation's length in ACE; a placeholder: the stand-in does not read the creature's motion table; <c>TODO(m4-standin-death-animation)</c>).</summary>
     internal const double DeathAnimationSeconds = 2.0;
 
     /// <summary>The share of a spell's power the placeholder damage rule takes as the smallest and the largest roll (read off ACE's comment that a level VII spell, power 400, does 110 to 180; <c>TODO(m3-standin-spell-damage)</c>).</summary>
@@ -88,6 +88,9 @@ internal sealed partial class StandInWorld
         public long XpOverride { get; } = kind.XpOverride;
 
         public float Height { get; } = kind.Height;
+
+        // M4 1.2 s3: the creature's look, for the corpse the player's kill leaves.
+        public uint Setup { get; } = kind.Setup;
 
         public bool Dead { get; set; }
 
@@ -463,7 +466,7 @@ internal sealed partial class StandInWorld
 
     /// <summary>
     /// The death, in the order ACE's code runs it: <c>OnDeath</c> queues the experience for the player's own action queue (<c>EarnXP</c>) and sends the killer notification; <c>Die</c> sends the Dead motion; the queued experience then
-    /// reaches the player (0x02CF total, then available); the creature is removed once its animation has played (ACE creates the corpse there: <c>TODO(m3-standin-corpse)</c>).
+    /// reaches the player (0x02CF total, then available); the corpse and the creature's removal follow once its animation has played (<see cref="CreateCreatureCorpse"/>).
     /// </summary>
     private void Kill(IAcSessionSink sink, StandInDamageType type, uint target, StandInCreature creature)
     {
@@ -476,8 +479,13 @@ internal sealed partial class StandInWorld
         sink.OnKillerNotification(Context(sink), new GameEventHeader(self.Guid, 0, 0x01AD), new KillerNotificationEvent(text));
         SendCreatureMotion(sink, target, MotionCommands.NonCombat, MotionCommands.Dead);
         GrantKillExperience(sink, creature);
-        Placeholder("m3-standin-corpse", "ACE leaves a corpse where the creature died (Creature_Death.cs CreateCorpse) after the Dead animation's length: the stand-in removes the creature " + DeathAnimationSeconds + " s after the Dead motion and creates no corpse");
-        _reducer.StandIn!.At(_reducer.Clock.Now + DeathAnimationSeconds, later => DeleteObject(later, target));
+        Placeholder("m4-standin-death-animation", "ACE leaves the corpse after the Dead animation's length (the creature's motion table's, Creature_Death.cs CreateCorpse): the stand-in waits " + DeathAnimationSeconds + " s after the Dead motion, then the corpse's F745 and the creature's F747 in one tick");
+        var place = _reducer.State.Objects.TryGet(target, out var body) && body.Position is { } at ? new AcPosition(at.CellId, at.Frame.Origin, at.Frame.Orientation) : default;
+        _reducer.StandIn!.At(_reducer.Clock.Now + DeathAnimationSeconds, later =>
+        {
+            CreateCreatureCorpse(later, creature, place);
+            DeleteObject(later, target);
+        });
     }
 
     /// <summary>The creature's own motion (ACE's <c>ExecuteMotion</c> broadcast as an UpdateMotion F74C): the stance and the forward command, the sequences continuing the object's.</summary>

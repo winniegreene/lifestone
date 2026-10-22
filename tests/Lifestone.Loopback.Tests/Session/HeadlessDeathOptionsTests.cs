@@ -26,9 +26,27 @@ public sealed class HeadlessDeathOptionsTests
         var o = HeadlessOptions.Parse(["--scenario=death-and-regear", "--death-seconds=120.5"]);
         Assert.Empty(o.Errors);
         Assert.Equal(120.5, o.Death.Seconds);
-        Assert.Equal(Program.DeathQuitAfterOverheadSeconds + 120.5, Program.DeathQuitAfterSeconds(o.Death.Seconds));
-        Assert.Equal(1500.0, Program.DeathQuitAfterSeconds(DeathOptions.DefaultSeconds));
+        Assert.Equal(Program.DeathQuitAfterOverheadSeconds + Program.DeathQuitAfterNewStagesSeconds + DeathOptions.DefaultFightSeconds + 120.5, Program.DeathQuitAfterSeconds(o.Death.Seconds, o.Death.FightSeconds));
+        Assert.Equal(2310.0, Program.DeathQuitAfterSeconds(DeathOptions.DefaultSeconds)); // 3.1 fix R19: the new loop's 900 + 630 + 180 + 600, not the old 1500
         Assert.Equal(900.0, Program.DeathQuitAfterOverheadSeconds);
+        Assert.Equal(630.0, Program.DeathQuitAfterNewStagesSeconds);
+    }
+
+    [Fact]
+    public void The_death_fight_seconds_option_moves_the_headless_limit_and_the_formula_is_the_loopback_tests_3_1_fix_R19()
+    {
+        var o = HeadlessOptions.Parse(["--scenario=death-and-regear", "--death-fight-seconds=300", "--death-seconds=100"]);
+        Assert.Empty(o.Errors);
+        Assert.Equal(300.0, o.Death.FightSeconds);
+        Assert.Equal(900.0 + 630.0 + 300.0 + 100.0, Program.DeathQuitAfterSeconds(o.Death.Seconds, o.Death.FightSeconds));
+
+        // The loopback tests' own limit and the host's default are one formula (the game leg's 2,015 s plus the log off, the margin and the old overhead's slack).
+        foreach (var args in new[] { Array.Empty<string>(), ["--death-seconds=120.5"], ["--death-fight-seconds=60"], ["--death-seconds=900", "--death-fight-seconds=240"] })
+        {
+            var parsed = HeadlessOptions.Parse(["--scenario=death-and-regear", .. args]);
+            Assert.Empty(parsed.Errors);
+            Assert.Equal(DeathLive.QuitAfterSecondsFor(parsed.Death), Program.DeathQuitAfterSeconds(parsed.Death.Seconds, parsed.Death.FightSeconds));
+        }
     }
 
     [Theory]

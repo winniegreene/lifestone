@@ -128,6 +128,7 @@ public sealed partial class PlayChecks
         Visit.ProjectileSetup ??= id => Lifestone.Data.Magic.AceWorldExtract.Load().ProjectilesBySpell.TryGetValue(id, out var projectile) ? projectile.SetupId : null;
         var learn = session.Tools.LearnSpells([FlameBoltSpellId], ActionSource.Host);
         var learned = await WaitFor(() => learn.IsCompleted, 10.0);
+        var caster = await HoldCasterAsync(session); // M4 3.1 g: the magic mode needs a caster in hand (the combat-mode guard; one an earlier row left counts); a wand this row wields is put away at its end
         var magic = session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
         var inMagic = await WaitFor(() => magic.IsCompleted, 10.0) && session.State.Self.Qualities.CombatMode == CombatModes.Magic;
 
@@ -260,6 +261,7 @@ public sealed partial class PlayChecks
 
         var peace = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
         await WaitFor(() => peace.IsCompleted, 10.0);
+        await StowAsync(session, caster);
 
         Check(
             name,

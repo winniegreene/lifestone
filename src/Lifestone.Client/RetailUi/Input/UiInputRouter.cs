@@ -93,6 +93,7 @@ public sealed partial class UiInputRouter
     {
         _manager = manager;
         _managerCallback = new ManagerCallback(this);
+        Drag = new UiDrag(manager);
 
         // UIElementManager::Init (11.4186 0x0045EE10, 11.6096 0x0045EEF0) registers the UI's maps.
         RegisterInputMap(UiMouseMap, _managerCallback, 0);
@@ -170,11 +171,13 @@ public sealed partial class UiInputRouter
     public bool IsActionInProgress(uint actionId) => _actionStates.ContainsKey(actionId);
 
     /// <summary>
-    /// The UI item being dragged (retail's <c>UIElementManager</c> drag element), or null. Dragging UI items (inventory,
-    /// spells, shortcuts) is not built in M2, so this is always null and drop targets never show their drag states
-    /// (TODO(retailui-runtime): drag and drop, with the gameplay panels).
+    /// The UI item being dragged (retail's <c>UIElementManager</c> drag element), or null: the item cell the left button went down on while <see cref="Drag"/>
+    /// carries it (M4 2.2 s3; the M2 stub answered null). <see cref="Widgets.UiField"/>'s drag-rollover reads it.
     /// </summary>
-    public UiElement? DragElement => null;
+    public UiElement? DragElement => Drag.Element;
+
+    /// <summary>The drag and drop of item cells (M4 2.2 s3): the mouse path below feeds it, panels register their drop targets with it.</summary>
+    public UiDrag Drag { get; }
 
     /// <summary>
     /// <c>CInputManager::RegisterInputMap</c>: <paramref name="callback"/> receives the actions of input map
@@ -280,6 +283,7 @@ public sealed partial class UiInputRouter
         ClientActive = active;
         if (!active)
         {
+            Drag.Cancel("the window lost the focus");
             ReleasePressedKeys();
         }
 
@@ -473,6 +477,13 @@ public sealed partial class UiInputRouter
         if (dik <= 0)
         {
             return false;
+        }
+
+        if (down && dik == DikScanCodes.Escape && Drag.Phase == UiDragPhase.Dragging)
+        {
+            DropDragCapture();
+            Drag.Cancel("Escape"); // Escape ends the drag and nothing else: the key is taken
+            return true;
         }
 
         var canonical = DikScanCodes.Canonical(dik);

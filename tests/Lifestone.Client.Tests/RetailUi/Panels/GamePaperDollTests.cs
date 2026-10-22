@@ -6,6 +6,7 @@ using Lifestone.Client.RetailUi.Input;
 using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Widgets;
+using Lifestone.Client.Session.Actions;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Client.Tests.RetailUi.Screens;
@@ -37,6 +38,18 @@ public sealed class GamePaperDollTests(DatSetFixture fixture) : IClassFixture<Da
     private const uint LegLocations = 0x2000 | 0x4000; // upper and lower leg armour
     private const uint HandWear = 0x20;
     private const uint FootWear = 0x100;
+    private const uint RingA = 0x80000207;
+    private const uint RingB = 0x80000208;
+    private const uint RingC = 0x80000209;
+    private const uint Rings = 0x40000 | 0x80000; // FingerWearLeft | FingerWearRight
+    private const uint LeftRing = 0x40000;
+    private const uint RightRing = 0x80000;
+    private const uint LeftRingSlot = 0x100001DC;
+    private const uint RightRingSlot = 0x100001DE;
+    private const uint WeaponSlot = 0x100001DF;
+    private const uint ShieldSlot = 0x100001E1;
+    private const uint HeadSlot = 0x100005AB;
+    private const uint ChestSlot = 0x100005AC;
 
     private sealed class Game(LoginRig rig, GamePlayScreen screen, IInboundMessageHandler handler, RecordingViewHost views) : IDisposable
     {
@@ -471,5 +484,126 @@ public sealed class GamePaperDollTests(DatSetFixture fixture) : IClassFixture<Da
         g.Open();
         Assert.Equal(4, figure.Builds);
         Assert.Equal(draws[1].GfxObjId, figure.Preview!.Draws[1].GfxObjId);
+    }
+
+    // ------------------------------------------------------------------ the click map and the drops (M4 2.2 s3)
+
+    [Fact]
+    public void The_click_map_gives_each_slot_its_equip_mask_side_and_the_drop_it_accepts()
+    {
+        var map = GamePaperDoll.ClickMap;
+        Assert.Equal(GamePaperDoll.SlotTable.Count, map.Count);
+        for (var i = 0; i < map.Count; i++)
+        {
+            var slot = GamePaperDoll.SlotTable[i];
+            Assert.Equal((slot.ElementId, slot.Name, (EquipMask)slot.Mask, slot.Side, slot.Armour), (map[i].ElementId, map[i].Name, map[i].Mask, map[i].Side, map[i].Armour));
+        }
+
+        // The rings and the bracelets ask for the free side; every other slot takes the item's own locations.
+        Assert.Equal([0x10000u, 0x20000u, 0x40000u, 0x80000u], map.Where(static e => e.Rule == PaperDollDropRule.FreeSide).Select(static e => (uint)e.Mask).Order());
+        Assert.All(map.Where(static e => e.Rule == PaperDollDropRule.SlotLocations), static e => Assert.NotEqual(EquipMask.None, e.Mask));
+        Assert.True(GamePaperDoll.TryGetClickEntry(WeaponSlot, out var weapon));
+        Assert.Equal((EquipMask)GamePaperDoll.WeaponLocations, weapon.Mask);
+        Assert.True(GamePaperDoll.TryGetClickEntry(LeftRingSlot, out var left));
+        Assert.Equal((EquipMask.FingerWearLeft, 1, PaperDollDropRule.FreeSide), (left.Mask, left.Side, left.Rule));
+        Assert.False(GamePaperDoll.TryGetClickEntry(0x10000001, out _)); // not a slot
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_ring_or_bracelet_dropped_on_a_slot_asks_for_that_side_when_it_is_free_else_the_free_side_else_the_slot_dropped_on()
+    {
+        using var g = Enter(equip: false);
+        foreach (var ring in new[] { RingA, RingB, RingC })
+        {
+            g.Create(Item(ring, "Ring", 0x060011D0, 0x8, Rings));
+            g.Unwield(ring); // a 0022 into the player: the ring is in the main pack
+        }
+
+        g.Open();
+        var left = g.Doll.DropOf(LeftRingSlot)!;
+        var right = g.Doll.DropOf(RightRingSlot)!;
+        Assert.Equal(DropVerdict.Ok, left.Check(RingA, out var mask));
+        Assert.Equal(LeftRing, mask); // its own side, free
+        Assert.Equal(DropVerdict.Ok, right.Check(RingA, out mask));
+        Assert.Equal(RightRing, mask);
+
+        g.Wield(RingB, LeftRing);
+        g.Frames(2);
+        Assert.Equal(DropVerdict.Ok, left.Check(RingA, out mask));
+        Assert.Equal(RightRing, mask); // the left is worn: the free side (WieldSlotChoice)
+
+        g.Wield(RingC, RightRing);
+        g.Frames(2);
+        Assert.Equal(DropVerdict.Ok, left.Check(RingA, out mask));
+        Assert.Equal(LeftRing, mask); // both worn: the slot dropped on, which the server swaps
+        Assert.Equal(DropVerdict.DoesNotFit, left.Check(RingB, out _)); // worn there already
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_wearable_dropped_on_a_slot_it_fits_wields_its_own_locations_and_one_that_does_not_fit_or_is_not_carried_is_refused()
+    {
+        using var g = Enter(equip: false);
+        foreach (var item in new[] { Wand, Cap, Coat })
+        {
+            g.Unwield(item);
+        }
+
+        g.Open();
+        var doll = g.Doll;
+        Assert.Equal(DropVerdict.Ok, doll.DropOf(HeadSlot)!.Check(Cap, out var mask));
+        Assert.Equal(HeadWear, mask);
+        Assert.Equal(DropVerdict.Ok, doll.DropOf(ChestSlot)!.Check(Coat, out mask));
+        Assert.Equal(CoatLocations, mask); // a coat covers several slots: its whole mask goes, as the double click's wield does
+        Assert.Equal(DropVerdict.Ok, doll.DropOf(WeaponSlot)!.Check(Wand, out mask));
+        Assert.Equal(Held, mask);
+        Assert.Equal(DropVerdict.DoesNotFit, doll.DropOf(ChestSlot)!.Check(Cap, out mask)); // a cap is no chest armour
+        Assert.Equal(0u, mask);
+        Assert.Equal(DropVerdict.DoesNotFit, doll.DropOf(ShieldSlot)!.Check(Wand, out _));
+        Assert.Equal(DropVerdict.NotHeld, doll.DropOf(HeadSlot)!.Check(0x7FFFFFFF, out _)); // an object the player does not carry
+        Assert.Equal(DropVerdict.NotHeld, doll.DropOf(HeadSlot)!.Check(0, out _));
+        Assert.Equal(DropVerdict.NotHeld, doll.DropOf(HeadSlot)!.Check(Leggings, out _)); // created but never put in the pack: not carried
+    }
+
+    [RequiresLocalDatsFact]
+    public void An_item_dragged_from_the_pack_to_a_paperdoll_slot_is_wielded_through_the_action_api_and_a_refused_drop_sends_nothing()
+    {
+        using var g = Enter(equip: false);
+        g.Create(Item(RingA, "Ring", 0x060011D0, 0x8, Rings));
+        g.Unwield(RingA);
+        g.Unwield(Cap);
+        g.Open();
+        g.Frames(4);
+        var page = Assert.Single(g.Screen.PanelControllers!.ControllersOf(7).OfType<GameInventoryPage>());
+        var actions = Assert.IsType<ActionApi>(g.Rig.Session.Actions);
+        var ring = page.PackList.FindItem(RingA)!;
+        var rightSlot = g.Doll.SlotList(RightRingSlot)!.CellAt(0)!;
+        var headSlot = g.Doll.SlotList(HeadSlot)!.CellAt(0)!;
+
+        var mark = actions.NextId();
+        DragCell(g, ring, rightSlot);
+        Assert.Equal(1, actions.NextId() - mark - 1);
+        var wield = Assert.IsType<ActionHandle>(g.Doll.DropOf(RightRingSlot)!.LastAction);
+        Assert.Equal((ActionKind.Wield, ActionSource.Ui), (wield.Kind, wield.Source));
+        Assert.Equal($"Wield item=0x{RingA:X8} location=0x{RightRing:X8}", wield.Summary, ignoreCase: true);
+
+        // A ring on the head slot does not fit: the release is refused and nothing is sent.
+        var mark2 = actions.NextId();
+        DragCell(g, ring, headSlot);
+        Assert.Equal(0, actions.NextId() - mark2 - 1);
+        Assert.Equal(Lifestone.Client.RetailUi.UiDragEnd.Refused, g.Rig.Manager.Input.Drag.LastEnd);
+    }
+
+    private static void DragCell(Game g, UiElement source, UiElement target)
+    {
+        var input = g.Rig.Manager.Input;
+        var s = source.ScreenBox;
+        var t = target.ScreenBox;
+        var (sx, sy) = ((s.X0 + s.X1) / 2, (s.Y0 + s.Y1) / 2);
+        input.MouseMove(sx, sy);
+        input.MouseButton(UiMouseButton.Left, down: true);
+        input.MouseMove(sx + 12, sy + 3);
+        input.MouseMove((t.X0 + t.X1) / 2, (t.Y0 + t.Y1) / 2);
+        input.MouseButton(UiMouseButton.Left, down: false);
+        g.Frames(1);
     }
 }

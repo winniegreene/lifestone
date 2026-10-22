@@ -31,6 +31,7 @@ internal sealed partial class GameStateReducer
 
     private readonly HashSet<uint> _inventoryNotedProperties = [];
     private bool _heldDeleteNoted;
+    private bool _adoptNoted;
 
     /// <summary>
     /// The PlayerDescription's <c>Inventory</c> (the main pack, in wire order) and <c>Equipped</c> lists, applied after the qualities (the one call from <c>OnPlayerDescription</c>). A description
@@ -68,6 +69,7 @@ internal sealed partial class GameStateReducer
         }
 
         var known = _state.Objects.TryGet(message.Guid, out var item);
+        var previousStack = known ? item!.Weenie.StackSize : null;
         var stackSize = message.StackSize;
         var stackValue = message.Value;
         if (known)
@@ -89,6 +91,23 @@ internal sealed partial class GameStateReducer
         inventory.SetStack(message.Guid, message.StackSize, message.Value);
         Changed();
         Publish(new InventoryChanged(InventoryChangeKind.StackChanged, message.Guid, StackSize: message.StackSize, Value: message.Value));
+        NoteAmmoStack(message.Guid, previousStack, message.StackSize);
+    }
+
+    /// <summary>
+    /// A launch (M4 1.2 s1): in the launch tick ACE sends the wielded ammo's 0x0197 with the stack one smaller (capture.md C3: 02CE, 0197, 02CD, then F750/F745/F755/F74A), so a fall of the stack of the item at
+    /// <see cref="HeldAmmo.Location"/> in missile combat mode is one shot of the <see cref="Attack"/> sequence. A stack that did not fall (a merge, a pick-up) or one with no known earlier size is not a shot.
+    /// TODO(m4-last-arrow-launch): the launch that uses the last arrow may delete the stack instead of sending 0x0197; not captured, so it is not counted (M4 1.3 s2: the missile attack tracker logs the TODO once per run when the arrow's F745 is taken as the launch with no 0x0197).
+    /// </summary>
+    private void NoteAmmoStack(uint guid, ushort? previous, uint now)
+    {
+        if (previous is not { } before || now >= before || _state.Self.Qualities.CombatMode != CombatModes.Missile || _state.Self.Inventory.EquippedAt(HeldAmmo.Location) != guid)
+        {
+            return;
+        }
+
+        WireAttack();
+        PublishAttack(_attack.OnShot());
     }
 
     /// <summary>
@@ -132,8 +151,9 @@ internal sealed partial class GameStateReducer
 
     /// <summary>
     /// GM 0x02DA: an instance-id quality (retail <c>CM_Qualities::DispatchUI_UpdateInstanceID</c>; per-object sequence). Container (2) and Wielder (3) are written to the object's weenie description
-    /// (0 clears them); membership of the model follows 0022, 0023, 019A and 0024 (see the class remarks). Any other instance property has nothing to update, and is logged once per property
-    /// (<c>TODO(m3-inventory-instance-properties)</c>).
+    /// (0 clears them); membership of the model follows 0022, 0023, 019A and 0024 (see the class remarks). Any other instance property has nothing to update and no consumer, and is logged once per property.
+    /// The Value and ItemType a loot rule needs are fields of the F745's weenie description (<see cref="WorldObject.Weenie"/> Value, <see cref="WorldObject.ItemType"/>), not instance properties:
+    /// <c>m3-inventory-instance-properties</c> is closed (M4 2.1 s1).
     /// </summary>
     public void OnPublicUpdateInstanceId(in InboundContext context, in PublicUpdateInstanceIdMsg message)
     {
@@ -161,7 +181,7 @@ internal sealed partial class GameStateReducer
                 {
                     _log.Info(
                         SessionLog.Category,
-                        "TODO(m3-inventory-instance-properties): a PublicUpdateInstanceId for an instance property the reducer does not apply; first seen",
+                        "a PublicUpdateInstanceId for an instance property the reducer does not apply (no consumer; Value and ItemType come from the weenie description); first seen",
                         new LogField("property", message.Property),
                         new LogField("guid", message.Guid));
                 }
@@ -180,6 +200,7 @@ internal sealed partial class GameStateReducer
         var self = _state.Self;
         var inventory = self.Inventory;
         inventory.Owner = self.Guid;
+        MoveInViewedContainer(message.Item, message.Container, (int)Math.Min(message.Placement, int.MaxValue));
         if (!inventory.IsKnownContainer(message.Container) && self.Guid != 0
             && _state.Objects.TryGet(message.Container, out var pack) && pack.ContainerId == self.Guid)
         {
@@ -195,6 +216,12 @@ internal sealed partial class GameStateReducer
         var container = message.Container;
         var from = inventory.PutInContainer(message.Item, message.ContainerType, container, (int)Math.Min(message.Placement, int.MaxValue));
         var now = inventory.Find(message.Item);
+        if (message.ContainerType != 0 && container == self.Guid)
+        {
+            // A pack that just arrived: its 0196 came before this 0022 and its F745 follows (capture C1).
+            ApplyPendingPackView(message.Item);
+        }
+
         if (_state.Objects.TryGet(message.Item, out var item))
         {
             Mirror(item, w => w with
@@ -214,6 +241,11 @@ internal sealed partial class GameStateReducer
         };
         Changed();
         Publish(new InventoryChanged(kind, message.Item, message.Container, now.Placement, 0, from.Container, from.Placement, from.Location));
+        PublishSidePackChanged(message.Container);
+        if (from.Kind == InventoryPlaceKind.InSidePack)
+        {
+            PublishSidePackChanged(from.Container);
+        }
     }
 
     /// <summary>
@@ -263,7 +295,7 @@ internal sealed partial class GameStateReducer
 
     /// <summary>
     /// A world object whose CreateObject says the player holds it (its container is the player or a known side pack, or the player wields it) and which the model does not list yet: ACE sends no 0022 for
-    /// the contents of a side pack at login, only each item's CreateObject. Call it from the create path once the object is in the table (<c>TODO(m3-inventory-sidepack-contents)</c>; <c>CreateNew</c> calls it
+    /// the contents of a side pack at login, only each item's CreateObject. Call it from the create path once the object is in the table (the tolerance when no 0196 named the item, M4 2.1 s1: <c>m3-inventory-sidepack-contents</c> is closed by <c>OnViewContents</c>; <c>CreateNew</c> calls it
     /// during the arrival only, so a live grant is published once, as Added, by its own 0022: M3 1.2 fix R3). The slot is unknown, so the item goes last; a later 0022 sets it.
     /// </summary>
     internal void AdoptHeldObject(WorldObject item)
@@ -285,6 +317,12 @@ internal sealed partial class GameStateReducer
         }
         else if (item.ContainerId is { } container and not 0 && inventory.IsKnownContainer(container))
         {
+            if (container != self.Guid && !_adoptNoted)
+            {
+                _adoptNoted = true;
+                _log.Info(SessionLog.Category, "a side-pack item joined the inventory model from its own CreateObject: no 0196 ViewContents named it (the tolerance); first seen", new LogField("guid", item.Guid), new LogField("pack", container));
+            }
+
             inventory.PutInContainer(item.Guid, ContainerTypeOf(item), container, int.MaxValue);
             Changed();
             Publish(new InventoryChanged(InventoryChangeKind.Added, item.Guid, container, inventory.Find(item.Guid).Placement));
@@ -325,6 +363,7 @@ internal sealed partial class GameStateReducer
         var inventory = self.Inventory;
         inventory.Owner = self.Guid;
         var from = inventory.Release(guid);
+        EvictShortcuts(guid); // OpenAC #219: the item left, so its shortcut row leaves with it (M4 3.2 h1)
         var known = _state.Objects.TryGet(guid, out var item);
         if (known)
         {
@@ -345,6 +384,14 @@ internal sealed partial class GameStateReducer
 
         Changed();
         Publish(new InventoryChanged(kind, guid, into, -1, 0, from.Container, from.Placement, from.Location));
+        if (from.Kind == InventoryPlaceKind.InSidePack)
+        {
+            PublishSidePackChanged(from.Container);
+        }
+        else if (from.Kind == InventoryPlaceKind.SidePack)
+        {
+            _state.Containers.Forget(guid);
+        }
     }
 
     /// <summary>ACE's <c>ContainerType</c> of an object by its ItemType: 1 for a container, else 0 (a foci cannot be told from its CreateObject: <c>TODO(m3-inventory-foci)</c>).</summary>

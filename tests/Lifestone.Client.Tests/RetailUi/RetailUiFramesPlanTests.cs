@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
+using Lifestone.Client.Play;
 using Lifestone.Client.RetailUi;
+using Lifestone.Client.RetailUi.Panels;
 
 namespace Lifestone.Client.Tests.RetailUi;
 
@@ -97,5 +99,60 @@ public sealed class RetailUiFramesPlanTests
         Assert.Contains("--retail-ui-checks", step, StringComparison.Ordinal);
         Assert.Contains("'portal-space', 'retail-ui', 'offline-player-checks',", script, StringComparison.Ordinal);
         Assert.DoesNotContain("'retail-ui-checks' {", script, StringComparison.Ordinal); // the checks run in the retail-ui step, not as a second step of the same suite
+    }
+
+    [Fact]
+    public void The_offline_content_frames_of_the_inventory_and_the_container_window_are_extra_frames_with_unique_file_safe_names_that_clash_with_no_other_frame()
+    {
+        // M4 2.2 s2 and s4: three review frames of PLACEHOLDER content (the stand-in's Pack with one Pyreal; the stand-in corpse's Bowl and Smock, in the combat stance as the hunt's corpse frame is, and in peace).
+        var names = PanelFramesPlan.OfflineContentFrames;
+        Assert.Equal(["inventory-sidepack", "corpse", "container-window", "container-chest"], names); // M4 3.2 lane e added the chest frame (D23: a chest, no creature corpse)
+        Assert.Equal("container-chest", PanelFramesPlan.ContainerChestFrame);
+        Assert.Equal("c2-spellcasting-empty", PanelFramesPlan.SpellcastingEmptyFrame.Name);
+        Assert.Equal("corpse", PanelFramesPlan.CorpseFrame);
+        Assert.Equal("corpse", Lifestone.Client.Session.Scenarios.HuntUiShotPlan.Names[Lifestone.Client.Session.Scenarios.HuntUiShotPlan.Corpse]); // the live hunt's frame is <stem>-corpse.png: the offline stand-in has its name
+        Assert.Equal(names.Count, names.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(names, name => Assert.Matches("^[a-z0-9]+(-[a-z0-9]+)*$", name));
+        Assert.Equal("inventory-sidepack", PanelFramesPlan.InventorySidePackFrame);
+        Assert.Equal("container-window", PanelFramesPlan.ContainerWindowFrame);
+        Assert.Equal("container-window.png", ShellFramesPlan.FileName(PanelFramesPlan.ContainerWindowFrame)); // the play-checks save them in the extra folder by this name
+
+        // Not one of the shell's ten frames (those are counted by file), a window frame, or a page's frame.
+        Assert.DoesNotContain(names, name => ShellFramesPlan.FrameNames.Any(frame => frame.EndsWith(name, StringComparison.Ordinal)));
+        Assert.DoesNotContain(names, name => PanelFramesPlan.AllWindowFrames.Any(window => window.Name == name));
+        var pageFiles = GamePanelHost.Pages.Select(PanelFramesPlan.FileName).ToHashSet(StringComparer.Ordinal);
+        Assert.DoesNotContain(names, name => pageFiles.Contains(name + ".png"));
+        Assert.Contains("7-inventory-backpack-and-paperdoll.png", pageFiles); // the page's own frame is a different file
+    }
+
+    [Fact]
+    public void The_vendor_windows_offline_frame_is_an_extra_frame_with_a_unique_file_safe_name_that_clashes_with_no_other_frame()
+    {
+        // M4 3.2 s4b: one review frame of PLACEHOLDER content (the stand-in's Thelnoth and shop), saved in the extra folder by the play-checks' vendor rows.
+        Assert.Equal(["vendor-buy-sell"], PanelFramesPlan.VendorContentFrames);
+        Assert.Equal("vendor-buy-sell", PanelFramesPlan.VendorBuySellFrame);
+        Assert.Equal("vendor-buy-sell.png", ShellFramesPlan.FileName(PanelFramesPlan.VendorBuySellFrame));
+        Assert.Matches("^[a-z0-9]+(-[a-z0-9]+)*$", PanelFramesPlan.VendorBuySellFrame);
+        Assert.DoesNotContain(PanelFramesPlan.VendorBuySellFrame, PanelFramesPlan.OfflineContentFrames);
+        Assert.DoesNotContain(PanelFramesPlan.VendorBuySellFrame, PanelFramesPlan.PanelShotExtraFrames);
+        Assert.DoesNotContain(ShellFramesPlan.FrameNames, frame => frame.EndsWith(PanelFramesPlan.VendorBuySellFrame, StringComparison.Ordinal));
+        Assert.DoesNotContain(PanelFramesPlan.AllWindowFrames, window => window.Name == PanelFramesPlan.VendorBuySellFrame);
+    }
+
+    [Fact]
+    public void The_offline_examine_frame_is_an_extra_frame_with_a_file_safe_name_that_clashes_with_no_other_frame_M4_3_2_s4c()
+    {
+        // M4 3.2 s4c: the play-checks' examine rows save the panel on the stand-in (PLACEHOLDER content: a labelled subset of ACE's tables, TODO(m4-standin-appraise-tables)) in the extra folder; the lead's panel shot is a different file.
+        var names = PanelFramesPlan.OfflineExamineFrames;
+        Assert.Equal(["examine-kit-standin"], names);
+        Assert.Equal("examine-kit-standin", PanelFramesPlan.ExamineStandInFrame);
+        Assert.Equal("examine-kit-standin.png", ShellFramesPlan.FileName(PanelFramesPlan.ExamineStandInFrame));
+        Assert.All(names, name => Assert.Matches("^[a-z0-9]+(-[a-z0-9]+)*$", name));
+        Assert.DoesNotContain(names, name => PanelFramesPlan.OfflineContentFrames.Contains(name));
+        Assert.DoesNotContain(names, name => PanelFramesPlan.ExamineShotFrames.Contains(name));
+        Assert.DoesNotContain(names, name => ShellFramesPlan.FrameNames.Any(frame => frame.EndsWith(name, StringComparison.Ordinal)));
+        Assert.DoesNotContain(names, name => PanelFramesPlan.AllWindowFrames.Any(window => window.Name == name));
+        var pageFiles = GamePanelHost.Pages.Select(PanelFramesPlan.FileName).ToHashSet(StringComparer.Ordinal);
+        Assert.DoesNotContain(names, name => pageFiles.Contains(name + ".png"));
     }
 }

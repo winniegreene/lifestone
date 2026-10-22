@@ -40,6 +40,9 @@ public sealed class WorldObject
     /// <summary>The weenie description's ItemType.</summary>
     public uint ItemType => Created.Weenie.ItemType;
 
+    /// <summary>The weenie description's CombatUse (ACE: 1 Melee, 2 Missile, 3 Ammo, 4 Shield, 5 TwoHanded), or null when the description sent none (M4 1.3 s1: what <c>GetDefaultCombatMode</c> reads).</summary>
+    public sbyte? CombatUse => Created.Weenie.CombatUse;
+
     /// <summary>The container that holds the object (the weenie description's ContainerId), or null.</summary>
     public uint? ContainerId => Created.Weenie.ContainerId;
 

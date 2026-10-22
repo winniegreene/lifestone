@@ -41,7 +41,13 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
             or Contracts.ActionKind.Use or Contracts.ActionKind.QueryHealth or Contracts.ActionKind.LogOff or Contracts.ActionKind.Talk
             or Contracts.ActionKind.RaiseAttribute or Contracts.ActionKind.RaiseVital or Contracts.ActionKind.RaiseSkill or Contracts.ActionKind.TrainSkill
             or Contracts.ActionKind.CastSpell or Contracts.ActionKind.SetCombatMode or Contracts.ActionKind.Wield or Contracts.ActionKind.Unwield or Contracts.ActionKind.MoveToPack
-            or Contracts.ActionKind.MergeStack or Contracts.ActionKind.Suicide or Contracts.ActionKind.AddSpellFavorite or Contracts.ActionKind.RemoveSpellFavorite;
+            or Contracts.ActionKind.MergeStack or Contracts.ActionKind.Suicide or Contracts.ActionKind.AddSpellFavorite or Contracts.ActionKind.RemoveSpellFavorite
+            or Contracts.ActionKind.Attack or Contracts.ActionKind.MissileAttack or Contracts.ActionKind.CancelAttack
+            or Contracts.ActionKind.OpenContainer or Contracts.ActionKind.CloseContainer or Contracts.ActionKind.PickUp or Contracts.ActionKind.Drop
+            or Contracts.ActionKind.SplitToContainer or Contracts.ActionKind.SplitTo3D or Contracts.ActionKind.SplitToWield or Contracts.ActionKind.Give
+            or Contracts.ActionKind.UseWithTarget or Contracts.ActionKind.Drink
+            or Contracts.ActionKind.OpenVendor or Contracts.ActionKind.Buy or Contracts.ActionKind.Sell or Contracts.ActionKind.Identify
+            or Contracts.ActionKind.AddShortcut or Contracts.ActionKind.RemoveShortcut or Contracts.ActionKind.UseShortcut; // M4 3.2: the vendor, appraisal and shortcut actions (s3 answers their sends)
 
     private OutboundTicket Ticket() => new(0, _reducer.Clock.Time.GetTimestamp());
 
@@ -197,13 +203,28 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
         });
     }
 
-    /// <summary>A Use: a lifestone binds the player (M3 3.2 db); a portal object of the visit answers UseDone and teleports the player; any other object is answered with UseDone and nothing else.</summary>
+    /// <summary>A Use: a lifestone binds the player (M3 3.2 db); a corpse or a chest opens or closes (M4 2.1 s3); a held Potion of Healing is drunk (M4 3.1 s2); a portal object of the visit answers UseDone and teleports the player; any other object is answered with UseDone and nothing else.</summary>
     internal OutboundTicket Use(uint guid)
     {
         if (IsLifestone(guid))
         {
             Later(sink => UseLifestone(sink, guid)); // M3 3.2 db: StandInWorld.Death.cs
             return Ticket();
+        }
+
+        if (TryContainer(guid, out var container))
+        {
+            return UseContainer(container); // M4 2.1 s3: a corpse or a chest opens and closes (StandInWorld.Containers.cs)
+        }
+
+        if (TryVendor(guid, out var vendor))
+        {
+            return OpenVendor(vendor); // M4 3.2 s3: a Use of one of the two vendors opens it (StandInWorld.Vendor.cs)
+        }
+
+        if (HealRules && TryPotion(guid, out var potion))
+        {
+            return Drink(potion); // M4 3.1 s2: a held Potion of Healing is drunk (StandInWorld.Heal.cs)
         }
 
         var portal = _visit.Objects.FirstOrDefault(o => o.Guid == guid && o.PortalTo is not null);
@@ -228,21 +249,52 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
     /// </summary>
     internal OutboundTicket QueryHealth(uint guid)
     {
-        if (TryCreature(guid, out var creature))
+        // ACE's "selection" is only the guid of the last QueryHealth; 0 or a non-creature clears it and gets no answer (W/Player.cs 393-437).
+        var selectable = TryCreature(guid, out var creature) ? _reducer.State.Objects.Contains(guid) : _visit.Objects.Any(o => o.Guid == guid && (o.DescriptionFlags & 0x10) != 0);
+        _healthSelection = selectable ? guid : 0;
+        _healthSelectionSerial++;
+        if (TryCreature(guid, out creature))
         {
             if (_reducer.State.Objects.Contains(guid))
             {
                 var fraction = creature.Fraction;
                 Later(sink => sink.OnUpdateHealth(Context(sink), new GameEventHeader(_reducer.State.Self.Guid, 0, 0x01C0), new UpdateHealthEvent(guid, fraction)));
+                ScheduleHealthHeartbeat(guid, _healthSelectionSerial);
             }
         }
-        else if (_visit.Objects.Any(o => o.Guid == guid && (o.DescriptionFlags & 0x10) != 0))
+        else if (selectable)
         {
+            Placeholder("m4-standin-placeholder-health", "an attackable object with no health model answers QueryHealth with " + PlaceholderHealth + " and gets no heartbeat push");
             Later(sink => sink.OnUpdateHealth(Context(sink), new GameEventHeader(_reducer.State.Self.Guid, 0, 0x01C0), new UpdateHealthEvent(guid, PlaceholderHealth)));
         }
 
         return Ticket();
     }
+
+    /// <summary>The guid of the last QueryHealth that named a creature (or an attackable placeholder): ACE's "selection" for the health pushes; 0 when cleared.</summary>
+    internal uint HealthSelection => _healthSelection;
+
+    /// <summary>Seconds between the heartbeat pushes of the selected creature's health (ACE's Player_Tick.cs 112-118).</summary>
+    internal const double HealthHeartbeatSeconds = 5.0;
+
+    private uint _healthSelection;
+    private int _healthSelectionSerial;
+
+    /// <summary>
+    /// ACE pushes one 01C0 per 5 s for the selected creature while its health is above 0 (<c>W/Player_Tick.cs</c> 112-118). The chain stops when the selection changes (a newer QueryHealth) or the creature dies or goes.
+    /// </summary>
+    private void ScheduleHealthHeartbeat(uint guid, int serial) =>
+        _reducer.StandIn!.At(_reducer.Clock.Now + HealthHeartbeatSeconds, sink =>
+        {
+            if (serial != _healthSelectionSerial || _healthSelection != guid || !TryCreature(guid, out var creature) || creature.Dead || creature.Health == 0 || !_reducer.State.Objects.Contains(guid))
+            {
+                return;
+            }
+
+            AnswerLog.Add("01C0");
+            sink.OnUpdateHealth(Context(sink), new GameEventHeader(_reducer.State.Self.Guid, 0, 0x01C0), new UpdateHealthEvent(guid, creature.Fraction));
+            ScheduleHealthHeartbeat(guid, serial);
+        });
 
     /// <summary>A log off: the phases and the character list come back after the visit's log-off delay.</summary>
     internal void LogOff() => Later(sink => StandInSessions.BeginLogOff(sink, _visit.LogOffDelay, _reducer.StandIn!, _reducer, _purged));
@@ -252,7 +304,7 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
         DispelProtectionOnTeleport(sink); // M3 3.2 db: a teleport dispels the lifestone protection (Player_Location.cs 702)
         Teleports++;
         var sequence = (ushort)(_reducer.State.Self.Stamps.Teleport + 1);
-        StandInSessions.SendTeleport(sink, _reducer.State.Self.Guid, jump, sequence);
+        StandInSessions.SendTeleport(sink, _reducer.State.Self.Guid, jump, sequence, unchecked((ushort)(_reducer.State.Self.Stamps.Position + 1)));
         if (UnhideAfterTeleport)
         {
             _reducer.StandIn!.At(_reducer.Clock.Now + UnhideAfterTeleportSeconds, UnhidePlayer);

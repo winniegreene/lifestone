@@ -52,7 +52,19 @@ public readonly record struct UiItemIcon(uint IconId, uint UnderlayId, uint Over
 /// </para>
 /// <para>
 /// <b>Selected and ghosted.</b> <see cref="SetSelected"/> shows the selected frame (<c>SetSelectedState</c> 0x004E1ED0; a cell that is not selectable ignores a select; see <see cref="SelectedFrameShown"/>); <see cref="SetGhosted"/> shows the ghosted frame (the waiting
-/// state, <c>SetWaitingState</c> 0x004E1E40). Not built: the shortcut number, the sell and trade marks, the cooldown overlay and the drag icon (<c>TODO(m3-uiitem-extras)</c>; D13: no drag in M3).
+/// state, <c>SetWaitingState</c> 0x004E1E40). The sell mark is built (<see cref="SetSellState"/>, M4 3.2 s4b). Not built: the trade mark (<c>TODO(m3-uiitem-extras)</c>).
+/// </para>
+/// <para>
+/// <b>The shortcut number and the cooldown overlay</b> (M4 3.2 h2; the share of <c>TODO(m3-uiitem-extras)</c> the hotbar needed). <see cref="SetShortcutNumber"/> is <c>UIElement_UIItem::SetShortcutNum</c> (11.6096 0x004E2220): the child 0x1000034A shows the image
+/// that slot picks from an array property of its own, 0x10000042 for a cell with an item, 0x10000043 for a ghosted one, 0x1000005E for an empty cell; the dats name the art (nine digit images and nine blanks per array), nothing is a placeholder. An empty cell shows no corner number: the toolbar template has no empty array (0x1000005E), so retail's lookup changes nothing, and the number of an empty slot is
+/// baked into that slot's empty-cell art (a large numeral in each list's own template). <see cref="SetCooldown"/>
+/// is <c>UpdateCooldownDisplay</c> (0x004E2AB0): ten stacked images 0x1000054F to 0x10000558, the one for the phase (a tenth of the cooldown left, 1 to 10) shows. Retail takes the phase from the item's cooldown in the enchantment registry; here the owner sets it
+/// (<c>TODO(m4-shortcut-cooldown-source)</c>).
+/// </para>
+/// <para>
+/// <b>Drag.</b> A cell of a list that is a drag source (<see cref="UiItemList.DragSource"/>) is taken on a press and carried by <see cref="UiDrag"/> (M4 2.2 s3). A cell under the dragged item shows the
+/// drag-accept frame (<see cref="DragAcceptId"/>, 0x1000045A) when the target takes the item, and the field's own drag-rollover states (9 accept, 10 reject) when the cell's desc has them
+/// (<see cref="ShowDragRollover"/>, <see cref="ClearDragRollover"/>; <c>TODO(m4-retail-drag)</c>, address unknown).
 /// </para>
 /// </remarks>
 public class UiItem : UiField
@@ -93,7 +105,37 @@ public class UiItem : UiField
     /// <summary>The open-container frame (<c>m_elem_Icon_OpenContainer</c>).</summary>
     public const uint OpenContainerId = 0x10000450;
 
+    /// <summary>The shortcut number child (<c>m_elem_Icon_ShortcutNum</c>).</summary>
+    public const uint ShortcutNumberId = 0x1000034A;
 
+    /// <summary>The shortcut number's array of images for a cell that shows an item (property 0x10000042 of the child; one entry per slot).</summary>
+    public const uint ShortcutDigitsProperty = 0x10000042;
+
+    /// <summary>The same array for a ghosted cell (property 0x10000043).</summary>
+    public const uint ShortcutDigitsGhostedProperty = 0x10000043;
+
+    /// <summary>The same array for an empty cell (property 0x1000005E; the toolbar's template does not carry it: an empty slot's number is in its empty-cell art).</summary>
+    public const uint ShortcutDigitsEmptyProperty = 0x1000005E;
+
+    /// <summary>The first cooldown step, <c>m_elem_Icon_Cooldown_10</c>; the ten steps are the ids 0x1000054F to 0x10000558 (10 to 100 per cent).</summary>
+    public const uint CooldownFirstId = 0x1000054F;
+
+    /// <summary>The number of cooldown steps.</summary>
+    public const int CooldownSteps = 10;
+
+
+    /// <summary>The drag-accept frame (0x1000045A): shown over a cell that takes the item being dragged over it.</summary>
+    public const uint DragAcceptId = 0x1000045A;
+
+    /// <summary>
+    /// The sell mark (0x10000437; 11.4186 <c>UIElement_UIItem::PostInit</c> finds it as <c>m_elem_Icon_SellState</c>, and <c>UIItem_Update</c> 0x004E2E60's sell-state branch shows it while the object's sell state is not 0: M4 3.2 s4b).
+    /// The vendor window sets the state of the items in its sell list (<c>gmVendorUI::VendorItemSetSellState</c> 11.6096 0x004C0FA0 over <c>ACCWeenieObject::SetSellState</c>, which re-draws every cell of the object).
+    /// </summary>
+    public const uint SellMarkId = 0x10000437;
+
+    private UiElement? _sellMark;
+    private bool _sellState;
+    private UiElement? _dragAccept;
     private UiElement? _icon;
     private UiElement? _overlays;
     private UiElement? _selected;
@@ -103,6 +145,8 @@ public class UiItem : UiField
     private UiTextElement? _nameText;
     private UiMeter? _capacityBar;
     private UiMeter? _structureBar;
+    private UiElement? _shortcutNumber;
+    private readonly UiElement?[] _cooldown = new UiElement?[CooldownSteps];
     private bool _selectable = true;
     private bool _isSelected;
     private bool _frameRegistered;
@@ -144,11 +188,49 @@ public class UiItem : UiField
     /// <summary>How many times the picture was composed (the cell composes only when the picture's fields change).</summary>
     public int Compositions { get; private set; }
 
+    /// <summary>The drag-accept frame child, or null when the template has none.</summary>
+    public UiElement? DragAcceptFrame => _dragAccept;
+
+    /// <summary>What a drag over this cell says: nothing, accept or reject (<see cref="ShowDragRollover"/>).</summary>
+    public UiDragRollover DragRollover { get; private set; }
+
+    /// <summary>The icon the cell shows now (the fields <see cref="ShowItem"/> was given), or false for an empty cell or a spell.</summary>
+    public bool TryGetIcon(out UiItemIcon icon)
+    {
+        icon = _lastIcon.Icon;
+        return _lastIcon.Has && ItemId != 0;
+    }
+
     /// <summary>The icon child, or null when the template has none.</summary>
     public UiElement? IconElement => _icon;
 
     /// <summary>The quantity text child, or null.</summary>
     public UiTextElement? QuantityText => _quantity;
+
+    /// <summary>Raised when the cell is deleted with its tree (the owner of a window of cells ends with it: the hotbar, which the screen does not dispose, M4 3.2 h2).</summary>
+    public event Action<UiItem>? Deleting;
+
+    /// <inheritdoc/>
+    protected internal override void OnDeleting()
+    {
+        base.OnDeleting();
+        Deleting?.Invoke(this);
+    }
+
+    /// <summary>The slot whose number the cell shows (<see cref="SetShortcutNumber"/>), or -1.</summary>
+    public int ShortcutNumber { get; private set; } = -1;
+
+    /// <summary>The image the shortcut number shows now (0 for none).</summary>
+    public uint ShortcutNumberImage { get; private set; }
+
+    /// <summary>The shortcut number child, or null when the template has none.</summary>
+    public UiElement? ShortcutNumberElement => _shortcutNumber;
+
+    /// <summary>The cooldown phase the cell shows (<see cref="SetCooldown"/>): 0 for none, 1 to 10.</summary>
+    public int CooldownPhase { get; private set; }
+
+    /// <summary>The cooldown step child for <paramref name="phase"/> (1 to 10), or null.</summary>
+    public UiElement? CooldownElement(int phase) => phase is >= 1 and <= CooldownSteps ? _cooldown[phase - 1] : null;
 
     /// <summary>The capacity bar child, or null.</summary>
     public UiMeter? CapacityBar => _capacityBar;
@@ -171,11 +253,81 @@ public class UiItem : UiField
         _selected = GetChildRecursive(SelectedId);
         _ghosted = GetChildRecursive(GhostedId);
         _openContainer = GetChildRecursive(OpenContainerId);
+        _dragAccept = GetChildRecursive(DragAcceptId);
+        _dragAccept?.SetVisible(false);
+        _sellMark = GetChildRecursive(SellMarkId);
+        _sellMark?.SetVisible(false);
         _quantity = GetChildRecursive(QuantityTextId) as UiTextElement;
         _nameText = GetChildRecursive(NameTextId) as UiTextElement;
         _capacityBar = GetChildRecursive(CapacityBarId) as UiMeter;
         _structureBar = GetChildRecursive(StructureBarId) as UiMeter;
+        _shortcutNumber = GetChildRecursive(ShortcutNumberId);
+        for (var i = 0; i < CooldownSteps; i++)
+        {
+            _cooldown[i] = GetChildRecursive(CooldownFirstId + (uint)i);
+        }
+
         SetCellState(EmptyState);
+    }
+
+    /// <summary>
+    /// <c>UIElement_UIItem::SetShortcutNum</c> (11.6096 0x004E2220): the cell shows the number of shortcut slot <paramref name="slot"/> (0 to 17), or none for a negative slot. The image is the slot's entry of the child's array property: 0x10000043 when
+    /// <paramref name="ghosted"/>, 0x1000005E for an empty cell, else 0x10000042. A lookup that finds no array leaves the child hidden (as retail's changes nothing): the toolbar's cells have none for the empty state, because an empty slot's number is part of its
+    /// own empty-cell art.
+    /// </summary>
+    public void SetShortcutNumber(int slot, bool ghosted)
+    {
+        if (_shortcutNumber is not { } element)
+        {
+            return;
+        }
+
+        if (slot < 0)
+        {
+            ShortcutNumber = -1;
+            ShortcutNumberImage = 0;
+            if (element.Visible)
+            {
+                element.SetVisible(false);
+            }
+
+            return;
+        }
+
+        var key = IsEmpty ? ShortcutDigitsEmptyProperty : ghosted ? ShortcutDigitsGhostedProperty : ShortcutDigitsProperty;
+        element.InqProperty(key, out var property);
+        uint did = 0;
+        if (property is UiArrayProperty array && slot < array.Items.Count && array.Items[slot] is UiDataIdProperty id)
+        {
+            did = id.Value;
+        }
+
+        ShortcutNumber = slot;
+        ShortcutNumberImage = did;
+        if (did != 0)
+        {
+            element.SetImageByDid(did, UiDrawMode.AlphaBlend);
+        }
+
+        element.SetVisible(did != 0);
+    }
+
+    /// <summary>
+    /// <c>UpdateCooldownDisplay</c> (11.6096 0x004E2AB0): the cooldown image for <paramref name="phase"/> shows (1 to 10, a tenth of the cooldown per step; 10 and above are the last), the others hide; 0 hides all. Retail reads the phase from the item's cooldown in the
+    /// enchantment registry (<c>CEnchantmentRegistry::OnCooldown</c> 0x00595230); the owner sets it here.
+    /// </summary>
+    public void SetCooldown(int phase)
+    {
+        phase = Math.Clamp(phase, 0, CooldownSteps);
+        CooldownPhase = phase;
+        for (var i = 0; i < CooldownSteps; i++)
+        {
+            var show = phase == i + 1;
+            if (_cooldown[i] is { } step && step.Visible != show)
+            {
+                step.SetVisible(show);
+            }
+        }
     }
 
     /// <summary>
@@ -192,6 +344,7 @@ public class UiItem : UiField
         SetCellState(EmptyState);
         ShowQuantity(-1);
         SetTooltip(null);
+        SetSellState(false); // an emptied cell carries no sell mark
         UpdateMouseVisibility();
     }
 
@@ -300,6 +453,48 @@ public class UiItem : UiField
         }
     }
 
+    /// <summary>
+    /// A dragged item is over this cell (<see cref="UiDrag"/>): <paramref name="accept"/> shows the drag-accept frame and the field's accept state; a reject shows the reject state only (the states are the cell's desc's; a state the desc
+    /// lacks is the base state, which the cell then restores, so the cell never loses its picture).
+    /// </summary>
+    public void ShowDragRollover(bool accept)
+    {
+        var rollover = accept ? UiDragRollover.Accept : UiDragRollover.Reject;
+        if (DragRollover == rollover)
+        {
+            return;
+        }
+
+        ClearDragRollover();
+        DragRollover = rollover;
+        if (accept)
+        {
+            _dragAccept?.SetVisible(true);
+        }
+
+        var state = accept ? UiStateIds.DragRolloverAccept : UiStateIds.DragRolloverReject;
+        if (Desc.States.ContainsKey(state))
+        {
+            EnterDragRollover(accept);
+        }
+    }
+
+    /// <summary>The drag over this cell ended or moved on: the frame hides and the cell goes back to the state it had (its icon and overlay states are applied again).</summary>
+    public void ClearDragRollover()
+    {
+        if (DragRollover == UiDragRollover.None)
+        {
+            return;
+        }
+
+        DragRollover = UiDragRollover.None;
+        _dragAccept?.SetVisible(false);
+        if (LeaveDragRollover())
+        {
+            SetCellState(IsEmpty ? EmptyState : OccupiedState); // a rollover state that passes to the children moved their states with it
+        }
+    }
+
     /// <summary><c>SetSelectableState</c> (11.6096 0x004E1F10).</summary>
     public void SetSelectable(bool selectable) => _selectable = selectable;
 
@@ -317,6 +512,30 @@ public class UiItem : UiField
 
     /// <summary>True when the open-container frame shows.</summary>
     public bool OpenContainerShown => _openContainer?.Visible == true;
+
+    /// <summary>
+    /// The sell mark (M4 3.2 s4b): shows the cell's item as one in the vendor's sell list (<c>UIItem_Update</c>'s sell-state branch, 11.4186 0x004E2E60). Does nothing when the state is as it was; a template without the mark element draws none
+    /// (<see cref="HasSellMark"/> reads false).
+    /// </summary>
+    public void SetSellState(bool selling)
+    {
+        if (_sellState == selling)
+        {
+            return;
+        }
+
+        _sellState = selling;
+        _sellMark?.SetVisible(selling);
+    }
+
+    /// <summary>The sell state last set (the cell's item is in the vendor's sell list).</summary>
+    public bool SellState => _sellState;
+
+    /// <summary>True when the cell's template has the sell mark element.</summary>
+    public bool HasSellMark => _sellMark is not null;
+
+    /// <summary>True while the sell mark is drawn.</summary>
+    public bool SellMarkShown => _sellMark?.Visible == true;
 
     /// <inheritdoc/>
     protected override bool GetShouldBeMouseVisible() => base.GetShouldBeMouseVisible() || !IsEmpty;
@@ -453,6 +672,19 @@ public class UiItem : UiField
             Manager.RegisterForGlobalMessage(this, UiGlobalMessageIds.Frame);
         }
     }
+}
+
+/// <summary>What a drag over a <see cref="UiItem"/> says about it.</summary>
+public enum UiDragRollover
+{
+    /// <summary>No drag is over the cell.</summary>
+    None,
+
+    /// <summary>The target takes the dragged item.</summary>
+    Accept,
+
+    /// <summary>The target refuses the dragged item.</summary>
+    Reject,
 }
 
 /// <summary>The icon composition of <see cref="UiItem"/> (retail's <c>IconData::RenderIcons</c>, 11.6096 0x0058DFB0; see the cell's remarks).</summary>

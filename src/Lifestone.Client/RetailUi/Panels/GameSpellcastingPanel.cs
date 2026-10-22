@@ -23,7 +23,7 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// </para>
 /// <para>
 /// <b>The bars</b> (<c>SpellCastSubMenu::UpdateFromPlayerModule</c>, 11.6096 0x004C7160): the window holds eight tabs (<c>PostInit</c>, 11.6096 0x004C68F0, pairs page 0x100000AA to 0x100000B0 and 0x100005C3 with tab 0x100000A3 to 0x100000A9
-/// and 0x100005C2), one <see cref="Spellbook.SpellBars"/> bar each; the tab's item list 0x100000B6 shows the bar's spells in slot order, each with its icon and its name from the SpellTable and the tooltip "name, new line,
+/// and 0x100005C2), one <see cref="Spellbook.SpellBars"/> bar each; the tab's item list 0x100000B6 shows the bar's spells in slot order from its first cell (<c>UIElement_ItemList::ItemList_AddSpellShortcut</c>, 0x004E4D30), each with its icon and its name from the SpellTable and the tooltip "name, new line,
 /// Double-click to cast this spell". Retail first drops the favourites the character no longer knows from its player module; Lifestone only leaves them out of the list (it writes nothing, <c>TODO(m3-spellcast-unknown-favourite)</c>).
 /// Only the shown tab is built; a tab is built again when its bar (or how many of its spells the character knows) changed since it was built, when its page opens, or when the SpellTable arrives (the list waits for it, never a guess). A build
 /// writes in place (a cell already showing the right spell is left alone) and nothing here runs per frame except the one-shot poll while the SpellTable is missing. Readiness is the table's own
@@ -143,6 +143,26 @@ public sealed class GameSpellcastingPanel : UiElement
         for (var tab = 0; tab < TabCount; tab++)
         {
             if (KnownOn(book.Bar(tab), book) > 0)
+            {
+                return tab;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>The first tab whose bar holds no spell the character knows (the empty bar the <c>c2-spellcasting-empty</c> frame shows), or -1 when every bar holds one or no session is attached (M4 3.2 lane e).</summary>
+    public int FirstTabWithoutSpells()
+    {
+        if (_context is null)
+        {
+            return -1;
+        }
+
+        var book = _context.Session.State.Self.Spellbook;
+        for (var tab = 0; tab < TabCount; tab++)
+        {
+            if (KnownOn(book.Bar(tab), book) == 0)
             {
                 return tab;
             }
@@ -498,10 +518,16 @@ public sealed class GameSpellcastingPanel : UiElement
             written++;
         }
 
-        while (list.CellCount > written)
+        // The surplus of a bar that shrank is emptied, not removed: the bar's cells past its favourites are its empty slot boxes, which UpdateEmptySlots (11.6096 0x004E4390) pads to the bar's width and trims (M4 3.2 lane e).
+        for (var i = list.CellCount - 1; i >= written; i--)
         {
-            list.DeleteItem(list.CellCount - 1); // the surplus of a bar that shrank
+            if (list.CellAt(i) is { IsEmpty: false } leftover)
+            {
+                leftover.Clear();
+            }
         }
+
+        list.UpdateEmptySlots();
 
         _built[tab] = bar;
         _builtKnown[tab] = known;
@@ -579,7 +605,7 @@ public sealed class GameSpellcastingPanel : UiElement
         {
             _name?.ClearAllText();
             _castButton?.SetState(UiStateIds.Ghosted);
-            _castButton?.SetTooltip(UiStringRef.FromLiteral(_lists[tab]?.CellCount > 0 ? "Select a spell to cast" : "You have no spells ready to cast"));
+            _castButton?.SetTooltip(UiStringRef.FromLiteral(_lists[tab]?.OccupiedCount > 0 ? "Select a spell to cast" : "You have no spells ready to cast"));
             return;
         }
 

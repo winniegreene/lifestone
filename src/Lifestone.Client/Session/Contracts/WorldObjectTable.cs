@@ -94,6 +94,41 @@ public sealed class WorldObjectTable
         return guid != 0;
     }
 
+    /// <summary>
+    /// <see cref="NearestNamed"/> over the living creatures only (M4 1.3 s2; the 4.2 review's R10): the object's ItemType has the creature bit, its last health fraction is not zero or below, and its forward
+    /// motion is not Dead (<see cref="DeadMotionLowWord"/>), as <see cref="NearestCreature(in CellFrame, float, uint, IReadOnlyList{string}?, int, int, Func{uint, int?}?, out uint)"/> filters. Unlike that
+    /// one it keeps other players: a player can be the attacker the auto-target is asked for. A corpse, a statue or an NPC of the name is skipped. Allocates nothing.
+    /// </summary>
+    /// <param name="name">The name to match (ordinal).</param>
+    /// <param name="centre">Where to measure from.</param>
+    /// <param name="exclude">An id to skip (the player), or 0.</param>
+    /// <param name="guid">The nearest living creature's id, or 0.</param>
+    /// <returns>True when one was found.</returns>
+    public bool NearestLivingCreatureNamed(string name, in CellFrame centre, uint exclude, out uint guid)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var origin = centre.ToGlobal();
+        var best = double.MaxValue;
+        guid = 0;
+        foreach (var o in _objects.Values)
+        {
+            if (o.Guid == exclude || o.Position is not { } p || !string.Equals(o.Name, name, StringComparison.Ordinal)
+                || (o.ItemType & CreatureItemType) == 0 || o.Health is <= 0f || o.Motion is { Forward: DeadMotionLowWord })
+            {
+                continue;
+            }
+
+            var d = p.ToGlobal().DistanceTo(origin);
+            if (d < best)
+            {
+                best = d;
+                guid = o.Guid;
+            }
+        }
+
+        return guid != 0;
+    }
+
     /// <summary>The CreateObject description flag of a lifestone (<c>BF_LIFESTONE</c>, 0x4000; ACE <c>ObjectDescriptionFlag.LifeStone</c>), as <c>WorldContentCensus</c> reads it.</summary>
     public const uint LifestoneFlag = 0x4000;
 
@@ -218,6 +253,79 @@ public sealed class WorldObjectTable
         }
 
         return found;
+    }
+
+    /// <summary>The ObjectDescriptionFlags bit of a player (<c>BF_PLAYER</c>, 0x8; ACE <c>ObjectDescriptionFlag.Player</c>), as <c>WorldContentCensus</c> reads it.</summary>
+    public const uint PlayerFlag = 0x8;
+
+    /// <summary>
+    /// Finds the creature nearest to <paramref name="centre"/>, as <see cref="NearestNamed"/> does but over what a hunt may attack (M4 1.2 s1; the 4.2 review's R10): the object's ItemType has the creature
+    /// bit, it is not the player or another player (<see cref="PlayerFlag"/>), it has a position, it is not known to be dead (its last health fraction is above zero, or it has none yet; its forward motion is not
+    /// Dead, <see cref="DeadMotionLowWord"/>), it is within <paramref name="maxMetres"/> (straight line in global metres), and, when asked, its name is one of <paramref name="names"/> (ordinal) and its level is
+    /// within <paramref name="minLevel"/> to <paramref name="maxLevel"/>. Non-creatures (a corpse, a lifestone, an NPC without the creature bit) and the dead are skipped. Retail's rule for what may be
+    /// attacked is <c>ClientCombatSystem::ObjectIsAttackable</c> (11.6096 0x0056B340); the server stays the judge. Allocates nothing.
+    /// </summary>
+    /// <remarks>
+    /// A creature's level is not in its CreateObject (only an appraisal carries it): <paramref name="levelOf"/> supplies it (null when unknown). When a band is asked (<paramref name="minLevel"/> above 0 or
+    /// <paramref name="maxLevel"/> below <see cref="int.MaxValue"/>) a creature whose level is unknown is <b>skipped</b>, never guessed in: <c>TODO(m4-creature-level)</c> until the appraisal is decoded.
+    /// </remarks>
+    /// <param name="centre">Where to measure from.</param>
+    /// <param name="maxMetres">The largest distance accepted.</param>
+    /// <param name="exclude">An id to skip (the player), or 0.</param>
+    /// <param name="names">The names to accept, or null for any name. Scanned linearly: keep it short.</param>
+    /// <param name="minLevel">The lowest level accepted (0 for no lower bound).</param>
+    /// <param name="maxLevel">The highest level accepted (<see cref="int.MaxValue"/> for no upper bound).</param>
+    /// <param name="levelOf">The level of a creature by id, or null when no band is asked.</param>
+    /// <param name="guid">The nearest creature's id, or 0.</param>
+    /// <returns>True when one was found.</returns>
+    public bool NearestCreature(in CellFrame centre, float maxMetres, uint exclude, IReadOnlyList<string>? names, int minLevel, int maxLevel, Func<uint, int?>? levelOf, out uint guid)
+    {
+        guid = 0;
+        var origin = centre.ToGlobal();
+        var best = (double)maxMetres;
+        var found = false;
+        var banded = minLevel > 0 || maxLevel < int.MaxValue;
+        foreach (var o in _objects.Values)
+        {
+            if (o.Guid == exclude || o.IsSelf || o.Position is not { } p || (o.ItemType & CreatureItemType) == 0 || (o.DescriptionFlags & PlayerFlag) != 0
+                || o.Health is <= 0f || o.Motion is { Forward: DeadMotionLowWord } || !NameListed(names, o.Name))
+            {
+                continue;
+            }
+
+            if (banded && (levelOf?.Invoke(o.Guid) is not { } level || level < minLevel || level > maxLevel))
+            {
+                continue;
+            }
+
+            var d = p.ToGlobal().DistanceTo(origin);
+            if (d <= best)
+            {
+                best = d;
+                guid = o.Guid;
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    private static bool NameListed(IReadOnlyList<string>? names, string name)
+    {
+        if (names is null)
+        {
+            return true;
+        }
+
+        for (var i = 0; i < names.Count; i++)
+        {
+            if (string.Equals(names[i], name, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsExcluded(IReadOnlyList<uint>? excluded, uint guid)

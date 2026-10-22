@@ -5,9 +5,11 @@ Lifestone is a faithful, single-player Asheron's Call. It is a Godot 4.7 (.NET, 
 - talks the AC protocol to a bundled ACE server on localhost.
 
 Read `README.md` and `docs/goals.md` for the project. The current milestone is
-**[docs/milestones/m3-lights-and-sound.md](docs/milestones/m3-lights-and-sound.md)** (the spec), with its plan of
-record, waves, slice tables, gates and decisions in **[docs/milestones/m3-plan.md](docs/milestones/m3-plan.md)**.
-M2 ([docs/milestones/m2-log-in.md](docs/milestones/m2-log-in.md)) is complete.
+**[docs/milestones/m4-fights-and-loot.md](docs/milestones/m4-fights-and-loot.md)** (the spec), with its plan of
+record, waves, slice tables, gates and decisions in **[docs/milestones/m4-plan.md](docs/milestones/m4-plan.md)**.
+M3 ([docs/milestones/m3-lights-and-sound.md](docs/milestones/m3-lights-and-sound.md), "fights and sound" in prose;
+its plan [docs/milestones/m3-plan.md](docs/milestones/m3-plan.md)) and M2
+([docs/milestones/m2-log-in.md](docs/milestones/m2-log-in.md)) are complete.
 
 ## Hard rules
 
@@ -51,9 +53,7 @@ M2 ([docs/milestones/m2-log-in.md](docs/milestones/m2-log-in.md)) is complete.
   - Never print, log, record or commit a password.
   - ACE's packet log writes the login password in clear text, so it stays under `server/runtime/`.
 - **Commits and pushes.**
-  - Commit through `tools/commit.ps1`, which sets `TZ=UTC` and uses the repository's configured identity (until it
-    exists, in wave 1 of M3: `TZ=UTC git commit ...` from Git Bash, or `$env:TZ='UTC'; git commit ...` from
-    PowerShell 7).
+  - Commit through `tools/commit.ps1`, which sets `TZ=UTC` and uses the repository's configured identity.
   - Push only `master`, only when the owner asks, and never with `--all` or `--mirror`.
 
 ### Data and sources
@@ -77,14 +77,15 @@ Every brief cites this section instead of restating it. All of these are in forc
 
 - **Database:** no writes of any kind. Read-only SELECTs only, through the existing `server\runtime\mariadb-ace.cnf`.
 - **Backend:** it runs only from the main checkout, and only an item's lead starts and stops it. Never
-  `-AllowStaleMod`. `server\setup-server.ps1` runs only with the owner's go-ahead (for M3, `-ModOnly` is
-  pre-authorised for the leads: docs/milestones/m3-plan.md §7, D6). Slices never run `server\*.ps1`, `tools\play.ps1`
+  `-AllowStaleMod`. `server\setup-server.ps1` runs only with the owner's go-ahead (for M4, `-ModOnly` is
+  pre-authorised for the leads: docs/milestones/m4-plan.md §7, D8, as M3 D6 was). Slices never run `server\*.ps1`, `tools\play.ps1`
   against a live server, Loopback or Soak tests, or `smoke.ps1 -Backend require|start`; loopback tests they write must
   compile and say what they prove, and the lead runs them.
 - **Accounts:** automation uses `accounts.test` only. The graduated test characters (`Lifestone Smoke`, `Lifestone
-  Loopback`) are the baseline and are never reset or levelled. M3's `BSD Mage` is levelled only by its build scenario
-  and by the loops' kills (m3-plan.md §7, D3) and is never reset or purged. Only `Lifestone Throwaway` may be levelled
-  freely or purged. A new test character is the owner's decision.
+  Loopback`) are the baseline and are never reset or levelled. M3's `BSD Mage` (m3-plan.md §7, D3) and M4's
+  `Holtburg Hunter` (m4-plan.md §7, D1) are levelled only by their build scenarios and by the loops' kills and are
+  never reset or purged. Only `Lifestone Throwaway` may be levelled freely or purged. A new test character is the
+  owner's decision.
 - **Off limits:** never open or print the user profile's `.lifestone-secrets` key file, the values in
   `server\runtime\secrets.json`, or the files listed in `.git/info/exclude`.
 - **Godot:** as "Running Godot" above; other agents may run Godot at the same time (at most three), so a frame-time

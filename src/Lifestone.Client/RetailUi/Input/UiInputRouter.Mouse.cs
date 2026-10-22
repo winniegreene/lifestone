@@ -1,6 +1,7 @@
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Text;
+using Lifestone.Client.RetailUi.Widgets;
 using Lifestone.Data.Ui;
 
 namespace Lifestone.Client.RetailUi.Input;
@@ -62,10 +63,23 @@ public sealed partial class UiInputRouter
         _lastMouseMoveTime = _manager.Now;
         _mouseHasLeftWindow = false;
         var hit = _manager.HitTest(x, y);
+        if (Drag.Phase != UiDragPhase.Idle && Drag.MovedTo(x, y))
+        {
+            // The press became a drag: the pressed cell lets go of the capture, so the elements under the pointer are entered and hear it.
+            DropDragCapture();
+            hit = _manager.HitTest(x, y);
+        }
+
         SwitchMouseOver(hit);
         var target = ElementWithMouseCapture ?? ElementLastEntered;
         target?.MouseMove(x, y);
-        return ElementWithMouseCapture is not null || (hit is not null && !IsWorldHole(hit));
+        if (Drag.Phase == UiDragPhase.Dragging)
+        {
+            Drag.Hover(hit, x, y);
+        }
+
+        // An item being carried keeps the pointer: the world never sees its motion (a drag over the 3D view must not steer the camera).
+        return Drag.Phase == UiDragPhase.Dragging || ElementWithMouseCapture is not null || (hit is not null && !IsWorldHole(hit));
     }
 
     /// <summary>
@@ -210,9 +224,13 @@ public sealed partial class UiInputRouter
         var (x, y) = MousePosition;
         SwitchMouseOver(_mouseHasLeftWindow ? null : _manager.HitTest(x, y));
         var isTap = UiMouseActions.IsTap(action);
-        if (action == UiMouseActions.Left && ElementLastOver is { Dragable: true })
+        if (action == UiMouseActions.Left)
         {
-            _manager.LogOnce("input:drag", LogSeverity.Warning, "TODO(retailui-runtime): drag and drop of UI items (UIElementManager::StartDragandDrop) is not built; a dragable element is clicked, not dragged");
+            // A press on a draggable item cell arms the drag (it takes the pressed item now); the press goes on as a click until the pointer has moved.
+            if (!Drag.Press(ElementLastOver, x, y) && ElementLastOver is { Dragable: true } and not UiItem)
+            {
+                _manager.LogOnce("input:drag", LogSeverity.Warning, "TODO(retailui-runtime): only item cells are dragged (UiDrag, M4 2.2 s3; retail's UIElementManager::StartDragandDrop address unknown); a dragable element of another class is clicked, not dragged");
+            }
         }
 
         var tapOnCapture = false;
@@ -287,6 +305,28 @@ public sealed partial class UiInputRouter
     private void MouseUpEvent(uint action)
     {
         var (x, y) = MousePosition;
+        if (action == UiMouseActions.Left && Drag.Phase != UiDragPhase.Idle)
+        {
+            if (_mouseHasLeftWindow && Drag.Phase == UiDragPhase.Dragging)
+            {
+                // Released outside the window: not the world view, so nothing is dropped.
+                DropDragCapture();
+                Drag.Cancel("released outside the window");
+                SwitchMouseOver(null);
+                _mouseTaken = true;
+                return;
+            }
+
+            var over = _mouseHasLeftWindow ? null : _manager.HitTest(x, y);
+            if (Drag.Release(over, x, y))
+            {
+                // A drag ended (dropped or cancelled): the release is taken, and the elements under the pointer are found again.
+                SwitchMouseOver(over);
+                _mouseTaken = true;
+                return;
+            }
+        }
+
         var target = ElementLastEntered;
         if (ElementWithMouseCapture is { } capture)
         {
@@ -612,8 +652,20 @@ public sealed partial class UiInputRouter
         _manager.DeleteElement(tooltip);
     }
 
+    /// <summary>The pressed cell of a drag that is on gives up the mouse capture (a drag begins, or ends by Escape), so the pointer is free to enter the elements under it.</summary>
+    private void DropDragCapture()
+    {
+        if (Drag.CaptureHolder is { } holder && ReferenceEquals(ElementWithMouseCapture, holder))
+        {
+            ElementWithMouseCapture = null;
+            _captureCount = 0;
+            _actionsTriggeringCapture.Clear();
+        }
+    }
+
     private void ForgetMouse(UiElement element)
     {
+        Drag.Forget(element);
         if (ReferenceEquals(ElementWithMouseCapture, element))
         {
             ElementWithMouseCapture = null;

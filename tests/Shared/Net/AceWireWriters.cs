@@ -1178,7 +1178,7 @@ public static class AceWireWriters
     /// (ACE's <c>UpdateObjectDescriptionFlags</c> sets ObjectDescriptionFlags 0x04000000 exactly then), the set fields
     /// in ACE's write order, Align.
     /// </summary>
-    private static void WriteWeenieDesc(BinaryWriter w, AceCreateObject d)
+    public static void WriteWeenieDesc(BinaryWriter w, AceCreateObject d)
     {
         uint h = 0;
         if (d.PluralName is not null) h |= 0x1;

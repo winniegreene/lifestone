@@ -221,7 +221,55 @@ public sealed class GameSpellcastingPanelTests(DatSetFixture fixture) : IClassFi
 
         g.Describe([bolt1.Id, bolt2.Id, strength.Id], Bars([strength.Id])); // the bar shrank
         Assert.Equal<uint>([strength.Id], g.Cast.ShownSpells(0));
-        Assert.Equal(1, g.Cast.ListOf(0)!.CellCount);
+        Assert.Equal(1, g.Cast.ListOf(0)!.OccupiedCount); // the cells after the favourite are empty slot boxes (M4 3.2 lane e)
+    }
+
+    [RequiresLocalDatsFact]
+    public void M4_3_2_e_each_bar_draws_its_empty_slot_boxes_after_its_favourites_from_the_first_cell_and_an_empty_bar_draws_only_boxes()
+    {
+        // The cause (M4 3.2 lane e): the bars' item list 0x100000B6 is a list that grows (property 0x10000015 of -1, one row: 0x5F of -1, width 439); retail pads it with empty slot cells (UIElement_ItemList::UpdateEmptySlots, 11.6096
+        // 0x004E4390) and Lifestone made cells only for the favourites and deleted the rest, so an empty bar drew nothing. A favourite still fills the first cell (ItemList_AddSpellShortcut 0x004E4D30).
+        using var g = Enter();
+        var bolt1 = Named("Flame Bolt I");
+        var strength = Named("Strength Self I");
+        g.Describe([bolt1.Id, strength.Id], Bars([bolt1.Id, strength.Id]));
+        g.ChangeMode(CombatMode.Magic);
+
+        var list = g.Cast.ListOf(0)!;
+        var width = list.Box.Width / UiItemList.DefaultCellWidth;
+        Assert.True(width >= 10, $"the bar is {list.Box.Width} wide");
+        Assert.Equal(width, list.CellCount); // a drawn cell for every whole cell the bar's width holds
+        Assert.Equal(2, list.OccupiedCount);
+        Assert.Equal(width - 2, list.EmptyCount);
+        Assert.Equal(bolt1.Id, g.Cell(0, 0).SpellId); // the favourites fill from the first cell
+        Assert.Equal(strength.Id, g.Cell(0, 1).SpellId);
+        for (var i = 2; i < width; i++)
+        {
+            var cell = g.Cell(0, i);
+            Assert.True(cell.IsEmpty);
+            Assert.Equal(UiItem.EmptyState, cell.IconElement!.State); // the empty-slot art: the icon child is in the empty state
+            Assert.NotEmpty(cell.IconElement.CurrentStateDesc!.Media); // and that state has an image
+            Assert.True(cell.IsShown);
+        }
+
+        // An empty bar: every cell a box.
+        var empty = g.Cast.FirstTabWithoutSpells();
+        Assert.True(empty > 0);
+        Assert.True(g.Cast.OpenTabByClick(empty));
+        g.Rig.Frame();
+        var emptyList = g.Cast.ListOf(empty)!;
+        Assert.Equal(width, emptyList.CellCount);
+        Assert.Equal(0, emptyList.OccupiedCount);
+        Assert.All(emptyList.Items.Cast<UiItem>(), static c => Assert.Equal(UiItem.EmptyState, c.IconElement!.State));
+
+        // A bar that shrank empties its surplus cells: the boxes stay, the favourite goes.
+        Assert.True(g.Cast.OpenTabByClick(0));
+        g.Rig.Frame();
+        g.Describe([bolt1.Id, strength.Id], Bars([strength.Id]));
+        Assert.Equal(width, list.CellCount);
+        Assert.Equal(1, list.OccupiedCount);
+        Assert.Equal(strength.Id, g.Cell(0, 0).SpellId);
+        Assert.True(g.Cell(0, 1).IsEmpty);
     }
 
     [RequiresLocalDatsFact]
@@ -268,6 +316,35 @@ public sealed class GameSpellcastingPanelTests(DatSetFixture fixture) : IClassFi
 
         Assert.True(g.Cast.OpenTabByClick(0)); // the earlier tab comes back
         Assert.Equal(0, g.Cast.OpenTab);
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_bar_that_changed_while_another_tab_was_open_shows_its_new_spells_when_its_tab_is_opened()
+    {
+        // 3.2-R6: a favourite added to bar 3 (index 2) while bar 1 is shown; opening tab 3 must show it, not the bar as it was built, nor an empty box.
+        using var g = Enter();
+        var bolt = Named("Flame Bolt I");
+        var strength = Named("Strength Self I");
+        g.Describe([bolt.Id, strength.Id], Bars([bolt.Id], [], [strength.Id]));
+        g.ChangeMode(CombatMode.Magic);
+        Assert.True(g.Cast.OpenTabByClick(2)); // built once with the strength spell
+        g.Rig.Frame();
+        Assert.Equal<uint>([strength.Id], g.Cast.ShownSpells(2));
+        Assert.True(g.Cast.OpenTabByClick(0));
+        g.Rig.Frame();
+
+        g.Describe([bolt.Id, strength.Id], Bars([bolt.Id], [], [strength.Id, bolt.Id])); // bar 3 changes while tab 1 is shown (a description also sets the combat mode: the window is hidden until the mode is magic again)
+        g.ChangeMode(CombatMode.Magic);
+        Assert.Equal(0, g.Cast.OpenTab);
+        Assert.Equal<uint>([strength.Id], g.Cast.ShownSpells(2)); // not the open tab: not rebuilt yet
+
+        var buildsBefore = g.Cast.Builds;
+        Assert.True(g.Cast.OpenTabByClick(2));
+        g.Rig.Frame();
+        Assert.True(g.Cast.Builds > buildsBefore); // the tab click rebuilt the tab whose bar changed
+        Assert.Equal<uint>([strength.Id, bolt.Id], g.Cast.ShownSpells(2));
+        Assert.Equal(strength.Id, g.Cell(2, 0).SpellId);
+        Assert.Equal(bolt.Id, g.Cell(2, 1).SpellId);
     }
 
     [RequiresLocalDatsFact]

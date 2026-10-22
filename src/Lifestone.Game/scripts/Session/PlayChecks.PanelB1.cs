@@ -1,3 +1,4 @@
+using Lifestone.Client.Play;
 using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Widgets;
@@ -5,6 +6,7 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Data.Motion;
+using Lifestone.Game.Core;
 
 namespace Lifestone.Game.Sessions;
 
@@ -86,6 +88,48 @@ public sealed partial class PlayChecks
                 && controller.Title == title && controller.ContentsTitle == "Contents of Backpack"
                 && controller.BurdenTextNow == percent + "%" && Math.Abs(controller.BurdenLevel - (float)level) < 0.0005f,
             $"stack={stack} cell_quantity={coinCell?.Quantity} player_cell=0x{controller.TopContainerList.CellAt(0)?.ItemId:X8} side_packs={sideShown}/{sideExpected} title='{controller.Title}' contents='{controller.ContentsTitle}' burden={burden} capacity={capacity} burden_text={controller.BurdenTextNow} meter={controller.BurdenLevel:0.####} expected_text={percent}%");
+
+        // M4 2.2 s2, the review frame `inventory-sidepack` (with --play-frames; PLACEHOLDER content: the stand-in's Pack holding one Pyreal, TODO(m4-standin-side-pack-item)). Review only, never judged: the
+        // page with the first side pack selected and its contents listed; the page is put back on the backpack afterwards.
+        if (_framesDirectory is not null && opened)
+        {
+            var packCell = controller.SidePackList.Items.OfType<UiItem>().FirstOrDefault(static c => !c.IsEmpty);
+            if (packCell is not null)
+            {
+                var pack = packCell.ItemId;
+
+                // The recorded description's Sack is announced empty (RecordedDescription.SidePacks; the stand-in's own Pack with one Pyreal is added only when the description carries no pack), so for the frame the 120 Pyreals this
+                // check granted go into it (the stand-in answers the move with the 0022 a server sends) and back out afterwards. The frame's contents are therefore placeholders: the stand-in's pack and the stand-in's coins.
+                var movedIn = false;
+                if (inventory.ItemsIn(pack).Count == 0 && guids[2] != 0 && inventory.Find(guids[2]).Kind == InventoryPlaceKind.MainPack)
+                {
+                    var moveIn = session.Actions.MoveToPack(guids[2], pack, 0, ActionSource.Host);
+                    movedIn = await WaitFor(() => moveIn.IsCompleted, 10.0) && inventory.Find(guids[2]).Kind == InventoryPlaceKind.InSidePack;
+                }
+
+                var held = inventory.ItemsIn(pack).Count;
+                controller.ShowContents(pack);
+                var listed = await WaitFor(() => controller.OpenContainer == pack && controller.PackList.OccupiedCount == inventory.ItemsIn(pack).Count(e => objects.Contains(e.Guid)) && controller.PackList.Items.OfType<UiItem>().All(static c => !c.IconPending), 8.0);
+                HideLightsHud(); // the developer HUD would cover the page; the shell's own panels stay
+                await Frames(4);
+                SaveExtraFrame(PanelFramesPlan.InventorySidePackFrame);
+                RestoreLightsHud();
+                Log.Info(LogCategory, "side pack frame: the inventory page with a side pack selected", ("pack", $"0x{pack:X8}"), ("contents_title", controller.ContentsTitle), ("held", held), ("listed", controller.PackList.OccupiedCount), ("settled", listed), ("coins_moved_in", movedIn), ("placeholder", "stand-in pack and coins, TODO(m4-standin-side-pack-item)"));
+                controller.ShowContents(inventory.Owner != 0 ? inventory.Owner : self.Guid);
+                if (movedIn)
+                {
+                    var moveOut = session.Actions.MoveToPack(guids[2], 0, 0, ActionSource.Host);
+                    var back = await WaitFor(() => moveOut.IsCompleted, 10.0) && inventory.Find(guids[2]).Kind == InventoryPlaceKind.MainPack;
+                    Log.Info(LogCategory, "side pack frame: the stand-in coins went back to the main pack", ("back", back));
+                }
+
+                await Frames(4);
+            }
+            else
+            {
+                Log.Info(LogCategory, "side pack frame: the stand-in announced no side pack; no frame");
+            }
+        }
 
         // Closed: the page does not redraw while hidden.
         await ClosePanelAsync(shell, GameInventoryPage.Panel);

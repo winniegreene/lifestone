@@ -13,7 +13,7 @@ namespace Lifestone.Client.Session.Contracts;
 /// confirmation, the server's error or its timeout, inside <c>GameSession.Tick</c> (docs/session.md, "Actions").</para>
 /// <para><b>Order and limits.</b> Session-phase actions (login, character operations, entering the world, logoff,
 /// quit) run one at a time, in call order. Chat, use and tool requests are rate-limited, and wait in the queue rather
-/// than being dropped. Stat raises, the magic lane (casts and combat-mode changes) and the inventory lane (wield, unwield, move) each
+/// than being dropped. Stat raises, the magic lane (casts and combat-mode changes), the inventory lane (wield, unwield, move) and the heal lane (a kit, a potion) each
 /// run one at a time, in call order, because the server's answers carry no request id; a cast also keeps the magic lane busy after its outcome until the server
 /// ends the cast (UseDone), as ACE is busy until then. The defaults are in docs/session.md (owner decision D49).</para>
 /// <para><b>Safety.</b> <see cref="KillSwitch"/> and <see cref="DryRun"/> apply to <see cref="ActionSource.Automation"/>
@@ -170,7 +170,8 @@ public interface IActionApi
     /// waits behind a cast and a cast behind the change). Confirmed on <see cref="CombatModeChanged"/> to the mode asked for; completes at once as <see cref="ActionOutcomeKind.Local"/>,
     /// sending nothing, when <see cref="PlayerQualities.CombatMode"/> already holds it. ACE's one told refusal (a weapon that does not fit the mode: WeenieError ActionCancelled) is a
     /// <see cref="ActionOutcomeKind.ServerError"/>; any other missing update is a <see cref="ActionOutcomeKind.TimedOut"/>; 5 s timeout.
-    /// Refused at once for a value that is not one of <see cref="CombatMode"/>.
+    /// Refused at once for a value that is not one of <see cref="CombatMode"/>. A mode the wielded weapon forbids (melee with a caster or a launcher in hand, magic with no caster, missile with no launcher) is
+    /// <see cref="ActionOutcomeKind.Refused"/> at once and never sent: the client-side guard (M4 3.1 lane g, <see cref="CombatModeGuard"/>; the owner's rule D23): ACE reverts such a mode itself (silently for one weapon, with ActionCancelled for an illegal pair).
     /// </summary>
     /// <param name="mode">The mode wanted.</param>
     /// <param name="source">Who is asking.</param>
@@ -203,13 +204,119 @@ public interface IActionApi
     /// from one pack to another, from a side pack to the main pack, or off the body. Lane Inventory. Confirmed on the item's put into the container
     /// (GameEvent 0x0022: <see cref="InventoryChangeKind.Moved"/>, or <see cref="InventoryChangeKind.Unwielded"/> for a worn item); a refusal (GameEvent 0x00A0) is a
     /// <see cref="ActionOutcomeKind.ServerError"/>; 5 s timeout.
-    /// Refused at once for item 0 or an item the player does not hold (a pickup from the ground is not built: <c>TODO(m3-pickup)</c>).
+    /// Refused at once for item 0. An item the player does not hold is picked up: <c>TODO(m3-pickup)</c> is closed (M4 2.1 s2) and this call is then <see cref="PickUp"/> under the kind
+    /// <see cref="ActionKind.MoveToPack"/> (the same GameAction, the pick-up tracker, its 25 s timeout and its busy chain).
     /// </summary>
     /// <param name="item">The item's guid.</param>
     /// <param name="container">The pack's guid; 0 is the main pack (the player's own guid, filled in when it is sent).</param>
     /// <param name="placement">The slot in the pack (0 is the first).</param>
     /// <param name="source">Who is asking.</param>
     ActionHandle MoveToPack(uint item, uint container = 0, uint placement = 0, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Opens a corpse or chest (GameAction 0x0036 Use, retail <c>CM_Inventory::Event_UseEvent</c> 11.6096 0x006AD310; the sender of 0x0195 and the handlers of GameEvent 0x0196 and 0x0052 are unknown in retail, named
+    /// <c>TODO(m4-retail-handler-0196)</c>). Lane Use. Confirmed on the 0196 for <paramref name="container"/> once every listed entry's world object is known (at most
+    /// 3 s after the 0196; past it Confirmed with the missing guids logged). ACE's UseDone 0 comes between the 0196 and the contents' F745s and is not the end.
+    /// A <see cref="ActionOutcomeKind.ServerError"/> when a UseDone arrives with no 0196 since the send: the detail carries the 02EB text, or "locked" when the container played its sound 0x94 (a locked chest sends no text).
+    /// A container that is already open: Confirmed at once, nothing sent. 20 s timeout. Refused at once for guid 0.
+    /// </summary>
+    /// <param name="container">The corpse's or chest's guid.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle OpenContainer(uint container, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Closes the open ground container (GameAction 0x0195 NoLongerViewingContents). Lane Use. Confirmed on the 0052 for it (at once for a corpse, 0.42 s later for a chest); a container that is not open: Confirmed
+    /// at once, nothing sent. 5 s timeout. Refused at once for guid 0.
+    /// </summary>
+    /// <param name="container">The container's guid.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle CloseContainer(uint container, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Picks an item up from the ground or an open container into the player's pack or a side pack (GameAction 0x0019 {item, container, placement}, retail <c>CM_Inventory::Event_PutItemInContainer</c> 0x006ACC80;
+    /// ACE walks the player to the item first). Lane Inventory. Confirmed on the 0022 {item, container == the requested one}; a <see cref="ActionOutcomeKind.ServerError"/> on the 0x00A0 for the item, its code the
+    /// preceding 028A's (0x001D busy, 0x0029) and its detail the 028A's or 02EB's text ("Source item not found!", "You are too encumbered ..."). 25 s timeout. After the confirmation the lane holds the next move
+    /// until the pickup chain ends (the own return-stance F74C and one more motion length: 0.74 s from the ground, 1.35 s from a container), and until 3 s after an own teleport.
+    /// </summary>
+    /// <param name="item">The item's guid.</param>
+    /// <param name="container">The pack's guid; 0 is the main pack (the player's own guid).</param>
+    /// <param name="placement">The slot in the pack.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle PickUp(uint item, uint container = 0, int placement = 0, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Drops an item the player holds to the ground (GameAction 0x001B DropItem). Lane Inventory. Confirmed on the 0x019A for the item; a refusal (0x00A0) is a <see cref="ActionOutcomeKind.ServerError"/>. 5 s timeout.
+    /// The lane holds the next move for the drop's chain (0.74 s).
+    /// </summary>
+    /// <param name="item">The item's guid.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle Drop(uint item, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Splits <paramref name="amount"/> from a stack the player holds into a pack (GameAction 0x0055). Lane Inventory. Confirmed on the 0022 of a new guid into that container (it precedes the new stack's F745 and the old
+    /// stack's 0197). 5 s timeout.
+    /// </summary>
+    /// <param name="stack">The stack's guid.</param>
+    /// <param name="container">The pack's guid; 0 is the main pack.</param>
+    /// <param name="placement">The slot in the pack.</param>
+    /// <param name="amount">How many to split off.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle SplitToContainer(uint stack, uint container, int placement, int amount, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Splits <paramref name="amount"/> from a stack the player holds onto the ground (GameAction 0x0056). Lane Inventory. Confirmed on the old stack's 0197, then the new ground stack's F745 (at most 3 s later). 5 s timeout.
+    /// The lane holds the next move for the split's chain (0.74 s).
+    /// </summary>
+    /// <param name="stack">The stack's guid.</param>
+    /// <param name="amount">How many to split off.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle SplitTo3D(uint stack, int amount, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Splits <paramref name="amount"/> from a stack the player holds and wields it (GameAction 0x019B). Lane Inventory. Confirmed on the 0x0023 of a new guid at <paramref name="location"/>; a
+    /// <see cref="ActionOutcomeKind.ServerError"/> on the 02EB text and the 0x00A0 (the old stack's 0197 is restored by the server). 5 s timeout.
+    /// </summary>
+    /// <param name="stack">The stack's guid.</param>
+    /// <param name="location">The <see cref="EquipMask"/> to wield it at.</param>
+    /// <param name="amount">How many to split off.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle SplitToWield(uint stack, EquipMask location, int amount, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Gives an item the player holds to a player or an NPC (GameAction 0x00CD {target, item, amount}). Lane Inventory. Confirmed on the 0x0024 for the item, or the 0x0022 naming the target, or the 0x0197 of a part stack;
+    /// a <see cref="ActionOutcomeKind.ServerError"/> on the 028B 0x046A (an NPC with no Give emote for the item: ACE answers it also for an NPC with other emotes), 0x03EF, 0x04CE, or the 0x00A0 (0x04CD), each with its
+    /// text; 028A 0x001D when the server is busy (a move or give before the post-teleport LoginComplete, or during a pick-up's chain). 20 s timeout.
+    /// </summary>
+    /// <param name="target">The receiver's guid.</param>
+    /// <param name="item">The item's guid.</param>
+    /// <param name="amount">How many to give (1 for an item that does not stack).</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle Give(uint target, uint item, int amount, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Uses an item on a target (GameAction 0x0035 {item, target}, retail <c>CM_Inventory::Event_UseWithTargetEvent</c>, 11.6096 0x006AD3E0): a healing kit on the player's own guid is the hunt's heal
+    /// (ACE <c>Healer.DoHealing</c>, spec §5.7). Lane Heal: one heal in flight at a time, in call order, and the lane holds the next heal until this one's UseDone AND the player's own Ready F74C AND 0.1 s have passed (ACE is
+    /// busy until the Ready: a repeat at the UseDone is refused 0x001D, capture.md C2). The handle is a <see cref="HealHandle"/>; its <see cref="HealHandle.Result"/> says what the F7E0 line read.
+    /// <para>Confirmed iff the UseDone 0x01C7 came with code 0 and the kit's 0x02CE Structure (property 92) fell since the send, or the kit was consumed (0x0024): a won roll (<see cref="HealResultKind.Healed"/>) and a lost roll
+    /// (<see cref="HealResultKind.FailedRoll"/>: a use spent, nothing healed, never an error) both confirm. A UseDone with a code is a <see cref="ActionOutcomeKind.ServerError"/> with that code (0x04FC untrained in Healing, 0x001D busy,
+    /// 0x04FE not a player target, 0x04EB jumping); a 0x028B 0x04FF (a full vital) or a 0x02EB text is a refusal read the same way (<c>TODO(m4-heal-full-vital-live)</c>: not captured live); a silent UseDone 0 with no Structure change
+    /// (a kit not held, no target) is a <see cref="ActionOutcomeKind.ServerError"/> "nothing happened". A use takes about 1.5 s; 20 s timeout. Refused at once for item 0 or target 0, and offline.</para>
+    /// </summary>
+    /// <param name="item">The kit's guid.</param>
+    /// <param name="target">The target's guid (the player's own for a self heal).</param>
+    /// <param name="source">Who is asking.</param>
+    HealHandle UseWithTarget(uint item, uint target, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Drinks a potion or eats food (GameAction 0x0036 Use, as <see cref="Use"/>), with the potion's own tracker. Lane Heal (the same lane and hold as <see cref="UseWithTarget"/>: ACE's chain is busy until its UseDone, and
+    /// its F74C Ready comes before it). Confirmed iff the UseDone came with code 0 and the potion's stack fell (0x0197 with one fewer) or the item was removed (0x0024, the last one); the restored amount is read from the F7E0 line
+    /// "The &lt;name&gt; restores N points of your &lt;Vital&gt;." (<see cref="HealResultKind.Drank"/>); N of 0 is <see cref="HealResultKind.Wasted"/>, still Confirmed, because ACE spends a potion drunk at a full vital (capture.md C3).
+    /// A refusal (0x028A 0x001D busy, 0x04EB jumping) ends at the UseDone as a <see cref="ActionOutcomeKind.ServerError"/> with its code, as does a UseDone with a code. The effect comes about 0.75 s after the send and the UseDone about 1.5 s;
+    /// 20 s timeout. Refused at once for item 0, and offline.
+    /// </summary>
+    /// <param name="item">The potion's or food's guid.</param>
+    /// <param name="source">Who is asking.</param>
+    HealHandle Drink(uint item, ActionSource source = ActionSource.Host);
 
     /// <summary>
     /// Merges <paramref name="amount"/> units of one stack the player holds into another stack of the same item (GameAction 0x0054 {from, to, amount}, retail
@@ -255,6 +362,37 @@ public interface IActionApi
     ActionHandle RemoveSpellFavorite(uint spellId, int bar, ActionSource source = ActionSource.Host);
 
     /// <summary>
+    /// Starts a melee attack on <paramref name="target"/>: GameAction 0x0008 TargetedMeleeAttack {target, height, power} (retail <c>CM_Combat::Event_TargetedMeleeAttack</c>; ACE <c>Player.HandleActionTargetedMeleeAttack</c>,
+    /// W/Player_Melee.cs). ACE walks the player to the target, swings, and repeats by itself while AutoRepeatAttacks is on, so ONE call gives a whole run of swings: the outcome says whether ACE took the attack,
+    /// and the run's end is <see cref="IGameSessionView.Attack"/> (Done on GameEvent 0x01A7 {0x0036}). Completes <see cref="ActionOutcomeKind.Confirmed"/> on the first sign ACE took it (its approach, the swing, a combat notice for the target), also
+    /// at once with the detail "queued" when a sequence is already running (ACE queues the power and answers nothing); <see cref="ActionOutcomeKind.ServerError"/> on its refusals; a 0x01A7 with a code and no start is a silent refusal
+    /// (<see cref="ActionOutcomeKind.ServerError"/>, the code kept). Time limit 20 s on the session clock from the send (the approach can take up to 15 s). Refused at once for a power outside 0 to 1 (or not finite), height outside 1 to 3, or no target.
+    /// </summary>
+    /// <param name="target">The target's object id.</param>
+    /// <param name="height">The attack height.</param>
+    /// <param name="power">The power bar, 0 to 1 (ACE clamps it).</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle Attack(uint target, AttackHeight height, float power, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Starts a missile attack on <paramref name="target"/>: GameAction 0x000A TargetedMissileAttack {target, height, accuracy} (ACE W/Player_Missile.cs). Like <see cref="Attack"/> one call gives a run of shots (capture.md C3).
+    /// Completes <see cref="ActionOutcomeKind.Confirmed"/> on the first launch (the sequence's start, the held ammunition's stack falling, or the arrow's F745 taken for ours by the war-spell projectile rule),
+    /// <see cref="ActionOutcomeKind.ServerError"/> on a refusal (out of range, out of ammunition, busy). Time limit 10 s. Refused at once for an accuracy outside 0 to 1 (or not finite), height outside 1 to 3, or no target.
+    /// </summary>
+    /// <param name="target">The target's object id.</param>
+    /// <param name="height">The attack height.</param>
+    /// <param name="accuracy">The accuracy bar, 0 to 1 (ACE clamps it).</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle MissileAttack(uint target, AttackHeight height, float accuracy, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Cancels the attack sequence: GameAction 0x01B7 CancelAttack (ACE <c>Player.HandleActionCancelAttack</c>, W/Player_Melee.cs 240-250). The swing in progress finishes first; the sequence ends with GameEvent 0x01A7 {0x0036}, which completes
+    /// this <see cref="ActionOutcomeKind.Confirmed"/>. With no sequence running ACE answers nothing and this completes at once as <see cref="ActionOutcomeKind.Sent"/>. Time limit 5 s.
+    /// </summary>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle CancelAttack(ActionSource source = ActionSource.Host);
+
+    /// <summary>
     /// Logs the character off: adds "Logging off..." to the chat as retail does, sends F653 (the only sender), and
     /// publishes <see cref="LogOffRequested"/> for portal space. Completes when the server's F653 and the character list
     /// have arrived.
@@ -297,4 +435,84 @@ public interface IActionApi
     /// <see cref="ActionOutcomeKind.DryRun"/>; nothing is sent. Other sources are unaffected.
     /// </summary>
     bool DryRun { get; set; }
+
+    // ---- M4 3.2 h1: the shortcut bar's actions (appended) ----
+
+    /// <summary>
+    /// Puts an item the player holds on the shortcut bar (GameAction 0x019C {slot, item, spell 0}; retail <c>gmToolbarUI::AddShortcut</c>, 11.6096 0x004BE630, through <c>CreateShortcutToItem</c> 0x004BE750; ACE <c>Player.HandleActionAddShortcut</c>).
+    /// ACE answers nothing and keeps the list for the next login, so the action completes as <see cref="ActionOutcomeKind.Sent"/> when it is sent and <see cref="SelfState.Shortcuts"/> changes at once. Retail's rules: an item already on the bar
+    /// moves (RemoveShortcut for its old slot is sent first); a slot that is occupied is cleared first and its occupant goes to the first empty slot to the right (<c>GetFirstEmptyShortcutToTheRightOf</c> 0x004BE1F0; with none free it leaves the bar, and a
+    /// RemoveShortcut for the slot is the only send); the item already in that slot is left alone (nothing is sent). Lane Immediate, no limit.
+    /// <para>Refused at once for item 0, a slot outside 0 to 17 other than <see cref="ShortcutBar.AutoSlot"/> (the first empty slot; refused when there is none: "There are no free shortcut slots"), and an item the player does not hold or a pyreal stack
+    /// (<c>gmToolbarUI::IsShortcutEligible</c> 0x004BDE60 and <c>ACCWeenieObject::IsCoinstack</c> 0x004BDEE0; the rest of eligibility is unread: <c>TODO(m4-shortcut-eligible-flags)</c>), and offline.</para>
+    /// </summary>
+    /// <param name="slot">The slot, 0 to 17 (<see cref="ShortcutBar.AutoSlot"/> for the first empty one).</param>
+    /// <param name="item">The item's guid.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle AddShortcut(int slot, uint item, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Empties a shortcut slot (GameAction 0x019D {slot}; retail <c>gmToolbarUI::RemoveShortcut</c>, 0x004BE0E0 and <c>RemoveShortcutInSlotNum</c> 0x004BE180). ACE answers nothing, so the action completes as <see cref="ActionOutcomeKind.Sent"/> when it
+    /// is sent and <see cref="SelfState.Shortcuts"/> changes at once. A slot that is already empty is refused (nothing to remove; no send). Refused at once for a slot outside 0 to 17, and offline. Lane Immediate, no limit.
+    /// </summary>
+    /// <param name="slot">The slot, 0 to 17.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle RemoveShortcut(int slot, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Uses the item on a shortcut slot (<c>gmToolbarUI::UseShortcut</c>, 11.6096 0x004BDFE0, which uses the slot's object as a click on it does). It routes to the action that does the job and returns that action's handle, so the caller sees its outcome:
+    /// a healing kit is <see cref="UseWithTarget"/> on the player, a potion or food is <see cref="Drink"/>, anything else is <see cref="Use"/> (a wieldable item: whatever Use does today). The client has no WeenieType, so the kit and the potion are told by
+    /// their weenie class and name (<c>ShortcutRouting</c>, <c>TODO(m4-shortcut-classify)</c>). An empty slot, a slot out of range and an object the player does not hold are refused at once; a spell shortcut (a spell and no object) is
+    /// <see cref="ActionOutcomeKind.NotImplemented"/> (<c>TODO(m4-shortcut-spell)</c>). The handle of a refusal has kind <see cref="ActionKind.UseShortcut"/>.
+    /// </summary>
+    /// <param name="slot">The slot, 0 to 17.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle UseShortcut(int slot, ActionSource source = ActionSource.Host);
+    /// <summary>
+    /// Asks the server to appraise an object (GameAction 0x00C8 Identify; M4 3.2 s2), the item list's examine and the paperdoll's figure click. ACE has no range or busy check: it finds the object in the pack, worn,
+    /// on the landblock, in the open container or vendor stock, and answers with one GameEvent 0x00C9 1 to 10 ms later (capture.md C3), so the Query lane (rate-limited, no hold) carries it. Completes
+    /// <see cref="ActionOutcomeKind.Confirmed"/> on the next 0x00C9 for the guid, whatever it says: <see cref="IdentifyHandle.Result"/> reads <see cref="IdentifyResultKind.Appraised"/>, <see cref="IdentifyResultKind.Failed"/>
+    /// (a creature's failed roll: the detail says "the roll failed", the tables are kept, the profiles are withheld) or <see cref="IdentifyResultKind.NotFound"/> (flags 0, success 0), and
+    /// <see cref="IGameSessionView.TryGetAppraisal"/> holds the answer. A repeat within 5 s of a failed answer on the same guid is answered failed by ACE with no roll (<see cref="IdentifyResult.Cooldown"/>); a repeat on the
+    /// current successful target is answered again with no roll. Two Identifies of one guid leave one after the other, so each takes its own answer. 5 s timeout. Refused at once for guid 0 (ACE clears its target and answers
+    /// nothing, spec 5.6) and offline.
+    /// </summary>
+    /// <param name="guid">The object's guid.</param>
+    /// <param name="source">Who is asking.</param>
+    IdentifyHandle Identify(uint guid, ActionSource source = ActionSource.Host);
+
+    /// <summary>
+    /// Opens a vendor (M4 3.2 s1): GameAction 0x0036 Use on the vendor, as <see cref="Use"/> (lane Use; one vendor action at a time). ACE turns the player to the vendor, answers UseDone 0 about 0.8 s later and sends the stock
+    /// (GameEvent 0x0062) 0.65 to 1.04 s after that (capture.md C1, C2), so it is <see cref="ActionOutcomeKind.Confirmed"/> on the 0062 for <paramref name="vendor"/> (<see cref="IGameSessionView.Vendor"/> then holds it), not on the UseDone.
+    /// A UseDone with a code is a <see cref="ActionOutcomeKind.ServerError"/>; a UseDone 0 with no 0062 for the vendor within <c>ActionPolicy.OpenVendorMarginSeconds</c> is <see cref="ActionOutcomeKind.Refused"/>
+    /// "vendor did not open" (a closed shop, or a walk that failed: both a bare UseDone 0). 20 s. The player must be within the vendor's use radius: this does not walk through a door (<c>TODO(m4-vendor-approach)</c>).
+    /// The default body throws: a view that keeps no vendor (a test fake) does not implement it.
+    /// </summary>
+    /// <param name="vendor">The vendor's object id.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle OpenVendor(uint vendor, ActionSource source = ActionSource.Host) => throw new NotSupportedException("IActionApi.OpenVendor is not implemented by this view (M4 3.2 s1)");
+
+    /// <summary>
+    /// Buys from a vendor (M4 3.2 s1): GameAction 0x005F {vendor, count, count x {i32 amount, u32 item}}, the items named by the guids of <see cref="VendorStock.Entries"/>. Lane Use (one vendor action at a time). Complete at ACE's UseDone:
+    /// <see cref="ActionOutcomeKind.Confirmed"/> iff no GameEvent 0x00A0 arrived since the send, then the pyreals paid (CoinValue before minus after) are compared with <see cref="VendorStock.PriceToBuy(uint, uint)"/> over the open stock and the F745 of each
+    /// item the server announced is awaited for 5 s; a mismatch or a missing object is a WARN in the outcome's detail and in <see cref="VendorTradeHandle.Result"/>, never a failure. A 00A0 is a <see cref="ActionOutcomeKind.ServerError"/> with code 0 and
+    /// the reason (the last 02EB, 028B or F7E0 line; none for too few pyreals: the detail then names the shortfall); a UseDone with a code (0x001D busy, 0x0038 no vendor, 0x0506 trading) is a ServerError with it. 10 s. ACE rejects the whole buy for
+    /// an invalid amount and skips an unknown guid silently. Refused at once for no vendor, no item, a guid of 0 or an amount of 0.
+    /// The default body throws: a view that keeps no vendor does not implement it.
+    /// </summary>
+    /// <param name="vendor">The vendor's object id.</param>
+    /// <param name="items">What to buy: the stock guid and how many.</param>
+    /// <param name="source">Who is asking.</param>
+    VendorTradeHandle Buy(uint vendor, IReadOnlyList<(uint item, uint amount)> items, ActionSource source = ActionSource.Host) => throw new NotSupportedException("IActionApi.Buy is not implemented by this view (M4 3.2 s1)");
+
+    /// <summary>
+    /// Sells to a vendor (M4 3.2 s1): GameAction 0x0060, the same layout as <see cref="Buy"/> with the player's items; the amount sent is each item's whole stack, because ACE sells and pays the whole stack whatever the amount says
+    /// (an item the model does not hold is sent with 1). Lane Use. Complete at the UseDone, as <see cref="Buy"/>: Confirmed iff no 00A0 since the send, the payout (CoinValue after minus before) compared with the sum of
+    /// <see cref="VendorStock.PayoutFor(WorldObject)"/> over the items the vendor's mask takes. An item ACE will not take is dropped with a 02EB line ("The X is unsellable.") and the sale goes on; a sale of nothing is the 00A0 (ServerError, code 0,
+    /// the reason). Refused at once for no vendor, no item or a guid of 0. The default body throws: a view that keeps no vendor does not implement it.
+    /// </summary>
+    /// <param name="vendor">The vendor's object id.</param>
+    /// <param name="items">The player's items to sell.</param>
+    /// <param name="source">Who is asking.</param>
+    VendorTradeHandle Sell(uint vendor, IReadOnlyList<uint> items, ActionSource source = ActionSource.Host) => throw new NotSupportedException("IActionApi.Sell is not implemented by this view (M4 3.2 s1)");
 }

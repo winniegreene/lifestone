@@ -395,7 +395,7 @@ public sealed class ReducerCombatTests
         var h = InWorld();
         h.Reducer.OnPlayerDescription(h.Context, new GameEventHeader(Player, 1, GameEventTypes.PlayerDescription), new PlayerDescriptionMsg { Options1 = options, Options2 = 0 });
         const uint drudge = 0x80000B01;
-        h.Reducer.OnCreateObject(h.Context, ReducerHarness.Create(drudge, ReducerHarness.Stamps(), ReducerHarness.Position(0x860201AD, 12, 20, 30), name: "Drudge"), isUpdate: false);
+        h.Reducer.OnCreateObject(h.Context, ReducerHarness.Create(drudge, ReducerHarness.Stamps(), ReducerHarness.Position(0x860201AD, 12, 20, 30), name: "Drudge", itemType: 0x10), isUpdate: false);
         if (mode is { } m)
         {
             SetMode(h, 5, m);
@@ -438,6 +438,46 @@ public sealed class ReducerCombatTests
     {
         var (h, _) = WithDrudge(CombatModes.Melee);
         Send(h, AceM3Writers.DefenderNotification(Player, 10, "Unknown Thing", Slash, 0.3, 14, 4, false, 0));
+        Assert.Equal(new AutoTargetRequested(0), Assert.Single(h.Of<AutoTargetRequested>()));
+        Assert.Contains(h.Log.Lines, l => l.Contains("TODO(m3-autotarget-selectnext)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_dead_attacker_of_the_name_is_skipped_for_a_living_one_farther_away()
+    {
+        // M4 1.3 s2 (the 4.2 review's R10): a corpse-in-waiting (health 0, or the Dead motion) is not the attacker; the nearest LIVING creature of the name is.
+        var (h, drudge) = WithDrudge(CombatModes.Melee);
+        const uint nearDead = 0x80000B02, nearDying = 0x80000B03;
+        h.Reducer.OnCreateObject(h.Context, ReducerHarness.Create(nearDead, ReducerHarness.Stamps(), ReducerHarness.Position(0x860201AD, 11, 20, 30), name: "Drudge", itemType: 0x10), isUpdate: false);
+        h.Reducer.OnCreateObject(h.Context, ReducerHarness.Create(nearDying, ReducerHarness.Stamps(), ReducerHarness.Position(0x860201AD, 11.5f, 20, 30), name: "Drudge", itemType: 0x10), isUpdate: false);
+        Assert.True(h.State.Objects.TryGet(nearDead, out var dead));
+        dead.Health = 0f;
+        Assert.True(h.State.Objects.TryGet(nearDying, out var dying));
+        dying.Motion = new ServerMotionState { MovementType = MovementType.Interpreted, Forward = WorldObjectTable.DeadMotionLowWord };
+        h.ClearEvents();
+        Send(h, AceM3Writers.DefenderNotification(Player, 10, "Drudge", Slash, 0.3, 14, 4, false, 0));
+        Assert.Equal(new AutoTargetRequested(drudge), Assert.Single(h.Of<AutoTargetRequested>()));
+    }
+
+    [Fact]
+    public void A_non_creature_of_the_attackers_name_is_skipped()
+    {
+        var (h, _) = WithDrudge(CombatModes.Melee);
+        const uint statue = 0x80000B04;
+        h.Reducer.OnCreateObject(h.Context, ReducerHarness.Create(statue, ReducerHarness.Stamps(), ReducerHarness.Position(0x860201AD, 11, 20, 30), name: "Marble Statue", itemType: 0x1000), isUpdate: false);
+        h.ClearEvents();
+        Send(h, AceM3Writers.DefenderNotification(Player, 10, "Marble Statue", Slash, 0.3, 14, 4, false, 0));
+        Assert.Equal(new AutoTargetRequested(0), Assert.Single(h.Of<AutoTargetRequested>()));
+    }
+
+    [Fact]
+    public void With_none_of_the_name_alive_no_target_is_asked_for_and_the_selectnext_todo_is_logged()
+    {
+        var (h, drudge) = WithDrudge(CombatModes.Melee);
+        Assert.True(h.State.Objects.TryGet(drudge, out var only));
+        only.Health = 0f;
+        h.ClearEvents();
+        Send(h, AceM3Writers.DefenderNotification(Player, 10, "Drudge", Slash, 0.3, 14, 4, false, 0));
         Assert.Equal(new AutoTargetRequested(0), Assert.Single(h.Of<AutoTargetRequested>()));
         Assert.Contains(h.Log.Lines, l => l.Contains("TODO(m3-autotarget-selectnext)", StringComparison.Ordinal));
     }

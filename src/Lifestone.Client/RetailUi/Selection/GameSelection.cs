@@ -206,6 +206,7 @@ public sealed class GameSelection : IDisposable
     }
 
     // gmToolbarUI::RecvNotice_UpdateObjectHealth (11.6096 0x004BDDA0).
+    // TODO(m4-health-from-01B1): moot under ACE: a 01C0 rides with every 01B1 and 01AD for a selected target (item 1.2's capture, Entity/DamageHistory.cs:93), so the meter moves on the hit; retail's use of 01B1's damage share is unknown.
     private void OnHealth(in HealthUpdated e)
     {
         if (_disposed || e.Guid == 0 || e.Guid != _selected || _health is null)

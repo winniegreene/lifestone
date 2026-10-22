@@ -180,6 +180,11 @@ internal sealed partial class StandInWorld
     /// <summary>A PutItemInContainer (0x0019): an unwield (the container is the player) and a move to a pack are the same message.</summary>
     internal OutboundTicket PutInContainer(uint item, uint container, uint placement)
     {
+        if (!_reducer.State.Self.Inventory.Find(item).Held && TryPickupSource(item, out _, out _))
+        {
+            return PickUp(item, container, placement); // M4 2.1 s3: an item on the ground or in the open container is picked up (StandInWorld.Moves.cs)
+        }
+
         Later(sink => PutNow(sink, item, container, placement));
         return Ticket();
     }
@@ -377,10 +382,19 @@ internal sealed partial class StandInWorld
             return;
         }
 
+        // M4 1.2 s3: ACE's CheckWeaponCollision (Player_Inventory.cs 1663-1668, 1909-1918): a launcher cannot be wielded while a melee weapon is, and the answer is GE 00A0 {item, None} (capture.md C2); the client moves the melee weapon to the pack first.
+        if ((mask & (uint)EquipMask.MissileWeapon) != 0 && _wielded.Keys.Any(w => _wieldMasks.TryGetValue(w, out var held) && (held & (uint)EquipMask.MeleeWeapon) != 0))
+        {
+            Placeholder("m4-standin-weapon-kinds", "the stand-in knows a weapon by the equip mask it was wielded with (melee 0x100000, launcher 0x400000, ammunition 0x800000), not by its weenie");
+            Failed(sink, item);
+            return;
+        }
+
         StandInWorn? worn = null;
         if (_pack.FindIndex(e => e.Guid == item) is >= 0 and var at)
         {
             _wielded[item] = _pack[at];
+            _wieldMasks[item] = mask;
             worn = _pack[at].Worn;
             _pack.RemoveAt(at);
         }
@@ -409,6 +423,7 @@ internal sealed partial class StandInWorld
 
         if (_wielded.Remove(item, out var entry))
         {
+            _wieldMasks.Remove(item);
             _pack.Add(entry);
             SendLook(sink, entry.Worn); // TryDequipObjectWithNetworking: the ObjDescEvent after the dequip (Creature_Equipment.cs 438)
         }

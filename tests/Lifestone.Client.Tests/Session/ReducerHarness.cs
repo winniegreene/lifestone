@@ -101,7 +101,8 @@ internal sealed class ReducerHarness
         string name = "Thing",
         ModelData? model = null,
         uint setup = 0x02000001,
-        Vector3? velocity = null)
+        Vector3? velocity = null,
+        uint itemType = 0)
     {
         var flags = PhysicsDescFlags.CSetup;
         if (position is not null)
@@ -130,7 +131,7 @@ internal sealed class ReducerHarness
             Velocity = velocity,
             Timestamps = stamps,
         };
-        var weenie = new WeenieDesc { Header = WeenieHeaderFlags.None, Name = name, WeenieClassId = 1, IconId = 0x06000001, ItemType = 0, ObjectDescriptionFlags = 0 };
+        var weenie = new WeenieDesc { Header = WeenieHeaderFlags.None, Name = name, WeenieClassId = 1, IconId = 0x06000001, ItemType = itemType, ObjectDescriptionFlags = 0 };
         return new CreateObjectMsg(guid, model ?? ModelData.Empty, physics, weenie);
     }
 
@@ -185,6 +186,9 @@ internal sealed class ReducerHarness
         Track<SpellbookChanged>();
         Track<InventoryChanged>();
         Track<InventoryFailed>();
+        Track<ContainerOpened>();
+        Track<ContainerClosed>();
+        Track<ContainerContentsChanged>();
         Track<CombatEvent>();
         Track<CombatModeChanged>();
         Track<AutoTargetRequested>();

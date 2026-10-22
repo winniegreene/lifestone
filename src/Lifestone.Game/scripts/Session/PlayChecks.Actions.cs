@@ -72,7 +72,8 @@ public sealed partial class PlayChecks
         var learn = session.Tools.LearnSpells([BuffSpellId, FizzleSpellId], ActionSource.Host);
         var learned = await WaitFor(() => learn.IsCompleted, 10.0);
 
-        // The combat mode: Magic (ACE answers a cast only in it), judged by the quality the private update sets.
+        // The combat mode: Magic (ACE answers a cast only in it), judged by the quality the private update sets. M4 3.1 g: the combat-mode guard wants a caster in hand (one an earlier row left counts); a wand this row wields is put away at its end.
+        var caster = await HoldCasterAsync(session);
         var magic = session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
         var magicDone = await WaitFor(() => magic.IsCompleted, 10.0);
         var modeInMagic = q.CombatMode;
@@ -147,6 +148,7 @@ public sealed partial class PlayChecks
             modeName,
             magicDone && peaceDone && magic.Outcome?.Kind == ActionOutcomeKind.Confirmed && modeInMagic == CombatModes.Magic && peace.Outcome?.Kind == ActionOutcomeKind.Confirmed && q.CombatMode == CombatModes.NonCombat,
             $"magic={magic.Outcome?.Kind} mode_then={modeInMagic} peace={peace.Outcome?.Kind} mode_now={q.CombatMode}");
+        await StowAsync(session, caster);
 
         // Wield and unwield an item the item tool granted (s2's pack wire).
         var spawn = session.Tools.SpawnItem(PlaceholderWandWcid, null, ActionSource.Host);

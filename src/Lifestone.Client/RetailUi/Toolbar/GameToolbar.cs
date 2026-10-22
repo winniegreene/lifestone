@@ -20,9 +20,10 @@ namespace Lifestone.Client.RetailUi.Toolbar;
 /// change the combat mode through <see cref="IActionApi.SetCombatMode"/> (<see cref="CombatModeRules.Toggle"/>: <c>ClientCombatSystem::ToggleCombatMode</c>, 11.6096 0x0056D610, asks for the wielded weapon's mode from non-combat and for non-combat otherwise) and the layout's button for the current mode
 /// shows (<see cref="SetCombatModeButtons"/>); Examination (gameplay M3 builds later) still opens the NotInM3 message.</item>
 /// </list>
-/// The selection display (name, health and mana meters), the stack slider and the shortcut slots wait for selection (g5) and for items (the gameplay milestone): they keep the layout's art.
+/// The selection display (name, health and mana meters) and the stack slider are built by <see cref="Selection.GameSelection"/>; the 18 shortcut slots (class 0x10000031) are the hotbar (<see cref="GameHotbar"/>, M4 3.2 h2): drawn from the
+/// shortcut model, used by the number keys and a click, a drag source and target.
 /// </summary>
-public sealed class GameToolbar : IUiElementListener
+public sealed class GameToolbar : IUiElementListener, IDisposable
 {
     /// <summary>The toolbar window.</summary>
     public const uint WindowId = 0x10000603;
@@ -60,7 +61,17 @@ public sealed class GameToolbar : IUiElementListener
         Window = window;
         _features[ExamineButtonId] = "Examination";
         window?.RegisterForElementMessages(this);
+        if (window is not null)
+        {
+            Hotbar = new GameHotbar(context, window, () => SelectedSource?.Invoke() ?? 0);
+        }
     }
+
+    /// <summary>The shortcut bar (M4 3.2 h2), or null when the layout lacks the toolbar window.</summary>
+    public GameHotbar? Hotbar { get; }
+
+    /// <summary>Ends the shortcut bar's subscriptions and key map (the session outlives the toolbar). Safe to call twice.</summary>
+    public void Dispose() => Hotbar?.Dispose();
 
     /// <summary>Where the Use button reads the selected object's id from (0 for none); the shell sets it to the selection display once that exists.</summary>
     public Func<uint>? SelectedSource { get; set; }
@@ -83,7 +94,7 @@ public sealed class GameToolbar : IUiElementListener
     /// <summary>
     /// <c>gmToolbarUI::RecvNotice_SetCombatMode</c> (11.6096 0x004BE2A0): the button for <paramref name="mode"/> shows (0x10000192 non-combat, 0x10000193 melee, 0x10000194 missile, 0x10000195 magic) and the others hide.
     /// The combat window (<see cref="Panels.GameCombatPanel"/>) calls it on <c>CombatModeChanged</c>, because the toolbar has no end of life to unsubscribe at. Retail also ghosts the shortcut slots that hold spells outside the
-    /// magic mode; the slots wait for items (<c>TODO(m3-toolbar-shortcut-ghost)</c>).
+    /// magic mode; the hotbar holds items only (a spell row is not drawn: <c>TODO(m4-shortcut-spell)</c>), so there is nothing to ghost (<c>TODO(m3-toolbar-shortcut-ghost)</c>).
     /// </summary>
     public void SetCombatModeButtons(int mode)
     {
@@ -116,6 +127,11 @@ public sealed class GameToolbar : IUiElementListener
             }
 
             return UiListenResult.Handled;
+        }
+
+        if (message.MessageId is UiMessageIds.Click or UiMessageIds.DoubleClick && message.Param1 == UiMouseActions.Left && Hotbar is not null && Hotbar.HandleClick(message.Element))
+        {
+            return UiListenResult.Handled; // a left click on a shortcut slot uses it
         }
 
         if (message.MessageId == UiMessageIds.ButtonClick && IsCombatButton(message.Element.ElementId))

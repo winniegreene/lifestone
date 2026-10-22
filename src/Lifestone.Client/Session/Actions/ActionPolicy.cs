@@ -44,6 +44,18 @@ internal enum ActionLane : byte
     /// </summary>
     Inventory,
 
+    /// <summary>
+    /// Attack, MissileAttack and CancelAttack (M4 1.2 s2): one in flight at a time, in call order. ACE answers an attack with no message of its own (the approach, the swing, the combat notices; a refusal is a WeenieError and a 0x01A7)
+    /// and carries no request id, so a second attack sent before the first is confirmed could not be told from it. An attack is complete at its confirmation, not at the end of the run it starts (that is the attack sequence).
+    /// </summary>
+    Attack,
+
+    /// <summary>
+    /// UseWithTarget and Drink (M4 3.1 s1): one in flight at a time, in call order, and the lane stays busy after a heal's UseDone until the player's own Ready F74C has arrived and 0.1 s have passed. ACE is busy until that Ready
+    /// (capture.md C2: a repeat sent at the UseDone, 8 ms before the Ready, was refused 0x001D), its answers carry no request id, and a kit's and a potion's answers differ, so only one heal at a time keeps each answer unambiguous.
+    /// </summary>
+    Heal,
+
     /// <summary>LoginComplete and Quit: neither serialised nor rate-limited.</summary>
     Immediate,
 }
@@ -85,6 +97,21 @@ internal static class ActionPolicy
     /// <summary>Use: until UseDone (ACE walks the player to the object first).</summary>
     internal const double UseSeconds = 20;
 
+    /// <summary>
+    /// UseWithTarget (a healing kit) and Drink (a potion or food), M4 3.1 s1: until the UseDone. A use takes 1.47-2.1 s from the send to the UseDone (capture.md C1 to C3: the kit's motion 1.48 s, the potion's effect at 0.74 s and its UseDone at
+    /// 1.48 s), so the limit is the Use's; ACE walks nobody for a self heal, but a kit used on another player walks to them first.
+    /// </summary>
+    internal const double HealSeconds = UseSeconds;
+
+    /// <summary>Attack (melee): until the first sign ACE took it; the server's approach can take up to 15 s (W/Player_Melee.cs 204-226), so the limit is the Use's.</summary>
+    internal const double AttackSeconds = UseSeconds;
+
+    /// <summary>MissileAttack: until the first launch or a refusal.</summary>
+    internal const double MissileAttackSeconds = 10;
+
+    /// <summary>CancelAttack: until the sequence's end (the swing in progress finishes first).</summary>
+    internal const double CancelAttackSeconds = 5;
+
     /// <summary>QueryHealth: until UpdateHealth (ACE answers only for a creature).</summary>
     internal const double QueryHealthSeconds = 5;
 
@@ -114,6 +141,75 @@ internal static class ActionPolicy
 
     /// <summary>Wield, Unwield and MoveToPack: until the inventory message (0x0023, 0x0022) or the refusal (0x00A0).</summary>
     internal const double InventorySeconds = 5;
+
+    /// <summary>OpenContainer (M4 2.1 s2): until the 0196 and the contents' objects; ACE walks the player to the container first (the Use's 15 s walk), as <see cref="UseSeconds"/>.</summary>
+    internal const double OpenContainerSeconds = UseSeconds;
+
+    /// <summary>
+    /// CloseContainer: until the 0052. Derivation (2.1-R11): the chest's lid takes 0.42 s to close (capture C3) and a corpse answers at once (capture C2), so 5 s holds the 0.42 s animation more than ten times over,
+    /// which is the plan row's "5 s plus half a chest animation" with the margin made flat; the close needs no walk.
+    /// </summary>
+    internal const double CloseContainerSeconds = 5;
+
+    /// <summary>
+    /// PickUp (M4 2.1 s2): until the 0022. Derivation: ACE walks the player to the item first (the 15 s walk of <c>Player_Move</c>), then plays the pickup motion before the 0022 (<see cref="BusyChainContainerSeconds"/>,
+    /// the longest captured), so 15 + 1.35 + 0.74 (a ground item's second length) is about 17.1 s; 25 s keeps a margin of 8 s (the spec's "about 25 s").
+    /// </summary>
+    internal const double PickUpSeconds = 25;
+
+    /// <summary>
+    /// Give: until the 0024 or 0022. Derivation (2.1-R11), as <see cref="PickUpSeconds"/>: ACE walks the player to the receiver first (the 15 s walk of <c>Player_Move</c>), then turns toward it (0.70 s, capture C4 run 4),
+    /// so 15 + 0.70 is about 15.7 s; 20 s keeps a margin of 4.3 s.
+    /// </summary>
+    internal const double GiveSeconds = 20;
+
+    /// <summary>Drop and the three splits: until the answer (no walk; the drop and the 3D split play one pickup motion, 0.74 s); <see cref="InventorySeconds"/>.</summary>
+    internal const double ItemMoveSeconds = InventorySeconds;
+
+    /// <summary>
+    /// The pickup motion's length from the ground, from a 3D split and for a drop (capture C4: 0.74 s, 0.73 s). ACE refuses a move sent while the previous move's chain runs (the pickup motion, the 0022, the
+    /// return stance and one more motion length): the Inventory lane holds the next move until the own return-stance F74C has arrived and this long has passed.
+    /// </summary>
+    internal const double BusyChainGroundSeconds = 0.74;
+
+    /// <summary>The same from an open corpse or chest (capture C2: 1.35 s; the item's height picks the motion).</summary>
+    internal const double BusyChainContainerSeconds = 1.35;
+
+    /// <summary>
+    /// A give's chain after its confirmation: the turn toward the receiver took 0.70 s (capture C4 run 4). Whether ACE keeps the player busy after an accepted give was not captured; a give is held like a pick-up as the
+    /// cautious reading (<c>TODO(m4-give-chain)</c>), and a refused give holds nothing.
+    /// </summary>
+    internal const double BusyChainGiveSeconds = 0.70;
+
+    /// <summary>
+    /// Added to every busy-chain hold (2.1-R8). ACE clears its busy state at the end of the motion on its own tick, and the measured lengths (<see cref="BusyChainGroundSeconds"/>, <see cref="BusyChainContainerSeconds"/>)
+    /// are rounded readings (the drop measured 0.73 s), so a move sent exactly at the measured end can reach ACE first and draw a 0x001D. 0.1 s is a few server ticks; the live moves test (two moves 1.5 s apart) did not
+    /// exercise the boundary, so the value is a margin, not a measurement.
+    /// </summary>
+    internal const double BusyChainMarginSeconds = 0.1;
+
+    /// <summary>
+    /// How long after a move's confirmation the lane waits for the own return-stance F74C before it counts the length from the confirmation (capture C2: the F74C came 31 ms after the 0022); a recording or a fake
+    /// without the F74C then still frees the lane.
+    /// </summary>
+    internal const double ReturnStanceWaitSeconds = 0.25;
+
+    /// <summary>
+    /// How long a give or a move waits, from an own teleport's arrival, for the client's post-teleport LoginComplete to go out (M4 2.1-R2). ACE refuses a give or a move while <c>WorldObject.Teleporting</c> is set
+    /// (the mod's <c>AceFacts.TeleportBusy</c> reads the same flag; ACE 95ef426d clears it in <c>Player.OnTeleportComplete</c>, reached from the LoginComplete handler), and the live chest recording shows the flag still set
+    /// 4.7 s after the teleport's reply, with the client's 0x00A1 sent only when portal space ended, 5.6 s after the place: it is the LoginComplete, not a fixed time, that clears it (capture C4's "within about 3 s" came from runs
+    /// that sent LoginComplete at once). The cap (the tunnel's 5.6 s plus a margin, under <see cref="LoginCompleteSeconds"/>) is for a session that never sends one (the offline stand-in): the wait then ends with a WARNING.
+    /// </summary>
+    internal const double TeleportLoginCompleteCapSeconds = 10;
+
+    /// <summary>
+    /// How long after the post-teleport LoginComplete's send a give or a move still waits (M4 2.1-R2): ACE handles the 0x00A1 on its own tick and clears the teleporting flag there, so a move sent in the same instant
+    /// can still reach it first. 0.5 s is a margin of a few server ticks (the live run measured nothing finer; a 0x001D after it would show in the moves test).
+    /// </summary>
+    internal const double LoginCompleteBusyMarginSeconds = 0.5;
+
+    /// <summary>How long a give's 028B refusal (0x046A, 0x03EF, 0x04CE) waits for its 00A0 before it ends the give by itself (capture C4: the 00A0 followed in 10 to 430 ms).</summary>
+    internal const double GiveRefusalGraceSeconds = 0.5;
 
     /// <summary>
     /// Suicide (M3 3.2 s0): until the player's death is seen, on the session clock from the send. ACE speaks five lines 3 s apart and then kills the player, so the death comes 15 s after the send; the limit is twice that.
@@ -151,6 +247,33 @@ internal static class ActionPolicy
         ActionLane.Move => new RateLimiter(MovePerSecond, (int)MovePerSecond),
         _ => null,
     };
+
+    /// <summary>
+    /// Identify (M4 3.2 s2): until the 0x00C9. ACE answers within 1 to 10 ms (capture.md C3) and with no walk, range or busy check (spec 5.6), so 5 s is the Query lane's limit
+    /// (<see cref="QueryHealthSeconds"/>) and holds the answer more than a hundred times over.
+    /// </summary>
+    internal const double IdentifySeconds = QueryHealthSeconds;
+
+    /// <summary>
+    /// ACE's cooldown after a failed appraisal (<c>Player.cs:274-299</c>, ACE 95ef426d): a repeat within this long of a failed request on the same guid is answered failed with no roll. The failed roll was not seen live
+    /// (<c>TODO(m4-appraise-fail-live)</c>, capture.md C3), so the number is read from source.
+    /// </summary>
+    internal const double IdentifyFailCooldownSeconds = 5;
+
+    /// <summary>OpenVendor (M4 3.2 s1): until the 0062 or the refusal; ACE turns the player to the vendor first (UseDone at +0.83 to 0.96 s, capture.md C1, C2), so the limit is the Use's.</summary>
+    internal const double OpenVendorSeconds = UseSeconds;
+
+    /// <summary>
+    /// How long after a vendor's UseDone 0 the 0062 is still awaited before the open is Refused "vendor did not open". Derivation: the 0062 followed the UseDone by 1.04 s (Thelnoth) and 0.65 s (Renald) in the live capture, so 3 s is
+    /// about three times the longest; a shop that is closed or a walk that failed is a bare UseDone 0 and ends here.
+    /// </summary>
+    internal const double OpenVendorMarginSeconds = 3;
+
+    /// <summary>How long after a vendor trade's UseDone the F745 of each announced item is awaited (capture.md C1, C2: 3 to 5 ms after the UseDone; the spec's 5 s as the limit).</summary>
+    internal const double TradeObjectsSeconds = 5;
+
+    /// <summary>Buy and Sell (M4 3.2 s1): until the UseDone (ACE answers within 20 ms, capture.md C1, C2) plus <see cref="TradeObjectsSeconds"/> for the objects.</summary>
+    internal const double TradeSeconds = 5 + TradeObjectsSeconds;
 }
 
 /// <summary>

@@ -107,6 +107,11 @@ internal abstract class ActionTracker
     /// </summary>
     internal virtual ActionOutcome Finish(ActionOutcome resolved) => resolved;
 
+    /// <summary>The tracker reached its timeout and is about to end as <see cref="ActionOutcomeKind.TimedOut"/> (a place to log what it saw; it must not resolve).</summary>
+    internal virtual void OnTimedOut(ActionApi api)
+    {
+    }
+
     /// <summary>Checks the state after the tick's events, for confirmations that are conditions rather than events.</summary>
     internal virtual void Poll(ActionApi api)
     {
@@ -181,6 +186,31 @@ internal abstract class ActionTracker
     /// (<see cref="ActionApi"/> serialises them against each other, M3 1.2 fix R1): the one UseDone in the air then belongs to the one action that is out.
     /// </summary>
     internal virtual bool ConsumesUseDone => false;
+
+    /// <summary>An object's motion was accepted (F74C), the player's own included. Called for every tracker in flight.</summary>
+    internal virtual void OnMotion(in ObjectMotionChanged e, ActionApi api)
+    {
+    }
+
+    /// <summary>An object's sound was played (F750). Called for every tracker in flight (M4 2.1 s2: a locked chest's 0x94).</summary>
+    internal virtual void OnSound(in ObjectSoundPlayed e, ActionApi api)
+    {
+    }
+
+    /// <summary>A combat notice arrived (0x01B1 to 0x01B4). Called for every tracker in flight.</summary>
+    internal virtual void OnCombat(in CombatEvent e, ActionApi api)
+    {
+    }
+
+    /// <summary>The player killed something (0x01AD). Called for every tracker in flight.</summary>
+    internal virtual void OnKilled(in PlayerKilledSomething e, ActionApi api)
+    {
+    }
+
+    /// <summary>The attack sequence changed (M4 1.2 s2). Called for every tracker in flight.</summary>
+    internal virtual void OnAttack(in AttackChanged e, ActionApi api)
+    {
+    }
 
     /// <summary>A player's inventory changed (0x0022, 0x0023, 0x019A, 0x0024, ...). Called for every tracker in flight.</summary>
     internal virtual void OnInventory(in InventoryChanged e, ActionApi api)

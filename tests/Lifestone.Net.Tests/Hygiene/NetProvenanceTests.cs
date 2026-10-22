@@ -18,6 +18,9 @@ namespace Lifestone.Net.Tests.Hygiene;
 public sealed partial class NetProvenanceTests
 {
     private const string OpenAc = "eriknihlen/OpenAC@1ee5a08";
+
+    /// <summary>The second OpenAC pin (M4 D7): the signed head the M4 wire is ported from (1.2 s0 on: the combat, container, vendor and appraisal codecs); the ports above stay at <see cref="OpenAc"/>.</summary>
+    private const string OpenAcM4 = "eriknihlen/OpenAC@f22b048";
     private const string Ace = "ACEmulator/ACE@95ef426d";
     private const string DatReaderWriter = "Chorizite/DatReaderWriter@a9345f2";
 
@@ -27,10 +30,10 @@ public sealed partial class NetProvenanceTests
     /// <summary>The track's source folders (or single files) and the pins a port in each may cite.</summary>
     private static readonly (string Path, string[] Pins)[] Scopes =
     [
-        ("src/Lifestone.Net", [OpenAc, Ace]),
-        ("tests/Lifestone.Net.Tests", [OpenAc, Ace]),
-        ("tests/Shared/Net", [OpenAc, Ace]),
-        ("tests/Lifestone.Loopback.Tests/Net", [OpenAc, Ace]),
+        ("src/Lifestone.Net", [OpenAc, OpenAcM4, Ace]),
+        ("tests/Lifestone.Net.Tests", [OpenAc, OpenAcM4, Ace]),
+        ("tests/Shared/Net", [OpenAc, OpenAcM4, Ace]),
+        ("tests/Lifestone.Loopback.Tests/Net", [OpenAc, OpenAcM4, Ace]),
         ("src/Lifestone.Data/Animation/MotionCommandTable.cs", [DatReaderWriter]),
     ];
 
@@ -47,9 +50,9 @@ public sealed partial class NetProvenanceTests
     [Fact]
     public void The_scan_finds_the_track_s_ports()
     {
-        // 53 product files and the motion command table, and 24 test files, when N13 landed: a broken scan must not pass.
+        // 53 product files and the motion command table, and 24 test files, when N13 landed (60 product files after M4 3.2 s0): a broken scan must not pass.
         var ports = Ports.Value;
-        Assert.True(ports.Count(p => p.Path.StartsWith("src/", StringComparison.Ordinal)) >= 54, $"only {ports.Count} port headers found");
+        Assert.True(ports.Count(p => p.Path.StartsWith("src/", StringComparison.Ordinal)) >= 60, $"only {ports.Count} port headers found");
         Assert.True(ports.Count(p => p.Path.StartsWith("tests/", StringComparison.Ordinal)) >= 24, $"only {ports.Count} port headers found");
         Assert.Contains(ports, p => p.Path == "src/Lifestone.Data/Animation/MotionCommandTable.cs");
         Assert.Contains(ports, p => p.Path == "tests/Lifestone.Net.Tests/FakeAce/AceCryptoSystemOracle.cs" && p.Source.StartsWith(Ace, StringComparison.Ordinal));
@@ -98,7 +101,7 @@ public sealed partial class NetProvenanceTests
         Assert.True(rows.Length >= 50, $"only {rows.Length} rows found in {Notices}; did its table change?");
 
         var openAcPorts = Ports.Value
-            .Where(p => p.Path.StartsWith("src/Lifestone.Net/", StringComparison.Ordinal) && p.Source.StartsWith(OpenAc, StringComparison.Ordinal))
+            .Where(p => p.Path.StartsWith("src/Lifestone.Net/", StringComparison.Ordinal) && (p.Source.StartsWith(OpenAc, StringComparison.Ordinal) || p.Source.StartsWith(OpenAcM4, StringComparison.Ordinal)))
             .Select(p => p.Path["src/Lifestone.Net/".Length..])
             .ToHashSet(StringComparer.Ordinal);
         var stale = rows.Where(r => !openAcPorts.Contains(r)).ToArray();
@@ -107,6 +110,7 @@ public sealed partial class NetProvenanceTests
 
     [Theory]
     [InlineData("// Ported from eriknihlen/OpenAC@1ee5a08 src/AcDream.Core.Net/Transport/SequenceMath.cs (MIT;", "eriknihlen/OpenAC@1ee5a08")]
+    [InlineData("// Ported from eriknihlen/OpenAC@f22b048 src/AcDream.Core.Net/Messages/AttackTargetRequest.cs (MIT;", "eriknihlen/OpenAC@f22b048")]
     [InlineData("// Partly ported from ACEmulator/ACE@95ef426d Source/ACE.Common/Cryptography/CryptoSystem.cs (AGPL-3.0)", "ACEmulator/ACE@95ef426d")]
     [InlineData("// The tail probe (N8): ported from nowhere", null)]
     [InlineData("/// Ported from eriknihlen/OpenAC@1ee5a08 src/x.cs (MIT;", null)]

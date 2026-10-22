@@ -57,6 +57,12 @@ public enum LoginCheckKind
     /// dies to the tuskers, respawns at the lifestone, re-gears, logs off and judges what it measured (<see cref="Lifestone.Client.Session.Scenarios.DeathLegVerdict"/>).
     /// </summary>
     BsdDeath,
+
+    /// <summary>
+    /// <c>--login-check=hunt</c> (M4 1.2 s4b): a separate check, never part of <see cref="All"/>. Enters the fighter (Holtburg Hunter), binds at Holtburg's lifestone, hunts the creatures of the hunt grounds with the
+    /// Mace or, with <c>--hunt-weapon=missile</c>, the Shortbow and Arrows, returns to Holtburg, logs off and judges what it measured (<see cref="Lifestone.Client.Session.Scenarios.HuntLegVerdict"/>).
+    /// </summary>
+    Hunt,
 }
 
 /// <summary>
@@ -112,6 +118,9 @@ public sealed record PlayOptions
 
     /// <summary>True for <c>--play-skip-scenarios</c> (M3 4.2 p5a C4): <c>--play-checks</c> leaves out the stand-in's fight and death scenarios (the smoke's shell-frames run; the play-checks step judges them in the same smoke).</summary>
     public bool SkipScenarios { get; init; }
+
+    /// <summary>True for <c>--retail-camera-still</c>: retail's fixed per-frame stall step of the chase camera (CameraManager::UpdateCamera, 11.6096 0x00456780). Default false: the step is scaled by the frame time.</summary>
+    public bool RetailCameraStill { get; init; }
 
     /// <summary>True for <c>--retail-unhide-flash</c>: retail's one opaque frame after an unhide that follows a re-hide mid-fade (docs/avatars.md section 17). Default false: that frame is not drawn.</summary>
     public bool RetailUnhideFlash { get; init; }
@@ -216,6 +225,12 @@ public sealed record PlayOptions
                 continue;
             }
 
+            if (argument.Name == "--retail-camera-still")
+            {
+                options = options with { RetailCameraStill = true };
+                continue;
+            }
+
             if (argument.Name == "--retail-unhide-flash")
             {
                 options = options with { RetailUnhideFlash = true };
@@ -252,12 +267,13 @@ public sealed record PlayOptions
                         ("buff", LoginCheckKind.Buff),
                         ("bsd-fight", LoginCheckKind.BsdFight),
                         ("bsd-death", LoginCheckKind.BsdDeath),
+                        ("hunt", LoginCheckKind.Hunt),
                         ("all", LoginCheckKind.All)),
                 };
             }
         }
 
-        if (options is { LoginCheck: LoginCheckKind.Buff or LoginCheckKind.BsdFight or LoginCheckKind.BsdDeath, ScreenshotPath: { } shot, ScreenshotAfterGiven: false })
+        if (options is { LoginCheck: LoginCheckKind.Buff or LoginCheckKind.BsdFight or LoginCheckKind.BsdDeath or LoginCheckKind.Hunt, ScreenshotPath: { } shot, ScreenshotAfterGiven: false })
         {
             options = options with { ScreenshotPath = null, BuffShotPath = shot }; // the buff leg takes its own frames, mid-cast, and the fight leg its three
         }

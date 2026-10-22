@@ -297,6 +297,13 @@ Lifestone keeps benefiting from OpenAC while staying an independent project, wit
   changed, so the ports' pin does not move.** In the folders M4 touches: `Core/Items/ClientObjectTable.cs`,
   `Core/Items/ItemInteractionPolicy.cs`, `Runtime/Gameplay/RuntimeItemInteraction.cs` (a carried spell focus no longer
   blocks inventory completeness, #226; a confirmation before a mana stone destroys an item, #217).
+- **Watch of 2026-10-19 (later, the M4 planning session; the procedure of §6.4 by `gh api`):** head
+  **f22b04851c5fcc3f38acfe50fb704ca38130c081** (2026-10-19T20:36:29Z, `verification.reason: valid`, a GitHub merge
+  commit; tree a775c74bdda77d0df09324ce19116cdb572c7529), 23 commits past 6db05a2 (the integration of contributor PRs
+  #218, #222-#224, #226 and the chat-tags fix #229). Under `src/AcDream.Core.Net/**` nothing changed; in the M4
+  folders only `Core/Items/ClientObjectTable.cs` (+5/-2) and `Runtime/Gameplay/RuntimeCommunicationState.cs`
+  (+18/-1). The existing ports' pin stays 1ee5a08; M4's new ports pin f22b048 (m4-plan.md D7). The #218 rule was
+  reverted and replaced (openac-m4-map.md §2, D16). Fetched as the tag `watch-2026-10-19b`; the tree hash compared.
 - Corrections to §1 to §4: ImageSharp and `Chorizite.Core` are gone (#215); `NOTICE.md` now lists the real package
   set (Arch, Silk.NET, Avalonia, DotRecast, the stb ports, OpenAL Soft) and credits WorldBuilder and Chorizite by
   folder. The §4 findings on the WorldBuilder licence and the ACE-derived scenery files still stand.

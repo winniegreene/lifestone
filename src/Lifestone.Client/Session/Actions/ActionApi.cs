@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Actions.Trackers;
@@ -48,12 +49,19 @@ internal sealed class ActionApi : IActionApi, IDisposable
 
     private readonly GameStateReducer _reducer;
     private readonly EventBus _bus;
+
+    // The attacks accepted but not yet sent, by handle: SendGuarded publishes AttackRequested for the one that reaches the wire (M4 1.3 s1).
+    private readonly Dictionary<ActionHandle, AttackRequested> _attackSends = new();
     private readonly ActionLog _actionLog;
     private readonly GameThreadBinding? _thread;
     private readonly RateLimiter?[] _limiters = new RateLimiter?[ActionPolicy.LaneCount];
     private readonly bool[] _laneWaiting = new bool[ActionPolicy.LaneCount];
     private readonly List<ActionTracker> _queued = [];
     private readonly List<ActionTracker> _inFlight = [];
+
+    // The shortcut rows whose item left the inventory, waiting for their one RemoveShortcut (M4 3.2 h1, OpenAC #219).
+    private readonly ShortcutEvictions _shortcutEvictions = new();
+    private bool _shortcutEligibilityNoted;
 
     // Trackers whose action is complete but whose lane is still busy (a cast until its UseDone); see ActionTracker.HoldsLane.
     private readonly List<ActionTracker> _laneHolds = [];
@@ -74,6 +82,10 @@ internal sealed class ActionApi : IActionApi, IDisposable
     private bool _disposed;
     private int _arrival;
     private int _loginCompleteArrival;
+    private double _teleportQuietUntil = double.NegativeInfinity;
+    private double _teleportArrivedAt = double.NegativeInfinity;
+    private bool _teleportAwaitsLoginComplete;
+    private bool _teleportCapLogged;
 
     /// <summary>The Action API of a session.</summary>
     /// <param name="reducer">The session's reducer (its state, clock, local notices and recorder).</param>
@@ -122,6 +134,12 @@ internal sealed class ActionApi : IActionApi, IDisposable
         bus.Subscribe<EnchantmentChanged>(OnEnchantment);
         bus.Subscribe<ObjectCreated>(OnObjectCreated);
         bus.Subscribe<ToolsUnavailable>(OnToolsUnavailable);
+        bus.Subscribe<ObjectMotionChanged>(OnMotion);
+        bus.Subscribe<CombatEvent>(OnCombat);
+        bus.Subscribe<PlayerKilledSomething>(OnKilled);
+        bus.Subscribe<AttackChanged>(OnAttack);
+        bus.Subscribe<ObjectSoundPlayed>(OnSound);
+        bus.Subscribe<ShortcutsChanged>(_shortcutEvictions.OnChanged);
         reducer.ToolReplyRouted = OnToolReply;
     }
 
@@ -298,6 +316,23 @@ internal sealed class ActionApi : IActionApi, IDisposable
     }
 
     /// <inheritdoc/>
+    public HealHandle UseWithTarget(uint item, uint target, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.UseWithTarget");
+        var handle = new HealHandle(NextId(), ActionKind.UseWithTarget, source, "UseWithTarget item=" + ActionText.Hex(item) + " target=" + ActionText.Hex(target), Clock.Now);
+        var problem = item == 0 ? "no item to use" : target == 0 ? "no target to use the item on" : null;
+        return (HealHandle)Accept(new HealTracker(handle, item, target), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public HealHandle Drink(uint item, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Drink");
+        var handle = new HealHandle(NextId(), ActionKind.Drink, source, "Drink item=" + ActionText.Hex(item), Clock.Now);
+        return (HealHandle)Accept(new PotionTracker(handle, item), item == 0 ? Refused("no item to drink") : null);
+    }
+
+    /// <inheritdoc/>
     public ActionHandle QueryHealth(uint guid, ActionSource source)
     {
         CheckThread("IActionApi.QueryHealth");
@@ -388,6 +423,47 @@ internal sealed class ActionApi : IActionApi, IDisposable
     }
 
     /// <inheritdoc/>
+    public ActionHandle Attack(uint target, AttackHeight height, float power, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Attack");
+        var handle = NewHandle(ActionKind.Attack, source, "Attack target=" + ActionText.Hex(target) + " height=" + (uint)height + " power=" + power.ToString("0.###", CultureInfo.InvariantCulture));
+        var problem = AttackProblem(target, height, power, "power");
+        if (problem is null)
+        {
+            _attackSends[handle] = new AttackRequested(target, height, power, false, source, 0);
+        }
+
+        return Accept(new MeleeAttackTracker(handle, target, height, power), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle MissileAttack(uint target, AttackHeight height, float accuracy, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.MissileAttack");
+        var handle = NewHandle(ActionKind.MissileAttack, source, "MissileAttack target=" + ActionText.Hex(target) + " height=" + (uint)height + " accuracy=" + accuracy.ToString("0.###", CultureInfo.InvariantCulture));
+        var problem = AttackProblem(target, height, accuracy, "accuracy");
+        if (problem is null)
+        {
+            _attackSends[handle] = new AttackRequested(target, height, accuracy, true, source, 0);
+        }
+
+        return Accept(new MissileAttackTracker(handle, target, height, accuracy), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle CancelAttack(ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.CancelAttack");
+        return Accept(new CancelAttackTracker(NewHandle(ActionKind.CancelAttack, source, "CancelAttack")), null);
+    }
+
+    private static string? AttackProblem(uint target, AttackHeight height, float bar, string barName) =>
+        target == 0 ? "no target to attack"
+        : height is not (AttackHeight.High or AttackHeight.Medium or AttackHeight.Low) ? "attack height " + (uint)height + " is not one of 1, 2 or 3"
+        : !float.IsFinite(bar) || bar < 0f || bar > 1f ? barName + " must be a number from 0 to 1 (ACE clamps it)"
+        : null;
+
+    /// <inheritdoc/>
     public ActionHandle Wield(uint item, EquipMask location, ActionSource source = ActionSource.Host)
     {
         CheckThread("IActionApi.Wield");
@@ -412,7 +488,118 @@ internal sealed class ActionApi : IActionApi, IDisposable
             ActionKind.MoveToPack,
             source,
             "MoveToPack item=" + ActionText.Hex(item) + " container=" + ActionText.Hex(container) + " placement=" + placement);
+        if (item != 0 && !State.Self.Inventory.Find(item).Held)
+        {
+            // M4 2.1 s2 closes TODO(m3-pickup): an item the player does not hold is picked up (the same GameAction 0x0019; the pick-up tracker, with its walk, its 0022 and its busy chain).
+            return Accept(new PickUpTracker(handle, item, container, (int)Math.Min(placement, int.MaxValue)));
+        }
+
         return Accept(new MoveToTracker(handle, item, container, placement), item == 0 ? Refused("no item to move") : null);
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle OpenContainer(uint container, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.OpenContainer");
+        var handle = NewHandle(ActionKind.OpenContainer, source, "OpenContainer container=" + ActionText.Hex(container));
+        return Accept(new OpenContainerTracker(handle, container), container == 0 ? Refused("no container to open") : null);
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle CloseContainer(uint container, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.CloseContainer");
+        var handle = NewHandle(ActionKind.CloseContainer, source, "CloseContainer container=" + ActionText.Hex(container));
+        return Accept(new CloseContainerTracker(handle, container), container == 0 ? Refused("no container to close") : null);
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle PickUp(uint item, uint container = 0, int placement = 0, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.PickUp");
+        var handle = NewHandle(ActionKind.PickUp, source, "PickUp item=" + ActionText.Hex(item) + " container=" + ActionText.Hex(container) + " placement=" + placement);
+        var problem = item == 0 ? "no item to pick up" : placement < 0 ? "the placement must be 0 or more" : null;
+        return Accept(new PickUpTracker(handle, item, container, placement), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle Drop(uint item, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Drop");
+        var handle = NewHandle(ActionKind.Drop, source, "Drop item=" + ActionText.Hex(item));
+        return Accept(new DropTracker(handle, item), item == 0 ? Refused("no item to drop") : null);
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle SplitToContainer(uint stack, uint container, int placement, int amount, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.SplitToContainer");
+        var handle = NewHandle(
+            ActionKind.SplitToContainer,
+            source,
+            "SplitToContainer stack=" + ActionText.Hex(stack) + " container=" + ActionText.Hex(container) + " placement=" + placement + " amount=" + amount);
+        var problem = stack == 0 ? "no stack to split" : placement < 0 ? "the placement must be 0 or more" : amount <= 0 ? "the amount must be at least 1 (ACE refuses 0 or less)" : null;
+        return Accept(new SplitToContainerTracker(handle, stack, container, placement, amount), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle SplitTo3D(uint stack, int amount, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.SplitTo3D");
+        var handle = NewHandle(ActionKind.SplitTo3D, source, "SplitTo3D stack=" + ActionText.Hex(stack) + " amount=" + amount);
+        var problem = stack == 0 ? "no stack to split" : amount <= 0 ? "the amount must be at least 1 (ACE refuses 0 or less)" : null;
+        return Accept(new SplitTo3DTracker(handle, stack, amount), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle SplitToWield(uint stack, EquipMask location, int amount, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.SplitToWield");
+        var handle = NewHandle(
+            ActionKind.SplitToWield,
+            source,
+            "SplitToWield stack=" + ActionText.Hex(stack) + " location=" + ActionText.Hex((uint)location) + " amount=" + amount);
+        var problem = stack == 0 ? "no stack to split" : location == EquipMask.None ? "no location to wield it at" : amount <= 0 ? "the amount must be at least 1 (ACE refuses 0 or less)" : null;
+        return Accept(new SplitToWieldTracker(handle, stack, location, amount), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle Give(uint target, uint item, int amount, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Give");
+        var handle = NewHandle(ActionKind.Give, source, "Give target=" + ActionText.Hex(target) + " item=" + ActionText.Hex(item) + " amount=" + amount);
+        var problem = target == 0 ? "no one to give to" : item == 0 ? "no item to give" : amount <= 0 ? "the amount must be at least 1 (ACE refuses 0 or less)" : null;
+        return Accept(new GiveTracker(handle, target, item, amount), problem is null ? null : Refused(problem));
+    }
+
+    /// <summary>
+    /// Why a move or a give must wait for the server (M4 2.1 s2, capture C4): ACE refuses one while it is teleporting the player, until the post-teleport LoginComplete is handled (<see cref="ActionPolicy.TeleportLoginCompleteCapSeconds"/>). Null when it may go.
+    /// </summary>
+    internal string? TeleportWait()
+    {
+        if (State.Self.Travel == SelfTravel.TeleportAnnounced)
+        {
+            return "an own teleport is under way";
+        }
+
+        var now = Clock.Now;
+        if (_teleportAwaitsLoginComplete)
+        {
+            if (now - _teleportArrivedAt < ActionPolicy.TeleportLoginCompleteCapSeconds)
+            {
+                return "waiting for the LoginComplete after an own teleport (ACE is busy until it handles it)";
+            }
+
+            if (!_teleportCapLogged)
+            {
+                _teleportCapLogged = true;
+                Log.Warn(SessionLog.Category, "no LoginComplete was sent within " + ActionText.Count((long)ActionPolicy.TeleportLoginCompleteCapSeconds) + " s of the own teleport's arrival: the move goes without it (ACE may refuse it as busy, 0x001D)");
+            }
+
+            return null;
+        }
+
+        return now < _teleportQuietUntil ? "within " + ActionText.Count((long)(ActionPolicy.LoginCompleteBusyMarginSeconds * 1000)) + " ms of the LoginComplete after an own teleport" : null;
     }
 
     /// <inheritdoc/>
@@ -508,9 +695,11 @@ internal sealed class ActionApi : IActionApi, IDisposable
             ResolveObserved();
             ExpireTimeouts(now);
             Tools.Update(); // the gear spawn's next merge, queued here so this tick's dispatch sends it
+            _shortcutEvictions.Flush(this); // a row whose item left goes first: an add for its slot queued in the same update must find the slot already freed on the server (3.2-R2)
             Dispatch(now);
             ResolveObserved();
             CompletePending();
+            _shortcutEvictions.Flush(this);
         }
         finally
         {
@@ -529,6 +718,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
         CancelIn(_inFlight, TrackerState.InFlight, cancelled);
         _laneHolds.Clear();
         _owedUseDones.Clear();
+        _shortcutEvictions.Clear();
 
         // Settled but not completed yet (outside an update this is empty): they complete with what they settled on.
         for (var i = 0; i < _completing.Count; i++)
@@ -708,8 +898,30 @@ internal sealed class ActionApi : IActionApi, IDisposable
     /// <summary>Publishes <see cref="ToolsUnavailable"/> for a reason the reducer does not see (a non-loopback server).</summary>
     internal void PublishToolsUnavailable(ToolAvailability availability, string reason) => _bus.Publish(new ToolsUnavailable(availability, reason));
 
+    private bool _giveChainNoted;
+
+    /// <summary>Logs <c>TODO(m4-give-chain)</c> once per session, the first time a give holds the Inventory lane after its confirmation (2.1-R7).</summary>
+    internal void NoteGiveChain()
+    {
+        if (_giveChainNoted)
+        {
+            return;
+        }
+
+        _giveChainNoted = true;
+        Log.Warn(SessionLog.Category, "TODO(m4-give-chain): a give holds the Inventory lane for " + ActionText.Count((long)(ActionPolicy.BusyChainGiveSeconds * 1000)) + " ms after its confirmation, the cautious reading: ACE's busy state after an accepted give was not captured");
+    }
+
     /// <summary>LoginComplete went out for the current arrival.</summary>
-    internal void MarkLoginCompleteSent() => _loginCompleteArrival = _arrival;
+    internal void MarkLoginCompleteSent()
+    {
+        _loginCompleteArrival = _arrival;
+        if (_teleportAwaitsLoginComplete)
+        {
+            _teleportAwaitsLoginComplete = false;
+            _teleportQuietUntil = Clock.Now + ActionPolicy.LoginCompleteBusyMarginSeconds;
+        }
+    }
 
     /// <summary>
     /// Asks for the kill switch at the start of the next update (a server reply must not complete handles during the
@@ -769,6 +981,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
     {
         tracker.State = TrackerState.Done;
         var handle = tracker.Handle;
+        _attackSends.Remove(handle); // an attack completed without ever being sent (refused later, cancelled) publishes nothing
         if (handle.IsCompleted)
         {
             return;
@@ -846,7 +1059,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
             var hold = _laneHolds[i];
             if (hold.Handle.SentAt is not { } heldSince || now - heldSince >= hold.TimeoutSeconds)
             {
-                if (hold.HoldsLane)
+                if (hold.HoldsLane && hold.ConsumesUseDone) // an item move holds the lane but takes no UseDone, so none is owed for it (2.1-R9)
                 {
                     OweUseDone(now);
                 }
@@ -865,6 +1078,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
                 }
 
                 tracker.State = TrackerState.Done;
+                tracker.OnTimedOut(this);
                 _completing.Add((tracker, new ActionOutcome(
                     ActionOutcomeKind.TimedOut,
                     0,
@@ -902,7 +1116,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
                 continue;
             }
 
-            if ((tracker.Lane is ActionLane.Session or ActionLane.Stats or ActionLane.Magic or ActionLane.Inventory) && LaneActionInFlight(tracker.Lane))
+            if ((tracker.Lane is ActionLane.Session or ActionLane.Stats or ActionLane.Magic or ActionLane.Inventory or ActionLane.Attack or ActionLane.Heal) && LaneActionInFlight(tracker.Lane))
             {
                 _laneWaiting[lane] = true;
                 continue;
@@ -924,6 +1138,11 @@ internal sealed class ActionApi : IActionApi, IDisposable
 
             if (tracker.WaitReason(this) is not null)
             {
+                if (tracker.Lane == ActionLane.Inventory)
+                {
+                    _laneWaiting[lane] = true; // moves leave in call order: a later one does not pass the one that waits
+                }
+
                 continue;
             }
 
@@ -1074,7 +1293,13 @@ internal sealed class ActionApi : IActionApi, IDisposable
     {
         try
         {
-            return tracker.Send(session, this);
+            var outcome = tracker.Send(session, this);
+            if (_attackSends.Remove(tracker.Handle, out var sent))
+            {
+                _bus.Publish(sent with { Time = FrameTime }); // the send reached the wire (Send did not throw): M4 1.3 s1
+            }
+
+            return outcome;
         }
         catch (ObjectDisposedException)
         {
@@ -1180,6 +1405,13 @@ internal sealed class ActionApi : IActionApi, IDisposable
         if (e.Travel is SelfTravel.Arriving or SelfTravel.TeleportArrived)
         {
             _arrival++;
+        }
+
+        if (e.Travel == SelfTravel.TeleportArrived)
+        {
+            _teleportArrivedAt = Clock.Now;
+            _teleportAwaitsLoginComplete = true;
+            _teleportCapLogged = false;
         }
 
         _movement.OnTravel(in e);
@@ -1347,6 +1579,70 @@ internal sealed class ActionApi : IActionApi, IDisposable
         }
     }
 
+    private void OnSound(in ObjectSoundPlayed e)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnSound(in e, this);
+            }
+        }
+    }
+
+    private void OnMotion(in ObjectMotionChanged e)
+    {
+        // A move that is complete but whose chain still runs (the Inventory lane's hold) waits for the own return-stance F74C (M4 2.1 s2), and a heal that is complete for the own Ready F74C (the Heal lane's hold, M4 3.1 s1).
+        for (var i = 0; i < _laneHolds.Count; i++)
+        {
+            if (_laneHolds[i].Lane is ActionLane.Inventory or ActionLane.Heal && _laneHolds[i].HoldsLane)
+            {
+                _laneHolds[i].OnMotion(in e, this);
+            }
+        }
+
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnMotion(in e, this);
+            }
+        }
+    }
+
+    private void OnCombat(in CombatEvent e)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnCombat(in e, this);
+            }
+        }
+    }
+
+    private void OnKilled(in PlayerKilledSomething e)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnKilled(in e, this);
+            }
+        }
+    }
+
+    private void OnAttack(in AttackChanged e)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i].State == TrackerState.InFlight)
+            {
+                _inFlight[i].OnAttack(in e, this);
+            }
+        }
+    }
+
     private void OnToolsUnavailable(in ToolsUnavailable e)
     {
         if (e.Availability == ToolAvailability.ModMissing)
@@ -1374,5 +1670,173 @@ internal sealed class ActionApi : IActionApi, IDisposable
                 return;
             }
         }
+    }
+
+    // ---- M4 3.2 h1: the shortcut bar's actions (appended) ----
+
+    /// <inheritdoc/>
+    public ActionHandle AddShortcut(int slot, uint item, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.AddShortcut");
+        var handle = NewHandle(ActionKind.AddShortcut, source, "AddShortcut slot=" + slot + " item=" + ActionText.Hex(item));
+        var problem = item == 0 ? "no item to put on the bar" : slot != ShortcutBar.AutoSlot && !ShortcutBar.InRange(slot) ? "the slot must be 0 to 17 (or -1 for the first empty slot)" : null;
+        return Accept(new AddShortcutTracker(handle, slot, item), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle RemoveShortcut(int slot, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.RemoveShortcut");
+        var handle = NewHandle(ActionKind.RemoveShortcut, source, "RemoveShortcut slot=" + slot);
+        return Accept(new RemoveShortcutTracker(handle, slot), ShortcutBar.InRange(slot) ? null : Refused("the slot must be 0 to 17"));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle UseShortcut(int slot, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.UseShortcut");
+        var self = State.Self;
+        var row = self.Shortcuts[slot];
+        string? problem = null;
+        WorldObject? item = null;
+        if (!ShortcutBar.InRange(slot))
+        {
+            problem = "the slot must be 0 to 17";
+        }
+        else if (row.IsEmpty)
+        {
+            problem = "nothing is on shortcut slot " + slot;
+        }
+        else if (row.IsItem && (!self.Inventory.Contains(row.ObjectId) || !State.Objects.TryGet(row.ObjectId, out item)))
+        {
+            problem = "the item on shortcut slot " + slot + " is not carried (object " + ActionText.Hex(row.ObjectId) + ")";
+        }
+
+        if (problem is not null || row.IsSpell)
+        {
+            var refused = NewHandle(ActionKind.UseShortcut, source, "UseShortcut slot=" + slot);
+            var outcome = problem is not null
+                ? Refused(problem)
+                : new ActionOutcome(ActionOutcomeKind.NotImplemented, 0, "TODO(m4-shortcut-spell): a spell shortcut (spell " + row.Spell + ") is not built; the toolbar's cast is a later pass");
+            return Accept(new UseShortcutTracker(refused), outcome);
+        }
+
+        return ShortcutRouting.Of(item!) switch
+        {
+            ShortcutRouting.Route.Kit => UseWithTarget(row.ObjectId, self.Guid, source),
+            ShortcutRouting.Route.Drink => Drink(row.ObjectId, source),
+            _ => Use(row.ObjectId, source),
+        };
+    }
+
+    /// <summary>Logs <c>TODO(m4-shortcut-eligible-flags)</c> once per session, the first time an item is put on the bar (the part of <c>IsShortcutEligible</c> the decompile does not name).</summary>
+    internal void NoteShortcutEligibilityGap()
+    {
+        if (_shortcutEligibilityNoted)
+        {
+            return;
+        }
+
+        _shortcutEligibilityNoted = true;
+        Log.Info(SessionLog.Category, "TODO(m4-shortcut-eligible-flags): gmToolbarUI::IsShortcutEligible also tests the weenie's stuck flag and a virtual answer the decompile does not name; only the held and not-pyreal rules are applied");
+    }
+
+    /// <inheritdoc/>
+    public IdentifyHandle Identify(uint guid, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Identify");
+        var handle = new IdentifyHandle(NextId(), ActionKind.Identify, source, "Identify guid=" + ActionText.Hex(guid), Clock.Now);
+        return (IdentifyHandle)Accept(
+            new IdentifyTracker(handle, guid),
+            guid == 0 ? Refused("no object to identify (guid 0 clears the server's target and the server answers nothing)") : null);
+    }
+
+    /// <summary>True when another Identify of <paramref name="guid"/> is in flight and still waiting for its answer (the next one waits its turn, so each takes its own 0x00C9; M4 3.2 s2).</summary>
+    internal bool IdentifyAwaiting(uint guid, ActionTracker except)
+    {
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            if (_inFlight[i] is IdentifyTracker tracker && !ReferenceEquals(tracker, except) && tracker.Guid == guid && tracker.State == TrackerState.InFlight && tracker.Resolution is null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // --- M4 3.2 s1: the vendor actions ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+    /// <inheritdoc/>
+    public ActionHandle OpenVendor(uint vendor, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.OpenVendor");
+        var handle = NewHandle(ActionKind.OpenVendor, source, "OpenVendor vendor=" + ActionText.Hex(vendor));
+        return Accept(new OpenVendorTracker(handle, vendor), vendor == 0 ? Refused("no vendor to open") : null);
+    }
+
+    /// <inheritdoc/>
+    public VendorTradeHandle Buy(uint vendor, IReadOnlyList<(uint item, uint amount)> items, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Buy");
+        ArgumentNullException.ThrowIfNull(items);
+        var handle = new VendorTradeHandle(NextId(), ActionKind.Buy, source, "Buy vendor=" + ActionText.Hex(vendor) + " items=" + ActionText.Count(items.Count), Clock.Now);
+        string? problem = vendor == 0 ? "no vendor to buy from" : items.Count == 0 ? "nothing to buy" : null;
+        foreach (var (item, amount) in items)
+        {
+            if (problem is not null)
+            {
+                break;
+            }
+
+            problem = item == 0 ? "a guid of 0 in the items to buy" : amount == 0 ? "an amount of 0 to buy of " + ActionText.Hex(item) : amount > int.MaxValue ? "an amount above Int32.MaxValue to buy of " + ActionText.Hex(item) : null;
+        }
+
+        return (VendorTradeHandle)Accept(new BuyTracker(handle, vendor, [.. items]), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public VendorTradeHandle Sell(uint vendor, IReadOnlyList<uint> items, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Sell");
+        ArgumentNullException.ThrowIfNull(items);
+        var handle = new VendorTradeHandle(NextId(), ActionKind.Sell, source, "Sell vendor=" + ActionText.Hex(vendor) + " items=" + ActionText.Count(items.Count), Clock.Now);
+        string? problem = vendor == 0 ? "no vendor to sell to" : items.Count == 0 ? "nothing to sell" : null;
+        var sends = new List<(uint item, uint amount)>(items.Count);
+        foreach (var item in items)
+        {
+            if (item == 0)
+            {
+                problem ??= "a guid of 0 in the items to sell";
+                continue;
+            }
+
+            // ACE sells and pays the whole stack whatever the amount says (W/Player_Commerce.cs 261, 296), but rejects an amount of 0 or above the stack: send the stack.
+            sends.Add((item, State.Objects.TryGet(item, out var held) && held.Weenie.StackSize is { } stack and > 0 ? stack : 1u));
+        }
+
+        return (VendorTradeHandle)Accept(new SellTracker(handle, vendor, sends), problem is null ? null : Refused(problem));
+    }
+
+    /// <summary>True when a vendor action other than <paramref name="self"/> is in flight (or holds its lane): the vendor actions go one at a time, as ACE's one UseDone names no request.</summary>
+    internal bool VendorActionPending(ActionTracker self)
+    {
+        foreach (var tracker in _inFlight)
+        {
+            if (tracker != self && tracker is VendorLaneTracker && tracker.State == TrackerState.InFlight)
+            {
+                return true;
+            }
+        }
+
+        foreach (var hold in _laneHolds)
+        {
+            if (hold != self && hold is VendorLaneTracker && hold.HoldsLane)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

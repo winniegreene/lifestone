@@ -347,27 +347,100 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
         Assert.False(field.Visible);
     }
 
+    private const uint Target = 0x80000B07;
+
+    // The attacks the Action API logged (offline, a send is refused at once and logged; what the test judges is that the window asked, with what).
+    private static List<ActionLogEntry> AttacksLogged(Setup s)
+    {
+        var list = new List<ActionLogEntry>();
+        for (var i = 0; i < s.Session.ActionLog.Count; i++)
+        {
+            if (s.Session.ActionLog[i].Kind is ActionKind.Attack or ActionKind.MissileAttack)
+            {
+                list.Add(s.Session.ActionLog[i]);
+            }
+        }
+
+        return list;
+    }
+
     [RequiresLocalDatsFact]
-    public void The_attack_height_buttons_answer_NotInM3_and_request_their_height_on_a_mouse_down_and_the_slider_sets_the_power()
+    public void A_click_on_each_height_button_in_melee_sends_Attack_with_that_height_and_the_slider_power_from_the_UI()
     {
         using var s = Enter();
         s.ChangeMode(CombatMode.Melee);
         var combat = s.Combat;
         Assert.Equal(2, combat.RequestedHeight); // the group box's default button is the medium one
         Assert.Equal(0x10000058u, Assert.IsAssignableFrom<UiGroupBox>(combat.GetChildRecursive(GameCombatPanel.HeightBoxId)).SelectedButtonId);
+        combat.SelectedProvider = () => Target;
 
-        // A mouse down on the high button requests it (SetRequestedAttackHeight); the click is the attack, which M3 does not have.
-        var high = combat.HeightButton(1)!;
-        high.BroadcastElementMessage(UiMessageIds.MouseDown);
-        Assert.Equal(1, combat.RequestedHeight);
-        high.BroadcastElementMessage(UiMessageIds.ButtonClick);
-        s.Rig.Frame();
-        Assert.Equal(1, combat.AttackClicks);
-        var dialog = Assert.Single(s.Rig.Manager.Dialogs.OpenDialogs);
-        Assert.Equal(NotInM3.Prefix + "Melee and missile attacks", Assert.IsType<Lifestone.Client.RetailUi.Text.UiTextElement>(dialog.GetChildRecursive(UiDialog.TextElement)).Text);
-        Assert.Contains(s.Rig.Log.Lines, l => l.Contains("TODO(m3-melee-attack)", StringComparison.Ordinal));
+        foreach (var height in new[] { 1, 2, 3 })
+        {
+            var before = AttacksLogged(s).Count;
+            var button = combat.HeightButton(height)!;
+            button.BroadcastElementMessage(UiMessageIds.MouseDown); // SetRequestedAttackHeight: the request starts and the bar begins
+            Assert.Equal(height, combat.RequestedHeight);
+            Assert.True(combat.Attacks!.RequestInProgress);
+            Assert.Equal(PowerBarMode.Combat, combat.Attacks.Mode); // the basic UI's own meter
+            Assert.Empty(AttacksLogged(s).Skip(before)); // nothing is sent until the click
+            button.BroadcastElementMessage(UiMessageIds.ButtonClick);
+            s.Rig.Run(1.0); // the slider asks 0.5 and the bar charges one per second: sent at 0.5
+            var entry = Assert.Single(AttacksLogged(s).Skip(before));
+            Assert.Equal(ActionKind.Attack, entry.Kind);
+            Assert.Equal(ActionSource.Ui, entry.Source);
+            Assert.Contains($"target=0x{Target:X8} height={height} power=0.5", entry.Summary, StringComparison.Ordinal);
+            Assert.Equal(1, combat.Attacks.Sends - (height - 1));
+            Assert.Equal(PowerBarMode.Undefined, combat.Attacks.Mode); // the refusal ended it: no 0x01A7 will
+        }
 
-        // The notices the attack code will send: the group box follows the height, the meter shows the level, the slider moves.
+        Assert.Empty(s.Rig.Manager.Dialogs.OpenDialogs); // no NotInM3 message any more
+        Assert.DoesNotContain(s.Rig.Log.Lines, l => l.Contains("TODO(m3-melee-attack)", StringComparison.Ordinal));
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_click_in_missile_mode_sends_MissileAttack_with_the_height_and_the_slider_as_the_accuracy()
+    {
+        using var s = Enter();
+        s.ChangeMode(CombatMode.Missile);
+        s.Combat.SelectedProvider = () => Target;
+        var low = s.Combat.HeightButton(3)!;
+        low.BroadcastElementMessage(UiMessageIds.MouseDown);
+        low.BroadcastElementMessage(UiMessageIds.ButtonClick);
+        s.Rig.Run(1.0);
+        var entry = Assert.Single(AttacksLogged(s));
+        Assert.Equal(ActionKind.MissileAttack, entry.Kind);
+        Assert.Equal(ActionSource.Ui, entry.Source);
+        Assert.Contains($"target=0x{Target:X8} height=3 accuracy=0.5", entry.Summary, StringComparison.Ordinal);
+        Assert.Empty(s.Rig.Manager.Dialogs.OpenDialogs);
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_click_with_nothing_selected_says_retails_line_and_sends_nothing()
+    {
+        using var s = Enter();
+        s.ChangeMode(CombatMode.Melee);
+        var combat = s.Combat;
+        var lines = new List<string>();
+        combat.ChatNotice = lines.Add;
+        Assert.Equal(0u, combat.SelectedProvider?.Invoke() ?? 0u);
+        var medium = combat.HeightButton(2)!;
+        medium.BroadcastElementMessage(UiMessageIds.MouseDown);
+        medium.BroadcastElementMessage(UiMessageIds.ButtonClick);
+        s.Rig.Run(1.0);
+        Assert.Contains(AttackPowerDriver.NoTargetText, lines);
+        Assert.Empty(AttacksLogged(s));
+        Assert.False(combat.Attacks!.RequestInProgress);
+        Assert.Equal(PowerBarMode.Undefined, combat.Attacks.Mode);
+        Assert.Equal(0f, Assert.IsAssignableFrom<UiMeter>(combat.GetChildRecursive(GameCombatPanel.MeterId)).Position);
+        Assert.Empty(s.Rig.Manager.Dialogs.OpenDialogs); // NotInM3 is not shown
+    }
+
+    [RequiresLocalDatsFact]
+    public void The_notices_the_attack_sends_move_the_group_box_the_meter_and_the_slider()
+    {
+        using var s = Enter();
+        s.ChangeMode(CombatMode.Melee);
+        var combat = s.Combat;
         combat.AttackHeightChanged(3);
         Assert.Equal(0x10000059u, Assert.IsAssignableFrom<UiGroupBox>(combat.GetChildRecursive(GameCombatPanel.HeightBoxId)).SelectedButtonId);
         combat.SetPowerbarLevel(PowerBarMode.Advanced, 0.9f); // another mode's level is the power bar's, not this meter's
@@ -467,18 +540,146 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
     {
         Assert.Equal(["c1-combat.png", "c1-powerbar.png"], PanelFramesPlan.WindowFrames.Select(PanelFramesPlan.FileName).ToArray());
         Assert.All(PanelFramesPlan.WindowFrames, f => Assert.Equal(CombatModes.Melee, f.CombatMode));
-        Assert.Equal([0x1000005Cu, 0x10000044u], PanelFramesPlan.WindowFrames.Select(f => f.WindowId).ToArray());
-        Assert.Equal([true], PanelFramesPlan.WindowFrames.Select(f => f.DrivePowerBar).Where(static d => d).ToArray());
+        Assert.Equal([0x1000005Cu, 0x1000005Cu], PanelFramesPlan.WindowFrames.Select(f => f.WindowId).ToArray()); // the basic UI charges the combat window's own meter
+        Assert.Equal([false, true], PanelFramesPlan.WindowFrames.Select(f => f.ByAttack).ToArray()); // the power frame is taken during a real attack, never driven by hand
         Assert.Equal([0x10000192u, 0x10000193u, 0x10000194u, 0x10000195u], GameToolbar.CombatButtonIds.ToArray());
+        Assert.False(PanelFramesPlan.SpellcastingFrame.ByAttack);
+    }
 
-        // M3 3.2 review finding 10: an advanced-mode bar is drawn only with the AdvancedCombatUI option on, which hides the combat window, so the power bar's frame hides it too, and says its placeholder; the other frames have none.
-        Assert.All(PanelFramesPlan.AllWindowFrames, static f => Assert.Equal(f.DrivePowerBar, f.HideCombatWindow));
-        Assert.All(PanelFramesPlan.AllWindowFrames, static f => Assert.Equal(f.DrivePowerBar, f.Placeholder is not null));
-        var powerBar = Assert.Single(PanelFramesPlan.WindowFrames, static f => f.DrivePowerBar);
-        Assert.Equal(WindowFrame.PowerBarPlaceholder, powerBar.Placeholder);
-        Assert.Contains("begun by hand at 0.6", WindowFrame.PowerBarPlaceholder, StringComparison.Ordinal);
-        Assert.Contains("nothing in M3 begins it", WindowFrame.PowerBarPlaceholder, StringComparison.Ordinal);
-        Assert.Equal(0.6f, WindowFrame.PowerBarLevel);
-        Assert.False(PanelFramesPlan.SpellcastingFrame.HideCombatWindow);
+    // GetDefaultCombatMode (11.6096 0x0056C050) reads the wielded weapon's own CombatUse (ACE: 1 Melee, 2 Missile, 3 Ammo, 4 Shield, 5 TwoHanded), M4 1.3 s1.
+    private static (GameSession Session, IInboundMessageHandler Handler, Action<double> Run, UiScene Scene) OfflineSession()
+    {
+        IInboundMessageHandler? handler = null;
+        var visit = new StandInVisit { EnterAfter = 0.2, UnhideAfter = 1.0 };
+        var time = new ManualTimeProvider();
+        var session = GameSession.Offline(
+            h =>
+            {
+                handler = h;
+                StandInSessions.CharacterSelect(h);
+                StandInSessions.PlayerVisits(h, visit);
+                StandInSessions.AnswerWorld(h, visit);
+            },
+            time,
+            new RecordingLogSink());
+        void Run(double seconds)
+        {
+            for (var t = 0.0; t < seconds; t += 0.1)
+            {
+                time.Advance(TimeSpan.FromSeconds(0.1));
+                session.Tick(session.Clock.Now);
+            }
+        }
+
+        Run(2.0);
+        return (session, handler!, Run, new UiScene([]));
+    }
+
+    private static void Wield(GameSession session, IInboundMessageHandler handler, uint guid, string name, sbyte? combatUse, EquipMask slot, uint sequence)
+    {
+        var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), null, name: name);
+        var weenie = combatUse is { } use ? basis.Weenie with { CombatUse = use, Header = basis.Weenie.Header | WeenieHeaderFlags.CombatUse } : basis.Weenie;
+        handler.OnPlayerDescription(Context, new GameEventHeader(session.State.Self.Guid, sequence, GameEventTypes.PlayerDescription), new PlayerDescriptionMsg { Equipped = [new EquippedDesc(guid, (uint)slot, 0)] });
+        handler.OnCreateObject(Context, basis with { Weenie = weenie }, isUpdate: false);
+    }
+
+    [Theory]
+    [InlineData("Mace", 1, EquipMask.MeleeWeapon, CombatMode.Melee)]
+    [InlineData("Shortbow", 2, EquipMask.MissileWeapon, CombatMode.Missile)]
+    [InlineData("Two-handed Sword", 5, EquipMask.TwoHanded, CombatMode.Melee)]
+    [InlineData("Mislabelled Bow", 2, EquipMask.MeleeWeapon, CombatMode.Missile)] // the weapon's own type decides, not its slot
+    [InlineData("Mislabelled Mace", 1, EquipMask.MissileWeapon, CombatMode.Melee)]
+    public void The_default_combat_mode_is_the_wielded_weapons_CombatUse(string name, int combatUse, EquipMask slot, CombatMode expected)
+    {
+        var (session, handler, _, scene) = OfflineSession();
+        using (session)
+        {
+            Wield(session, handler, 0x80000801, name, (sbyte)combatUse, slot, 7);
+            Assert.Equal(expected, CombatModeRules.DefaultMode(session.State, out var blocked, out var missing, out var absent));
+            Assert.Null(blocked);
+            Assert.Equal(0u, missing);
+            Assert.False(absent);
+
+        }
+    }
+
+    [Fact]
+    public void Arrows_alone_are_not_a_weapon_and_a_shield_or_ammo_in_a_weapon_slot_leaves_the_slot_to_decide()
+    {
+        var (session, handler, _, scene) = OfflineSession();
+        using (session)
+        {
+            // Arrows wield to the ammunition slot (0x800000), outside the weapon slots: nothing is wielded as a weapon, so fists (melee).
+            Wield(session, handler, 0x80000802, "Arrow", 3, EquipMask.MissileAmmo, 7);
+            Assert.Equal(CombatMode.Melee, CombatModeRules.DefaultMode(session.State, out var blocked, out _, out var absent));
+            Assert.Null(blocked);
+            Assert.False(absent);
+
+            // A CombatUse of Ammo (3) or Shield (4) on an item in a weapon slot is no weapon type: the slot rule decides, and the description did carry a CombatUse, so nothing is named absent.
+            Wield(session, handler, 0x80000803, "Odd Quiver", 3, EquipMask.MissileWeapon, 8);
+            Assert.Equal(CombatMode.Missile, CombatModeRules.DefaultMode(session.State, out _, out _, out absent));
+            Assert.False(absent);
+            Wield(session, handler, 0x80000804, "Odd Shield", 4, EquipMask.MeleeWeapon, 9);
+            Assert.Equal(CombatMode.Melee, CombatModeRules.DefaultMode(session.State, out _, out _, out absent));
+            Assert.False(absent);
+        }
+    }
+
+    [Fact]
+    public void A_weapon_with_no_CombatUse_falls_back_to_the_slot_and_names_it_once()
+    {
+        var (session, handler, _, scene) = OfflineSession();
+        using (session)
+        {
+            Wield(session, handler, 0x80000805, "Plain Bow", null, EquipMask.MissileWeapon, 7);
+            Assert.Equal(CombatMode.Missile, CombatModeRules.DefaultMode(session.State, out _, out _, out var absent));
+            Assert.True(absent);
+            Assert.NotNull(CombatModeRules.Toggle(session, scene.Manager, null));
+            Assert.NotNull(CombatModeRules.Toggle(session, scene.Manager, null)); // a second press: named once
+            Assert.Equal(1, scene.Log.Lines.Count(l => l.Contains(CombatModeRules.CombatUseAbsentTodo, StringComparison.Ordinal)));
+        }
+    }
+
+    // M4 3.1 g: the toolbar never asks for a mode the combat-mode guard refuses (the guard is what the Action API applies to every SetCombatMode).
+    [Theory]
+    [MemberData(nameof(WieldedSetups.Names), MemberType = typeof(WieldedSetups))]
+    public void The_toggle_picks_a_mode_the_combat_mode_guard_allows_for_every_wielded_setup(string name)
+    {
+        var c = WieldedSetups.Find(name);
+        var state = WieldedSetups.World(c.Pieces).State;
+        var pick = CombatModeRules.DefaultMode(state, out var blocked, out var missing);
+
+        Assert.Equal(c.Pick, pick);
+        Assert.Null(blocked);
+        if (pick == CombatMode.NonCombat)
+        {
+            Assert.NotEqual(0u, missing); // peace is picked only for want of an item's kind: the press asks nothing
+            return;
+        }
+
+        Assert.Equal(0u, missing);
+        Assert.Null(CombatModeGuard.Check(pick, state));
+        Assert.True(CombatModeRules.Compatible(state, pick, out _)); // retail's CompatibleCombatMode agrees too
+    }
+
+    [Theory]
+    [InlineData(EquipMask.MeleeWeapon, 3)]
+    [InlineData(EquipMask.MeleeWeapon, 4)]
+    [InlineData(EquipMask.MeleeWeapon, 9)]
+    [InlineData(EquipMask.MissileWeapon, 3)]
+    [InlineData(EquipMask.MissileWeapon, 4)]
+    [InlineData(EquipMask.MissileWeapon, 9)]
+    [InlineData(EquipMask.TwoHanded, 3)]
+    [InlineData(EquipMask.TwoHanded, 4)]
+    public void A_CombatUse_that_is_neither_melee_nor_missile_picks_a_mode_the_guard_allows_whatever_slot_the_item_is_in(EquipMask slot, int combatUse)
+    {
+        // The 1.3 review's R6 (docs/milestones/m4-plan.md section 9): for CombatUse 3, 4 or another value the slot decides here where retail's picker gives melee. Whatever the slot says, the pick passes the guard.
+        var itemType = slot == EquipMask.MissileWeapon ? 0x100u : 0x1u;
+        var state = WieldedSetups.World(new Piece(0x80000C01, "Odd Weapon", itemType, (sbyte)combatUse, slot)).State;
+        var pick = CombatModeRules.DefaultMode(state, out _, out _, out var absent);
+
+        Assert.False(absent);
+        Assert.NotEqual(CombatMode.NonCombat, pick);
+        Assert.Null(CombatModeGuard.Check(pick, state));
     }
 }

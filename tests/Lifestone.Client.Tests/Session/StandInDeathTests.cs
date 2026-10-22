@@ -205,6 +205,8 @@ public sealed class StandInDeathTests
             Assert.Equal((uint)Math.Round(max * 0.75f, MidpointRounding.ToEven), current);
         }
 
+        Assert.True(rig.Tally.FirstVitalsSeen);
+        Assert.True(rig.Tally.SampleVitalsAfterArrival()); // the scenario reads the judged vitals at the end of its vitals wait; this rig has no scenario
         Assert.InRange(rig.Tally.VitalsAfterArrivalPercent, 70.0, 80.0);
         Assert.Equal(CombatModes.NonCombat, rig.Cast.Q.CombatMode);
         Assert.False(rig.World.Dying);

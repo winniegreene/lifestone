@@ -12,7 +12,9 @@ using Lifestone.Client.Tests.RetailUi.Screens;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Tests;
 using Lifestone.Net.Dispatch;
+using Lifestone.Net.Messages;
 using Lifestone.Net.Session;
+using Lifestone.Net.Types;
 
 namespace Lifestone.Client.Tests.RetailUi.Selection;
 
@@ -206,6 +208,62 @@ public sealed class GameSelectionTests(DatSetFixture fixture) : IClassFixture<Da
         rig.Session.Actions.QueryHealth(Guard, ActionSource.Ui);
         rig.Run(0.5);
         Assert.False(selection.HealthShown);
+    }
+
+    private static void Push(LoginRig rig, uint guid, float health)
+    {
+        var self = rig.Session.State.Self.Guid;
+        rig.Session.Reducer.OnUpdateHealth(new InboundContext(0, MessageQueue.Login, rig.Session.Clock.Time.GetTimestamp()), new GameEventHeader(self, 0, 0x01C0), new UpdateHealthEvent(guid, health));
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_pushed_health_with_no_query_outstanding_moves_the_meter_like_ACEs_heartbeat()
+    {
+        var (rig, _, selection, held, _) = Enter();
+        using var _ = rig;
+        held.Value = Guard;
+        rig.Run(0.5);
+        Assert.True(selection.LastQuery!.IsCompleted); // nothing outstanding: what follows is a push
+        Push(rig, Guard, 0.45f);
+        rig.Frame();
+        Assert.Equal(0.45f, selection.HealthFraction!.Value, 3); // gmToolbarUI::RecvNotice_UpdateObjectHealth
+        Assert.Equal(1, selection.Queries); // the push cost no query
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_push_for_another_object_or_after_the_selection_changed_does_not_move_the_meter()
+    {
+        var (rig, _, selection, held, _) = Enter();
+        using var _ = rig;
+        held.Value = Guard;
+        rig.Run(0.5);
+        Push(rig, Statue, 0.1f);
+        Push(rig, 0x80000BEE, 0.1f);
+        Assert.Equal(StandInWorld_PlaceholderHealth, selection.HealthFraction!.Value, 3);
+
+        held.Value = Statue; // the selection moves on: the meter hides until a creature answers
+        rig.Run(0.5);
+        Assert.False(selection.HealthShown);
+        Push(rig, Guard, 0.1f); // a late push for the old selection
+        Assert.False(selection.HealthShown);
+        held.Value = 0;
+        rig.Frame();
+        Push(rig, Guard, 0.1f);
+        Assert.False(selection.HealthShown);
+    }
+
+    [RequiresLocalDatsFact]
+    public void Successive_pushes_show_each_value_on_the_meter()
+    {
+        var (rig, _, selection, held, _) = Enter();
+        using var _ = rig;
+        held.Value = Guard;
+        rig.Run(0.5);
+        foreach (var value in new[] { 1.0f, 0.7f, 0.4f, 0.0f })
+        {
+            Push(rig, Guard, value);
+            Assert.Equal(value, selection.HealthFraction!.Value, 3);
+        }
     }
 
     [RequiresLocalDatsFact]

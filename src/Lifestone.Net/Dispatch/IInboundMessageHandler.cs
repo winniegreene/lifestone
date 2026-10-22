@@ -341,6 +341,42 @@ public interface IInboundMessageHandler
     {
     }
 
+    /// <summary>GameEvent 0x01A7 AttackDone {u32 WeenieError} (M4 1.2 s0).</summary>
+    void OnAttackDone(in InboundContext context, in GameEventHeader header, in AttackDoneEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x01B8 CombatCommenceAttack (no payload; M4 1.2 s0).</summary>
+    void OnCommenceAttack(in InboundContext context, in GameEventHeader header, in CommenceAttackEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0196 ViewContents {u32 container, u32 count, count x {u32 item, u32 ContainerType}} (M4 2.1 s0).</summary>
+    void OnViewContents(in InboundContext context, in GameEventHeader header, in ViewContentsEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0052 CloseGroundContainer {u32 container} (M4 2.1 s0).</summary>
+    void OnCloseGroundContainer(in InboundContext context, in GameEventHeader header, in CloseGroundContainerEvent message)
+    {
+    }
+
+    /// <summary>
+    /// GameEvent 0x0062 ApproachVendor (M4 3.2 s0): the vendor a Use opened, its trade rules and its whole stock; also sent again
+    /// after each buy. A stack of <see cref="VendorEntry.Unlimited"/> (-1) is unlimited supply, never 0.
+    /// </summary>
+    void OnApproachVendor(in InboundContext context, in GameEventHeader header, VendorApproachMsg message)
+    {
+    }
+
+    /// <summary>
+    /// GameEvent 0x00C9 IdentifyObjectResponse (M4 3.2 s0): the answer to an Identify, with the sections its flags announce;
+    /// <see cref="IdentifyResponseMsg.Success"/> false is a result, not an error (ACE still sends the tables).
+    /// </summary>
+    void OnIdentifyResponse(in InboundContext context, in GameEventHeader header, IdentifyResponseMsg message)
+    {
+    }
+
     // Everything else.
 
     /// <summary>A message the dispatcher does not decode; <paramref name="body"/> is the whole message, opcode included.</summary>

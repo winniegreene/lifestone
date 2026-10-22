@@ -2,6 +2,7 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Data.Magic;
 using Lifestone.Data.Motion;
@@ -610,5 +611,135 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
     {
         // Player_Spells.cs 451-457: Enchantment, Artifice, Verdancy, Strife, Shadow.
         Assert.Equal([15268u, 15269u, 15270u, 15271u, 43173u], GearKit.FociWcids);
+    }
+
+
+    // ---------------------------------------------------------------- M4 3.1 d0 (D20): the decoys join the death loop's kit only
+
+    private static Dictionary<uint, StandInItemKind> DecoyWeenies() => DecoyKit.All.ToDictionary(d => d.Wcid, d => new StandInItemKind(d.Name, null));
+
+    [RequiresDatsFact]
+    public void A_plain_kit_is_what_it_was_and_the_decoy_kit_is_the_plain_kit_with_eight_decoy_lines_at_the_end()
+    {
+        var plain = KitFor(Account);
+
+        // The plain kit (the buff, fight and login legs' kit) has no decoy and describes itself as it always did.
+        Assert.False(plain.HasDecoys);
+        Assert.Empty(plain.DecoyItems);
+        Assert.Equal(59, plain.Items.Count);
+        Assert.Equal(17_005, plain.Burden);
+        Assert.Equal("items=59 components=53 customised_components=52 slots=59/102 burden=17005/19650", plain.Describe());
+        Assert.Equal(PinnedStacks, string.Join(' ', plain.Components.Select(c => c.Wcid + ":" + c.Stack)));
+
+        var decoyed = plain.WithDecoys(DecoyKit.All);
+        output.WriteLine("decoy kit: " + decoyed.Describe());
+
+        Assert.True(decoyed.HasDecoys);
+        Assert.Equal(67, decoyed.Items.Count);
+        Assert.Equal(plain.Items, decoyed.Items.Take(59)); // the plain lines, unchanged and in the same order
+        Assert.Equal(DecoyKit.All.Select(d => d.Wcid), decoyed.Items.Skip(59).Select(i => i.Wcid));
+        Assert.All(decoyed.Items.Skip(59), i => Assert.Equal(GearKind.Decoy, i.Kind));
+        Assert.Equal(DecoyKit.All.Select(d => d.ToGearItem()), decoyed.DecoyItems);
+        Assert.Equal(67, decoyed.Slots);
+        Assert.Equal(17_005 + 452, decoyed.Burden);
+        Assert.Equal(17_457, decoyed.Burden);
+        Assert.Equal(plain.CustomisedComponentIds, decoyed.CustomisedComponentIds);
+        Assert.Equal(53, decoyed.Components.Count());
+        Assert.Equal(5, decoyed.ArmourItems.Count());
+        Assert.Equal(plain.WandItem, decoyed.WandItem);
+        Assert.Equal("items=67 components=53 customised_components=52 slots=67/102 burden=17457/19650 decoys=8", decoyed.Describe());
+
+        // The plain kit was not changed by building the other, and the decoys left it by value.
+        Assert.False(plain.HasDecoys);
+        Assert.Equal(59, plain.Items.Count);
+    }
+
+    [RequiresDatsFact]
+    public void The_decoy_kit_stays_under_the_capacity_and_the_pack_slots_and_a_mage_that_kept_the_leather_set_and_the_old_wand_still_fits_under_its_real_capacity()
+    {
+        var kit = KitFor(Account).WithDecoys(DecoyKit.All);
+        var conservative = GearKit.EncumbranceCapacity(GearKit.CapacityStrength);
+        var real = EncumbranceSystem.EncumbranceCapacity((int)(MageTemplate.LowAttribute + GearKit.CapacityStrength), 0);
+        const int OldWand = 50;
+        var carried = kit.Burden + GearKit.LeatherSetBurden + OldWand;
+        output.WriteLine($"decoy kit {kit.Burden} of {conservative} (conservative); + leather {GearKit.LeatherSetBurden} + old wand {OldWand} = {carried} of {real} at strength 141 ({(double)carried / real:P1})");
+
+        Assert.True(kit.Burden * 100 <= conservative * 90, $"the decoy kit's burden {kit.Burden} is over 90% of {conservative}");
+        Assert.True(kit.Slots <= GearKit.PackCapacity * 3 / 4, $"{kit.Slots} slots of {GearKit.PackCapacity}");
+        Assert.True(carried * 100 <= real * 95, $"carrying {carried} is over 95% of {real}");
+        Assert.True(EncumbranceSystem.Load(real, carried) < 1.0);
+    }
+
+    [RequiresDatsFact]
+    public void ForDeathLoop_is_the_decoy_kit_with_the_option_on_and_the_plain_kit_with_it_off_and_counts_the_decoys_for_the_level()
+    {
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        var plain = GearKit.Build(spells, Account);
+
+        var on = GearKit.ForDeathLoop(spells, Account, new DeathOptions());
+        Assert.Equal(plain.WithDecoys(DecoyKit.All).Items, on.Items); // BSD Mage's level 126: all eight
+
+        var off = GearKit.ForDeathLoop(spells, Account, new DeathOptions { Decoys = false });
+        Assert.False(off.HasDecoys);
+        Assert.Equal(plain.Items, off.Items);
+        Assert.Equal(plain.Describe(), off.Describe());
+
+        Assert.Single(GearKit.ForDeathLoop(spells, Account, new DeathOptions(), level: 15).DecoyItems);
+        Assert.Equal(3, GearKit.ForDeathLoop(spells, Account, new DeathOptions(), level: 21).DecoyItems.Count());
+        Assert.False(GearKit.ForDeathLoop(spells, Account, new DeathOptions(), level: 5).HasDecoys);
+        Assert.Equal(8, GearKit.ForDeathLoop(spells, Account, new DeathOptions(), level: 400).DecoyItems.Count());
+        Assert.Throws<ArgumentNullException>(() => GearKit.ForDeathLoop(spells, Account, null!));
+    }
+
+    [Fact]
+    public void WithDecoys_replaces_the_decoys_it_has_is_idempotent_and_leaves_the_kit_it_was_called_on_alone()
+    {
+        var plain = GearKit.Of([Wand(), Comp(691, "Lead Scarab", 40)]);
+
+        var one = plain.WithDecoys(DecoyKit.All.Take(1).ToList());
+        var eight = one.WithDecoys(DecoyKit.All);
+        var again = eight.WithDecoys(DecoyKit.All);
+        var none = eight.WithDecoys([]);
+
+        Assert.Equal(2, plain.Items.Count);
+        Assert.False(plain.HasDecoys);
+        Assert.Equal(3, one.Items.Count);
+        Assert.Equal(10, eight.Items.Count);
+        Assert.Equal(eight.Items, again.Items);
+        Assert.Equal(plain.Items, none.Items);
+        Assert.False(none.HasDecoys);
+        Assert.Equal(plain.Burden + DecoyKit.TotalBurden, eight.Burden);
+        Assert.Equal("items=10 components=1 customised_components=0 slots=10/102 burden=" + eight.Burden + "/19650 decoys=8", eight.Describe());
+        Assert.Equal(DecoyKit.For(126).Select(d => d.Wcid), plain.WithDecoys(126).DecoyItems.Select(i => i.Wcid));
+        Assert.Throws<ArgumentNullException>(() => plain.WithDecoys((IReadOnlyList<DecoyItem>)null!));
+    }
+
+    [Fact]
+    public void SpawnGear_asks_for_exactly_the_decoys_not_held_one_each_and_a_rerun_asks_for_none()
+    {
+        using var rig = new Rig(DecoyWeenies());
+        var three = GearKit.Of([Wand()]).WithDecoys(DecoyKit.All.Take(3).ToList());
+        var first = rig.Finish(rig.Session.Tools.SpawnGear(three, ActionSource.Host));
+        Assert.True(first.Succeeded, first.Describe());
+        Assert.Equal(4, first.Requested); // the wand and three decoys
+        Assert.All(DecoyKit.All.Take(3), d => Assert.Equal(1, rig.Held(d.Wcid)));
+
+        var all = GearKit.Of([Wand()]).WithDecoys(DecoyKit.All);
+        var second = rig.Finish(rig.Session.Tools.SpawnGear(all, ActionSource.Host));
+
+        Assert.True(second.Succeeded, second.Describe());
+        Assert.True(second.Arrived);
+        Assert.Equal(5, second.Requested); // the five decoys not held, none of the three that are, and not the wand
+        Assert.Equal(4, second.AlreadyHeld);
+        Assert.Equal(DecoyKit.All.Skip(3).Select(d => d.Wcid), second.Grants.Select(g => g.Item.Wcid));
+        Assert.All(second.Grants, g => Assert.Null(g.Requested)); // an item, not a stack
+        Assert.All(second.Grants, g => Assert.Equal(ItemOutcome.Created, g.Outcome));
+        Assert.All(DecoyKit.All, d => Assert.Equal(1, rig.Held(d.Wcid)));
+        Assert.All(DecoyKit.All, d => Assert.Equal(1, rig.Stacks(d.Wcid)));
+
+        var third = rig.Finish(rig.Session.Tools.SpawnGear(all, ActionSource.Host));
+        Assert.Equal(0, third.Requested);
+        Assert.Equal(9, third.AlreadyHeld);
+        Assert.Equal(9, rig.Inventory.Pack.Count); // the wand and the eight decoys, never a second copy
     }
 }

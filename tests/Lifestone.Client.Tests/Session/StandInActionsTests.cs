@@ -107,6 +107,11 @@ public sealed class StandInActionsTests
 
         public void Mode(CombatMode mode)
         {
+            if (mode == CombatMode.Magic)
+            {
+                WieldedSetups.Hold(Session, WieldedSetups.Wand); // the combat-mode guard (M4 3.1 g) wants a caster in the hand for the magic mode
+            }
+
             Finish(Session.Actions.SetCombatMode(mode, ActionSource.Host));
         }
 
@@ -235,6 +240,7 @@ public sealed class StandInActionsTests
         using var rig = new Rig();
         Assert.Equal(0, rig.Q.CombatMode); // the description carries no mode: nothing has said one yet
 
+        WieldedSetups.Hold(rig.Session, WieldedSetups.Wand); // the combat-mode guard (M4 3.1 g) wants a caster in the hand for the magic mode
         var magic = rig.Session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
         rig.Finish(magic, 1.5);
         Assert.Equal((ActionOutcomeKind.Confirmed, CombatModes.Magic), (magic.Outcome!.Value.Kind, rig.Q.CombatMode));
@@ -400,6 +406,7 @@ public sealed class StandInActionsDatTests(DatSetFixture fixture) : IClassFixtur
         var learn = session.Tools.LearnSpells([buff, bolt, eight], ActionSource.Host);
         Run(session, 1.5);
         Assert.True(learn.IsCompleted, learn.Summary);
+        WieldedSetups.Hold(session, WieldedSetups.Wand); // the combat-mode guard (M4 3.1 g) wants a caster in the hand for the magic mode
         var mode = session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
         Run(session, 1.5);
         Assert.Equal(ActionOutcomeKind.Confirmed, mode.Outcome!.Value.Kind);

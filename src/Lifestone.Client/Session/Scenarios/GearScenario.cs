@@ -34,6 +34,9 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <c>worn</c> counts the pieces (0 to 5); <c>kit</c> counts the kit lines held in full (components summed over stacks); <c>gear_steps</c> counts the requests this run sent for the wand, the armour and the wields (0 on a ready mage); <c>topup</c> counts the
 /// component requests (the kit's component lines the pack was short of: a cast burns components, so a mage that cast since the last run is topped up; report-only, M3 1.4 fix B, review 1.4-R1). No account or
 /// character name is in it.</para>
+/// <para><b>Decoys</b> (M4 3.1 d0, D20). A kit built for the death loop (<see cref="GearKit.ForDeathLoop"/>) ends with <see cref="GearKind.Decoy"/> lines: ordinary expensive items the mage only carries. The same <c>item</c> top-up spawns the ones not held (counted by weenie class, one each,
+/// <see cref="DecoyGrants"/>); the wield steps never see one (<see cref="GearKind.Decoy"/> is not wielded, and a worn one is no kit piece that holds a slot). The verdict fields keep their meaning, and for a decoy kit <c>kit=&lt;held&gt;/&lt;lines&gt;</c> counts the decoy lines too; <c>gear_steps</c> stays the
+/// wand's and the armour's. A plain kit has no decoy line, so its verdict is what it always was.</para>
 /// <para><b>The first cast</b> (M3 1.4 s2; <see cref="GearCasts"/>). After the gear the scenario casts once: <see cref="IActionApi.SetCombatMode"/> to Magic (ACE answers a cast made in another mode with a bare UseDone,
 /// <c>Player_Magic.cs</c> 84 and 275, and holds the Magic mode only with a wielded caster, <c>Player_Combat.cs</c> 872-880: so the gear comes first), one Creature Enchantment self buff
 /// through <see cref="IActionApi.Cast(uint, ActionSource)"/> (the highest level of the first profile line whose ACE chance from the read model's current skill is at least <see cref="GearCasts.MinChance"/>:
@@ -131,7 +134,8 @@ public sealed class GearScenario : IScenario
         _spawnWait = new ReasonTimer(SpawnLimit);
         foreach (var item in kit.Items)
         {
-            if (item.Kind != GearKind.Component)
+            // A decoy (M4 3.1 d0) is carried and never wielded: the wield steps see only the wand and the armour.
+            if (item.Kind is GearKind.Wand or GearKind.Armour)
             {
                 _gear.Add(item);
             }
@@ -157,12 +161,22 @@ public sealed class GearScenario : IScenario
     public uint EnteredGuid { get; private set; }
 
     /// <summary>The requests this run sent for the wand and the armour, and the wields (<c>gear_steps</c>); the component top-up is <see cref="TopUp"/>.</summary>
-    public int GearSteps => GrantsOf(isComponent: false) + _wieldSteps;
+    public int GearSteps => GrantsOf(GrantClass.Gear) + _wieldSteps;
 
     /// <summary>The component requests this run sent (<c>topup</c>): the kit's component lines the pack was short of, e.g. after a cast burned some.</summary>
-    public int TopUp => GrantsOf(isComponent: true);
+    public int TopUp => GrantsOf(GrantClass.Component);
 
-    private int GrantsOf(bool isComponent)
+    /// <summary>The decoy requests this run sent (M4 3.1 d0; always 0 for a plain kit): the decoys the pack did not hold, one request each. Not part of <see cref="GearSteps"/>, which stays the wand's and the armour's.</summary>
+    public int DecoyGrants => GrantsOf(GrantClass.Decoy);
+
+    private enum GrantClass
+    {
+        Gear,
+        Component,
+        Decoy,
+    }
+
+    private int GrantsOf(GrantClass wanted)
     {
         var n = 0;
         if (_spawn is { } spawn)
@@ -170,7 +184,9 @@ public sealed class GearScenario : IScenario
             var grants = spawn.Grants;
             for (var i = 0; i < grants.Count; i++)
             {
-                if ((grants[i].Item.Kind == GearKind.Component) == isComponent)
+                var kind = grants[i].Item.Kind;
+                var of = kind == GearKind.Component ? GrantClass.Component : kind == GearKind.Decoy ? GrantClass.Decoy : GrantClass.Gear;
+                if (of == wanted)
                 {
                     n++;
                 }
@@ -681,7 +697,8 @@ public sealed class GearScenario : IScenario
     {
         for (var i = 0; i < _kit.Items.Count; i++)
         {
-            if (_kit.Items[i].Wcid == wcid)
+            // A decoy is not a piece the mage wears: a worn one (a human's doing) must not hold a slot the armour needs.
+            if (_kit.Items[i].Wcid == wcid && _kit.Items[i].Kind != GearKind.Decoy)
             {
                 return true;
             }

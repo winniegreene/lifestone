@@ -21,7 +21,7 @@ public sealed class SessionContractTests
     /// </summary>
     private static readonly string[] Catalogue =
     [
-        nameof(SessionPhaseChanged), nameof(ConnectionProgress), nameof(CharacterListChanged), nameof(CharacterSelected),
+        nameof(SessionPhaseChanged), nameof(ConnectionProgress), nameof(ContainerOpened), nameof(ContainerClosed), nameof(ContainerContentsChanged), nameof(CharacterListChanged), nameof(CharacterSelected),
         nameof(CharacterCreateResult), nameof(CharacterErrorReceived), nameof(Booted), nameof(PlayerCreated),
         nameof(ObjectCreated), nameof(ObjectUpdated), nameof(ObjectDeleted), nameof(ObjectMoved), nameof(ObjectMotionChanged),
         nameof(ObjectVectorChanged), nameof(ObjectStateChanged), nameof(ObjectParented), nameof(ObjectPickedUp),
@@ -33,6 +33,12 @@ public sealed class SessionContractTests
         nameof(InventoryChanged), nameof(InventoryFailed),
         nameof(CombatEvent), nameof(CombatModeChanged), nameof(PlayerDied), nameof(PlayerKilledSomething), nameof(AutoTargetRequested), // M3 1.2 s3 (CombatEvents.cs), M3 4.2 p2
         nameof(AdminEnvironChanged), // M3 1.3 s2b (AmbientEnvirons.cs)
+        nameof(AttackChanged), // M4 1.2 lane s1 (AttackSequence.cs)
+        nameof(AttackRequested), // M4 1.3 lane s1 (AttackSequence.cs)
+        nameof(ShortcutsChanged), // M4 3.2 lane h1 (ShortcutBar.cs)
+        nameof(AppraisalReceived), // M4 3.2 lane s2 (Appraisal.cs)
+
+        nameof(VendorOpened), nameof(VendorStockChanged), nameof(VendorClosed), nameof(CoinValueChanged), // M4 3.2 lane s1 (VendorEvents.cs)
     ];
 
     private static Type[] ClientTypes => typeof(IGameSessionView).Assembly.GetTypes();

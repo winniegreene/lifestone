@@ -79,8 +79,31 @@ public sealed partial class PlayChecks : Node
         LogOffDelay = 6.0, // longer than retail's 3 s wait and the transition's collapse, so portal space's logoff tunnel is up before the character list returns
     };
 
-    /// <summary>The visit after a reconnect (the disconnected screen's button runs the stand-in again): the arrival only, with the unhide a little earlier.</summary>
-    public static StandInVisit ReplayVisit { get; } = Visit with { HoldEntry = false, EnterAfter = 3.0, UnhideAfter = 14.0, Teleports = [], Objects = [], Speech = [], Scripts = [], Sounds = [] };
+    /// <summary>
+    /// The visit after a reconnect (the disconnected screen's button runs the stand-in again): the arrival only, with the unhide a little earlier. M4 3.1 s4: it is the visit of the heal rows (<c>PlayChecks.Heal.cs</c>,
+    /// run in the run's second session): <c>HealItems</c> announces a Handy Healing Kit and five Potions of Healing in the pack (<c>Visit</c> keeps its own pack: the other rows count it), the player STARTS with partial
+    /// health from the synthetic description (<c>Recorded = null</c>: a recorded character's description may be full-health, or list Healing untrained; <c>VitalUpdates</c> empty: no later update makes it 41), and the
+    /// rest of <c>Visit</c> stays. <c>TODO(m4-standin-start-vitals)</c>: the starting health is a placeholder of the rows, not a character's; the visit logs it once when it starts (<see cref="StandInVisit.StartVitalsPlaceholder"/>).
+    /// <para><b>Seam note for the owners of <see cref="Visit"/> and of rows in the run's second session</b> (M4 3.1 fix, review R24): every row that runs after the reconnect (the reconnect rows, the silent-server row, the heal rows) runs on THIS visit, a synthetic
+    /// description with 5 health and the kit and potions, not on the machine's recorded character, and the visible window shows a 5-health player. A row that needs the recorded character or a full vital belongs in the first session.</para>
+    /// </summary>
+    public static StandInVisit ReplayVisit { get; } = Visit with
+    {
+        HoldEntry = false,
+        EnterAfter = 3.0,
+        UnhideAfter = 14.0,
+        Teleports = [],
+        Objects = [],
+        Speech = [],
+        Scripts = [],
+        Sounds = [],
+        HealItems = true,
+        Vendors = true, // M4 3.2 s4b: Thelnoth and Renald at their real cells, 10,000 pyreals, a kit and Leather Bracers in the pack (the vendor rows, PlayChecks.Vendor.cs; the heal rows take the first kit and potion, which HealItems announces before them)
+        Recorded = null,
+        Stats = Visit.Stats! with { Health = 5 },
+        StartVitalsPlaceholder = true, // logs TODO(m4-standin-start-vitals) once at the login burst (M4 3.1 fix, review R24)
+        VitalUpdates = [],
+    };
 
     /// <summary>The stand-in portal's object id (a server object's: 0x80000000 and up). A Use of it teleports the player to the Academy.</summary>
     public const uint PortalGuid = 0x80000A03;
@@ -173,7 +196,9 @@ public sealed partial class PlayChecks : Node
     private int _shellBuildFrames; // the staged shell's own figures (GamePlayScreen.BuildFrames and the longest frame and unit), from the first shell that was built
     private double _shellBuildLongestFrameMs;
     private double _shellBuildLongestUnitMs;
+    private string _shellBuildGc = "n/a"; // report-only: the shell build's GC pause and collections (GamePlayScreen.BuildGc)
     private bool _shellStaged;
+    private string _shellPostWindowGc = "n/a"; // report-only (M4 1.1 fix R2): the first collection after the no-GC window ended (GamePlayScreen.PostWindowGcReport)
     private ulong _arrivedAtMs;
     private long _slowFrames;
     private double _teleportMaxFrameMs;
@@ -232,6 +257,13 @@ public sealed partial class PlayChecks : Node
                 _shellBuildFrames = shellScreen.BuildFrames;
                 _shellBuildLongestFrameMs = shellScreen.LongestBuildFrameMilliseconds;
                 _shellBuildLongestUnitMs = shellScreen.LongestBuildUnitMilliseconds;
+                var buildGc = shellScreen.BuildGc;
+                _shellBuildGc = $"{buildGc.PauseMilliseconds:0.0}ms/{buildGc.Gen0}/{buildGc.Gen1}/{buildGc.Gen2}";
+            }
+
+            if (_shellStaged)
+            {
+                _shellPostWindowGc = shellScreen.PostWindowGcReport;
             }
 
             _shellRootShown |= shellScreen.Root is { IsShown: true };
@@ -1231,6 +1263,9 @@ public sealed partial class PlayChecks : Node
         await KitChecksAsync(session); // (see the next line)
         await KitLookFramesAsync(session, ui?.Screens?.Flow.CurrentScreen as GamePlayScreen); // M3 4.2 p6: with --play-frames, the kit worn and its review frames (PlayChecks.KitLook.cs)
         // M3 1.4 s0 (the line above): SpawnGear against the stand-in: the kit arrives in the pack (kit=n/n), a second run asks for nothing (kit_topup=0)
+        await AttackChecksAsync(session); // M4 1.2 s3: a melee kill and a missile hit on the stand-in (PlayChecks.Attack.cs)
+        await ContainerChecksAsync(session); // M4 2.1 s4a: the stand-in tusker's corpse opened, an item picked up and dropped (PlayChecks.Containers.cs)
+        await DragChecksAsync(session); // M4 2.2 s3: an item dragged from the pack to a side pack with the real router's mouse events (PlayChecks.Drag.cs)
 
         // --- a boot by the server: the player is taken away and the retail disconnected screen has the button that reconnects (D43) ---
         var server = _host.StandIn ?? throw new InvalidOperationException("the stand-in session has no server levers");
@@ -1249,6 +1284,10 @@ public sealed partial class PlayChecks : Node
         Check("the-player-arrives-again-after-the-reconnect", again && _mode.Rig is { } second && !ReferenceEquals(second, rig) && _mode.Avatars is { Player: not null }, $"rig={(_mode.Rig is null ? "none" : "built")} stage={_mode.Flow.Stage}");
         var secondRig = _mode.Rig;
         await WaitFor(() => _mode.Flow.Stage == Lifestone.Client.Play.PlayStage.InWorld, 60.0);
+        await HealChecksAsync(session); // M4 3.1 s4: a potion, a kit and a potion at a full vital on the replay visit's player (PlayChecks.Heal.cs; no creature, D23)
+        await HotbarChecksAsync(session); // M4 3.2 h2: a potion and a kit dragged onto the hotbar, key 1 drinks, a slot dragged off the bar is removed (PlayChecks.Hotbar.cs)
+        await VendorChecksAsync(session); // M4 3.2 s4b: Thelnoth's shop: the vendor window opens, a kit is bought with its Buy button, a kit is sold from its sell list (PlayChecks.Vendor.cs; the stand-in's vendors are the only NPCs, D23)
+        await ExamineChecksAsync(session); // M4 3.2 s4c: the replay visit's Handy Healing Kit examined, the Identify and the window's lines (PlayChecks.Examine.cs; no creature, D23)
         server.GoQuiet(0.2, "stand-in server went quiet");
         var silent = await WaitFor(() => _mode.Rig is null && ui?.Flow?.Flow.CurrentMode == UiModes.Disconnected, 15.0);
         Check("a-silent-server-shows-the-disconnected-screen", silent && session.State.FailureMessage is not null, $"rig={(_mode.Rig is null ? "none" : "built")} mode={(ui?.Flow is { } sf ? UiModes.NameOf(sf.Flow.CurrentMode) : "none")} status='{_mode.Flow.StatusText}'");
@@ -1320,7 +1359,7 @@ public sealed partial class PlayChecks : Node
         Check(
             "no-ui-step-after-enter-is-over-12-ms",
             (_uiStepWindowOpen && _uiStepMaxMs <= MaxUiStepMilliseconds) || _framesDirectory is not null,
-            $"worst_ui_step_ms={_uiStepMaxMs:0.0} limit={MaxUiStepMilliseconds:0} shell_build_frames={_shellBuildFrames} shell_longest_frame_ms={_shellBuildLongestFrameMs:0.0} shell_longest_unit_ms={_shellBuildLongestUnitMs:0.0} shell_staged={_shellStaged}{(_framesDirectory is not null ? " (REPORTED, NOT JUDGED: a --play-frames run is not a timing run)" : string.Empty)}");
+            $"worst_ui_step_ms={_uiStepMaxMs:0.0} limit={MaxUiStepMilliseconds:0} shell_build_frames={_shellBuildFrames} shell_longest_frame_ms={_shellBuildLongestFrameMs:0.0} shell_longest_unit_ms={_shellBuildLongestUnitMs:0.0} shell_staged={_shellStaged} shell_gc_pause_ms_gen012={_shellBuildGc} shell_post_window_gc={_shellPostWindowGc}{(_framesDirectory is not null ? " (REPORTED, NOT JUDGED: a --play-frames run is not a timing run)" : string.Empty)}");
 
         // The arrival's first frame used to compile a canvas pipeline (15 to 80 ms; docs/session.md section 27): CanvasWarmUp draws that item at start-up, so none compiles from Enter on.
         Check(

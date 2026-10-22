@@ -191,6 +191,9 @@ public sealed class ChaseCameraModel
     /// <summary><c>m_InvertMouseLookYAxis</c>. TODO(g5-mouselook-prefs): retail's default is not read.</summary>
     public bool InvertMouseLookY { get; set; }
 
+    /// <summary>True for <c>--retail-camera-still</c>: retail's fixed stall step per frame (CameraManager::UpdateCamera, 11.6096 0x00456780), whose dead zone grows with the frame rate. Default false: the step is scaled by the frame time.</summary>
+    public bool RetailStillStep { get; set; }
+
     /// <summary>The seconds a first step takes before there is a frame time (<c>1 / SceneTool::m_FramesPerSecond</c>).</summary>
     public double FirstStepSeconds { get; set; } = 1.0 / 60.0;
 
@@ -230,6 +233,27 @@ public sealed class ChaseCameraModel
         TranslationalStiffness = CurrentStiffness;
         RotationalStiffness = CurrentStiffness;
         ViewerOffset = VideoOffset ?? new Vector3(0f, DefaultOffsetYFactor * Scale, DefaultOffsetZFactor * Scale);
+        SetTargetForOffset(ViewerOffset);
+    }
+
+    /// <summary>
+    /// The default offsets with the viewer turned about the pivot by <paramref name="degrees"/> (the review hunt's side view, M4 1.3-L1: the target stood behind the player's body in line with the camera).
+    /// 0 is <see cref="SetDefaultOffsets"/>.
+    /// </summary>
+    /// <param name="degrees">The turn, in degrees; the sign picks the side.</param>
+    public void SetHeadingOffset(float degrees)
+    {
+        SetDefaultOffsets();
+        if (degrees == 0f)
+        {
+            return;
+        }
+
+        var a = degrees * (MathF.PI / 180f);
+        var s = MathF.Sin(a);
+        var c = MathF.Cos(a);
+        var o = ViewerOffset;
+        ViewerOffset = new Vector3((o.X * c) + (s * o.Y), (c * o.Y) - (s * o.X), o.Z);
         SetTargetForOffset(ViewerOffset);
     }
 
@@ -732,7 +756,7 @@ public sealed class ChaseCameraModel
             var origin = Vector3.Lerp(previous.Origin, wantedOrigin, fractionOrigin);
             var rotation = Quaternion.Normalize(Quaternion.Slerp(previous.Orientation, wantedRotation, fractionRotation));
             var still = fractionOrigin < 1f && fractionRotation < 1f
-                && Vector3.Distance(origin, previous.Origin) < 2f * MinStepSeconds
+                && Vector3.Distance(origin, previous.Origin) < StillStepMetres(dt, RetailStillStep)
                 && MathF.Abs(Quaternion.Dot(rotation, previous.Orientation)) > 1f - 1e-7f;
             desired = still ? previous : new CellFrame(cell, new AcFrame(origin, rotation));
         }
@@ -750,6 +774,14 @@ public sealed class ChaseCameraModel
         _hasViewer = true;
         return new CameraPose(viewer, desired, pivotFrame, translucency, InHead, blocked);
     }
+
+    /// <summary>
+    /// The smallest step (m) the smoothing still takes. Retail keeps the previous viewer when the interpolated position is under a fixed 2 x 0.0002 m from it (CameraManager::UpdateCamera, 11.4186 0x00456660, 11.6096 0x00456780),
+    /// so retail's dead zone around the wanted point grows with the frame rate: 0.0004 / (stiffness * 10 * dt), about 7 mm at 60 Hz but 20 mm at 240 Hz. The default is a glitch fix: the step is scaled by the frame time against 60 Hz
+    /// (a longer frame keeps the 60 Hz threshold, so at 60 Hz or slower it equals retail), which keeps the dead zone the same on every display (M4 1.3 s2, the shell-frames fade check's 0.30 m stop).
+    /// <c>--retail-camera-still</c> (<paramref name="retail"/>) restores retail's fixed step.
+    /// </summary>
+    internal static float StillStepMetres(double dt, bool retail = false) => retail ? 2f * MinStepSeconds : 2f * MinStepSeconds * (float)Math.Min(1.0, dt * 60.0);
 
     private void Pitch(double now, bool keepGoing, float modOverride, bool raise)
     {
