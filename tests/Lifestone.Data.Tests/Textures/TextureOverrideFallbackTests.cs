@@ -6,6 +6,7 @@ namespace Lifestone.Data.Tests.Textures;
 /// M3 4.2 p6 (q6-texture-override-fallback): an ObjDesc texture change whose new texture cannot load leaves the surface on its own texture (retail's failed change: <c>CSurface::UseTextureMap</c> 11.6096 0x00537020 is not
 /// applied), where the loader used to throw and the part's whole mesh was dropped. The fallback is counted and told once per texture.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class TextureOverrideFallbackTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private const uint ClipMapSurface = 0x0800000Au;

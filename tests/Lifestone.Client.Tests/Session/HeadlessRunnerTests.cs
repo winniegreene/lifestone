@@ -81,6 +81,26 @@ public sealed class HeadlessRunnerTests
     }
 
     [Fact]
+    public void A_replays_digest_evidence_names_the_trailer_and_both_digests_so_a_failed_check_carries_its_cause_P4_sfix2()
+    {
+        byte[] recording;
+        using (var run = new ScriptedRun())
+        {
+            Assert.True(run.Finish().Ok);
+            run.Runner.Dispose();
+            recording = run.Recording.ToArray();
+        }
+
+        var replay = new SessionReplayer().Replay(new MemoryStream(recording));
+        var evidence = replay.DigestEvidence();
+        var digest = GameStateDigest.ToHex(replay.StateDigest);
+        Assert.Contains("trailer=present", evidence, StringComparison.Ordinal);
+        Assert.Contains("recorded_digest=" + digest, evidence, StringComparison.Ordinal);
+        Assert.Contains("replayed_digest=" + digest, evidence, StringComparison.Ordinal);
+        Assert.Contains("end=Trailer", evidence, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_summary_line_is_the_frozen_verdict_line_and_names_no_secret_account_or_character()
     {
         using var run = new ScriptedRun();
@@ -166,7 +186,6 @@ public sealed class HeadlessRunnerTests
     [Theory]
     [InlineData("play")]
     [InlineData("alice")]
-    [InlineData("nobody")]
     [InlineData("TEST")]
     [InlineData("test ")]
     public void Runner_refuses_any_account_but_the_test_account_before_anything_else(string account)
@@ -255,6 +274,19 @@ public sealed class HeadlessRunnerTests
         Assert.Contains((MessageOpcodes.CharacterCreate, 0u), server.Sent);
         var created = server.Characters.Single(c => c.Name == "Lifestone Smoke");
         Assert.Equal(created.Guid, ((LoginScenario)run.Runner.Scenario).EnteredGuid);
+    }
+
+    [Fact]
+    public void P4_rfixb_R11_a_run_that_creates_a_character_on_test_melee_or_test_archer_is_refused_before_the_backend()
+    {
+        foreach (var account in new[] { "test-melee", "test-archer" })
+        {
+            var options = new HeadlessRunOptions { Session = new SessionOptions { Account = account } };
+            var e = Assert.Throws<PlayAccountException>(() => new ScriptedRun(new LoginScenario(createCharacter: "Lifestone Throwaway", skillClasses: HeadlessCharacterTests.StandInClasses()), options: options));
+            Assert.DoesNotContain(account, e.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("Lifestone Throwaway", e.Message, StringComparison.Ordinal);
+            Assert.Throws<PlayAccountException>(() => new ScriptedRun(new LoginCheckScenario(HeadlessCharacterTests.StandInClasses(), "Lifestone Smoke"), options: options));
+        }
     }
 
     [Fact]

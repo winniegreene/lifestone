@@ -38,6 +38,9 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <param name="HealthStartShare">The health share (0 to 1) the hunt read when it began (the scenario's first health read, <c>health_start_pct</c> on the detail line; <see cref="HuntScenario.HealthStartShare"/>), or null when none was read. With <paramref name="HealEnabled"/> and <paramref name="HealBelowPercent"/> it decides whether <c>heals &gt;= 1</c> is judged (M4 3.2 L2).</param>
 /// <param name="HealEnabled"><c>--heal on</c> (the recovery rule was on for the leg).</param>
 /// <param name="HealBelowPercent">The recovery trigger, <c>--heal-below</c>, in percent (default 75).</param>
+/// <param name="Blocked">The arrows that hit the environment (<c>blocked</c>, M4 P4 bow; counted in <c>misses</c> too; report-only in its first gate, printed after <c>misses=</c>).</param>
+/// <param name="Seeks">The times the hunt went to a creature of its band that the client already knew, beyond the acquire range (<c>seeks</c>, M4 P4 seek; report-only in its first gate, printed after <c>blocked=</c>).</param>
+/// <param name="OneBlowKills">The kills whose target took no damage line before it died (<c>one_blow_kills</c>, P5a round 3: ACE writes no damage line for a lethal blow, <c>Player_Combat.cs</c> 157 @95ef426d); stands for <c>damage_dealt</c> (and, for the missile hunt, <c>hits</c>) when those are 0. Printed after <c>vendor_frame_max_ms=</c>.</param>
 /// <param name="ModeMismatch">The moments the combat mode and the wielded weapon disagreed during the leg (<c>mode_mismatch</c>, M4 3.1 s4 from <see cref="CombatModeWatch"/>; report-only in its first gate: the line prints it after <c>ground=</c> and nothing judges it).</param>
 public readonly record struct HuntLegMeasures(
     int Kills,
@@ -73,11 +76,14 @@ public readonly record struct HuntLegMeasures(
     double? VendorFrameMaxMs = null,
     double? HealthStartShare = null,
     bool HealEnabled = true,
-    int HealBelowPercent = 75);
+    int HealBelowPercent = 75,
+    int Blocked = 0,
+    int Seeks = 0,
+    int OneBlowKills = 0);
 
 /// <summary>
 /// The hunt leg's verdict (<c>--login-check=hunt</c>, M4 1.2 s4b): composed from the scenario's failure (or null) and the measures, so it is built and tested without Godot. The line is
-/// <c>hunt done ok=&lt;true|false&gt; kills= damage_dealt= damage_taken= hits_taken= evades= xp_gained= fighter= swings= shots= hits= misses= returned=yes|no attack_frame_max_ms=&lt;x|n/a&gt;</c> (M3's six fields in M3's order, then the new
+/// <c>hunt done ok=&lt;true|false&gt; kills= damage_dealt= damage_taken= hits_taken= evades= xp_gained= fighter= swings= shots= hits= misses= blocked= seeks= returned=yes|no attack_frame_max_ms=&lt;x|n/a&gt;</c> (M3's six fields in M3's order, then the new
 /// ones; no name, no account), logged under the <c>logincheck</c> category.
 /// </summary>
 /// <remarks>
@@ -93,6 +99,51 @@ public readonly record struct HuntLegMeasures(
 /// </remarks>
 public static class HuntLegVerdict
 {
+    /// <summary>
+    /// The measures of a hunt from the scenario's own numbers alone (no frame is sampled: the frame fields are n/a), for a run without Godot (the headless loopback's <c>hunt_loop verdict</c>). M4 P5a fix r4: round 4's
+    /// <c>HuntLiveTests</c> built the measures field by field and left <see cref="HuntLegMeasures.OneBlowKills"/> at its default 0 while the scenario counted three, so the judge failed "damage_dealt=0 ... one_blow_kills=0";
+    /// every scenario count the verdict judges is read here, once.
+    /// </summary>
+    /// <param name="scenario">The hunt that ran.</param>
+    /// <param name="weapon">The hunt's weapon.</param>
+    /// <param name="lootEnabled">True when the hunt was asked to loot (the <c>looted</c> judge).</param>
+    /// <param name="ground">The hunt's ground.</param>
+    public static HuntLegMeasures FromScenario(HuntScenario scenario, HuntWeapon weapon, bool lootEnabled, HuntGroundChoice ground)
+    {
+        ArgumentNullException.ThrowIfNull(scenario);
+        var tally = scenario.Tally;
+        return new HuntLegMeasures(
+            Kills: tally.Kills,
+            DamageDealt: tally.DamageDealt,
+            DamageTaken: tally.DamageTaken,
+            HitsTaken: tally.HitsTaken,
+            Evades: tally.Evades,
+            XpGained: tally.XpGained,
+            Fighter: scenario.Fighter,
+            Swings: tally.Swings,
+            Shots: tally.Shots,
+            Hits: tally.Hits,
+            Misses: tally.Misses,
+            Returned: scenario.Returned,
+            Weapon: weapon,
+            CorpsesOpened: scenario.CorpsesOpened,
+            CorpseItems: scenario.CorpseItems,
+            Looted: scenario.Looted,
+            LootSkipped: scenario.LootSkipped,
+            Heals: scenario.Heals,
+            KitUses: scenario.KitUses,
+            Potions: scenario.PotionsUsed,
+            LootEnabled: lootEnabled,
+            Ground: ground,
+            Sold: tally.Sold,
+            Bought: tally.Bought,
+            Pyreals: tally.Pyreals,
+            Appraised: tally.Appraised,
+            Blocked: tally.Blocked,
+            Seeks: tally.Seeks,
+            OneBlowKills: scenario.OneBlowKills);
+    }
+
     /// <summary>The name of the report-only note for <c>attack_frame_max_ms=n/a</c> with a swing or a shot (2.1-R13).</summary>
     public const string AttackFrameNoWindowNote = "NOTE(attack_frame_max_ms=n/a)";
 
@@ -128,9 +179,10 @@ public static class HuntLegVerdict
             problems.Add(string.Create(CultureInfo.InvariantCulture, $"kills={measures.Kills} (>= 1 expected)"));
         }
 
-        if (measures.DamageDealt <= 0)
+        // P5a round 3: a kill whose target took no damage line before it died is one lethal blow, which ACE never reports as damage (Player_Combat.cs 157 @95ef426d); one_blow_kills >= 1 stands for the damage then.
+        if (measures.DamageDealt <= 0 && measures.OneBlowKills < 1)
         {
-            problems.Add(string.Create(CultureInfo.InvariantCulture, $"damage_dealt={measures.DamageDealt} (> 0 expected)"));
+            problems.Add(string.Create(CultureInfo.InvariantCulture, $"damage_dealt={measures.DamageDealt} (> 0 expected, or one_blow_kills >= 1; one_blow_kills={measures.OneBlowKills})"));
         }
 
         if (measures.Weapon == HuntWeapon.Missile)
@@ -140,9 +192,9 @@ public static class HuntLegVerdict
                 problems.Add(string.Create(CultureInfo.InvariantCulture, $"shots={measures.Shots} (>= 1 expected for the missile hunt)"));
             }
 
-            if (measures.Hits < 1)
+            if (measures.Hits < 1 && measures.OneBlowKills < 1)
             {
-                problems.Add(string.Create(CultureInfo.InvariantCulture, $"hits={measures.Hits} (>= 1 expected for the missile hunt)"));
+                problems.Add(string.Create(CultureInfo.InvariantCulture, $"hits={measures.Hits} (>= 1 expected for the missile hunt, or one_blow_kills >= 1: a lethal arrow has no damage line; one_blow_kills={measures.OneBlowKills})"));
             }
         }
         else if (measures.Swings < 1)
@@ -184,7 +236,7 @@ public static class HuntLegVerdict
         var ok = problems.Count == 0;
         var line = string.Create(
             CultureInfo.InvariantCulture,
-            $"hunt done ok={(ok ? "true" : "false")} kills={measures.Kills} damage_dealt={measures.DamageDealt} damage_taken={measures.DamageTaken} hits_taken={measures.HitsTaken} evades={measures.Evades} xp_gained={measures.XpGained} fighter={measures.Fighter} swings={measures.Swings} shots={measures.Shots} hits={measures.Hits} misses={measures.Misses} returned={(measures.Returned ? "yes" : "no")} attack_frame_max_ms={(measures.AttackFrameMaxMs is { } ms && !double.IsNaN(ms) ? ms.ToString("0.0", CultureInfo.InvariantCulture) : "n/a")} corpses_opened={measures.CorpsesOpened} corpse_items={measures.CorpseItems} looted={measures.Looted} loot_frame_max_ms={(measures.LootFrameMaxMs is { } lms && !double.IsNaN(lms) ? lms.ToString("0.0", CultureInfo.InvariantCulture) : "n/a")} loot_skipped={measures.LootSkipped} heals={measures.Heals} kit_uses={measures.KitUses} potions={measures.Potions} ground={measures.Ground.ToString().ToLowerInvariant()} {CombatModeWatch.FieldName}={measures.ModeMismatch} sold={measures.Sold} bought={measures.Bought} pyreals={measures.Pyreals} appraised={measures.Appraised} vendor_frame_max_ms={(measures.VendorFrameMaxMs is { } vms && !double.IsNaN(vms) ? vms.ToString("0.0", CultureInfo.InvariantCulture) : "n/a")}{(measures.LootFrameMaxMs is { } lflagged && !double.IsNaN(lflagged) && lflagged > FrameWarnMs ? " loot_frame_over_50=yes" : string.Empty)}{(Over(measures.AttackFrameMaxMs, FrameWarnMs) || Over(measures.LootFrameMaxMs, FrameWarnMs) ? " frame_over_50=yes" : string.Empty)}");
+            $"hunt done ok={(ok ? "true" : "false")} kills={measures.Kills} damage_dealt={measures.DamageDealt} damage_taken={measures.DamageTaken} hits_taken={measures.HitsTaken} evades={measures.Evades} xp_gained={measures.XpGained} fighter={measures.Fighter} swings={measures.Swings} shots={measures.Shots} hits={measures.Hits} misses={measures.Misses} blocked={measures.Blocked} seeks={measures.Seeks} returned={(measures.Returned ? "yes" : "no")} attack_frame_max_ms={(measures.AttackFrameMaxMs is { } ms && !double.IsNaN(ms) ? ms.ToString("0.0", CultureInfo.InvariantCulture) : "n/a")} corpses_opened={measures.CorpsesOpened} corpse_items={measures.CorpseItems} looted={measures.Looted} loot_frame_max_ms={(measures.LootFrameMaxMs is { } lms && !double.IsNaN(lms) ? lms.ToString("0.0", CultureInfo.InvariantCulture) : "n/a")} loot_skipped={measures.LootSkipped} heals={measures.Heals} kit_uses={measures.KitUses} potions={measures.Potions} ground={measures.Ground.ToString().ToLowerInvariant()} {CombatModeWatch.FieldName}={measures.ModeMismatch} sold={measures.Sold} bought={measures.Bought} pyreals={measures.Pyreals} appraised={measures.Appraised} vendor_frame_max_ms={(measures.VendorFrameMaxMs is { } vms && !double.IsNaN(vms) ? vms.ToString("0.0", CultureInfo.InvariantCulture) : "n/a")} one_blow_kills={measures.OneBlowKills}{(measures.LootFrameMaxMs is { } lflagged && !double.IsNaN(lflagged) && lflagged > FrameWarnMs ? " loot_frame_over_50=yes" : string.Empty)}{(Over(measures.AttackFrameMaxMs, FrameWarnMs) || Over(measures.LootFrameMaxMs, FrameWarnMs) ? " frame_over_50=yes" : string.Empty)}");
         return new HuntLegOutcome(ok, line, problems, notes);
     }
 }

@@ -67,6 +67,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
     private double _lastOwnMs;
     private double _maxOwnMs;
     private readonly PipelineCompilationWatch _pipelines = new();
+    private readonly GcFrameWatch _gcWatch = new();
     private string _notice = string.Empty;
     private bool _loggedNoticePlaceholder;
 
@@ -121,6 +122,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
         _movement = new MovementBindings(walker.Controller, Clock, () => walker.Controller.AutoRun);
         _cameraKeys = new CameraBindings(CameraModel, Clock, this);
         walker.Controller.Notice += OnNotice;
+        _movement.HumanKey += key => HumanKey?.Invoke(key);
         Name = "PlayerController";
         ProcessPriority = -20;
     }
@@ -284,6 +286,13 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
     }
 
     /// <summary>
+    /// A person pressed a movement key (<see cref="OnInputAction"/> delivered a movement-map press; <see cref="MovementBindings.HumanKey"/>): the human's
+    /// key wins over automation (R6). The play host forwards it to <c>MoveIntents.ReportHumanKey</c>, which the runner's Interrupted state listens to.
+    /// Camera keys and releases do not raise it.
+    /// </summary>
+    public event Action<string>? HumanKey;
+
+    /// <summary>
     /// An action of retail's movement map (4) or camera maps (5, and 6 while the alternate camera mode is held) fired
     /// (<c>IInputActionCallback::OnAction</c>): movement actions go to the command interpreter's intents (<see cref="MovementBindings"/>), camera
     /// actions to the camera (<see cref="CameraBindings"/>).
@@ -405,6 +414,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
         var ms = delta * 1000.0;
         _frames++;
         var compiled = _pipelines.Step();
+        var gc = _gcWatch.Step();
         if (_frames > WarmupFrames)
         {
             _maxFrameMs = Math.Max(_maxFrameMs, ms);
@@ -426,6 +436,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
                     ("process_ms", Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000.0),
                     ("render_setup_cpu_ms", RenderingServer.GetFrameSetupTimeCpu()),
                     ("gc_gen0_collections", GC.CollectionCount(0)),
+                    .. gc.Fields(), // M4 P4 g3fix: the collector's pause and collections in this frame's interval, so the line names a GC pause as the cause (TODO(m4-throwaway-teleport-frame))
                     .. compiled.Fields(),
                 ]);
         }

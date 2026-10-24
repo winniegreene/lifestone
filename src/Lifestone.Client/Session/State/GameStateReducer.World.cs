@@ -795,9 +795,10 @@ internal sealed partial class GameStateReducer
     }
 
     /// <summary>
-    /// The world is gone (the server's F653 or the network session's logoff event, or a reset): every object but the
-    /// player gets <see cref="ObjectDeleted"/>, the player <see cref="SelfTravel.NotInWorld"/>, and the player's identity,
-    /// stamps and qualities are forgotten.
+    /// The world is gone (the server's F653 or the network session's logoff event, or a reset): every object, the
+    /// player's own included, gets <see cref="ObjectDeleted"/> (the table is cleared with it, and a consumer that keeps the
+    /// player's object, the avatar set, would otherwise keep a dead player beside the next character's), the player
+    /// <see cref="SelfTravel.NotInWorld"/>, and the player's identity, stamps and qualities are forgotten.
     /// </summary>
     private void LeaveWorld()
     {
@@ -818,10 +819,7 @@ internal sealed partial class GameStateReducer
         _guidScratch.Clear();
         foreach (var o in objects.All)
         {
-            if (!o.IsSelf)
-            {
-                _guidScratch.Add(o.Guid);
-            }
+            _guidScratch.Add(o.Guid);
         }
 
         var deleted = _guidScratch.ToArray();

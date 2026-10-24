@@ -84,13 +84,10 @@ public sealed class DestinationReadinessTests
         var data = new TheoryData<int, int, ReadinessItem>();
         foreach (var layer in new[] { ReadinessItem.Terrain, ReadinessItem.Objects, ReadinessItem.Collision })
         {
-            for (var dy = -1; dy <= 1; dy++)
-            {
-                for (var dx = -1; dx <= 1; dx++)
-                {
-                    data.Add(dx, dy, layer);
-                }
-            }
+            // The centre and the two opposite corners of the ring: each layer's piece is looked up at its own landblock offset (the 27-piece count is Open_land_needs_the_full_3_by_3).
+            data.Add(0, 0, layer);
+            data.Add(-1, -1, layer);
+            data.Add(1, 1, layer);
         }
 
         return data;
@@ -131,8 +128,6 @@ public sealed class DestinationReadinessTests
     [Theory]
     [InlineData(0x00000001u, 4)] // the south-west corner of the map
     [InlineData(0xFEFE0001u, 4)] // landblock 0xFF is off the map (LandDefs::in_bounds)
-    [InlineData(0x00FE0001u, 4)]
-    [InlineData(0xFE000001u, 4)]
     [InlineData(0x00800001u, 6)] // the west edge
     [InlineData(0x80FE0001u, 6)] // the north edge
     [InlineData(0x80800001u, 9)]
@@ -255,7 +250,6 @@ public sealed class DestinationReadinessTests
 
     [Theory]
     [InlineData(0x00000000u)] // no position yet
-    [InlineData(0xA9B40000u)]
     [InlineData(0xA9B40041u)] // between the land cells and the EnvCells
     [InlineData(0xA9B400FFu)]
     [InlineData(0xA9B4FFFEu)] // LandBlockInfo

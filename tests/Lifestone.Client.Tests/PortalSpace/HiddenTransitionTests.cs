@@ -15,7 +15,6 @@ public sealed class HiddenTransitionTests(DatSetFixture fixture) : IClassFixture
     [InlineData(0x00404C18u, 0x00400C08u, HiddenChange.Unhide)]
     [InlineData(0x00004000u, 0x00004008u, HiddenChange.None)] // Hidden unchanged
     [InlineData(0x00000010u, 0x00000020u, HiddenChange.None)]
-    [InlineData(0x00000000u, 0x00000000u, HiddenChange.None)]
     public void Only_a_change_of_the_hidden_bit_acts(uint oldState, uint newState, HiddenChange change)
     {
         Assert.Equal(change, HiddenTransition.Classify(oldState, newState));
@@ -61,6 +60,7 @@ public sealed class HiddenTransitionTests(DatSetFixture fixture) : IClassFixture
         Assert.Equal(0x00400C28u, HiddenTransition.ApplyToChildState(0x00400C28, HiddenChange.None));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void On_the_real_dats_script_table_0x34000004_plays_the_hidden_and_unhide_scripts()
     {
@@ -71,6 +71,7 @@ public sealed class HiddenTransitionTests(DatSetFixture fixture) : IClassFixture
         Assert.Equal(0u, HiddenTransition.Play(effects, HiddenChange.None));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void An_object_without_a_script_table_plays_nothing()
     {

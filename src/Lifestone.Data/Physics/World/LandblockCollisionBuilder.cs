@@ -244,7 +244,7 @@ public sealed class LandblockCollisionBuilder
             var portal = data.Portals[i];
             var polygon = structure.GetPortal(portal.PolygonId)
                 ?? throw new InvalidDataException($"EnvCell 0x{data.Id:X8}: portal {i} names polygon {portal.PolygonId}, which is not one of its struct's portals.");
-            portals[i] = new PhysCellPortal(portal.OtherCellId, portal.OtherPortalIndex, portal.PortalSide, PhysPolygon.MakePlane(polygon.Vertices));
+            portals[i] = new PhysCellPortal(portal.OtherCellId, portal.OtherPortalIndex, portal.PortalSide, PhysPolygon.MakePlane(polygon.Vertices), polygon.Vertices);
         }
 
         return new PhysEnvCell(data.Id, new CellFrame(data.Id, ToFrame(data.Frame)), structure.Bsp, physics, portals, data.VisibleCellIds.ToArray(), data.SeenOutside)

@@ -11,6 +11,7 @@ namespace Lifestone.Data.Tests.Dat;
 /// The language dat (<c>client_local_English.dat</c>) read through <see cref="DatSet"/>'s standalone databases: its
 /// records are unpacked with a reader bound to the portal, which holds the master property table (m2-log-in.md §5.1).
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class LocalDatTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private DatSet Dats => fixture.Dats;

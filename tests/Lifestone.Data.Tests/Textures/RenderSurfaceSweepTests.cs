@@ -9,6 +9,7 @@ using Xunit.Abstractions;
 namespace Lifestone.Data.Tests.Textures;
 
 /// <summary>Decodes every RenderSurface in the user's portal and highres dats.</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class RenderSurfaceSweepTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     /// <summary>Format census of client_portal.dat (docs/research/local-scout.md, dat-format.md).</summary>

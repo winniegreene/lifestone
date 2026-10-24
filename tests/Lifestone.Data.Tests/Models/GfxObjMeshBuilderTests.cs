@@ -37,6 +37,7 @@ public sealed class GfxObjMeshBuilderTests(DatSetFixture fixture) : IClassFixtur
         { 0x0100005A, "08000B01+10/6 08000B02+30/44 08000B03+11/11 08000B04+10/9 08000B05+14/12" },
     };
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [MemberData(nameof(IndependentSubMeshCounts))]
     public void Sub_mesh_counts_match_the_independent_python_reader(uint gfxObjId, string expected)
@@ -51,6 +52,7 @@ public sealed class GfxObjMeshBuilderTests(DatSetFixture fixture) : IClassFixtur
         ModelsExhaustiveTests.AssertWellFormed(mesh, surfaceIds: null);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_building_carries_sort_center_bounds_and_degrade_link()
     {
@@ -75,6 +77,7 @@ public sealed class GfxObjMeshBuilderTests(DatSetFixture fixture) : IClassFixtur
         Assert.True(mesh.VertexBounds.Size.Z > 1f);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void NoPos_polygons_use_uv_index_zero()
     {
@@ -95,6 +98,7 @@ public sealed class GfxObjMeshBuilderTests(DatSetFixture fixture) : IClassFixtur
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Separate_back_polygon_uses_negative_surface_and_uvs()
     {
@@ -118,6 +122,7 @@ public sealed class GfxObjMeshBuilderTests(DatSetFixture fixture) : IClassFixtur
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Anchor_gfxobj_is_a_single_transparent_triangle()
     {
@@ -128,6 +133,7 @@ public sealed class GfxObjMeshBuilderTests(DatSetFixture fixture) : IClassFixtur
         Assert.Equal(1, mesh.Mesh.TriangleCount);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Polygon_core_also_builds_an_EnvCell_cellstruct()
     {
@@ -147,6 +153,7 @@ public sealed class GfxObjMeshBuilderTests(DatSetFixture fixture) : IClassFixtur
         Assert.All(built.Mesh.SubMeshes, s => Assert.Contains(s.SurfaceId, surfaces));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Surface_indices_with_different_retail_addressing_get_one_sub_mesh_each()
     {
@@ -178,6 +185,7 @@ public sealed class GfxObjMeshBuilderTests(DatSetFixture fixture) : IClassFixtur
             subs.Sum(x => x.Info.Ranges.Sum(r => r.IndexCount)));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void EnvCell_portal_polygons_are_on_untextured_surfaces_that_retail_skips()
     {
@@ -206,6 +214,7 @@ public sealed class GfxObjMeshBuilderTests(DatSetFixture fixture) : IClassFixtur
         Assert.All(SurfaceDrawRules.DrawnSubMeshes(fixture.Dats, built.Mesh, MeshDrawContext.Object), Assert.True);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Building_skips_its_untextured_portal_sub_mesh_only_when_drawn_as_a_building()
     {
@@ -230,6 +239,7 @@ public sealed class GfxObjMeshBuilderTests(DatSetFixture fixture) : IClassFixtur
         Assert.All(portalPolygons, p => Assert.True((p.Polygon.Stippling & 4) != 0));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Missing_gfxobj_loads_as_null()
     {

@@ -24,6 +24,7 @@ public sealed class WalkChecksTests(DatSetFixture fixture, ITestOutputHelper out
 {
     private const double Step = 1.0 / 60.0;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_walk_suite_holds_on_the_real_collision()
     {
@@ -47,6 +48,7 @@ public sealed class WalkChecksTests(DatSetFixture fixture, ITestOutputHelper out
         Assert.All(suite.Verdicts, v => Assert.True(v.Passed, $"{v.Name}: {v.Detail}"));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_camera_behind_a_wall_fails_the_walk()
     {
@@ -71,6 +73,7 @@ public sealed class WalkChecksTests(DatSetFixture fixture, ITestOutputHelper out
         Assert.Contains("camera", scenario.Verdict.Detail, StringComparison.Ordinal);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_teleport_without_a_server_leaves_the_player_constrained_unless_the_host_drops_it()
     {

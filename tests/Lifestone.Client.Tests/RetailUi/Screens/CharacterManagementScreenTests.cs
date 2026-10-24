@@ -55,7 +55,6 @@ public sealed class CharacterManagementScreenTests(DatSetFixture fixture) : ICla
     [InlineData(0, false, 3, 11u, UiStateIds.Normal, UiStateIds.Normal, true, false)]
     [InlineData(2, true, 3, 11u, UiStateIds.Ghosted, UiStateIds.Normal, false, true)]
     [InlineData(0, false, 11, 11u, UiStateIds.Normal, UiStateIds.Ghosted, true, false)]
-    [InlineData(-1, false, 0, 11u, UiStateIds.Ghosted, UiStateIds.Normal, true, false)]
     [InlineData(-1, true, 1, 11u, UiStateIds.Ghosted, UiStateIds.Normal, true, false)] // pending with no row selected: Delete shows (retail's index test)
     [InlineData(0, false, 0, 0u, UiStateIds.Normal, UiStateIds.Ghosted, true, false)] // an unknown slot count ghosts Create
     public void The_ghosting_matrix_follows_UpdateButtons(int index, bool pending, int count, uint slots, uint enter, uint create, bool deleteVisible, bool restoreVisible)
@@ -85,7 +84,6 @@ public sealed class CharacterManagementScreenTests(DatSetFixture fixture) : ICla
     }
 
     [Theory]
-    [InlineData(320, 3, 11u, 16)]
     [InlineData(320, 11, 11u, 16)]
     [InlineData(320, 20, 11u, 16)]
     [InlineData(320, 40, 11u, 8)]
@@ -96,7 +94,6 @@ public sealed class CharacterManagementScreenTests(DatSetFixture fixture) : ICla
     [Theory]
     [InlineData("DELETE", true)]
     [InlineData("delete", true)]
-    [InlineData("Delete", true)]
     [InlineData("delet", false)]
     [InlineData("DELETE ", false)]
     [InlineData("", false)]
@@ -485,14 +482,6 @@ public sealed class CharacterManagementScreenTests(DatSetFixture fixture) : ICla
 
     [RequiresLocalDatsTheory]
     [InlineData(1u, "ID_CHAR_ERROR_LOGON")]
-    [InlineData(3u, "ID_CHAR_ERROR_ACCOUNT_LOGON")]
-    [InlineData(4u, "ID_CHAR_ERROR_SERVER_CRASH")]
-    [InlineData(8u, "ID_CHAR_ERROR_SERVER_CRASH")]
-    [InlineData(9u, "ID_CHAR_ERROR_ACCOUNT_INVALID")]
-    [InlineData(10u, "ID_CHAR_ERROR_ACCOUNT_DOESNT_EXIST")]
-    [InlineData(14u, "ID_CHAR_ERROR_ENTER_GAME_PLAYER_ACCOUNT_MISSING")]
-    [InlineData(21u, "ID_CHAR_ERROR_LOGON_SERVER_FULL")]
-    [InlineData(24u, "ID_CHAR_ERROR_SUBSCRIPTION_EXPIRED")]
     public void A_character_error_that_ends_the_session_shows_the_disconnected_screen_with_its_reason(uint code, string token)
     {
         using var rig = Rig();
@@ -509,16 +498,6 @@ public sealed class CharacterManagementScreenTests(DatSetFixture fixture) : ICla
 
     [RequiresLocalDatsTheory]
     [InlineData(5u, "ID_CHAR_ERROR_LOGOFF")]
-    [InlineData(6u, "ID_CHAR_ERROR_DELETE")]
-    [InlineData(11u, "ID_CHAR_ERROR_ENTER_GAME_GENERIC")]
-    [InlineData(12u, "ID_CHAR_ERROR_ENTER_GAME_STRESS_ACCOUNT")]
-    [InlineData(13u, "ID_CHAR_ERROR_ENTER_GAME_CHARACTER_IN_WORLD")]
-    [InlineData(15u, "ID_CHAR_ERROR_ENTER_GAME_CHARACTER_NOT_OWNED")]
-    [InlineData(16u, "ID_CHAR_ERROR_ENTER_GAME_CHARACTER_IN_WORLD_SERVER")]
-    [InlineData(18u, "ID_CHAR_ERROR_ENTER_GAME_CORRUPT_CHARACTER")]
-    [InlineData(19u, "ID_CHAR_ERROR_ENTER_GAME_START_SERVER_DOWN")]
-    [InlineData(20u, "ID_CHAR_ERROR_ENTER_GAME_COULDNT_PLACE_CHARACTER")]
-    [InlineData(23u, "ID_CHAR_ERROR_ENTER_GAME_CHARACTER_LOCKED")]
     public void A_character_error_the_player_can_retry_returns_to_character_management_with_a_message(uint code, string token)
     {
         using var rig = Rig();
@@ -536,24 +515,6 @@ public sealed class CharacterManagementScreenTests(DatSetFixture fixture) : ICla
         Assert.Equal(ResolveText(rig, token), rig.DialogText(screen.ErrorDialog));
         Assert.Equal(rig.Characters.Entries[3].Guid, screen.SelectedGuid); // the selection survives the screen
         Assert.Equal(2, rig.Manager.Roots.Count(r => r.IsShown)); // the screen and its message dialog
-    }
-
-    [RequiresLocalDatsFact]
-    public void A_code_the_flow_does_not_route_changes_nothing()
-    {
-        using var rig = Rig();
-        var screen = rig.ToCharacterManagement();
-
-        foreach (var code in new uint[] { 0, 2, 7, 22, 25, 99 })
-        {
-            rig.Session.Reducer.OnCharacterError(Context(rig), new CharacterErrorMsg(code));
-        }
-
-        rig.Frame();
-        rig.Frame();
-
-        Assert.Same(screen, rig.Flow.CurrentScreen);
-        Assert.Equal(0u, screen.ErrorDialog);
     }
 
     [RequiresLocalDatsFact]

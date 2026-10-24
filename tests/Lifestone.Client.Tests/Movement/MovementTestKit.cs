@@ -212,7 +212,8 @@ internal static class MovementTestKit
 /// <summary>The player's weenie in the controller tests: a non-PK player with a settable run rate and jump speed.</summary>
 internal sealed class TestPlayerWeenie : IPhysicsWeenie
 {
-    public float RunRate { get; set; } = 1.5f;
+    /// <summary>The run rate: the fighters' live one (2.47, 9.6-9.9 m/s; P5a research and live round 1), not the old convenience of 1.5. A test that needs another sets it.</summary>
+    public float RunRate { get; set; } = 2.47f;
 
     public float JumpVelocity { get; set; } = 5f;
 

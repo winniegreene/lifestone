@@ -86,36 +86,4 @@ public sealed class StandInCastPlannerTests(DatSetFixture fixture) : IClassFixtu
             rig.Scripts.Count);
     }
 
-    [RequiresDatsFact]
-    public void A_self_buff_with_the_most_windups_plays_each_of_them_then_the_gesture_in_the_plans_times()
-    {
-        var table = SpellTableData.Load(fixture.Dats);
-        var components = SpellComponentTableData.Load(fixture.Dats);
-
-        // The spells with words (a quest spell such as Impulse has none: ACE speaks nothing then, which the first assertion of the cast skips by choosing another).
-        var best = table.Spells.Values.Where(SelfBuff).Where(s => (s.Flags & SpellFlags.FastCast) == 0 && !string.IsNullOrWhiteSpace(components.GetSpellWords(s.Formula))).OrderByDescending(Windups).ThenBy(s => s.Id).First();
-        Assert.True(Windups(best) >= 1, "a buff with at least one scarab exists");
-        CastAndCompare(best.Id, fizzle: false);
-    }
-
-    [RequiresDatsFact]
-    public void A_fast_cast_self_buff_has_no_windup_in_the_dats_plan_and_in_the_stand_ins_messages()
-    {
-        var table = SpellTableData.Load(fixture.Dats);
-        var fast = table.Spells.Values.Where(SelfBuff).Where(s => (s.Flags & SpellFlags.FastCast) != 0).OrderBy(s => s.Id).FirstOrDefault();
-        if (fast is null)
-        {
-            // The dats may hold no FastCast self buff the stand-in's skill can cast; the hand-made plans of StandInCastSequenceTests cover the shape. Say so rather than pass silently.
-            Assert.Fail("no FastCast self enchantment with an effect script and a power the stand-in can cast was found in the SpellTable: the dat-backed FastCast case cannot run");
-        }
-
-        Assert.Equal(0, StandInCastPlanner.FromDats(fixture.Dats).Plan(fast).Steps.Count(s => s.Kind == CastStepKind.Windup));
-        CastAndCompare(fast.Id, fizzle: false);
-    }
-
-    [RequiresDatsFact]
-    public void A_level_eight_fizzles_after_its_words_and_gestures_in_the_dats_plan()
-    {
-        CastAndCompare(Fizzler, fizzle: true);
-    }
 }

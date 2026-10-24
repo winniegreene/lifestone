@@ -242,6 +242,7 @@ public sealed class RetailSoundPlayerTests(DatSetFixture fixture) : IClassFixtur
             ((MinimalSoundSink)sink).Calls);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void On_the_real_dats_the_enter_whoosh_plays_wave_0x0A000246_at_full_volume()
     {
@@ -258,6 +259,7 @@ public sealed class RetailSoundPlayerTests(DatSetFixture fixture) : IClassFixtur
             output.Plays);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void On_the_real_dats_the_tunnel_hum_plays_centred_at_minus_10_db()
     {

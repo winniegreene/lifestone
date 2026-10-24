@@ -8,6 +8,7 @@ namespace Lifestone.Data.Tests.Effects;
 /// M3 4.1 s0: the one PhysicsScript of the end-of-retail portal dat that holds a SetLight hook (<c>SetLightHook::Execute</c> 11.6096 0x00527BD0,
 /// <c>CPhysicsObj::set_lights</c> 0x005107C0), pinned by id and by what it does to the lights.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class SetLightScriptPinTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     [RequiresDatsFact]

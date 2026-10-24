@@ -36,8 +36,8 @@ internal sealed record HeadlessEnvironment(string? ServerRuntime, IReadOnlyList<
 /// <para><b>Exit codes:</b> 0 the scenario succeeded; 1 the command line was bad (nothing ran) or the scenario failed;
 /// 2 the run could not start (no dats, no backend, a refused gate, a scenario not built yet).</para>
 /// <para><b>Output:</b> log lines on standard error (from <c>--log-level</c>, default info) and in
-/// <c>cache/headless/&lt;UTC&gt;-headless.log</c> (everything from debug up when <c>--log-level=debug</c>, else info);
-/// the recording (always, D48) in <c>cache/sessions/&lt;UTC&gt;-headless.lsrec</c> or <c>--record-session=DIR</c>, deleted
+/// <c>cache/headless/&lt;UTC&gt;-headless-&lt;pid&gt;.log</c> (everything from debug up when <c>--log-level=debug</c>, else info);
+/// the recording (always, D48) in <c>cache/sessions/&lt;UTC&gt;-headless-&lt;pid&gt;.lsrec</c> or <c>--record-session=DIR</c>, deleted
 /// again when the run could not start (no session ever wrote to it); the verdict line
 /// (<see cref="HeadlessRunResult.SummaryLine"/>, m2-plan §4.14) on standard output once the backend was found and the
 /// dats opened; with <c>--summary=PATH</c>, the whole result as JSON. Relative output paths are taken from the checkout's
@@ -237,8 +237,8 @@ internal static class Program
     {
         var stamp = environment.Time.GetUtcNow();
         var recordingFolder = options.Session.RecordDirectory ?? SessionOptions.DefaultRecordDirectory;
-        var recordingRelative = Path.Combine(recordingFolder, RecordingFormat.FileName(stamp, HeadlessRunOptions.RunnerToken));
-        var logRelative = Path.Combine(LogDirectory, Path.ChangeExtension(RecordingFormat.FileName(stamp, HeadlessRunOptions.RunnerToken), ".log"));
+        var recordingRelative = Path.Combine(recordingFolder, RecordingFormat.FileName(stamp, HeadlessRunOptions.RunnerToken, Environment.ProcessId));
+        var logRelative = Path.Combine(LogDirectory, Path.ChangeExtension(RecordingFormat.FileName(stamp, HeadlessRunOptions.RunnerToken, Environment.ProcessId), ".log"));
         if (!OutputPaths.TryResolve(recordingRelative, root, out var recordingPath, out var problem)
             || !OutputPaths.TryResolve(logRelative, root, out var logPath, out problem))
         {
@@ -321,6 +321,7 @@ internal static class Program
                 HeadlessScenario.Fight => FightQuitAfterSeconds,
                 HeadlessScenario.DeathAndRegear => DeathQuitAfterSeconds(options.Death.Seconds, options.Death.FightSeconds),
                 HeadlessScenario.Hunt => HuntQuitAfterSeconds(options.Hunt.Seconds),
+                HeadlessScenario.Wayfind => WayfindScenario.QuitAfterSeconds(options.Wayfind),
                 _ => HeadlessRunOptions.DefaultQuitAfterSeconds,
             },
             LifestoneVersion = typeof(Program).Assembly.GetName().Version?.ToString(),
@@ -373,7 +374,9 @@ internal static class Program
                         log.Warn("headless", "--character and --create-character are ignored by --scenario=fighter-build (the fighter is always the template's character)");
                     }
 
-                    scenario = new FighterBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log);
+                    // The components' taper colours are the account's (ACE customises them from the stored account name, as for the gear kit): read here, hashed by FighterComponents and never logged or printed.
+                    var withComponents = Lifestone.Client.Session.Fighter.FighterProfile.For(options.Fighter) is not null; // the Hunter has no spells and so no components
+                    scenario = new FighterBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log, template: options.Fighter, spells: withComponents ? SpellTableData.Load(dats).Spells : null, account: withComponents ? LoginName(runtime, runOptions.Session.Account) : null, recreate: options.FighterRecreate);
                 }
                 else if (options.Scenario == HeadlessScenario.Gear)
                 {
@@ -389,10 +392,13 @@ internal static class Program
                 {
                     if (options.Session.Character is not null || options.CreateCharacter is not null)
                     {
-                        log.Warn("headless", "--character and --create-character are ignored by --scenario=buff (the mage is always the template's character)");
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=buff (the character is the account's template: " + (options.Fighter?.Name ?? Lifestone.Client.Session.Mage.MageTemplate.CharacterName) + ")");
                     }
 
-                    scenario = new BuffScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Buff, log, bars: new MageSpellBars(log));
+                    // M4 P5a C4: a fighter account (test-melee, test-archer) buffs through the caster swap with no gear step; the default account is the mage's scenario, unchanged.
+                    scenario = options.Fighter is { } buffFighter
+                        ? new BuffScenario(buffFighter, SpellTableData.Load(dats).Spells, options.Buff, log)
+                        : new BuffScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Buff, log, bars: new MageSpellBars(log));
                 }
                 else if (options.Scenario == HeadlessScenario.Fight)
                 {
@@ -436,7 +442,20 @@ internal static class Program
                             return height;
                         },
                         ground: options.Hunt.GroundRow,
-                        follow: new Lifestone.Client.Session.Scenarios.HuntFollow(dats, log));
+                        follow: new Lifestone.Client.Session.Scenarios.HuntFollow(dats, log),
+                        template: options.Fighter)
+                    {
+                        SeekHeight = (cellId, x, y) => Lifestone.Client.Session.Fighter.HuntGround.SeekHeight(dats, cellId, x, y), // M4 P4 seek
+                    };
+                }
+                else if (options.Scenario == HeadlessScenario.Wayfind)
+                {
+                    if (options.Session.Character is not null || options.CreateCharacter is not null)
+                    {
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=wayfind (the character is the account's fighter template)");
+                    }
+
+                    scenario = new WayfindScenario(dats, log, options.Wayfind, options.Fighter?.Name);
                 }
                 else if (options.CreateCharacter is { } create)
                 {
@@ -502,6 +521,21 @@ internal static class Program
         if (scenario is HuntScenario huntRun)
         {
             output.WriteLine("hunt " + huntRun.VerdictFields());
+        }
+
+        if (scenario is WayfindScenario wayfindRun)
+        {
+            foreach (var leg in wayfindRun.Lines)
+            {
+                output.WriteLine(leg);
+            }
+
+            if (wayfindRun.StreamerLine is { } streamerLine)
+            {
+                output.WriteLine(streamerLine);
+            }
+
+            output.WriteLine(wayfindRun.DoneLine(result.Ok));
         }
 
         if (scenario is GearScenario gear)

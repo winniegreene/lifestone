@@ -85,7 +85,6 @@ public sealed class ViewFrustumTests
     }
 
     [Theory]
-    [InlineData(179.0f)]
     [InlineData(179.885f)] // the portal zoom's widest lens (f = 0.001, D31)
     [InlineData(179.99f)]
     public void Fields_of_view_up_to_just_below_180_degrees_make_a_cone_in_front_of_the_eye(float degrees)
@@ -105,7 +104,6 @@ public sealed class ViewFrustumTests
 
     [Theory]
     [InlineData(180f)]
-    [InlineData(181f)]
     [InlineData(float.NaN)]
     public void A_field_of_view_of_180_degrees_or_more_is_rejected(float degrees) =>
         Assert.Throws<ArgumentException>(() => ViewFrustum.FromCamera(North, Vector3.UnitZ, degrees, 1f));

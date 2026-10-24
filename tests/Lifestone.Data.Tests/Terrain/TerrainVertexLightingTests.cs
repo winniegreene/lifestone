@@ -74,6 +74,7 @@ public sealed class TerrainVertexLightingTests(DatSetFixture fixture, ITestOutpu
         Assert.Equal(255 * (double)TerrainVertexLighting.ColorByteScale * 0.2, night.R, 6);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Dereth_sky_keyframes_sit_above_the_ambient_floor()
     {
@@ -105,6 +106,7 @@ public sealed class TerrainVertexLightingTests(DatSetFixture fixture, ITestOutpu
         Assert.All(normals, n => Assert.True(Vector3.Distance(expected, n) < 1e-6f, $"{n} vs {expected}"));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_area_normals_match_TerrainMeshBuilder_and_OpenAC_and_lighting_matches_the_reference()
     {
@@ -141,6 +143,7 @@ public sealed class TerrainVertexLightingTests(DatSetFixture fixture, ITestOutpu
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_landblock_lighting_matches_the_double_precision_reference_and_OpenAC_normals()

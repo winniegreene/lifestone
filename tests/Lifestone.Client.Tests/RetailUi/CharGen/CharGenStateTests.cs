@@ -63,6 +63,16 @@ public sealed class CharGenStateTests(DatSetFixture fixture) : IClassFixture<Dat
             var intent = state.GetResult();
             Assert.True(intent.TryValidate(out var invalid), invalid);
             Assert.Null(AceCreateRules.Check(intent, Catalog.Data, Catalog.Skills));
+
+            // The summary page fits the profession to the character (folded in from the CharGenSummary create-intent fact, P1): the intent the create sends still has the required skills and verifies.
+            state.FitTemplateToCharacter();
+            var fitted = state.GetCharGenResult();
+            var fittedIntent = fitted.ToIntent();
+            Assert.True(CharGenVerifier.Verify(fitted, Catalog, out problem), $"fitted: heritage {heritage} gender {gender} seed {seed}: {problem}");
+            Assert.Equal(CharacterCreateIntent.RequiredSkillCount, fittedIntent.SkillAdvancementClasses.Count);
+            Assert.True(fittedIntent.TryValidate(out invalid), invalid);
+            Assert.Equal(TestName, fittedIntent.Name);
+            Assert.True(state.Template >= 0, "the summary page fits the profession, so a character always has a template of 0 or more");
         }
     }
 

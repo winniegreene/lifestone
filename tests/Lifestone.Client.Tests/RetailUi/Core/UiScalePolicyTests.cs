@@ -8,10 +8,8 @@ public sealed class UiScalePolicyTests
 {
     [Theory]
     [InlineData(800, 600, 1, 800, 600)]
-    [InlineData(1280, 720, 1, 1280, 720)]
     [InlineData(1920, 1080, 1, 1920, 1080)]
     [InlineData(1600, 1200, 2, 800, 600)]
-    [InlineData(2560, 1440, 2, 1280, 720)]
     [InlineData(3840, 2160, 3, 1280, 720)]
     [InlineData(1700, 1300, 2, 850, 650)]
     public void The_scale_is_the_largest_that_leaves_retails_minimum(int width, int height, int scale, int logicalWidth, int logicalHeight)

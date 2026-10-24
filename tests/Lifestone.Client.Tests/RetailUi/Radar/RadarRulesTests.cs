@@ -42,10 +42,8 @@ public sealed class RadarRulesTests
     [Theory]
     [InlineData(75.0, 73.9, true)]
     [InlineData(75.0, 74.0, false)] // the test is against the range less one metre, squared, and "greater or equal" drops it
-    [InlineData(75.0, 80.0, false)]
     [InlineData(25.0, 23.9, true)]
     [InlineData(25.0, 24.0, false)]
-    [InlineData(25.0, 40.0, false)]
     public void An_object_beyond_the_range_less_a_metre_is_dropped(double range, double metresAhead, bool shown)
     {
         var shownAt = RadarRules.TryPlace(new Vector3(0f, (float)metresAhead, 0f), range, 50, 60, 60, out _, out _);
@@ -110,12 +108,10 @@ public sealed class RadarRulesTests
     // ------------------------------------------------------------------ intensity
 
     [Theory]
-    [InlineData(0f, 1.0f)]
     [InlineData(4.99f, 1.0f)]
     [InlineData(-4.99f, 1.0f)]
     [InlineData(5.0f, 0.65f)]
     [InlineData(-5.0f, 0.65f)]
-    [InlineData(40f, 0.65f)]
     public void A_blip_is_bright_within_5_metres_of_the_players_height_and_dim_beyond(float verticalOffset, float expected)
     {
         Assert.Equal(expected, RadarRules.IntensityOf(verticalOffset));

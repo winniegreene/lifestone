@@ -9,6 +9,7 @@ using Lifestone.Client.Options;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Credentials;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.Checkout;
 using Lifestone.Data.Magic;
@@ -32,7 +33,7 @@ namespace Lifestone.Game.Sessions;
 /// <para>The verdict is <see cref="FightLegVerdict"/>'s (<c>[logincheck] bsd-fight done ok=...</c>); the process ends with 0 only when it held. A failure at any stage logs off before it is reported (so ACE does not keep the
 /// character in the world for the next run). Per frame the node reads counters and allocates nothing; strings are built at stage changes and at the end.</para>
 /// <para><b>The loading worker</b> reads the SpellTable, builds the gear kit (the login name is hashed into the kit's component formulas inside the worker and stays in its locals), loads the den's floor graph
-/// (<see cref="DenPlanner"/>) and then prepares the methods of the fight's types (<see cref="RuntimeHelpers.PrepareMethod(RuntimeMethodHandle)"/>), so none of that is compiled on the game thread in the den.</para>
+/// (<see cref="DenRooms"/>) and then prepares the methods of the fight's types (<see cref="RuntimeHelpers.PrepareMethod(RuntimeMethodHandle)"/>), so none of that is compiled on the game thread in the den.</para>
 /// <para><b>Limits.</b> <see cref="WholeCheckSecondsFor"/>: the login and the arrival 60 s, the gear 120 s, the buff top-up 240 s (a live cycle of 26 casts took 56 s), the teleport and the settle 30 s, the fight's own
 /// <c>--fight-seconds</c> (default 300), so 750 s by default; the log off after a failure may take <see cref="RecoverySeconds"/> more.</para>
 /// </remarks>
@@ -86,7 +87,7 @@ public sealed partial class FightLegRunner : Node
     private RoutePlayHost _walkHost = null!;
     private FightOptions _options = new();
     private double _wholeSeconds = WholeCheckSeconds;
-    private Task<(SpellTableData Table, GearKit Kit, DenPlanner Planner, double BuildMilliseconds, double PlannerMilliseconds)>? _loading;
+    private Task<(SpellTableData Table, GearKit Kit, RoomGraph Planner, double BuildMilliseconds, double PlannerMilliseconds)>? _loading;
     private FightScenario? _scenario;
     private string? _optionError;
     private ActionHandle? _pending;
@@ -167,7 +168,7 @@ public sealed partial class FightLegRunner : Node
                 var kit = GearKit.Build(table.Spells, LoginName(key));
                 var buildMs = System.Diagnostics.Stopwatch.GetElapsedTime(built).TotalMilliseconds;
                 var planning = System.Diagnostics.Stopwatch.GetTimestamp();
-                var planner = new DenPlanner(DenPlanner.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(dats), new LandblockCoord(1, 5))));
+                var planner = DenRooms.GraphOf(LandblockCellSet.Load(new CellStructureLibrary(dats), new LandblockCoord(1, 5)));
                 var plannerMs = System.Diagnostics.Stopwatch.GetElapsedTime(planning).TotalMilliseconds;
                 var warm = System.Diagnostics.Stopwatch.GetTimestamp();
                 var prepared = PrepareFightMethods();

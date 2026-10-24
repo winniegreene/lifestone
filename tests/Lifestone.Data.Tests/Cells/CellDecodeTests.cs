@@ -23,6 +23,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
 
     private static readonly LandblockCoord Academy = new(0x86, 0x03);
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_building_entry_cell_A9B40100_matches_python_reader()
     {
@@ -54,6 +55,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
         Assert.Equal(0u, cell.RestrictionObjectId);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_cell_A9B4010F_matches_python_reader()
     {
@@ -68,6 +70,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
         Assert.Equal(16, cell.VisibleCellIds.Count);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_LandBlockInfo_matches_python_reader()
     {
@@ -103,6 +106,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
         Assert.All(second.Portals, p => Assert.Equal(5, p.StabList.Count));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Ace_start_cell_860301AD_matches_python_reader()
     {
@@ -122,6 +126,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
         AssertVector(new Vector3(10.388f, -25.102f, 3.857f), cell.StaticObjects[0].Frame.Origin);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Town_network_cells_match_python_reader()
     {
@@ -142,6 +147,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
         Assert.Equal(7, hub.StaticObjects.Count);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [InlineData(0x86, 0x03, 2163, 0x86030972u, 568u, 5089, 0, 123531, 975, 0, 155, 0, 0)]
     [InlineData(0x00, 0x07, 498, 0x000702F1u, 205u, 1299, 0, 60360, 1218, 0, 103, 0, 0)]
@@ -167,6 +173,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
         Assert.Equal(buildings, lbi.Buildings.Count);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Ace_start_position_lies_inside_its_cell_on_the_floor()
     {
@@ -183,6 +190,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
         Assert.False(set.Contains(cell, AceStartOrigin - new Vector3(0, 0, 0.5f)), "half a metre below the floor is outside the cell");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Ace_dungeon_landblocks_are_classified_as_dungeons()
     {
@@ -209,6 +217,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
         Assert.Equal(138, holtburg.SeenOutsideCellCount);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_building_entry_point_is_in_an_entry_cell()
     {
@@ -222,6 +231,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
         Assert.InRange(entry.Position.Z, 65f, 67.5f);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Enumerating_cells_uses_the_btree_not_num_cells()
     {
@@ -233,6 +243,7 @@ public sealed class CellDecodeTests(CellsFixture fixture) : IClassFixture<CellsF
         Assert.Empty(CellDiscovery.EnumerateEnvCellIds(fixture.Dats, new LandblockCoord(0x00, 0x00)));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Missing_records_return_null()
     {

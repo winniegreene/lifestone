@@ -4,6 +4,7 @@ using Lifestone.Data.Terrain;
 namespace Lifestone.Data.Tests;
 
 /// <summary>Checks against the user's end-of-retail dats; expected values come from docs/research/local-scout.md.</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class DatSetTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     /// <summary>

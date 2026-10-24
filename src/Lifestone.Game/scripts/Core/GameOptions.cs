@@ -469,11 +469,6 @@ public sealed record GameOptions
             errors.Add("--play-frames saves the play checks' shell frames: it needs --play-checks");
         }
 
-        if (play.SkipScenarios && options.Checks != GameCheckSuite.Play)
-        {
-            errors.Add("--play-skip-scenarios leaves out the play checks' fight and death scenarios: it needs --play-checks");
-        }
-
         return options with { Session = session, Play = play, Errors = errors };
     }
 

@@ -11,6 +11,7 @@ using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Credentials;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.Checkout;
 using Lifestone.Data.Magic;
@@ -35,7 +36,7 @@ namespace Lifestone.Game.Sessions;
 /// <para>The verdict is <see cref="DeathLegVerdict"/>'s (<c>[logincheck] bsd-death done ok=...</c>); the process ends with 0 only when it held. A failure at any stage logs off before it is reported. Per frame the node reads
 /// counters and allocates nothing; strings are built at stage changes and at the end.</para>
 /// <para><b>The loading worker</b> reads the SpellTable, builds the gear kit (the login name is hashed into the kit's component formulas inside the worker and stays in its locals), loads the den's floor graph
-/// (<see cref="DenPlanner"/>) and prepares the methods of the death loop's types (<see cref="RuntimeHelpers.PrepareMethod(RuntimeMethodHandle)"/>), so none of that is compiled on the game thread in the den. The session's own
+/// (<see cref="DenRooms"/>) and prepares the methods of the death loop's types (<see cref="RuntimeHelpers.PrepareMethod(RuntimeMethodHandle)"/>), so none of that is compiled on the game thread in the den. The session's own
 /// message handlers (the victim notice, the vitae, the purge, the corpse) are prepared by <c>SessionJitWarmUp</c> at start-up, for every message the dispatcher knows.</para>
 /// <para><b>Limits.</b> <see cref="WholeCheckSecondsFor"/>: the login and the arrival 60 s, the gear 120 s, the spell bars 30 s, the bind 90 s (the teleport, the walk, the Use and the attune line), the suicide and its respawn
 /// 90 s (the countdown is 15 s), the decoy top-up after that suicide 30 s, the teleport to the den and the settle 30 s, <c>--death-seconds</c> (default 600), the respawn and the vitals 65 s, and the re-gear 120 s; and, since M4 3.1 d2, the stages
@@ -143,7 +144,7 @@ public sealed partial class DeathLegRunner : Node
     private FightOptions _fightOptions = new();
     private readonly CombatModeWatch _modeWatch = new(); // M4 3.1 g: mode_mismatch=, report-only, printed last on the leg line
     private double _wholeSeconds = WholeCheckSeconds;
-    private Task<(SpellTableData Table, GearKit Kit, DenPlanner Planner, double BuildMilliseconds, double PlannerMilliseconds)>? _loading;
+    private Task<(SpellTableData Table, GearKit Kit, RoomGraph Planner, double BuildMilliseconds, double PlannerMilliseconds)>? _loading;
     private DeathScenario? _scenario;
     private string? _optionError;
     private ActionHandle? _pending;
@@ -237,7 +238,7 @@ public sealed partial class DeathLegRunner : Node
                 var kit = GearKit.ForDeathLoop(table.Spells, LoginName(key), options);
                 var buildMs = System.Diagnostics.Stopwatch.GetElapsedTime(built).TotalMilliseconds;
                 var planning = System.Diagnostics.Stopwatch.GetTimestamp();
-                var planner = new DenPlanner(DenPlanner.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(dats), new LandblockCoord(1, 5))));
+                var planner = DenRooms.GraphOf(LandblockCellSet.Load(new CellStructureLibrary(dats), new LandblockCoord(1, 5)));
                 var plannerMs = System.Diagnostics.Stopwatch.GetElapsedTime(planning).TotalMilliseconds;
                 var warm = System.Diagnostics.Stopwatch.GetTimestamp();
                 var prepared = PrepareDeathMethods();

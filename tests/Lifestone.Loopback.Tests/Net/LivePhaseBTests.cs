@@ -26,6 +26,7 @@ namespace Lifestone.Loopback.Tests.Net;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
 [TestCaseOrderer("Lifestone.Loopback.Tests.Net.LiveStepOrderer", "Lifestone.Loopback.Tests")]
 public sealed class LivePhaseBTests(ITestOutputHelper output)
 {
@@ -91,6 +92,7 @@ public sealed class LivePhaseBTests(ITestOutputHelper output)
         }
     }
 
+    [Trait("Lane", "solo")]
     [LoopbackFact]
     [LiveStep(11)]
     public void Walking_Holtburg_on_the_retail_cadence_keeps_where_within_half_a_metre_and_the_force_position_sequence_still()
@@ -177,6 +179,7 @@ public sealed class LivePhaseBTests(ITestOutputHelper output)
         Assert.True(crcErrors == duplicates, $"ACE counted {crcErrors} bad checksums, the link made {duplicates} duplicate encrypted deliveries ({link.Describe()})");
     }
 
+    [Trait("Lane", "solo")]
     [LoopbackFact]
     [LiveStep(20)]
     [Trait("Tier", "Soak")]

@@ -32,6 +32,7 @@ public sealed class StageSiteTests(DatSetFixture fixture, ITestOutputHelper outp
         Assert.Equal(0f, StaticClearance.SegmentSegmentDistance(new Vector2(0, 0), new Vector2(2, 2), new Vector2(0, 2), new Vector2(2, 0)));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_stage_is_clear_of_Holtburgs_buildings_and_statics()
     {

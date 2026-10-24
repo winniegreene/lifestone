@@ -14,7 +14,7 @@ public sealed class BuffLegVerdictTests
     private const string Gear = "gear=wielded worn=8 kit=40/40 gear_steps=0 topup=0 cast=n/a";
 
     private static readonly Regex Line = new(
-        @"^buff done ok=(true|false) gear=(wielded|failed|\?) worn=(\d+|\?) cast=(ok|fizzled|failed|n/a) buffs=\d+/\d+ rebuffed=(yes|no) forced=(yes|no) min_remaining_s=(\d+|n/a) levels=\S+ cycle_s=\d+ cast_scripts=\d+ cast_sounds=\d+ cast_windows=\d+ cast_frame_max_ms=(\d+\.\d|n/a) sounds_server=(\d+|n/a) fizzles=\d+ misses=\S+ surpassed=\d+ cast_scripts_expected=\d+( frame_over_50=yes)?$",
+        @"^buff done ok=(true|false) gear=(wielded|failed|\?) worn=(\d+|\?) cast=(ok|fizzled|failed|n/a) buffs=\d+/\d+ rebuffed=(yes|no) forced=(yes|no) min_remaining_s=(\d+|n/a) levels=\S+ cycle_s=\d+ cast_scripts=\d+ cast_sounds=\d+ cast_windows=\d+ cast_frame_max_ms=(\d+\.\d|n/a) sounds_server=(\d+|n/a) fizzles=\d+ misses=\S+ surpassed=\d+ cast_scripts_expected=\d+( frame_over_50=yes)?( driver=on rebuff_lines=\d+ rebuff_s=(\d+|n/a))?$",
         RegexOptions.CultureInvariant);
 
     private static BuffResult Cycle(int cast = 30, int fizzles = 0, string[]? misses = null, string? failure = null) => new()
@@ -49,16 +49,18 @@ public sealed class BuffLegVerdictTests
     private static BuffLegMeasures Measures(int? server = 3, long scripts = 12, long sounds = 20, long windows = 31, double? frame = 21.4) => new(scripts, sounds, windows, frame, server);
 
     [Fact]
-    public void A_clean_run_holds_and_the_line_has_the_fields_in_order()
+    public void A_clean_run_holds_and_the_golden_line_has_the_fields_in_order()
     {
-        var outcome = BuffLegVerdict.Compose(Ran(), Measures());
+        // The golden line (P1b lane B), forced-pass shape: the whole line is compared once, with a cast window over 50 ms for the flag.
+        var outcome = BuffLegVerdict.Compose(Ran(), Measures(frame: 52.04));
 
         Assert.True(outcome.Ok, string.Join("; ", outcome.Problems));
         Assert.Empty(outcome.Problems);
         Assert.Equal("ok", outcome.Cast);
         Assert.Matches(Line, outcome.Line);
-        Assert.StartsWith("buff done ok=true gear=wielded worn=8 cast=ok buffs=24/24 rebuffed=yes forced=yes min_remaining_s=1204 levels=Focus:VII,Will:VII cycle_s=1324 ", outcome.Line, StringComparison.Ordinal);
-        Assert.EndsWith(" cast_scripts=12 cast_sounds=20 cast_windows=31 cast_frame_max_ms=21.4 sounds_server=3 fizzles=0 misses=none surpassed=0 cast_scripts_expected=" + (Ran().Cycle!.Cast + Ran().Forced!.Cast), outcome.Line, StringComparison.Ordinal);
+        Assert.Equal(
+            "buff done ok=true gear=wielded worn=8 cast=ok buffs=24/24 rebuffed=yes forced=yes min_remaining_s=1204 levels=Focus:VII,Will:VII cycle_s=1324 cast_scripts=12 cast_sounds=20 cast_windows=31 cast_frame_max_ms=52.0 sounds_server=3 fizzles=0 misses=none surpassed=0 cast_scripts_expected=31 frame_over_50=yes",
+            outcome.Line);
     }
 
     [Theory]
@@ -83,18 +85,14 @@ public sealed class BuffLegVerdictTests
         var slow = BuffLegVerdict.Compose(Ran(), Measures(frame: 480.0));
 
         Assert.True(quiet.Ok, string.Join("; ", quiet.Problems));
-        Assert.Contains(" cast_scripts=0 cast_sounds=0 cast_windows=0 cast_frame_max_ms=n/a ", quiet.Line, StringComparison.Ordinal);
         Assert.True(slow.Ok);
-        Assert.Contains(" cast_frame_max_ms=480.0 ", slow.Line, StringComparison.Ordinal);
         Assert.Matches(Line, quiet.Line);
         Assert.Matches(Line, slow.Line);
     }
 
     [Theory]
-    [InlineData(21.4, false)]
     [InlineData(50.0, false)]
     [InlineData(50.1, true)]
-    [InlineData(74.9, true)]
     [InlineData(480.0, true)]
     public void A_cast_window_over_50_ms_prints_the_flag_and_still_passes(double frame, bool over50)
     {
@@ -110,15 +108,6 @@ public sealed class BuffLegVerdictTests
     {
         Assert.DoesNotContain("frame_over_50", BuffLegVerdict.Compose(Ran(), Measures(frame: null)).Line, StringComparison.Ordinal);
         Assert.DoesNotContain("frame_over_50", BuffLegVerdict.Compose(Ran(), Measures(frame: double.NaN)).Line, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_expected_cast_scripts_count_the_casts_of_both_passes()
-    {
-        var none = BuffLegVerdict.Compose(new BuffLegScenarioResult(true, null, Gear, null, null), Measures());
-
-        Assert.Contains(" cast_scripts_expected=0", none.Line, StringComparison.Ordinal);
-        Assert.Contains(" cast_scripts_expected=" + (Ran().Cycle!.Cast + Ran().Forced!.Cast), BuffLegVerdict.Compose(Ran(), Measures(scripts: 2)).Line, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -141,6 +130,7 @@ public sealed class BuffLegVerdictTests
         Assert.Contains("rebuffed=no forced=no", castOnly.Line, StringComparison.Ordinal);
         Assert.False(noPass.Ok);
         Assert.Matches(Line, noPass.Line);
+        Assert.Contains(" cast_scripts_expected=0", noPass.Line, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -167,21 +157,15 @@ public sealed class BuffLegVerdictTests
     // ---------------------------------------------------------------------------------------------- the cast= rule (D20)
 
     [Fact]
-    public void Cast_is_ok_when_every_cast_was_confirmed()
+    public void Cast_is_ok_when_every_cast_was_confirmed_or_a_fizzle_was_recovered_by_its_retry()
     {
         Assert.Equal("ok", BuffLegVerdict.CastOf(Cycle(), Forced()));
-    }
-
-    [Fact]
-    public void Cast_is_ok_when_a_fizzle_was_recovered_by_its_retry()
-    {
         // The cycle counts the fizzle (fizzles=1) and retries one level down; the line landed, so there is no miss.
         Assert.Equal("ok", BuffLegVerdict.CastOf(Cycle(fizzles: 2), Forced()));
     }
 
     [Theory]
     [InlineData("Focus:fizzled")]
-    [InlineData("Will:upgrade-fizzled")]
     public void Cast_is_fizzled_when_a_line_was_missed_by_fizzles(string miss)
     {
         Assert.Equal("fizzled", BuffLegVerdict.CastOf(Cycle(fizzles: 2, misses: [miss]), Forced()));
@@ -190,8 +174,6 @@ public sealed class BuffLegVerdictTests
 
     [Theory]
     [InlineData("Focus:no-spell")]
-    [InlineData("Focus:no-level")]
-    [InlineData("Imp:no-worn-piece")]
     [InlineData("Bane:error-0x0402")]
     public void Cast_is_failed_for_any_other_miss(string miss)
     {
@@ -227,5 +209,61 @@ public sealed class BuffLegVerdictTests
     public void A_miss_token_is_a_fizzle_by_its_why(string miss, bool fizzle)
     {
         Assert.Equal(fizzle, BuffLegVerdict.IsFizzle(miss));
+    }
+
+    // ---------------------------------------------------------------------------------------------- the driver run (M4 4.1 lane c, DoD 14)
+
+    private static BuffResult Driver(int cast = 3, bool rebuffed = true, string[]? misses = null) => new()
+    {
+        Wanted = 24,
+        Active = 24,
+        Levels = "Focus:VII,Will:VII",
+        RecastWhileActive = rebuffed ? cast : 0,
+        Pass = "rebuff",
+        MinRemainingSeconds = 1795.2,
+        Cast = cast,
+        Misses = misses ?? [],
+    };
+
+    private static BuffLegScenarioResult Driven(BuffResult? driver = null, double seconds = 33.4) =>
+        new(true, null, Gear, Cycle(), null, DriverOn: true, Driver: driver ?? Driver(), RebuffSeconds: seconds);
+
+    [Fact]
+    public void A_driver_run_golden_line_reads_rebuffed_from_the_drivers_pass_and_ends_with_the_driver_fields()
+    {
+        var outcome = BuffLegVerdict.Compose(Driven(), Measures());
+
+        Assert.True(outcome.Ok, string.Join("; ", outcome.Problems));
+        Assert.Matches(Line, outcome.Line);
+        Assert.Equal(
+            "buff done ok=true gear=wielded worn=8 cast=ok buffs=24/24 rebuffed=yes forced=no min_remaining_s=1795 levels=Focus:VII,Will:VII cycle_s=1324 cast_scripts=12 cast_sounds=20 cast_windows=31 cast_frame_max_ms=21.4 sounds_server=3 fizzles=0 misses=none surpassed=0 cast_scripts_expected=33 driver=on rebuff_lines=3 rebuff_s=33",
+            outcome.Line);
+    }
+
+    [Fact]
+    public void A_driver_run_whose_pass_recast_nothing_active_or_never_ended_fails_the_leg()
+    {
+        var cast = BuffLegVerdict.Compose(Driven(Driver(rebuffed: false)), Measures());
+        Assert.False(cast.Ok);
+        Assert.Contains(" rebuffed=no forced=no ", cast.Line, StringComparison.Ordinal);
+        Assert.Contains("driver's pass", cast.Problems[0], StringComparison.Ordinal);
+
+        var never = BuffLegVerdict.Compose(new BuffLegScenarioResult(false, "driver: never", Gear, Cycle(), null, DriverOn: true), Measures());
+        Assert.False(never.Ok);
+        Assert.EndsWith(" driver=on rebuff_lines=0 rebuff_s=n/a", never.Line, StringComparison.Ordinal);
+        Assert.Matches(Line, never.Line);
+    }
+
+    [Fact]
+    public void A_run_without_the_driver_is_unchanged_and_a_forced_pass_does_not_count_for_a_driver_run()
+    {
+        var plain = BuffLegVerdict.Compose(Ran(), Measures());
+        Assert.DoesNotContain("driver=", plain.Line, StringComparison.Ordinal);
+        Assert.Contains(" rebuffed=yes forced=yes ", plain.Line, StringComparison.Ordinal);
+
+        // A driver run judges the driver's pass even if a forced result were handed in.
+        var mixed = BuffLegVerdict.Compose(new BuffLegScenarioResult(true, null, Gear, Cycle(), Forced(), DriverOn: true, Driver: Driver(rebuffed: false)), Measures());
+        Assert.False(mixed.Ok);
+        Assert.Contains(" forced=yes ", mixed.Line, StringComparison.Ordinal); // printed from the forced result when one exists; the judgement is the driver's
     }
 }

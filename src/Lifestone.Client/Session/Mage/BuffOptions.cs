@@ -4,8 +4,8 @@ using Lifestone.Client.Options;
 namespace Lifestone.Client.Session.Mage;
 
 /// <summary>
-/// The buff cycle's four options (M3 2.1 s0b; plan decisions D10 and D24; registered in <c>OptionCatalog.Buff.cs</c>): the cast chance a level must reach, the re-buff margin, the transfer tries of the mana loop and the
-/// bound of its regeneration wait. Immutable; <see cref="FromArguments"/> is the parser both hosts call.
+/// The buff cycle's six options (M3 2.1 s0b; plan decisions D10 and D24; M4 4.1 lane a; registered in <c>OptionCatalog.Buff.cs</c>): the cast chance a level must reach, the re-buff margin, the transfer tries of the mana loop and the
+/// bound of its regeneration wait, and the re-buff driver's switch and check interval (<see cref="RebuffDriver"/>). Immutable; <see cref="FromArguments"/> is the parser both hosts call.
 /// </summary>
 public sealed record BuffOptions
 {
@@ -21,6 +21,12 @@ public sealed record BuffOptions
     /// <summary>The default of <c>--buff-mana-wait-s</c>: the longest a named regeneration wait lasts before the cycle fails.</summary>
     public const double DefaultManaWaitSeconds = 180;
 
+    /// <summary>The default of <c>--buff-auto-check-s</c>: how often the re-buff driver asks which lines are due.</summary>
+    public const double DefaultAutoCheckSeconds = 5;
+
+    /// <summary>The least <c>--buff-auto-check-s</c> accepts.</summary>
+    public const double MinAutoCheckSeconds = 1;
+
     /// <summary>The ACE cast chance (<see cref="Scenarios.GearCasts.Chance"/>) a level must reach to be cast, in (0, 1] (<c>--buff-cast-chance</c>).</summary>
     public double CastChance { get; init; } = DefaultCastChance;
 
@@ -33,10 +39,16 @@ public sealed record BuffOptions
     /// <summary>The bound of the regeneration wait, in seconds on the session clock (<c>--buff-mana-wait-s</c>).</summary>
     public double ManaWaitSeconds { get; init; } = DefaultManaWaitSeconds;
 
+    /// <summary>True when the re-buff driver starts passes by itself (<c>--buff-auto on</c>; default off, M4 4.1).</summary>
+    public bool Auto { get; init; }
+
+    /// <summary>The seconds between the re-buff driver's checks, at least <see cref="MinAutoCheckSeconds"/> (<c>--buff-auto-check-s</c>).</summary>
+    public double AutoCheckSeconds { get; init; } = DefaultAutoCheckSeconds;
+
     /// <summary>Every problem found while parsing, one line each, values never repeated beyond what the option parsers print.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
 
-    /// <summary>Parses the four options from arguments already split; an option that does not parse is reported in <see cref="Errors"/> and keeps its default.</summary>
+    /// <summary>Parses the six options from arguments already split; an option that does not parse is reported in <see cref="Errors"/> and keeps its default.</summary>
     /// <param name="args">The user arguments.</param>
     public static BuffOptions FromArguments(IEnumerable<CommandLineArgument> args)
     {
@@ -96,6 +108,21 @@ public sealed record BuffOptions
                     }
 
                     break;
+                case "--buff-auto":
+                    o = o with { Auto = OptionValues.Switch(argument, errors, o.Auto) };
+                    break;
+                case "--buff-auto-check-s":
+                    var check = OptionValues.Double(argument, errors, o.AutoCheckSeconds);
+                    if (errors.Count == known && check >= MinAutoCheckSeconds)
+                    {
+                        o = o with { AutoCheckSeconds = check };
+                    }
+                    else if (errors.Count == known)
+                    {
+                        errors.Add($"{argument.Name}: '{argument.Value}' is under {MinAutoCheckSeconds:0} second");
+                    }
+
+                    break;
             }
         }
 
@@ -104,5 +131,5 @@ public sealed record BuffOptions
 
     /// <summary>The options as the run logs them, in invariant culture.</summary>
     public override string ToString() =>
-        string.Create(CultureInfo.InvariantCulture, $"cast_chance={CastChance} rebuff_margin_s={RebuffMarginSeconds} transfer_tries={TransferTries} mana_wait_s={ManaWaitSeconds}");
+        string.Create(CultureInfo.InvariantCulture, $"cast_chance={CastChance} rebuff_margin_s={RebuffMarginSeconds} transfer_tries={TransferTries} mana_wait_s={ManaWaitSeconds} auto={(Auto ? "on" : "off")} auto_check_s={AutoCheckSeconds}");
 }

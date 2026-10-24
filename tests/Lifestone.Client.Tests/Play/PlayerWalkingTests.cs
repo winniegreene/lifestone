@@ -23,6 +23,7 @@ namespace Lifestone.Client.Tests.Play;
 /// <see cref="MovementBindings"/> to the human walker on Holtburg's collision, the dry-run sink's messages, and the chase camera swept through the
 /// same collision.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class PlayerWalkingTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private DatSet Dats => fixture.Dats;

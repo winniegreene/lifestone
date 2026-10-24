@@ -23,6 +23,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </summary>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[Trait("Lane", "solo")]
 public sealed class HoltburgLapsLoopbackTests(ITestOutputHelper output)
 {
     /// <summary>The character the loopback runs use, created on the test account when missing.</summary>
@@ -78,6 +80,7 @@ public sealed class HoltburgLapsLoopbackTests(ITestOutputHelper output)
         output.WriteLine($"ring: {scenario.Route.Goals.Count} points, start {scenario.Route.Start}");
 
         HeadlessRunResult result;
+        LiveCharacter.Release(output, BackendProbe.TestAccountKey);
         var secrets = File.ReadAllBytes(files.SecretsFile);
         HeadlessRunner runner;
         try

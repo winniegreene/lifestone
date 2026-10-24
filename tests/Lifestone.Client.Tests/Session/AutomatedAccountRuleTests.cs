@@ -37,7 +37,7 @@ public sealed class AutomatedAccountRuleTests
     [Fact]
     public void A_login_check_on_the_play_account_or_any_other_is_refused_with_the_rule_and_no_account_name()
     {
-        foreach (var account in new[] { "play", "alice", "Alice-Alt", "lifestone", "TEST", "lifestone-test", "hunter2-typo" })
+        foreach (var account in new[] { "play", "alice", "Alice-Alt", "lifestone", "TEST", "Test-Melee", "test-mage", "lifestone-test", "hunter2-typo" })
         {
             string[] args = ["--play", $"--account={account}", "--login-check=enter"];
             var session = SessionOptions.Parse(args);
@@ -55,10 +55,13 @@ public sealed class AutomatedAccountRuleTests
         }
     }
 
-    [Fact]
-    public void A_login_check_on_the_test_account_goes_on_unchanged()
+    [Theory]
+    [InlineData("test")]
+    [InlineData("test-melee")]
+    [InlineData("test-archer")]
+    public void A_login_check_on_any_of_the_three_test_accounts_goes_on_unchanged(string account)
     {
-        string[] args = ["--account=test", "--login-check=enter"];
+        string[] args = [$"--account={account}", "--login-check=enter"];
         var session = SessionOptions.Parse(args);
         Assert.True(AutomatedAccountRule.TryApply(session, Automated(args), out var applied, out var refusal));
         Assert.Null(refusal);
@@ -108,5 +111,54 @@ public sealed class AutomatedAccountRuleTests
         Assert.Contains("IsAutomated", code, StringComparison.Ordinal);
         Assert.Contains("LoginCheck != LoginCheckKind.None", code, StringComparison.Ordinal);
         Assert.Contains("CreateLive(Options,", code, StringComparison.Ordinal); // the bootstrap gets the rule's options, not services.Options.Session
+    }
+
+    [Fact]
+    public void P4_rfixb_R11_test_melee_and_test_archer_enter_only_their_own_fighter_and_create_nothing()
+    {
+        foreach (var (account, own, other) in new[] { (TestAccounts.Melee, "Holtburg Brawler", "Holtburg Archer"), (TestAccounts.Archer, "Holtburg Archer", "Lifestone Smoke") })
+        {
+            Assert.True(AutomatedAccountRule.TryCharacters(account, null, null, out var none));
+            Assert.Null(none);
+            Assert.True(AutomatedAccountRule.TryCharacters(account, own.ToUpperInvariant(), null, out _)); // its own fighter, any case
+            Assert.False(AutomatedAccountRule.TryCharacters(account, other, null, out var wrong));
+            Assert.False(AutomatedAccountRule.TryCharacters(account, own, own, out var created)); // creating even its own character is the fighter-build's path, not this check's
+            foreach (var text in new[] { wrong, created })
+            {
+                Assert.False(string.IsNullOrEmpty(text));
+                Assert.DoesNotContain(account, text, StringComparison.Ordinal);
+                Assert.DoesNotContain(other, text!, StringComparison.Ordinal);
+            }
+        }
+
+        // The test account keeps its five characters and the creation of its smoke character.
+        Assert.True(AutomatedAccountRule.TryCharacters(TestAccounts.Test, "Lifestone Smoke", "Lifestone Smoke", out _));
+        Assert.True(AutomatedAccountRule.TryCharacters(null, "Lifestone Smoke", "Lifestone Smoke", out _));
+    }
+
+    [Fact]
+    public void P4_rfixb_R11_the_login_checks_that_create_a_character_refuse_test_melee_and_test_archer()
+    {
+        foreach (var account in new[] { TestAccounts.Melee, TestAccounts.Archer })
+        {
+            foreach (var kind in new[] { LoginCheckKind.Enter, LoginCheckKind.AcademyExit, LoginCheckKind.HoltburgLaps, LoginCheckKind.All, LoginCheckKind.Throwaway })
+            {
+                Assert.False(AutomatedAccountRule.TryLoginCheck(account, kind, out var refusal), kind.ToString());
+                Assert.False(string.IsNullOrEmpty(refusal));
+                Assert.DoesNotContain(account, refusal, StringComparison.Ordinal);
+            }
+
+            // The fighter kinds have their own runners and templates.
+            Assert.True(AutomatedAccountRule.TryLoginCheck(account, LoginCheckKind.Hunt, out _));
+            Assert.True(AutomatedAccountRule.TryLoginCheck(account, LoginCheckKind.None, out _));
+        }
+
+        foreach (var kind in Enum.GetValues<LoginCheckKind>())
+        {
+            Assert.True(AutomatedAccountRule.TryLoginCheck(TestAccounts.Test, kind, out _), kind.ToString());
+        }
+
+        var host = CheckoutFiles.ReadCSharpCode(SessionHostFile);
+        Assert.Contains("AutomatedAccountRule.TryLoginCheck(", host, StringComparison.Ordinal); // the game applies it
     }
 }

@@ -41,6 +41,9 @@ internal sealed partial class GameStateReducer : IAcSessionSink
     private int _attempt = 1;
     private int _bootBalance;
     private int _characterErrorBalance;
+    private uint? _deferredEnterWorldError;
+    private int _enterWorldRetryAhead;
+    private int _loginRetries;
 
     /// <summary>A reducer writing <paramref name="state"/> and publishing on <paramref name="bus"/>.</summary>
     /// <param name="state">The session's state (empty).</param>
@@ -112,6 +115,11 @@ internal sealed partial class GameStateReducer : IAcSessionSink
                 CompleteDataCheck();
                 break;
             case SessionEventKind.RetryScheduled:
+                if (sessionEvent.Phase == SessionPhase.EnteringWorld)
+                {
+                    NoteEnterWorldRetry(sessionEvent.Code);
+                }
+
                 _attempt = Math.Max(1, sessionEvent.Attempt);
                 Publish(new ConnectionProgress(ConnectionStage.Retrying, _attempt, sessionEvent.Delay, sessionEvent.Code, sessionEvent.Text));
                 break;
@@ -128,6 +136,7 @@ internal sealed partial class GameStateReducer : IAcSessionSink
                 LeaveWorld();
                 break;
             case SessionEventKind.Failed:
+                _deferredEnterWorldError = null;
                 Fail(sessionEvent.Failure);
                 break;
             case SessionEventKind.Warning:
@@ -217,6 +226,9 @@ internal sealed partial class GameStateReducer : IAcSessionSink
         _attempt = 1;
         _bootBalance = 0;
         _characterErrorBalance = 0;
+        _deferredEnterWorldError = null;
+        _enterWorldRetryAhead = 0;
+        _loginRetries = 0;
         _createsAwaiting = 0;
         _restoreAwaiting = 0;
         _deleteAwaitingList = false;

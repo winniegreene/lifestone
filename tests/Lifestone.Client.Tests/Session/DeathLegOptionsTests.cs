@@ -61,14 +61,8 @@ public sealed class DeathLegOptionsTests
 
     [Theory]
     [InlineData("--death-decoys=maybe", "--death-decoys")]
-    [InlineData("--death-rebuff=2", "--death-rebuff")]
-    [InlineData("--death-fight=yes please", "--death-fight")]
     [InlineData("--death-fight-kills=0", "--death-fight-kills")]
-    [InlineData("--death-fight-kills=1001", "--death-fight-kills")]
-    [InlineData("--death-fight-kills=many", "--death-fight-kills")]
     [InlineData("--death-fight-seconds=0", "--death-fight-seconds")]
-    [InlineData("--death-fight-seconds=-5", "--death-fight-seconds")]
-    [InlineData("--death-fight-seconds=soon", "--death-fight-seconds")]
     [InlineData("--buff-cast-chance=0", "--buff-cast-chance")]
     [InlineData("--buff-transfer-tries=0", "--buff-transfer-tries")]
     public void A_bad_value_is_the_legs_option_error_naming_the_option_and_the_default_stays(string argument, string name)

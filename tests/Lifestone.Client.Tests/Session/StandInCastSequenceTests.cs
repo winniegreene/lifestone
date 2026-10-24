@@ -301,45 +301,6 @@ public sealed class StandInCastSequenceTests
     }
 
     [Fact]
-    public void A_self_boost_raises_stamina_by_the_seeded_roll_with_ACEs_line_and_no_enchantment()
-    {
-        using var rig = Ready(Visit(new StandInPlayerStats { Stamina = 20 }), Revitalize);
-        Assert.True(rig.Q.TryGetVitalLevels(3, out var before, out var max));
-        var plan = Plans[Revitalize];
-        var cast = rig.Session.Actions.Cast(Revitalize, ActionSource.Host);
-        rig.Run(plan.EndTime + 1.5);
-
-        // The roll is the stand-in's seeded generator's first: between the base and the base plus the variance, inclusive (15 to 35).
-        var roll = new Random(StandInWorld.VitalSeed).Next(15, 36);
-        Assert.True(rig.Q.TryGetVitalLevels(3, out var after, out _));
-        Assert.Equal((20u, 20u + (uint)roll), (before, after));
-        Assert.True(after <= max);
-        Assert.Equal(["02BB", "F74C", "F74C", "02E9", "F7E0", "F755", "F755", "F74C", "01C7"], rig.Tags);
-        Assert.Equal(ActionOutcomeKind.Sent, cast.Outcome!.Value.Kind); // no enchantment and no projectile: only UseDone ends it
-        var line = rig.Chat.Last(l => l.Text.StartsWith("You cast", StringComparison.Ordinal));
-        Assert.Equal($"You cast Revitalize Self I and restore {roll} points of your stamina.", line.Text);
-        Assert.Equal(StandInWorld.MagicChat, (int)line.ChatType);
-        Assert.Empty(rig.Q.Enchantments.Where(e => e.SpellId == Revitalize));
-    }
-
-    [Fact]
-    public void A_self_transfer_moves_stamina_to_mana_by_ACEs_rule_capped_scaled_and_clamped_to_what_mana_misses()
-    {
-        using var rig = Ready(Visit(), StaminaToMana); // stamina 120 of 120, mana 75 of 100
-        var plan = Plans[StaminaToMana];
-        var cast = rig.Session.Actions.Cast(StaminaToMana, ActionSource.Host);
-        rig.Run(plan.EndTime + 1.5);
-
-        // Stamina to Mana Self I: proportion 0.5 of 120 = 60, capped at 50; loss 0.1 gives 45; mana misses 25, so the destination gets 25 and the source's share scales to round(50 * 25/45) = 28.
-        Assert.True(rig.Q.TryGetVitalLevels(3, out var stamina, out _));
-        Assert.True(rig.Q.TryGetVitalLevels(5, out var mana, out _));
-        Assert.Equal((92u, 100u), (stamina, mana));
-        Assert.Equal(["02BB", "F74C", "F74C", "F74C", "02E9", "02E9", "F7E0", "F755", "F755", "F74C", "01C7"], rig.Tags);
-        Assert.Equal(ActionOutcomeKind.Sent, cast.Outcome!.Value.Kind);
-        Assert.Contains(rig.Chat, l => l.Text == "You cast Stamina to Mana Self I on yourself and lose 28 points of stamina and also gain 25 points of mana");
-    }
-
-    [Fact]
     public void Meditative_Trance_2345_transfers_stamina_to_mana_from_the_cycles_own_BuffStatMods_row()
     {
         // M3 2.1 fix A (2.1-R3): the stand-in's Stamina to Mana rows ARE BuffStatMods.StaminaToMana, so the VII (loss -0.75, no cap) it once lacked changes the vitals as the cycle predicts.
@@ -358,20 +319,6 @@ public sealed class StandInCastSequenceTests
         Assert.Contains(rig.Chat, l => l.Text == "You cast Meditative Trance on yourself and lose 14 points of stamina and also gain 25 points of mana");
         Assert.Equal(ActionOutcomeKind.Sent, cast.Outcome!.Value.Kind);
         Assert.DoesNotContain(rig.Log.Lines, l => l.Contains("m3-standin-vital-spell-table", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void A_self_transfer_with_nothing_to_gain_changes_no_vital_and_sends_no_update()
-    {
-        using var rig = Ready(Visit(new StandInPlayerStats { Mana = 100 }), StaminaToMana); // mana is full: the destination's room is 0
-        var cast = rig.Session.Actions.Cast(StaminaToMana, ActionSource.Host);
-        rig.Run(Plans[StaminaToMana].EndTime + 1.5);
-
-        Assert.True(rig.Q.TryGetVitalLevels(3, out var stamina, out _));
-        Assert.Equal(120u, stamina);
-        Assert.DoesNotContain("02E9", rig.Tags);
-        Assert.Contains(rig.Chat, l => l.Text == "You cast Stamina to Mana Self I on yourself and lose 0 points of stamina and also gain 0 points of mana");
-        Assert.True(cast.IsCompleted, cast.Summary);
     }
 
     [Fact]

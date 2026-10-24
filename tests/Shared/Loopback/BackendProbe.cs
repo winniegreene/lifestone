@@ -141,8 +141,16 @@ public static class BackendProbe
     /// property names only (no value is decoded or copied), never puts file content into the reason, and zeroes the
     /// bytes it read.
     /// </summary>
-    public static string? TestAccountProblem(string secretsFile)
+    public static string? TestAccountProblem(string secretsFile) => AccountProblem(secretsFile, TestAccountKey);
+
+    /// <summary>
+    /// Null when <paramref name="secretsFile"/> exists and holds an object at <c>accounts.&lt;accountKey&gt;</c>, else the reason (M4 D31: the melee and
+    /// archer accounts are checked per test, by <see cref="LoopbackRun.SkipReasonNow(string?)"/>, while the probe itself still gates on <c>accounts.test</c>).
+    /// Reads property names only and zeroes the bytes it read, as <see cref="TestAccountProblem"/> always did.
+    /// </summary>
+    public static string? AccountProblem(string secretsFile, string accountKey)
     {
+        ArgumentException.ThrowIfNullOrEmpty(accountKey);
         ArgumentNullException.ThrowIfNull(secretsFile);
         if (!File.Exists(secretsFile))
         {
@@ -161,9 +169,9 @@ public static class BackendProbe
 
         try
         {
-            return HasTestAccount(bytes)
+            return HasAccount(bytes, accountKey)
                 ? null
-                : $"{secretsFile} has no 'accounts.{TestAccountKey}' entry (the loopback tests' account; secrets schema 2, written by server\\setup-server.ps1)";
+                : $"{secretsFile} has no 'accounts.{accountKey}' entry (a loopback test account; secrets schema 2; server\\setup-server.ps1 -AddAccount {accountKey} adds it)";
         }
         catch (JsonException)
         {
@@ -179,7 +187,7 @@ public static class BackendProbe
     /// <summary>The UTF-8 byte order mark (U+FEFF) that a secrets.json saved by some editors starts with.</summary>
     private static ReadOnlySpan<byte> Utf8ByteOrderMark => [0xEF, 0xBB, 0xBF];
 
-    private static bool HasTestAccount(ReadOnlySpan<byte> json)
+    private static bool HasAccount(ReadOnlySpan<byte> json, string accountKey)
     {
         if (json.StartsWith(Utf8ByteOrderMark))
         {
@@ -200,7 +208,7 @@ public static class BackendProbe
             {
                 while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
                 {
-                    var isTest = reader.ValueTextEquals(TestAccountKey);
+                    var isTest = reader.ValueTextEquals(accountKey);
                     reader.Read();
                     if (isTest)
                     {

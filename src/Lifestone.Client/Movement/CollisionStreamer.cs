@@ -33,6 +33,10 @@ namespace Lifestone.Client.Movement;
 /// <see cref="LandblockCollision"/> the streamer attached (<see cref="PhysicsWorld.GetLandblock"/>), so collision someone
 /// else attaches over the streamer's (<see cref="PhysicsWorld.Attach"/> replaces) is theirs from then on. A needed
 /// landblock that someone else detaches is built again on the next pump.</para>
+/// <para><b>A corridor</b> (<see cref="SetCorridor"/>, P5a S6). A host that knows where the player is going (the headless wayfinder) names the
+/// landblocks of the route ahead; they are requested and kept attached beside the focus's 3x3, and as the route moves on the ones it
+/// leaves are kept for <c>keepBehind</c> more landblocks (the most recently dropped first), then released like any landblock the focus does not
+/// need. With no corridor set the streamer behaves exactly as without the feature.</para>
 /// <para>Main thread (or the headless tick) only, except the build function, which runs on the workers.
 /// <see cref="Pump"/> allocates nothing while no build finishes.</para>
 /// </remarks>
@@ -45,6 +49,9 @@ public sealed class CollisionStreamer : IDisposable
     private readonly ILogSink _log;
     private readonly Dictionary<LandblockCoord, Entry> _entries = [];
     private readonly List<LandblockCoord> _scratch = [];
+    private readonly List<LandblockCoord> _corridor = [];
+    private readonly List<LandblockCoord> _trail = [];
+    private int _keepBehind;
     private uint _focusCellId;
     private bool _hasFocus;
     private bool _focusOutsideKnown;
@@ -98,6 +105,72 @@ public sealed class CollisionStreamer : IDisposable
 
     /// <summary>Builds that failed since the streamer was made.</summary>
     public int FailureCount { get; private set; }
+
+    /// <summary>
+    /// Raised on the pumping thread right after the streamer attached a landblock's collision to the world (from <see cref="Pump"/>'s
+    /// scheduler drain or <see cref="PumpSynchronously"/>); the headless nav streamer builds the landblock's tile from it. Not raised for
+    /// collision someone else attached.
+    /// </summary>
+    public event Action<LandblockCoord, LandblockCollision>? BlockAttached;
+
+    /// <summary>Raised right after the streamer detached a landblock it had attached (the focus and the corridor no longer need it).</summary>
+    public event Action<LandblockCoord>? BlockReleased;
+
+    /// <summary>The landblocks the corridor names now (a copy of the last <see cref="SetCorridor"/>, on the map, without repeats).</summary>
+    public IReadOnlyList<LandblockCoord> Corridor => _corridor;
+
+    /// <summary>
+    /// Names the landblocks the route crosses next (P5a S6): <paramref name="ahead"/> (landblock or cell ids, in the order of travel) are
+    /// requested and kept attached together with the focus's 3x3 (<see cref="SetFocus"/>). A landblock that an earlier corridor named and this
+    /// one does not (the route moved on) stays attached as long as it is one of the <paramref name="keepBehind"/> most recently dropped
+    /// ones; the older ones are released like any landblock nothing needs. An empty list with <c>keepBehind</c> 0 clears the corridor. The
+    /// same list again does nothing. May be called before the first <see cref="SetFocus"/> (the landblocks are requested with it).
+    /// </summary>
+    /// <param name="ahead">Landblock ids (the low 16 bits are ignored) the route crosses next; ids off the map are left out.</param>
+    /// <param name="keepBehind">How many dropped corridor landblocks stay attached (0 or more).</param>
+    public void SetCorridor(IReadOnlyList<uint> ahead, int keepBehind)
+    {
+        ArgumentNullException.ThrowIfNull(ahead);
+        ArgumentOutOfRangeException.ThrowIfNegative(keepBehind);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var next = new List<LandblockCoord>(ahead.Count);
+        foreach (var id in ahead)
+        {
+            var coord = LandblockCoord.FromId(id);
+            if (LandDefs.IsOnMap(coord) && !next.Contains(coord))
+            {
+                next.Add(coord);
+            }
+        }
+
+        if (keepBehind == _keepBehind && next.SequenceEqual(_corridor))
+        {
+            return;
+        }
+
+        foreach (var old in _corridor)
+        {
+            if (!next.Contains(old))
+            {
+                _trail.Remove(old);
+                _trail.Insert(0, old);
+            }
+        }
+
+        _trail.RemoveAll(next.Contains);
+        if (_trail.Count > keepBehind)
+        {
+            _trail.RemoveRange(keepBehind, _trail.Count - keepBehind);
+        }
+
+        _corridor.Clear();
+        _corridor.AddRange(next);
+        _keepBehind = keepBehind;
+        if (_hasFocus)
+        {
+            UpdateNeeded();
+        }
+    }
 
     /// <summary>
     /// The player is now in <paramref name="playerCellId"/>: requests the landblocks it needs (builds start on the
@@ -282,6 +355,16 @@ public sealed class CollisionStreamer : IDisposable
             }
         }
 
+        foreach (var coord in _corridor)
+        {
+            Request(coord);
+        }
+
+        foreach (var coord in _trail)
+        {
+            Request(coord);
+        }
+
         CancelReleased();
     }
 
@@ -389,6 +472,7 @@ public sealed class CollisionStreamer : IDisposable
             if (Owns(entry))
             {
                 World.Detach(coord);
+                BlockReleased?.Invoke(coord);
             }
 
             entry.Cancel?.Cancel();
@@ -420,6 +504,7 @@ public sealed class CollisionStreamer : IDisposable
         entry.Block = block;
         entry.Build = null;
         entry.Cancel = null;
+        BlockAttached?.Invoke(entry.Coord, block);
     }
 
     /// <summary>

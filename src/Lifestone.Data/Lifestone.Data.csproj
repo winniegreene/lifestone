@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Lifestone.Data.Tests" />
+    <InternalsVisibleTo Include="Lifestone.Client.Tests" />
   </ItemGroup>
 
   <ItemGroup>

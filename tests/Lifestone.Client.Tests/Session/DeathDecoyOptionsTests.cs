@@ -37,15 +37,6 @@ public sealed class DeathDecoyOptionsTests
     }
 
     [Fact]
-    public void A_bad_value_is_an_error_and_keeps_the_default()
-    {
-        var o = Parse("--death-decoys=maybe");
-
-        Assert.Equal(["--death-decoys: 'maybe' is not on or off"], o.Errors);
-        Assert.True(o.Decoys);
-    }
-
-    [Fact]
     public void The_option_reads_together_with_the_others_and_shows_in_the_log_line_only_when_off()
     {
         var o = Parse("--death-seconds=120", "--death-decoys=off", "--death-recover-corpse=off", "--death-recover-min-health=75");
@@ -61,36 +52,14 @@ public sealed class DeathDecoyOptionsTests
     }
 
     [Fact]
-    public void A_bad_decoys_value_does_not_hide_a_good_value_of_a_sibling()
-    {
-        var o = Parse("--death-decoys=maybe", "--death-seconds=90");
-
-        Assert.Equal(["--death-decoys: 'maybe' is not on or off"], o.Errors);
-        Assert.Equal(90.0, o.Seconds);
-    }
-
-    [Fact]
-    public void The_option_is_registered_for_the_main_scene_and_the_headless_host_with_a_help_that_names_the_decoys_and_the_check()
+    public void The_option_is_registered_for_the_main_scene_and_the_headless_host()
     {
         var group = OptionCatalog.Death();
 
         Assert.Equal(OptionScenes.Main | OptionScenes.Headless, group.Scenes);
         var decoys = Assert.Single(group.Options, o => o.Name == "--death-decoys");
         Assert.Equal("on|off", decoys.Value);
-        Assert.Contains("default on", decoys.Help, StringComparison.Ordinal);
-        Assert.Contains("452 burden", decoys.Help, StringComparison.Ordinal);
-        Assert.Contains("decoy check", decoys.Help, StringComparison.Ordinal);
-        Assert.Contains("off is M3's kit exactly", decoys.Help, StringComparison.Ordinal);
         // The siblings are still there, in front of it.
         Assert.Equal(["--death-seconds", "--death-stages", "--death-recover-corpse", "--death-recover-min-health", "--death-decoys", "--death-rebuff", "--death-fight", "--death-fight-kills", "--death-fight-seconds"], group.Options.Select(o => o.Name));
-    }
-
-    [Fact]
-    public void Every_stage_and_the_other_options_are_untouched_by_the_new_option()
-    {
-        Assert.Equal(DeathStages.All, DeathOptions.ParseStages("all", out var problem));
-        Assert.Null(problem);
-        Assert.Equal(600.0, new DeathOptions().Seconds);
-        Assert.True(new DeathOptions().RecoverCorpse);
     }
 }

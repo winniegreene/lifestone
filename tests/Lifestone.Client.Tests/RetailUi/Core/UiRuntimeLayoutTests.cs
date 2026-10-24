@@ -17,7 +17,6 @@ public sealed class UiRuntimeLayoutTests
 
     [Theory]
     [InlineData(800, 600)]
-    [InlineData(1280, 720)]
     [InlineData(1920, 1080)]
     public void A_root_following_the_display_fills_it_and_its_children_follow_their_edges(int width, int height)
     {

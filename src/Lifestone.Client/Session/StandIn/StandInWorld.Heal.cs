@@ -119,22 +119,23 @@ internal sealed partial class StandInWorld
 
     /// <summary>
     /// The kit and the potions the stand-in's player is announced with when the visit asks (<see cref="StandInVisit.HealItems"/>, <c>TODO(m4-standin-heal-items)</c>): a Handy Healing Kit (20 uses) and five Potions of Healing in
-    /// the main pack, as the hunter carries them. The class ids, names, burdens, values and uses are the world database's; the art is the placeholder item model, the icon the placeholder icon.
+    /// the main pack, as the hunter carries them. The class ids, names, burdens, values and uses are the world database's; the art (Setup and icon) is the weenies' own from <see cref="StandInWeenieArt"/>.
     /// </summary>
     /// <param name="player">The stand-in player's guid.</param>
     internal static HealItemBurst HealItems(uint player)
     {
-        var physics = new PhysicsDesc { Flags = PhysicsDescFlags.CSetup, State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal, SetupId = PlaceholderItemSetup, Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) };
+        var kitPhysics = new PhysicsDesc { Flags = PhysicsDescFlags.CSetup, State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal, SetupId = StandInWeenieArt.SetupOr(HandyKitWcid, PlaceholderItemSetup), Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) };
+        var potionPhysics = kitPhysics with { SetupId = StandInWeenieArt.SetupOr(HealingPotionWcid, PlaceholderItemSetup) };
         var kit = new CreateObjectMsg(
             HealKitGuid,
             ModelData.Empty,
-            physics,
-            new WeenieDesc
+            kitPhysics,
+            StandInWeenieArt.Apply(new WeenieDesc
             {
                 Header = WeenieHeaderFlags.Container | WeenieHeaderFlags.Value | WeenieHeaderFlags.Burden | WeenieHeaderFlags.Structure | WeenieHeaderFlags.MaxStructure,
                 Name = HandyKitName,
                 WeenieClassId = HandyKitWcid,
-                IconId = 0x06000001,
+                IconId = StandInWeenieArt.PlaceholderIcon,
                 ItemType = HealItemType,
                 ObjectDescriptionFlags = 0,
                 ContainerId = player,
@@ -142,17 +143,17 @@ internal sealed partial class StandInWorld
                 Burden = HandyKitBurden,
                 Structure = HandyKitUses,
                 MaxStructure = HandyKitUses,
-            });
+            }, null));
         var potions = new CreateObjectMsg(
             HealPotionGuid,
             ModelData.Empty,
-            physics,
-            new WeenieDesc
+            potionPhysics,
+            StandInWeenieArt.Apply(new WeenieDesc
             {
                 Header = WeenieHeaderFlags.Container | WeenieHeaderFlags.Value | WeenieHeaderFlags.Burden | WeenieHeaderFlags.StackSize | WeenieHeaderFlags.MaxStackSize,
                 Name = HealingPotionName,
                 WeenieClassId = HealingPotionWcid,
-                IconId = 0x06000001,
+                IconId = StandInWeenieArt.PlaceholderIcon,
                 ItemType = HealItemType,
                 ObjectDescriptionFlags = 0,
                 ContainerId = player,
@@ -160,12 +161,12 @@ internal sealed partial class StandInWorld
                 Burden = (ushort)(PotionBurden * PotionStackAtLogin),
                 StackSize = PotionStackAtLogin,
                 MaxStackSize = PotionMaxStack,
-            });
+            }, null));
         return new HealItemBurst([new ContentDesc(HealKitGuid, 0), new ContentDesc(HealPotionGuid, 0)], [kit, potions]);
     }
 
     /// <summary>The text of the placeholder the announced items are (logged once at the login burst).</summary>
-    internal const string HealItemsPlaceholder = "the player is announced with a Handy Healing Kit (20 uses) and five Potions of Healing in its main pack (the visit's HealItems): ids, names, values and burdens are the world database's, the art is the placeholder item model";
+    internal const string HealItemsPlaceholder = "the player is announced with a Handy Healing Kit (20 uses) and five Potions of Healing in its main pack (the visit's HealItems): ids, names, values, burdens and art (Setup, icon) are the world database's";
 
     // --- the rules ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 

@@ -173,9 +173,8 @@ public sealed class StandInActionsTests
         rig.Learn(FlameBolt);
         rig.Mode(CombatMode.Magic);
         rig.World.AnswerLog.Clear();
-        const uint target = 0x7A000001;
 
-        var cast = rig.Session.Actions.Cast(FlameBolt, target, ActionSource.Host);
+        var cast = rig.Session.Actions.Cast(FlameBolt, ActionSource.Host); // no target: a bolt at a guid the stand-in does not hold ends the cast (TargetNotAcquired, M4 4.1 t2)
         for (var i = 0; i < 40 && !rig.Created.Exists(g => g >= StandInWorld.FirstProjectileGuid); i++)
         {
             rig.Run(0.1);
@@ -215,26 +214,6 @@ public sealed class StandInActionsTests
     }
 
     [Fact]
-    public void A_spell_the_character_does_not_know_ends_with_the_invalid_spell_use_done_and_a_cast_outside_magic_mode_ends_bare()
-    {
-        using var rig = new Rig();
-        rig.Mode(CombatMode.Magic);
-        var unknown = rig.Finish(rig.Session.Actions.Cast(Strength, ActionSource.Host));
-        Assert.Equal((ActionOutcomeKind.ServerError, StandInWorld.MagicInvalidSpellType), (unknown.Outcome!.Value.Kind, unknown.Outcome.Value.Code));
-
-        rig.Learn(Strength);
-        rig.Mode(CombatMode.NonCombat);
-        var guarded = rig.Finish(rig.Session.Actions.Cast(Strength, ActionSource.Host), 0.5); // the stance guard (M3 4.2 p3): refused at once, nothing sent
-        Assert.Equal(ActionOutcomeKind.Refused, guarded.Outcome!.Value.Kind);
-        rig.Session.RetailCastAnyMode = true; // retail's client sends it; the stand-in's ACE ends it bare (this rig's session only)
-        var peace = rig.Finish(rig.Session.Actions.Cast(Strength, ActionSource.Host));
-
-        Assert.Equal((ActionOutcomeKind.ServerError, 0u), (peace.Outcome!.Value.Kind, peace.Outcome.Value.Code));
-        Assert.Contains("not in the magic combat mode", peace.Outcome.Value.Detail, StringComparison.Ordinal);
-        Assert.Empty(rig.Q.Enchantments.Where(e => e.SpellId == Strength));
-    }
-
-    [Fact]
     public void A_combat_mode_change_answers_with_the_private_update_of_property_40_and_back()
     {
         using var rig = new Rig();
@@ -248,9 +227,9 @@ public sealed class StandInActionsTests
         var peace = rig.Session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
         rig.Finish(peace, 1.5);
         Assert.Equal((ActionOutcomeKind.Confirmed, CombatModes.NonCombat), (peace.Outcome!.Value.Kind, rig.Q.CombatMode));
-        Assert.Equal(["02CD", "02CD"], rig.World.AnswerLog);
+        Assert.Equal(["F74C", "02CD", "F74C", "02CD"], rig.World.AnswerLog); // M4 4.1 v3: ACE's SetCombatMode plays the stance motion (F74C) before the private update (02CD)
         Assert.Equal(ActionOutcomeKind.Local, rig.Finish(rig.Session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host), 0.5).Outcome!.Value.Kind);
-        Assert.Equal(2, rig.World.AnswerLog.Count);
+        Assert.Equal(4, rig.World.AnswerLog.Count);
     }
 
     [Fact]
@@ -295,11 +274,26 @@ public sealed class StandInActionsTests
         var unwield = rig.Finish(rig.Session.Actions.Unwield(sword, ActionSource.Host));
 
         Assert.Equal(ActionOutcomeKind.Confirmed, unwield.Outcome!.Value.Kind);
-        Assert.Equal(["02DA", "02CE", "02DA", "0022"], rig.World.AnswerLog);
+        Assert.Equal(["02DA", "02CE", "F74A", "02DA", "0022"], rig.World.AnswerLog); // M4 4.1 fix2b: ACE unparents the item with a PickupEvent after the zeros (Player_Inventory.cs 400-404)
+        Assert.True(rig.Session.State.Objects.TryGet(sword, out var stowed) && stowed.Parent is null, "the stowed sword leaves the hand (the PickupEvent unparents it)");
         Assert.Equal(new InventoryPlace(InventoryPlaceKind.MainPack, rig.Session.State.Self.Guid, 0, 0), rig.Session.State.Self.Inventory.Find(sword));
         Assert.Equal([sword], rig.Session.State.Self.Inventory.Pack.Select(e => e.Guid));
         Assert.Contains(rig.World.Pack, e => e.Guid == sword);
         Assert.Empty(rig.World.Wielded);
+    }
+
+    [Fact]
+    public void The_healers_heart_is_created_with_the_LightingOn_bit_ACE_gives_weenie_8552_and_a_sword_is_not()
+    {
+        using var rig = new Rig();
+        var heart = rig.Spawn(Lifestone.Client.Session.Mage.GearKit.Wand.Wcid);
+        var sword = rig.Spawn(Sword);
+
+        // ACE: weenie 8552 has PropertyBool LightsStatus = 1 (world database 0.9.296) and LightsStatus sets Lifestone.Net.Types.PhysicsState.LightingOn (WorldObject_Properties.cs 1057-1060).
+        Assert.True(rig.Session.State.Objects.TryGet(heart, out var orb) && (orb.State & Lifestone.Net.Types.PhysicsState.LightingOn) != 0, "the Healer's Heart carries LightingOn");
+        Assert.True(rig.Session.State.Objects.TryGet(sword, out var blade) && (blade.State & Lifestone.Net.Types.PhysicsState.LightingOn) == 0, "a sword does not");
+        Assert.Equal(Lifestone.Net.Types.PhysicsState.LightingOn, StandInWorld.LightingOf(StandInWorld.HealersHeartWcid));
+        Assert.Equal(Lifestone.Net.Types.PhysicsState.None, StandInWorld.LightingOf(331));
     }
 
     [Fact]
@@ -313,7 +307,7 @@ public sealed class StandInActionsTests
 
         var worn = rig.Finish(rig.Session.Actions.MoveToPack(first, 0, 0, ActionSource.Host));
         Assert.Equal(ActionOutcomeKind.Confirmed, worn.Outcome!.Value.Kind);
-        Assert.Equal(["02DA", "02CE", "02DA", "0022"], rig.World.AnswerLog);
+        Assert.Equal(["02DA", "02CE", "F74A", "02DA", "0022"], rig.World.AnswerLog); // M4 4.1 fix2b: ACE unparents the item with a PickupEvent after the zeros (Player_Inventory.cs 400-404)
         Assert.Equal(rig.Session.State.Self.Guid, rig.Changes[^1].Container);
 
         rig.World.AnswerLog.Clear();
@@ -350,18 +344,6 @@ public sealed class StandInActionsTests
         Assert.Throws<NotSupportedException>(() => responder.Session.SendChangeCombatMode(8));
     }
 
-    [Fact]
-    public void Without_a_spell_table_a_known_spell_is_a_placeholder_self_enchantment()
-    {
-        using var rig = new Rig(lookup: false);
-        rig.Learn(2);
-        rig.Mode(CombatMode.Magic);
-
-        var cast = rig.Finish(rig.Session.Actions.Cast(2, ActionSource.Host));
-
-        Assert.Equal(ActionOutcomeKind.Confirmed, cast.Outcome!.Value.Kind);
-        Assert.Single(rig.Q.Enchantments, e => e.SpellId == 2);
-    }
 }
 
 /// <summary>M3 1.2 s4c: the SpellTable host wiring and the stand-in's answers against the retail table (skipped without the dats).</summary>
@@ -413,7 +395,7 @@ public sealed class StandInActionsDatTests(DatSetFixture fixture) : IClassFixtur
 
         var cast = session.Actions.Cast(buff, ActionSource.Host);
         Run(session, 3.0);
-        var shot = session.Actions.Cast(bolt, 0x7A000001u, ActionSource.Host);
+        var shot = session.Actions.Cast(bolt, ActionSource.Host); // no target (M4 4.1 t2: a guid the stand-in does not hold ends the cast)
         Run(session, 3.0);
         var fizzle = session.Actions.Cast(eight, ActionSource.Host);
         Run(session, 3.0);

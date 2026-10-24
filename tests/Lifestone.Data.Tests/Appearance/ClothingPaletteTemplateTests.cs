@@ -5,6 +5,7 @@ namespace Lifestone.Data.Tests.Appearance;
 /// M3 4.2 p6 follow-up (TODO(q7-clothing-palettes)): BSD Mage's kit asks the platemail gauntlets (ClothingBase 0x10000011) and the sollerets (0x10000054) in palette template 21 (Gold); the dat's tables define it,
 /// so neither ACE's first-template fallback nor retail's failed palette step (<c>ClothingTable::BuildObjDesc</c> 11.6096 0x005A89B0) is reached. The other kit pieces' own templates are defined too.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class ClothingPaletteTemplateTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     [RequiresDatsTheory]

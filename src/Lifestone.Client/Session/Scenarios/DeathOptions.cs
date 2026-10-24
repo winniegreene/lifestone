@@ -30,7 +30,7 @@ public enum DeathStages
 
     /// <summary>
     /// D37, the last stage, after the measures are frozen and before the log off: the vitae is paid back with the server mod's <c>xp</c> verb (ACE <c>GrantXP</c> then <c>UpdateXpVitae</c>, <c>Player_Xp.cs</c> 53-82, 133-175), the
-    /// amount computed from ACE's rule (<see cref="Lifestone.Client.Session.Contracts.EffectRules.VitaeExperienceToClear"/>), refused loudly if it would cross the next level; skipped when the registry holds no vitae.
+    /// amount computed from ACE's rule (<see cref="Lifestone.Client.Session.Contracts.EffectRules.VitaeExperienceToClear"/>), allowed to cross a level since D42 (logged as vitae_level_crossed=yes level=a->b) but never more than it clears; skipped when the registry holds no vitae.
     /// </summary>
     Vitae = 64,
 
@@ -129,6 +129,18 @@ public sealed record DeathOptions
 
     /// <summary>The seconds after which the death loop's fight fails loudly (<c>--death-fight-seconds</c>, above 0, default <see cref="DefaultFightSeconds"/>).</summary>
     public double FightSeconds { get; init; } = DefaultFightSeconds;
+
+    /// <summary>
+    /// M4 P4 g3fix: the most seconds the fight stage waits, at Holtburg and before the teleport to the den, for the mana to regenerate to <see cref="FightManaFloorPercent"/> of the maximum (0, the default: no wait, the game's leg is unchanged).
+    /// The rebuff's 27 casts leave the mage at about 23 mana, and the mage regenerates about 0.43 a second, so a 180 s fight started there waits for mana for most of its time (g3: 3 of 4 kills, phase=Mana). Not a retry: nothing has been cast.
+    /// </summary>
+    public double FightManaWaitSeconds { get; init; }
+
+    /// <summary>The share of the maximum mana, in percent, that ends the wait of <see cref="FightManaWaitSeconds"/> (default 70).</summary>
+    public double FightManaFloorPercent { get; init; } = DefaultFightManaFloorPercent;
+
+    /// <summary>The default of <see cref="FightManaFloorPercent"/>.</summary>
+    public const double DefaultFightManaFloorPercent = 70;
 
     /// <summary>Every problem found while parsing, one line each.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];

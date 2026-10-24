@@ -27,6 +27,7 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
 public sealed class MageBuildLoopbackTests(ITestOutputHelper output)
 {
     private static readonly Regex Built = new(
@@ -61,6 +62,7 @@ public sealed class MageBuildLoopbackTests(ITestOutputHelper output)
         var scenario = new MageBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log);
 
         HeadlessRunResult result;
+        LiveCharacter.Release(output, BackendProbe.TestAccountKey);
         var secrets = File.ReadAllBytes(files.SecretsFile);
         HeadlessRunner runner;
         try

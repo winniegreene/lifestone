@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using Godot;
 using Lifestone.Client.Audio;
 using Lifestone.Client.Avatars;
+using Lifestone.Client.Options;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Credentials;
 using Lifestone.Client.Session.Mage;
@@ -23,6 +24,9 @@ namespace Lifestone.Game.Sessions;
 /// <c>--login-check=all</c> (hooked by one line at the top of <see cref="LoginCheckRunner.Install"/>, as <see cref="ThrowawayLegRunner"/> is). The script is the scenario's; this node walks the character list and the
 /// arrival (the session host has already started the login), re-seats the wand, steps the scenario once per frame after the session host and play mode, and reads what only the engine can see: the cast-window
 /// counters of the avatar set (<c>AvatarStats.CastWindows/CastScripts/CastSounds</c>, read as deltas around the scenario), the worst frame while a cast window is open and the server sounds that sounded.
+/// <para><b>The <c>--buff-*</c> options</b> are read (M4 4.1 lane c; closes <c>TODO(m3-buff-leg-options)</c>); a bad value fails the leg at its first frame. With <c>--buff-auto on</c> the scenario runs no forced pass: the re-buff
+/// driver makes the pass from the margin of the shortest line (<see cref="BuffScenario"/>'s remarks), the review frames are of the driver's pass's cast, and a fourth frame shows the chat with the "[Lifestone] re-buffed" notice.
+/// The armour ledger is kept in the user data (<see cref="ArmourLedgerFileStore"/>, <c>user://armour</c>) and read at the next login.</para>
 /// </summary>
 /// <remarks>
 /// <para><b>The re-seat is the leg's fixture, not a gear step.</b> ACE sends no sound (F750) for a cast; it sends one for a wield or an unwield (<c>Player_Inventory.cs</c> 306 and 405,
@@ -84,6 +88,8 @@ public sealed partial class BuffLegRunner : Node
     private RetailUiLayer? _ui;
     private Task<(SpellTableData Table, GearKit Kit, double BuildMilliseconds)>? _loading;
     private BuffScenario? _scenario;
+    private BuffOptions _buffOptions = new();
+    private string? _optionError;
     private ActionHandle? _pending;
     private readonly SoundLegTally _sounds = new();
     private Phase _phase = Phase.Loading;
@@ -120,6 +126,8 @@ public sealed partial class BuffLegRunner : Node
     private int _shotHiddenFrames = -1;
     private int _shotsTaken;
     private bool _shotDone;
+    private bool _chatShotOwed;
+    private int _chatShotFrames = -1;
     private string _shotNote = "not taken";
     private readonly List<(Node Node, bool WasVisible)> _shotHidden = [];
 
@@ -132,6 +140,12 @@ public sealed partial class BuffLegRunner : Node
         ArgumentNullException.ThrowIfNull(mode);
         var dats = services.Dats ?? throw new InvalidOperationException("the buff leg needs the dats (Main checks for them first)");
         var key = host.Options.Account;
+        var buffOptions = BuffOptions.FromArguments(CommandLineArgument.ParseAll(OS.GetCmdlineUserArgs()));
+        foreach (var error in buffOptions.Errors)
+        {
+            Log.Error(LogCategory, "buff: " + error);
+        }
+
         var runner = new BuffLegRunner
         {
             Name = "BuffLegRunner",
@@ -139,6 +153,8 @@ public sealed partial class BuffLegRunner : Node
             _host = host,
             _mode = mode,
             _ui = ui,
+            _buffOptions = buffOptions,
+            _optionError = buffOptions.Errors.Count == 0 ? null : "bad buff option: " + string.Join("; ", buffOptions.Errors),
             _shotPath = services.Options.Play.BuffShotPath,
         };
 
@@ -158,8 +174,10 @@ public sealed partial class BuffLegRunner : Node
         main.AddChild(runner);
         Log.Info(
             LogCategory,
-            "login check 'buff' installed: the test account enters BSD Mage, the wand is re-seated, the buff scenario runs in the game's session (gear, magic mode, cycle, forced re-buff pass), then the game logs off and quits",
+            "login check 'buff' installed: the test account enters BSD Mage, the wand is re-seated, the buff scenario runs in the game's session (gear, magic mode, cycle, "
+            + (buffOptions.Auto ? "the re-buff driver's pass from the shortest line's margin, no forced pass" : "forced re-buff pass") + "), then the game logs off and quits",
             ("scenario", BuffScenario.ScenarioName),
+            ("buff_options", buffOptions.ToString()),
             ("review_frames", runner._shotPath is not null));
     }
 
@@ -195,6 +213,12 @@ public sealed partial class BuffLegRunner : Node
         if (_host.Session is not { } session)
         {
             Finish("the session host has no session");
+            return;
+        }
+
+        if (_optionError is not null && !_failed)
+        {
+            Fail(null, _optionError); // a bad --buff-* value fails the leg before it logs in, as the hunt leg's does
             return;
         }
 
@@ -492,7 +516,9 @@ public sealed partial class BuffLegRunner : Node
     {
         var (table, kit, buildMilliseconds) = _loading!.Result;
         Log.Info(LogCategory, "buff: the gear kit was built on the loading worker, off the game thread", ("build_ms", buildMilliseconds));
-        _scenario = new BuffScenario(kit, table.Spells, new BuffOptions(), GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false, bars: new MageSpellBars(GodotLogSink.Instance));
+        // The ledger of the armour lines is the session's, kept in the user data across a log-off (M4 4.1 lane c; closes TODO(m4-buff-armour-relog-time)): read by the cycle's seed after this login, saved when the scenario ends.
+        var store = new ArmourLedgerFileStore(new UserDataFiles(ProjectSettings.GlobalizePath("user://armour")), GodotLogSink.Instance);
+        _scenario = new BuffScenario(kit, table.Spells, _buffOptions, GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false, bars: new MageSpellBars(GodotLogSink.Instance), ledger: ArmourBuffLedger.For(session.State), store: store);
         _avatars = _mode.Avatars;
         if (_avatars is { } avatars)
         {
@@ -571,8 +597,11 @@ public sealed partial class BuffLegRunner : Node
 
     // ------------------------------------------------------------------------------------------------ the mid-cast frame
 
-    /// <summary>True from the forced pass's cast effect until the third frame is taken (or given up): the scenario waits.</summary>
-    private bool ShotsOwed => !_shotDone && !double.IsNaN(_shotEffectAt);
+    /// <summary>
+    /// True from the cast effect (the forced pass's, or the driver's pass's) until the third frame is taken (or given up), and, with the driver, from the end of the driver stage until the chat frame is taken: the scenario waits.
+    /// The wait for the chat frame starts only once the driver stage is over, or the driver (stepped by the scenario) could never finish.
+    /// </summary>
+    private bool ShotsOwed => (!_shotDone && !double.IsNaN(_shotEffectAt)) || (_chatShotOwed && _scenario is { Stage: not "driver" });
 
     /// <summary>
     /// <c>--play-screenshot=PATH</c> without <c>--play-screenshot-after</c> (M3 2.1 fix A, 2.1-R9): the frames are of the <b>first cast of the cycle or the forced pass that plays a script on the player</b> (a buff on the player, with its target
@@ -583,6 +612,12 @@ public sealed partial class BuffLegRunner : Node
     /// </summary>
     private void StepShot()
     {
+        if (_chatShotOwed)
+        {
+            StepChatShot();
+            return;
+        }
+
         if (_shotPath is null || _shotDone || _avatars is null || _scenario is null)
         {
             return;
@@ -592,13 +627,19 @@ public sealed partial class BuffLegRunner : Node
         {
             // The frames are of the first cast of the cycle or the forced pass that plays a script on the player (a self buff's target effect). The gate's first run showed
             // that the forced pass alone can play none there (its line was a wand Aura, whose effect plays on the wand), so both stages are watched (M3 2.1 lead fix).
-            if (!string.Equals(_scenario.Stage, "cycle", StringComparison.Ordinal) && !string.Equals(_scenario.Stage, "rebuff", StringComparison.Ordinal))
+            // With the driver (--buff-auto on) there is no forced pass and the frames are of the driver's pass's cast: only the driver stage is watched (M4 4.1 lane c).
+            var watched = _scenario.DriverOn
+                ? string.Equals(_scenario.Stage, "driver", StringComparison.Ordinal)
+                : string.Equals(_scenario.Stage, "cycle", StringComparison.Ordinal) || string.Equals(_scenario.Stage, "rebuff", StringComparison.Ordinal);
+            if (!watched)
             {
                 if (_shotBaseSet)
                 {
-                    // The cycle and the forced pass are over and no cast effect was seen on the player.
+                    // The cycle and the forced pass (or the driver's pass) are over and no cast effect was seen on the player.
                     _shotDone = true;
-                    _shotNote = "no cast of the cycle or the forced pass played a script on the player, so no frame was taken";
+                    _shotNote = _scenario.DriverOn
+                        ? "no cast of the driver's pass played a script on the player, so no frame was taken"
+                        : "no cast of the cycle or the forced pass played a script on the player, so no frame was taken";
                     Log.Warn(LogCategory, "buff: " + _shotNote);
                 }
 
@@ -647,9 +688,53 @@ public sealed partial class BuffLegRunner : Node
         if (++_shotsTaken == ShotDelaysSeconds.Length)
         {
             _shotDone = true;
-            _shotNote = "taken: " + ShotDelaysSeconds.Length.ToString(CultureInfo.InvariantCulture) + " frames of the forced pass's cast";
             RestoreDeveloperHud();
+            if (_scenario.DriverOn)
+            {
+                // The fourth frame (<stem>-4.png): the chat with the "[Lifestone] re-buffed" notice, once the driver's pass is over.
+                _chatShotOwed = true;
+                _chatShotFrames = -1;
+                _shotNote = "taken: " + ShotDelaysSeconds.Length.ToString(CultureInfo.InvariantCulture) + " frames of the driver pass's cast; the chat frame is owed";
+            }
+            else
+            {
+                _shotNote = "taken: " + ShotDelaysSeconds.Length.ToString(CultureInfo.InvariantCulture) + " frames of the forced pass's cast";
+            }
         }
+    }
+
+    /// <summary>
+    /// The fourth review frame of a driver run: once the driver stage is over (the "[Lifestone] re-buffed n lines" notice is in the chat) the developer HUD is hidden and, after <see cref="HiddenFramesBeforeShot"/> frames, the viewport
+    /// is saved to <c>&lt;stem&gt;-4.png</c>. The scenario is held for those few frames by <see cref="ShotsOwed"/>.
+    /// </summary>
+    private void StepChatShot()
+    {
+        if (_scenario is null || _shotPath is null || string.Equals(_scenario.Stage, "driver", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (_chatShotFrames < 0)
+        {
+            _chatShotFrames = 0;
+            HideDeveloperHud();
+            return;
+        }
+
+        if (++_chatShotFrames < HiddenFramesBeforeShot + 1)
+        {
+            return;
+        }
+
+        var path = ShotPath(_shotPath, ShotDelaysSeconds.Length + 1);
+        var saved = ScreenshotWriter.Save(GetViewport(), path, LogCategory, ("frame", "buff-chat"), ("developer_hud", "hidden"));
+        _skipNextFrame = true;
+        Log.Info(LogCategory, (saved ? "buff: review frame 4 of 4, the chat with the driver's notice: " : "buff: the chat review frame could not be saved: ") + path);
+        _chatShotOwed = false;
+        RestoreDeveloperHud();
+        _shotNote = saved
+            ? "taken: " + ShotDelaysSeconds.Length.ToString(CultureInfo.InvariantCulture) + " frames of the driver pass's cast and 1 frame of the chat with its notice"
+            : "taken: " + ShotDelaysSeconds.Length.ToString(CultureInfo.InvariantCulture) + " frames of the driver pass's cast; the chat frame could not be saved";
     }
 
     private void GiveUpShots(string why)
@@ -798,7 +883,10 @@ public sealed partial class BuffLegRunner : Node
             _failure ?? why ?? scenario?.Failure,
             scenario?.Gear.VerdictFields() ?? "gear=failed worn=0",
             scenario?.CycleResult,
-            scenario?.ForcedResult);
+            scenario?.ForcedResult,
+            scenario?.DriverOn ?? _buffOptions.Auto,
+            scenario?.DriverResult,
+            scenario?.DriverRebuffSeconds ?? double.NaN);
         var measures = new BuffLegMeasures(
             Math.Max(0, _scriptsAfter - _scriptsBefore),
             Math.Max(0, _soundsAfter - _soundsBefore),

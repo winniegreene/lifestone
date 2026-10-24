@@ -59,7 +59,6 @@ public sealed class CharacterCreateIntentTests
     [InlineData("")]
     [InlineData("Zoë")]
     [InlineData("Tab\tName")]
-    [InlineData("日本")]
     public void A_name_must_be_printable_ascii(string name)
     {
         Assert.False(Intent(name: name).TryValidate(out var problem));

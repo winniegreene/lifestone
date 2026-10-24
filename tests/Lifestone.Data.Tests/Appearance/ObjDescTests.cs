@@ -192,6 +192,7 @@ public sealed class ObjDescTests(DatSetFixture fixture) : IClassFixture<DatSetFi
         Assert.Equal(new[] { new SubPalette(0x04001071, 192, 64), new SubPalette(0x040002BC, 0, 192) }, od.SubPalettes);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_CharGen_ObjDesc_converts()
@@ -215,6 +216,7 @@ public sealed class ObjDescTests(DatSetFixture fixture) : IClassFixture<DatSetFi
         Assert.Equal(0, deduplicated); // no CharGen ObjDesc repeats an entry
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Both_part_duplicate_rules_draw_the_same_parts()
     {

@@ -9,6 +9,7 @@ using TextureMapChange = Lifestone.Data.Appearance.TextureMapChange;
 namespace Lifestone.Data.Tests.Appearance;
 
 /// <summary>Exhaustive appearance sweeps over the user's dats, with pinned counts.</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class AppearanceSweepTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private DatSet Dats => fixture.Dats;

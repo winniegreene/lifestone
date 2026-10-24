@@ -15,6 +15,7 @@ namespace Lifestone.Client.Tests.Objects;
 /// particles are not counted), in the non-parallel <see cref="AllocationMeasurementCollection"/>.
 /// </summary>
 [Collection(AllocationMeasurementCollection.Name)]
+[Trait("Tier", "Exhaustive")]
 public sealed class LivingStaticSoundsAllocationTests(ObjectsFixture fixture) : IClassFixture<ObjectsFixture>
 {
     private const uint StandingTorch = 0x020005D8;

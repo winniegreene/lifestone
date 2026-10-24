@@ -33,20 +33,11 @@ public sealed class HeadlessFightOptionsTests
     [InlineData("--fight-kills=0", "--fight-kills: '0' is not 1 to 1000")]
     [InlineData("--fight-kills=1001", "--fight-kills: '1001' is not 1 to 1000")]
     [InlineData("--fight-seconds=0", "--fight-seconds: '0' is not a positive number of seconds")]
-    [InlineData("--fight-seconds=-5", "--fight-seconds: '-5' is not a positive number of seconds")]
     public void A_bad_fight_option_is_reported_and_keeps_its_default(string argument, string expected)
     {
         var o = HeadlessOptions.Parse(["--scenario=fight", argument]);
         Assert.Equal(expected, Assert.Single(o.Errors));
         Assert.Equal((1, 300.0), (o.Fight.Kills, o.Fight.Seconds));
-    }
-
-    [Fact]
-    public void Fight_runs_on_the_default_test_account_only()
-    {
-        var error = Assert.Single(HeadlessOptions.Parse(["--scenario=fight", "--account=somebody"]).Errors);
-        Assert.Equal("--account: --scenario=fight runs on the default test account 'test' only; the value is not shown", error);
-        Assert.Empty(HeadlessOptions.Parse(["--scenario=fight", "--account=test"]).Errors);
     }
 
     [Fact]

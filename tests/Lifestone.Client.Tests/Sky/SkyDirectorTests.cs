@@ -9,6 +9,7 @@ namespace Lifestone.Client.Tests.Sky;
 /// 0.8 s, light every 15 s of <c>Timer::cur_time</c>), immediate refreshes on jumps, the model list and equality with
 /// <see cref="DerethSky.Evaluate(double)"/>. No per-frame garbage: <see cref="SkyDirectorAllocationTests"/> (not parallel).
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class SkyDirectorTests(SkyDatsFixture fixture) : IClassFixture<SkyDatsFixture>
 {
     private double Noon(int group = 0) => Lifestone.Client.Navigation.GoldenViewpoints.GameTimeFor(new(0.5, group), fixture.Sky);

@@ -67,6 +67,9 @@ public sealed class PrivateUpdateCodecTests
         var truncated = InboundDispatcher.Dispatch(new InboundContext(2, MessageQueue.Ui, 0), body[..^1], handler);
         Assert.Equal(DispatchOutcome.Malformed, truncated.Outcome);
         Assert.StartsWith($"{(uint)expected.Kind:X4} PrivateUpdate", handler.Malformed);
+
+        // A trailing byte is malformed too (this test took over the dispatcher table's PrivateUpdate rows: polish fold data-net-mod).
+        Assert.Equal(DispatchOutcome.Malformed, InboundDispatcher.Dispatch(new InboundContext(3, MessageQueue.Ui, 0), [.. body, 0xAA], handler).Outcome);
     }
 
     [Fact]

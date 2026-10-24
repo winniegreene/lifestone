@@ -35,13 +35,13 @@ The moved helpers keep the namespaces they had (`Lifestone.Data.Tests`, `Lifesto
 - Tests that talk to the localhost backend are `[LoopbackFact]` or `[LoopbackTheory]`. Their class carries
   `[Trait("Category", "Loopback")]` and `[Collection(LoopbackCollection.Name)]`, and they live in
   `tests/Lifestone.Loopback.Tests/<Track>/`. A reflection test enforces this. Default runs exclude them with
-  `--filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure"`; the Exhaustive tier (76 tests, the dat sweeps) has its own slice-check stage (`-Exhaustive`).
+  `--filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure"`; the Exhaustive tier (every test that reads the retail dats outside the retail UI, session and avatar tests: the sweeps and the decoder and asset pins; its count is the baseline file's "exhaustive") has its own slice-check stage (`-Exhaustive`), run at every gate; a slice that touches `src/Lifestone.Data` (or one of the Client folders whose tests moved (`src/Lifestone.Client/` `Audio`, `Effects`, `Interiors`, `Movement`, `Navigation`, `Objects`, `Play`, `PortalSpace`, `Rendering` or `Sky`)) runs `slice-check -Exhaustive`.
 - Loopback classes have no `IClassFixture` (and the Loopback collection no `ICollectionFixture`): xUnit builds fixtures
   before the gate takes the lock and re-probes the backend, even when every test skips. Per-class shared state (one
   login for several tests) is created lazily from inside a test body, after the gate, never in a fixture constructor.
   The reflection test enforces this too.
 - `[Trait("Tier", "Soak")]` marks long tests (fuzzing at full size, the lossy soaks), which default runs exclude.
-  `[Trait("Tier", "Exhaustive")]` marks full sweeps over the dats.
+  `[Trait("Tier", "Exhaustive")]` marks the tests that read the retail dats: the full sweeps and the decoder and asset pins (the retail UI, session and avatar tests keep the dats only as an input and stay in the default run).
 - `[Trait("Tier", "Timing")]` marks a test whose verdict is wall-clock time (a frame budget, a latency, a rate) and so only
   means something on a quiet machine. The default filter leaves it out; the lead runs it alone (`--filter "Tier=Timing"`), with no other Godot or
   dotnet process up.

@@ -159,6 +159,7 @@ public sealed class SkyObjectTrackerTests(SkyDatsFixture fixture) : IClassFixtur
         Assert.Equal(1, tracker.Slots[0].Generation); // same GfxObj and properties: kept across the change
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Sunny_day_group_0_from_noon_to_night()
     {
@@ -193,6 +194,7 @@ public sealed class SkyObjectTrackerTests(SkyDatsFixture fixture) : IClassFixtur
         Assert.Equal(0.7f, s[1].Material.VertexAlpha(fixture.Surface(0x0800004D)), 5);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Rainy_groups_put_rain_in_both_passes_around_the_viewer()
     {

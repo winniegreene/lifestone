@@ -15,6 +15,7 @@ namespace Lifestone.Client.Tests.Interiors;
 /// uploaded (<c>ObjectLightTable</c>; <c>--interior-engine-checks</c> guards it now), with the arrival's camera behind the character and
 /// its lights ahead of and beside it.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class MovingObjectLightEvidenceTests(InteriorsFixture fixture) : IClassFixture<InteriorsFixture>
 {
     /// <summary>The male human's Setup (the character 5a's login check creates).</summary>

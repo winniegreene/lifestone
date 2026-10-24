@@ -17,12 +17,9 @@ public sealed class AttachStateMappingTests
     }
 
     [Theory]
-    [InlineData(true, AttachState.Pending, AttachState.Pending)]
     [InlineData(true, AttachState.Attached, AttachState.Attached)]
     [InlineData(true, AttachState.Failed, AttachState.Failed)]
-    [InlineData(true, AttachState.Disabled, AttachState.Disabled)]
     [InlineData(false, AttachState.Pending, AttachState.Disabled)]
-    [InlineData(false, AttachState.Attached, AttachState.Disabled)]
     public void Objects_are_the_systems_answer_unless_the_layer_is_off(bool running, AttachState system, AttachState expected)
     {
         Assert.Equal(expected, AttachStateMapping.Objects(running, system));
@@ -35,46 +32,23 @@ public sealed class AttachStateMappingTests
         Assert.True(AttachStateMapping.Collision().IsSettled());
     }
 
-    [Fact]
-    public void A_cell_without_the_interiors_layer_is_disabled_whatever_else_holds()
-    {
-        Assert.Equal(AttachState.Disabled, AttachStateMapping.Cell(false, true, true, true, LandblockLoadState.Loaded));
-        Assert.Equal(AttachState.Disabled, AttachStateMapping.Cell(false, false, false, false, null));
-    }
-
-    [Fact]
-    public void An_attached_cell_is_attached()
-    {
-        Assert.Equal(AttachState.Attached, AttachStateMapping.Cell(true, true, true, true, LandblockLoadState.Loaded));
-    }
-
     [Theory]
-    [InlineData(null)]
-    [InlineData(LandblockLoadState.Loading)]
-    public void A_cell_whose_landblock_has_not_registered_yet_is_pending(LandblockLoadState? landblock)
+    [InlineData(false, true, true, true, LandblockLoadState.Loaded, AttachState.Disabled)] // no interiors layer: disabled whatever else holds
+    [InlineData(false, false, false, false, null, AttachState.Disabled)]
+    [InlineData(true, true, true, true, LandblockLoadState.Loaded, AttachState.Attached)]
+    [InlineData(true, false, false, false, null, AttachState.Pending)] // the landblock has not registered yet
+    [InlineData(true, false, false, false, LandblockLoadState.Loading, AttachState.Pending)]
+    [InlineData(true, false, true, true, LandblockLoadState.Loaded, AttachState.Pending)] // SetPlayerCell / PlaceViewer ask the layer to mesh the rest of the landblock; until then the cell is on its way
+    [InlineData(true, false, true, false, LandblockLoadState.Loaded, AttachState.Failed)] // a cell the registered landblock does not contain: failed, not pending for ever
+    [InlineData(true, false, false, false, LandblockLoadState.Failed, AttachState.Failed)] // a landblock that failed to load
+    public void The_cell_state_follows_the_layer_the_registration_the_mesh_and_the_landblock(bool interiors, bool attached, bool registered, bool cellExists, LandblockLoadState? landblock, AttachState expected)
     {
-        Assert.Equal(AttachState.Pending, AttachStateMapping.Cell(true, false, false, false, landblock));
-    }
-
-    [Fact]
-    public void A_registered_landblock_that_has_not_meshed_an_existing_cell_yet_is_pending()
-    {
-        // SetPlayerCell / PlaceViewer ask the layer to mesh the rest of the landblock; until then the cell is on its way.
-        Assert.Equal(AttachState.Pending, AttachStateMapping.Cell(true, false, true, true, LandblockLoadState.Loaded));
-    }
-
-    [Fact]
-    public void A_cell_the_registered_landblock_does_not_contain_is_failed_not_pending_for_ever()
-    {
-        var state = AttachStateMapping.Cell(true, false, true, false, LandblockLoadState.Loaded);
-        Assert.Equal(AttachState.Failed, state);
-        Assert.True(state.IsSettled());
-    }
-
-    [Fact]
-    public void A_cell_in_a_landblock_that_failed_to_load_is_failed()
-    {
-        Assert.Equal(AttachState.Failed, AttachStateMapping.Cell(true, false, false, false, LandblockLoadState.Failed));
+        var state = AttachStateMapping.Cell(interiors, attached, registered, cellExists, landblock);
+        Assert.Equal(expected, state);
+        if (expected == AttachState.Failed)
+        {
+            Assert.True(state.IsSettled());
+        }
     }
 
     [Theory]

@@ -73,13 +73,17 @@ public sealed class HeadlessRunner : IDisposable
     public const double VerticalFovDegrees = 60;
 
     private readonly GameSession _session;
-    private readonly IScenario _scenario;
+    private IScenario _scenario;
     private readonly IWorldAttachments _world;
     private readonly DataOnlyAttachments? _dataWorld;
     private readonly PortalSpaceDirector _director;
     private readonly PortalSessionBridge _bridge;
     private readonly CountingLogSink _log;
-    private readonly HeadlessRunOptions _options;
+    private HeadlessRunOptions _options;
+    private int _errors0;
+    private int _warnings0;
+    private int _loginCompletes0;
+    private long _corrections0;
     private readonly List<SessionPhase> _phases = [];
     private readonly IDisposable _phaseSubscription;
     private bool _disposed;
@@ -120,7 +124,7 @@ public sealed class HeadlessRunner : IDisposable
     public PortalSpaceDirector Director => _director;
 
     /// <summary>The session-clock time the run started.</summary>
-    public double Started { get; }
+    public double Started { get; private set; }
 
     /// <summary>True once the run ended.</summary>
     public bool IsDone => Result.Done;
@@ -195,7 +199,7 @@ public sealed class HeadlessRunner : IDisposable
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(log);
 
-        // D10: an automated run uses only the test account. Applied here, the one place every caller passes (the host, the scenarios' tests),
+        // D10 (M4 D31): an automated run uses only the three test accounts (TestAccounts). Applied here, the one place every caller passes (the host, the scenarios' tests),
         // before anything else; the refusal never repeats the account name (a mistyped option could be a password).
         if (!AutomatedAccountRule.TryApply(options.Session, automated: true, out var automatedSession, out var accountRefusal))
         {
@@ -204,6 +208,22 @@ public sealed class HeadlessRunner : IDisposable
         }
 
         options = options with { Session = automatedSession };
+
+        // M4 P4 rfix-b (review R11): on test-melee and test-archer a run enters only that account's own fighter and creates no character; refused loudly, before any backend step.
+        var (enterName, createName) = scenario switch
+        {
+            LoginScenario l => (l.Character, l.CreateCharacter),
+            AcademyExitScenario a => (a.Login.Character, a.Login.CreateCharacter),
+            HoltburgLapsScenario h => (h.Login.Character, h.Login.CreateCharacter),
+            WayfindScenario w => (w.Login.Character, w.Login.CreateCharacter),
+            LoginCheckScenario c => ((string?)c.Character, (string?)c.Character), // the check creates its character when it is missing
+            _ => ((string?)null, (string?)null),
+        };
+        if (!AutomatedAccountRule.TryCharacters(automatedSession.Account, enterName, createName, out var characterRefusal))
+        {
+            log.Warn(RunnerName, RunnerName + " refused the run: " + characterRefusal);
+            throw new PlayAccountException(characterRefusal!);
+        }
 
         // A0's S8: nothing before the loopback gate; then the mod-ready gate (D11), both naming this runner.
         LoopbackGate.Require(options.Session.Server, RunnerName, log);
@@ -238,6 +258,44 @@ public sealed class HeadlessRunner : IDisposable
             session.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Re-arms the runner with another scenario over the same live session (M4 P4: <see cref="HeadlessSession"/> runs several
+    /// scenarios in one login). The previous run must have ended. The new run's clock, limit and counters start now: the
+    /// result's errors, warnings, LoginCompletes and corrections count from this call on.
+    /// </summary>
+    /// <param name="scenario">What to run next.</param>
+    /// <param name="quitAfterSeconds">The limit on this run, in seconds on the session clock.</param>
+    internal void Arm(IScenario scenario, double quitAfterSeconds)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(scenario);
+        if (!Result.Done)
+        {
+            throw new InvalidOperationException("Arm: the previous run has not ended");
+        }
+
+        _scenario = scenario;
+        _options = _options with { QuitAfterSeconds = quitAfterSeconds };
+        _phases.Clear();
+        _errors0 = _log.Errors;
+        _warnings0 = _log.Warnings;
+        _loginCompletes0 = _director.LoginCompletesSent;
+        _corrections0 = _session.Corrections;
+        Started = _session.Clock.Now;
+        Result = Snapshot(done: false, ok: false, failure: null);
+    }
+
+    /// <summary>
+    /// One network frame with no scenario (M4 P4 sfix): the session ticks so it receives and acknowledges what the server sent, which keeps the
+    /// client's silence watchdog (20 s) and the server's own timeout quiet while a long-lived <see cref="HeadlessSession"/> waits between runs.
+    /// </summary>
+    /// <param name="now">The frame time.</param>
+    internal void KeepAlive(double now)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _session.Tick(now);
     }
 
     /// <summary>Runs one frame at <paramref name="now"/> (see the remarks). Returns the result so far.</summary>
@@ -345,12 +403,12 @@ public sealed class HeadlessRunner : IDisposable
         _scenario.Stage,
         failure,
         [.. _phases],
-        _log.Errors,
-        _log.Warnings,
+        _log.Errors - _errors0,
+        _log.Warnings - _warnings0,
         _session.Clock.Now - Started,
-        _director.LoginCompletesSent,
+        _director.LoginCompletesSent - _loginCompletes0,
         _session.Recorder?.Frames ?? 0,
-        _session.Corrections,
+        _session.Corrections - _corrections0,
         _scenario.WhereMaxMetres,
         _scenario.Unmatched);
 

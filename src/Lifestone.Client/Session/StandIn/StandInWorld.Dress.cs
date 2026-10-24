@@ -15,11 +15,13 @@ internal sealed partial class StandInWorld
 
     /// <summary>
     /// Sends the player's ObjDescEvent for what it wears now, when a piece worn on the body is in <paramref name="piece"/> or has just left; no dresser: the look stays
-    /// (<c>TODO(m3-standin-objdesc-on-wield)</c>, logged once).
+    /// (<c>TODO(m3-standin-objdesc-on-wield)</c>, logged once). With <paramref name="always"/> it is sent whatever the piece is, as ACE's
+    /// <c>TryDequipObjectWithBroadcasting</c> does for every dequip (<c>Creature_Equipment.cs</c> 438, unconditional; M4 4.1 fix3, review R24): a stowed weapon sends the
+    /// same look the dresser rebuilds.
     /// </summary>
-    private void SendLook(IAcSessionSink sink, StandInWorn? piece)
+    private void SendLook(IAcSessionSink sink, StandInWorn? piece, bool always = false)
     {
-        if (piece is null || !IsBodyWear(piece.Value))
+        if (!always && (piece is null || !IsBodyWear(piece.Value)))
         {
             return;
         }

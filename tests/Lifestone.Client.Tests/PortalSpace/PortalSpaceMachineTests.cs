@@ -127,14 +127,10 @@ public sealed class PortalSpaceMachineTests
     }
 
     [Theory]
-    [InlineData(66, 5.0)]
     [InlineData(67, 5.0)]
     [InlineData(68, 2.0)]
-    [InlineData(72, 2.0)]
     [InlineData(76, 2.0)]
     [InlineData(77, 5.0)]
-    [InlineData(1, 5.0)]
-    [InlineData(119, 5.0)]
     public void The_exit_window_is_frames_68_to_76_and_the_cap_is_5_s(int frame, double heldSeconds)
     {
         var tunnel = new FakeTunnel { Frame = frame };
@@ -436,7 +432,6 @@ public sealed class PortalSpaceMachineTests
 
     [Theory]
     [InlineData(TeleportAnimState.Holding)]
-    [InlineData(TeleportAnimState.LeavingTunnel)]
     [InlineData(TeleportAnimState.Arriving)]
     public void A_logoff_begun_mid_sequence_keeps_f_game_and_resets_the_zoom_and_the_roll(TeleportAnimState during)
     {

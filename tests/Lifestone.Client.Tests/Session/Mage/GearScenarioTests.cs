@@ -554,16 +554,6 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Empty(burned.SentWields);
     }
 
-    [Fact]
-    public void The_gear_help_names_the_verdict_fields_topup_and_cast_and_no_longer_says_a_ready_mage_sends_nothing()
-    {
-        var help = OptionCatalog.Headless().Options.Single(o => o.Name == "--scenario").Help;
-        Assert.Contains("topup=<n>", help, StringComparison.Ordinal);
-        Assert.Contains("cast=<ok|fizzled|failed|n/a>", help, StringComparison.Ordinal);
-        Assert.Contains("sends no gear step", help, StringComparison.Ordinal);
-        Assert.DoesNotContain("a ready mage sends nothing", help, StringComparison.Ordinal);
-    }
-
     private static SpellInfo Costing(Rig rig, uint id, uint baseMana)
     {
         var info = rig.Table[id] with { BaseMana = baseMana };
@@ -868,5 +858,70 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Equal(5, WornPieces(rig));
         Assert.Equal(7, scenario.DecoyGrants); // the Skull Cap was held (worn), so seven were spawned
         Assert.StartsWith("gear=wielded worn=5 kit=15/15", scenario.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    // ---------------------------------------------------------------- M4 P4 sess2: a session already in the world (one login, several scenarios)
+
+    [Fact]
+    public void With_RequireCharacter_a_session_already_in_the_world_as_BSD_Mage_is_geared_without_a_login_or_a_character_choice()
+    {
+        using var rig = new Rig();
+        rig.Session.State.Self.Name = MageTemplate.CharacterName;
+        var scenario = new GearScenario(SmallKit(), rig.Log, endSession: false, cast: false) { RequireCharacter = true };
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.StartsWith("gear=wielded worn=5 kit=7/7", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.DoesNotContain(rig.Log.Entries, e => e.Message.Contains("entering the existing character", StringComparison.Ordinal));
+        Assert.Equal(SessionPhase.InWorld, rig.Session.State.Phase);
+    }
+
+    [Fact]
+    public void With_RequireCharacter_a_session_in_the_world_as_another_character_fails_at_once_and_sends_nothing()
+    {
+        using var rig = new Rig();
+        rig.Session.State.Self.Name = "Lifestone Throwaway";
+        var sends = rig.Responder.ActionSends.Count;
+        var scenario = new GearScenario(SmallKit(), rig.Log, endSession: true, cast: false) { RequireCharacter = true };
+
+        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario, limit: 10));
+
+        Assert.Contains("'Lifestone Throwaway', not BSD Mage", scenario.Failure, StringComparison.Ordinal);
+        Assert.Equal(sends, rig.Responder.ActionSends.Count); // no grant, no wield
+        Assert.Equal(SessionPhase.InWorld, rig.Session.State.Phase); // not even a log off, though endSession is on: the session is the host's
+        Assert.DoesNotContain(rig.Log.Entries, e => e.Message.Contains("logging off before the run ends as failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_fight_scenario_with_RequireCharacter_fails_at_once_on_another_character_and_goes_on_to_the_gear_on_BSD_Mage()
+    {
+        using var wrong = new Rig();
+        wrong.Session.State.Self.Name = "Lifestone Throwaway";
+        var sends = wrong.Responder.ActionSends.Count;
+        var fight = new FightScenario(SmallKit(), wrong.Table, new BuffOptions(), new FightOptions { Kills = 1 }, walk: null, wrong.Log, endSession: false) { RequireCharacter = true };
+        Assert.Equal(ScenarioStatus.Failed, Steps(wrong, fight, 10));
+        Assert.Contains("gear: ", fight.Failure, StringComparison.Ordinal);
+        Assert.Contains("not BSD Mage", fight.Failure, StringComparison.Ordinal);
+        Assert.Equal(sends, wrong.Responder.ActionSends.Count);
+
+        using var right = new Rig();
+        right.Session.State.Self.Name = MageTemplate.CharacterName;
+        var ok = new FightScenario(SmallKit(), right.Table, new BuffOptions(), new FightOptions { Kills = 1 }, walk: null, right.Log, endSession: false) { RequireCharacter = true };
+        Steps(right, ok, 20); // the stand-in has no magic skills, so the run ends later at the buffs; what is judged is the gear stage before it
+        Assert.StartsWith("gear=wielded worn=5", ok.Gear!.VerdictFields(), StringComparison.Ordinal);
+        Assert.DoesNotContain("not BSD Mage", ok.Failure ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain(right.Log.Entries, e => e.Message.Contains("entering the existing character", StringComparison.Ordinal));
+    }
+
+    private static ScenarioStatus Steps(Rig rig, IScenario scenario, double seconds)
+    {
+        var status = ScenarioStatus.Running;
+        for (var t = 0.0; t < seconds && status == ScenarioStatus.Running; t += 0.1)
+        {
+            rig.Tick(0.1);
+            status = scenario.Step(rig.Session, rig.Session.Clock.Now);
+        }
+
+        return status;
     }
 }

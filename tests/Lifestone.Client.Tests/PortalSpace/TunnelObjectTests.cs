@@ -10,6 +10,7 @@ namespace Lifestone.Client.Tests.PortalSpace;
 /// Step PS5 on the real dats: the tunnel object spins the UIASSET animation with <c>set_sequence_animation</c>'s start
 /// frame 1 at 40 fps, and its frame-2 hook becomes one tunnel hum per 2.975 s loop.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class TunnelObjectTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private const uint TunnelHum = 0x0A000316;

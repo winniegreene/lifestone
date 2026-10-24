@@ -425,7 +425,7 @@ public sealed class DeathLegRunnerTests
         var m4Fixed = m4Stages.Sum(name => Constant(runner, name));
         var whole = m3Fixed + DeathOptions.DefaultSeconds + m4Fixed + DeathOptions.DefaultFightSeconds;
         var recovery = Constant(runner, "RecoverySeconds");
-        var timeout = double.Parse(Regex.Match(Smoke, @"--login-check=bsd-death' (\d+) ").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var timeout = double.Parse(Regex.Match(Smoke, @"--login-check=bsd-death"" (\d+) ").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
 
         Assert.Equal(605.0, m3Fixed); // M3's loop: 60 + 120 + 30 + 90 + 90 + 30 + 65 + 120
         Assert.Equal(630.0, m4Fixed); // M4 3.1's stages: 30 + 240 + 30 + 60 + 120 + 90 + 60
@@ -440,7 +440,6 @@ public sealed class DeathLegRunnerTests
         // The smoke step's Godot timeout is the sum plus the recovery log off and a margin (365 s over 2015 + 120).
         Assert.Equal(2500.0, timeout);
         Assert.True(timeout >= whole + recovery + 300, $"the smoke gives the leg {timeout} s for {whole} s, {recovery} s of recovery and the start-up");
-        Assert.Contains("2500 s: the leg stops itself at 2015 s with the defaults", Smoke, StringComparison.Ordinal);
 
         // Each limit covers what the scenario's own stage limit asks of it.
         Assert.True(Constant(runner, "BarsSeconds") >= DeathScenario.BarsSeconds);
@@ -476,27 +475,18 @@ public sealed class DeathLegRunnerTests
 
         var body = script[script.IndexOf("'login-death' {", StringComparison.Ordinal)..];
         body = body[..body.IndexOf("'login' {", StringComparison.Ordinal)];
-        Assert.Contains("--account=test --login-check=bsd-death", body, StringComparison.Ordinal);
+        Assert.Contains("--account=$($stepAccounts[$step]) --login-check=bsd-death", body, StringComparison.Ordinal);
         Assert.Contains("bsd-death done ok=true", body, StringComparison.Ordinal);
         Assert.Contains("$verdict", body, StringComparison.Ordinal);
-        Assert.Contains("login-death ", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal); // its help line
 
         // M4 2.2 s4 and M4 3.1 d2: the corpse trip's four fields and the decoy loop's nine are copied into the summary, report-only (n/a when absent), and the step's seconds are the leg's limit plus the recovery and a margin.
         Assert.Contains("'corpse_looted', 'items_recovered', 'trip_s', 'trip_abort', 'rebuffed', 'den_kills', 'decoys', 'decoy_safe', 'decoys_dropped', 'gear_dropped', 'decoys_recovered', 'pretrip_heals', 'gear_left', 'mode_mismatch'", body, StringComparison.Ordinal);
         Assert.Contains("report-only: $copied", body, StringComparison.Ordinal);
-        Assert.Contains("they never fail the step", body, StringComparison.Ordinal);
         Assert.Contains("\"$key=n/a\"", body, StringComparison.Ordinal); // an absent field reads n/a
         Assert.DoesNotContain("corpse_looted=", body, StringComparison.Ordinal); // a name in the copy list, never a judged "=" comparison
         Assert.DoesNotContain("decoy_safe=", body, StringComparison.Ordinal);
         Assert.DoesNotContain("mode_mismatch=", body, StringComparison.Ordinal);
-        Assert.Contains("--login-check=bsd-death' 2500 ''", body, StringComparison.Ordinal); // the step's seconds: the leg's 2015 s, the 120 s recovery and a margin
-
-        // The help text names the new fields, the 2500 s and the new frame.
-        var help = script[script.IndexOf("      login-death ", StringComparison.Ordinal)..script.IndexOf("      login-hunt ", StringComparison.Ordinal)];
-        Assert.Contains("rebuffed=<yes, no or skipped> den_kills=<n>", help, StringComparison.Ordinal);
-        Assert.Contains("decoys_recovered=<n|n/a> pretrip_heals=<n> gear_left=<n|n/a> mode_mismatch=<n>", help, StringComparison.Ordinal);
-        Assert.Contains("the Godot run gets 2500 s", help, StringComparison.Ordinal);
-        Assert.Contains("corpse-open, lifestone and decoys frames", help, StringComparison.Ordinal);
+        Assert.Contains("--login-check=bsd-death\" 2500 ''", body, StringComparison.Ordinal); // the step's seconds: the leg's 2015 s, the 120 s recovery and a margin
     }
 
     [Fact]
@@ -535,7 +525,6 @@ public sealed class DeathLegRunnerTests
         Assert.Contains("scenario.DecoyCheckResult is not { Made: true }", runner, StringComparison.Ordinal);
         Assert.Contains("list.FindItem(guid) is null", runner, StringComparison.Ordinal);
         Assert.Contains("list.ScrollToShow(first)", runner, StringComparison.Ordinal);
-        Assert.Contains("the decoys frame is given up: the in-game shell has no inventory page to open", runner, StringComparison.Ordinal);
     }
 
     [Fact]

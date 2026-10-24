@@ -1,3 +1,4 @@
+using Lifestone.Loopback.Tests.Session;
 using System.Globalization;
 using System.Security.Cryptography;
 using Lifestone.Client.Session;
@@ -28,6 +29,7 @@ namespace Lifestone.Loopback.Tests.ServerMod;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
 public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
 {
     /// <summary>The graduated character that stays at the character screen's baseline and does the purging.</summary>
@@ -36,6 +38,8 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
     private const string Smoke = "Lifestone Smoke";
 
     private const string Hunter = "Holtburg Hunter";
+    private const string Brawler = "Holtburg Brawler";
+    private const string Archer = "Holtburg Archer";
 
     private const string Throwaway = "Lifestone Throwaway";
 
@@ -61,6 +65,8 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
             (Smoke, ToolErrors.Graduated),
             (Caller, ToolErrors.Graduated),
             (Hunter, ToolErrors.Graduated),
+            (Brawler, ToolErrors.Graduated),
+            (Archer, ToolErrors.Graduated),
             (NotOnTheAccount, ToolErrors.UnknownCharacter),
         ];
         Assert.Equal(expected, leg.Refusals);
@@ -91,6 +97,7 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
     {
         var files = BackendProbe.MainCheckoutFiles;
         var log = new RecordingLogSink();
+        LiveCharacter.Release(Console.WriteLine, BackendProbe.TestAccountKey);
         var secrets = File.ReadAllBytes(files.SecretsFile);
         HeadlessRunner runner;
         try
@@ -138,7 +145,7 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
 
         private readonly IReadOnlyList<uint> _skillClasses;
         private readonly Action<string> _log;
-        private readonly Queue<(string Name, string Code)> _refusalsToAsk = new([(Throwaway, ToolErrors.NotPendingDeletion), (Smoke, ToolErrors.Graduated), (Caller, ToolErrors.Graduated), (Hunter, ToolErrors.Graduated), (NotOnTheAccount, ToolErrors.UnknownCharacter)]);
+        private readonly Queue<(string Name, string Code)> _refusalsToAsk = new([(Throwaway, ToolErrors.NotPendingDeletion), (Smoke, ToolErrors.Graduated), (Caller, ToolErrors.Graduated), (Hunter, ToolErrors.Graduated), (Brawler, ToolErrors.Graduated), (Archer, ToolErrors.Graduated), (NotOnTheAccount, ToolErrors.UnknownCharacter)]);
         private readonly List<(string Name, string Code)> _refusals = [];
         private ActionHandle? _pending;
         private ToolHandle<CharPurgeResult>? _purge;

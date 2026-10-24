@@ -1,6 +1,7 @@
 using Lifestone.Client.Avatars;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Play;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.CharacterCreation;
@@ -47,18 +48,29 @@ public sealed class HuntFollow : IHuntFollow
 {
     private const string LogCategory = "hunt";
 
+    /// <summary>
+    /// How long a move into a landblock whose collision is not attached yet is held back (the streamer builds it on its workers while the net pump keeps
+    /// running), in seconds; past it the follower builds it at once (<c>HeadlessStreamer.EnsureNow</c>) and logs <c>TODO(hunt-crossing-stall)</c> with the stall.
+    /// Not retail: Lifestone's own.
+    /// </summary>
+    public const double CrossingWaitSeconds = 3.0;
+
     private readonly DatSet _dats;
     private readonly ILogSink _log;
     private readonly Func<IGameSessionView, IMovementSink>? _sinkOf;
     private readonly PhysicsGeometryLibrary _geometry;
-    private readonly LandblockCollisionBuilder _builder;
+    private readonly HeadlessStreamer _streamer;
+    private readonly HashSet<LandblockCoord> _failedBlocks = [];
     private readonly PhysicsWorld _world = new();
+    private LandblockCoord? _focusBlock;
+    private double _crossingSince = double.NaN;
     private readonly List<ObjectMoved> _moves = [];
     private readonly List<ObjectMotionChanged> _serverMotions = [];
     private WireMotionItem[] _actions = new WireMotionItem[16];
     private IDisposable? _movesSubscription;
     private IDisposable? _motionSubscription;
     private OfflineWalker? _walker;
+    private MoveIntents? _move;
     private SessionTargetWorld? _targets;
     private bool _placed;
     private bool _disposed;
@@ -73,7 +85,7 @@ public sealed class HuntFollow : IHuntFollow
         ArgumentNullException.ThrowIfNull(log);
         (_dats, _log, _sinkOf) = (dats, log, sinkOf);
         _geometry = new PhysicsGeometryLibrary(dats);
-        _builder = new LandblockCollisionBuilder(dats, _geometry);
+        _streamer = new HeadlessStreamer(dats, _geometry, _world, null, log);
     }
 
     /// <inheritdoc/>
@@ -99,6 +111,8 @@ public sealed class HuntFollow : IHuntFollow
         var sink = _sinkOf?.Invoke(session) ?? new PresenceGatedMovementSink(session.Actions.Movement, () => session.State.Self.Travel == SelfTravel.Present);
         _world.SetTime(now);
         _walker = OfflineWalker.Create(_dats, _world, _log, weenie, _geometry, id: self.Guid, sink: sink);
+        _move = session.Actions.Move; // scripted movement goes through IActionApi.Move (the human's keys, R2)
+        _move.Bind(_walker.Controller, _walker.Controller.Options.RunByDefault);
         _targets = new SessionTargetWorld(session.State, _dats, _geometry, () => _world.CurrentTime, _walker.Physics);
         _walker.Physics.TargetWorld = _targets;
         _movesSubscription = session.Events.Subscribe<ObjectMoved>((in ObjectMoved e) =>
@@ -126,6 +140,7 @@ public sealed class HuntFollow : IHuntFollow
             return;
         }
 
+        _streamer.Pump(); // P5a-R8: the landblock crossing builds on the workers while the net pump runs; only the start waits for them
         DrainMoves(now);
         ApplyServerMotions();
         if (_placed)
@@ -143,43 +158,84 @@ public sealed class HuntFollow : IHuntFollow
         }
 
         _disposed = true;
+        if (_move is not null && _walker is not null)
+        {
+            _move.Unbind(_walker.Controller);
+        }
+
         _movesSubscription?.Dispose();
         _motionSubscription?.Dispose();
+        _streamer.Dispose();
     }
 
-    /// <summary>Attaches the collision of the landblock of <paramref name="cellId"/> and the eight around it that the world does not hold yet; false when the landblock itself fails to build.</summary>
-    private bool EnsureAttached(uint cellId)
+    /// <summary>
+    /// Makes sure the collision of the landblock of <paramref name="cellId"/> is attached, through the headless streamer (P5a S6: the collision streamer over
+    /// two workers; the player's landblock is the focus, so the ones left behind are released). The first landblock (the placement) is built at once; a
+    /// later crossing is not waited for (P5a-R8: the net pump keeps running): <see cref="EnsureResult.Pending"/> holds the move back until the workers have
+    /// it, for at most <see cref="CrossingWaitSeconds"/>. <see cref="EnsureResult.Failed"/> when the landblock itself fails to build.
+    /// </summary>
+    private EnsureResult EnsureAttached(uint cellId, double now)
     {
         var centre = LandblockCoord.FromId(cellId);
-        if (_world.IsAttached(centre))
+        if (_focusBlock == centre && _world.IsAttached(centre))
         {
-            return true;
+            return EnsureResult.Ready;
         }
 
-        for (var dx = -1; dx <= 1; dx++)
+        if (!_placed || _focusBlock is null)
         {
-            for (var dy = -1; dy <= 1; dy++)
+            _focusBlock = centre;
+            _streamer.EnsureNow(cellId);
+        }
+        else
+        {
+            _streamer.SetFocus(cellId);
+            _streamer.Pump();
+            if (!_world.IsAttached(centre) && !_streamer.IsSettled(cellId))
             {
-                if (centre.Offset(dx, dy) is { } coord && !_world.IsAttached(coord))
+                if (double.IsNaN(_crossingSince))
                 {
-                    try
-                    {
-                        _world.Attach(_builder.Build(coord));
-                    }
-                    catch (Exception e) when (e is InvalidDataException or InvalidOperationException or IOException)
-                    {
-                        _log.Error(LogCategory, "TODO(m4-hunt-follow-collision): the collision of a landblock around the player did not build; the hunt's own body cannot follow there", new LogField("landblock", coord.ToString()), new LogField("why", e.Message));
-                        Failure ??= "the collision of landblock " + coord + " did not build: " + e.Message;
-                        if (coord == centre)
-                        {
-                            return false;
-                        }
-                    }
+                    _crossingSince = now;
                 }
+
+                if (now - _crossingSince < CrossingWaitSeconds)
+                {
+                    return EnsureResult.Pending;
+                }
+
+                var waited = now - _crossingSince;
+                _streamer.EnsureNow(cellId);
+                _log.Warn(
+                    LogCategory,
+                    "TODO(hunt-crossing-stall): the landblock crossing did not attach on the workers in time; built at once, the net pump stalled",
+                    new LogField("landblock", centre.ToString()),
+                    new LogField("waited_s", waited),
+                    new LogField("streamer", _streamer.StatsLine())); // (no wall clock in Session sources: the pump and build maxima are the stall's measure)
             }
+
+            _focusBlock = centre;
         }
 
-        return _world.IsAttached(centre);
+        _crossingSince = double.NaN;
+        if (!_world.IsAttached(centre))
+        {
+            if (_failedBlocks.Add(centre))
+            {
+                _log.Error(LogCategory, "TODO(m4-hunt-follow-collision): the collision of the player's landblock did not build; the hunt's own body cannot follow there", new LogField("landblock", centre.ToString()));
+            }
+
+            Failure ??= "the collision of landblock " + centre + " did not build";
+            return EnsureResult.Failed;
+        }
+
+        return EnsureResult.Ready;
+    }
+
+    private enum EnsureResult
+    {
+        Ready,
+        Pending,
+        Failed,
     }
 
     private void DrainMoves(double now)
@@ -192,9 +248,17 @@ public sealed class HuntFollow : IHuntFollow
         // The controller's own report can come back as the server's echo while it applies a move: the batch is taken first.
         var batch = _moves.ToArray();
         _moves.Clear();
-        foreach (var move in batch)
+        for (var i = 0; i < batch.Length; i++)
         {
-            if (!EnsureAttached(move.Position.CellId))
+            var move = batch[i];
+            var ensured = EnsureAttached(move.Position.CellId, now);
+            if (ensured == EnsureResult.Pending)
+            {
+                _moves.AddRange(batch.AsSpan(i)); // held back, in order, until the landblock is attached
+                break;
+            }
+
+            if (ensured == EnsureResult.Failed)
             {
                 continue;
             }

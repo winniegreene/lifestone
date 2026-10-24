@@ -52,9 +52,15 @@ internal static class FighterItems
         return guid != 0;
     }
 
+    /// <summary>The launchers a fighter's kit can give or an older build left (the Shortbow, the Longbow): the wielded-launcher fallback looks for each.</summary>
+    internal static readonly uint[] LauncherWcids = [FighterKit.ShortbowWcid, FighterKit.LongbowWcid, FighterKit.Archer.LauncherWcid];
+
+    /// <summary>The ammunition a fighter's kit can give or an older build left (the Arrow, the Greater Frost Arrow).</summary>
+    internal static readonly uint[] AmmoWcids = [FighterKit.ArrowWcid, FighterKit.GreaterFrostArrowWcid];
+
     /// <summary>
     /// The wielded launcher, by what the read model shows: <see cref="CombatModeGuard.Read"/>'s launcher (an item in the missile slot 0x400000, ACE's rule, or a wielded ItemType MissileWeapon item with CombatUse 2), else an
-    /// equipped item of the Shortbow's class. Null when none is wielded. ACE refuses a melee weapon while it is wielded (<c>CheckWeaponCollision</c>, <c>Player_Inventory.cs</c>), and so does the combat-mode guard.
+    /// equipped item of the Shortbow's class. Null when none is wielded. ACE refuses a melee weapon while it is wielded (<c>CheckWeaponCollision</c>, <c>Player_Inventory.cs:1878-2056</c> at ACE 95ef426d), and so does the combat-mode guard.
     /// </summary>
     /// <param name="state">The read model.</param>
     /// <param name="scratch">A list for the held guids (cleared first).</param>
@@ -66,7 +72,15 @@ internal static class FighterItems
             return launcher;
         }
 
-        return Find(state, scratch, FighterKit.ShortbowWcid, out var bow, out var equipped) && equipped && state.Objects.TryGet(bow, out var shortbow) ? shortbow : null;
+        foreach (var wcid in LauncherWcids)
+        {
+            if (Find(state, scratch, wcid, out var bow, out var equipped) && equipped && state.Objects.TryGet(bow, out var wielded))
+            {
+                return wielded;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -82,7 +96,7 @@ internal static class FighterItems
         for (var i = 0; i < equipped.Count; i++)
         {
             var entry = equipped[i];
-            var ammunition = (entry.Location & (uint)EquipMask.MissileAmmo) != 0 || (state.Objects.TryGet(entry.Guid, out var o) && o.Weenie.WeenieClassId == FighterKit.ArrowWcid);
+            var ammunition = (entry.Location & (uint)EquipMask.MissileAmmo) != 0 || (state.Objects.TryGet(entry.Guid, out var o) && Array.IndexOf(AmmoWcids, o.Weenie.WeenieClassId) >= 0);
             if (!ammunition)
             {
                 continue;

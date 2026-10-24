@@ -33,6 +33,7 @@ namespace Lifestone.Loopback.Tests.ServerMod;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
 [TestCaseOrderer("Lifestone.Loopback.Tests.Net.LiveStepOrderer", "Lifestone.Loopback.Tests")]
 public sealed partial class ModVerbsLiveTests(ITestOutputHelper output)
 {

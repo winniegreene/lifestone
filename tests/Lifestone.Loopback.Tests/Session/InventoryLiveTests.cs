@@ -23,10 +23,12 @@ namespace Lifestone.Loopback.Tests.Session;
 /// (<see cref="PlayerInventory.IsKnown"/>); the run prints the pack, side-pack and equipped counts and the burden read from the player's quality, for the lead to compare with the character.
 /// (3) Each grant raises <see cref="PlayerInventory.Count"/> by exactly one (a grant that ACE merged into an existing stack would show as a failure here: the throwaway starts without Pyreal, and the
 /// mod creates a new item per request).</para>
-/// <para><b>Touches</b> only the throwaway (items given to it, never removed: they go with a purge). The run always ends logged off.</para>
+/// <para><b>Touches</b> only the throwaway (items given to it, never removed: they go with a purge). Since M4 P4 the run is over the throwaway's shared session (one login per test process; the throwaway is put in peace mode first) and does not log off at the end; the lists after the login are those of the session's entry.</para>
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[LiveSharedSession]
 public sealed class InventoryLiveTests(ITestOutputHelper output)
 {
     private const string Throwaway = "Lifestone Throwaway";
@@ -36,48 +38,15 @@ public sealed class InventoryLiveTests(ITestOutputHelper output)
     {
         using var dats = DatSet.Open();
         var leg = new InventoryLeg(HeadlessCharacter.RetailSkillClasses(dats), output.WriteLine);
-        var result = Run(dats, leg, 300);
-        output.WriteLine(result.SummaryLine("memory"));
+        var result = Run(leg, 300);
         Assert.True(result.Ok, result.Failure);
         Assert.Equal("done", leg.Stage);
         Assert.True(leg.FirstGrantInPack, "the first grant did not land in the main pack with its world object");
         Assert.True(leg.SecondGrantInPack, "the second grant did not land in the main pack with its world object");
     }
 
-    private static HeadlessRunResult Run(DatSet dats, IScenario scenario, double seconds)
-    {
-        var files = BackendProbe.MainCheckoutFiles;
-        var log = new RecordingLogSink();
-        var secrets = File.ReadAllBytes(files.SecretsFile);
-        HeadlessRunner runner;
-        try
-        {
-            runner = HeadlessRunner.Start(
-                new HeadlessRunOptions
-                {
-                    Session = new SessionOptions { Account = BackendProbe.TestAccountKey, Server = BackendProbe.Probe().AceEndPoint! },
-                    QuitAfterSeconds = seconds,
-                },
-                scenario,
-                secrets,
-                File.ReadAllBytes(files.PidsFile),
-                dats,
-                TimeProvider.System,
-                log,
-                recording: null);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(secrets);
-        }
-
-        var context = new GameThreadSynchronizationContext();
-        using (context.Install())
-        using (runner)
-        {
-            return runner.Run(context, CancellationToken.None);
-        }
-    }
+    private HeadlessRunResult Run(IScenario scenario, double seconds) =>
+        LiveRun.Run(output, scenario, "inventory", seconds, item: "p4", character: Throwaway);
 
     /// <summary>The whole leg in one session, written as a script that yields a handle to wait for it (or null to wait a frame).</summary>
     internal sealed class InventoryLeg : IScenario
@@ -118,6 +87,15 @@ public sealed class InventoryLiveTests(ITestOutputHelper output)
         {
             ArgumentNullException.ThrowIfNull(session);
             _session = session;
+            if (Stage == "start" && LiveMage.AlreadyInWorld(session) && LiveMage.WrongCharacter(session, Throwaway) is { } wrong)
+            {
+                // Nothing was sent (the shared session is the host's: no log off).
+                Failure = wrong;
+                _log("FAILED: " + wrong);
+                Stage = "failed";
+                return ScenarioStatus.Failed;
+            }
+
             switch (Stage)
             {
                 case "done":
@@ -184,33 +162,41 @@ public sealed class InventoryLiveTests(ITestOutputHelper output)
         private IEnumerable<ActionHandle?> Script()
         {
             var s = _session ?? throw new InvalidOperationException("no session");
-            Stage = "login";
-            var login = s.Actions.Login(ActionSource.Host);
-            yield return login;
-            Confirmed(login, "login");
-
-            Stage = "throwaway";
-            var slot = Find(s, Throwaway);
-            Require(slot is not { PendingDeletion: true }, $"'{Throwaway}' is pending deletion from an earlier run: purge it first (ModCharPurgeLiveTests does)");
-            if (slot is null)
+            if (LiveMage.AlreadyInWorld(s))
             {
-                var create = s.Actions.CreateCharacter(HeadlessCharacter.Intent(Throwaway, _skillClasses), ActionSource.Host);
-                yield return create;
-                Confirmed(create, "creating the throwaway");
-                slot = Find(s, Throwaway);
-                Require(slot is { PendingDeletion: false }, "creating the throwaway: the list does not show it");
+                Stage = "running";
+                _log("already in the world: the shared session's entry logged the character in");
             }
-
-            Stage = "entering";
-            var enter = s.Actions.EnterWorld(slot!.Value.Guid, ActionSource.Host);
-            yield return enter;
-            Confirmed(enter, "entering the world as " + Throwaway);
-            Stage = "arriving";
-            _since = s.Clock.Now;
-            while (s.State.Self.Travel != SelfTravel.Present || !s.State.Self.Qualities.IsKnown)
+            else
             {
-                Require(s.Clock.Now - _since <= ArrivalSeconds, "arriving: the player was not unhidden with its qualities within " + ArrivalSeconds + " s");
-                yield return null;
+                Stage = "login";
+                var login = s.Actions.Login(ActionSource.Host);
+                yield return login;
+                Confirmed(login, "login");
+
+                Stage = "throwaway";
+                var slot = Find(s, Throwaway);
+                Require(slot is not { PendingDeletion: true }, $"'{Throwaway}' is pending deletion from an earlier run: purge it first (ModCharPurgeLiveTests does)");
+                if (slot is null)
+                {
+                    var create = s.Actions.CreateCharacter(HeadlessCharacter.Intent(Throwaway, _skillClasses), ActionSource.Host);
+                    yield return create;
+                    Confirmed(create, "creating the throwaway");
+                    slot = Find(s, Throwaway);
+                    Require(slot is { PendingDeletion: false }, "creating the throwaway: the list does not show it");
+                }
+
+                Stage = "entering";
+                var enter = s.Actions.EnterWorld(slot!.Value.Guid, ActionSource.Host);
+                yield return enter;
+                Confirmed(enter, "entering the world as " + Throwaway);
+                Stage = "arriving";
+                _since = s.Clock.Now;
+                while (s.State.Self.Travel != SelfTravel.Present || !s.State.Self.Qualities.IsKnown)
+                {
+                    Require(s.Clock.Now - _since <= ArrivalSeconds, "arriving: the player was not unhidden with its qualities within " + ArrivalSeconds + " s");
+                    yield return null;
+                }
             }
 
             var inventory = s.State.Self.Inventory;
@@ -246,6 +232,12 @@ public sealed class InventoryLiveTests(ITestOutputHelper output)
                 {
                     SecondGrantInPack = ok;
                 }
+            }
+
+            if (LiveRun.KeepSession)
+            {
+                _log("the shared session stays logged in (no log off at the end of the leg)");
+                yield break;
             }
 
             Stage = "logging-off";

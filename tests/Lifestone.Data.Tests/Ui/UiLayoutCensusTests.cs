@@ -10,6 +10,7 @@ namespace Lifestone.Data.Tests.Ui;
 /// independent walker of the raw bytes (<see cref="RawLayoutWalker"/>) agrees with DatReaderWriter's reading. The
 /// numbers are what a reader of the test log needs to trust the decode; nothing dat-derived is written anywhere.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class UiLayoutCensusTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private DatSet Dats => fixture.Dats;

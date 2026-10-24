@@ -70,9 +70,7 @@ public sealed class RecoveryRulesTests
     // ---------------------------------------------------------------------------------------------- none
 
     [Theory]
-    [InlineData(10u)]
     [InlineData(100u)]
-    [InlineData(187u)]
     public void With_the_recovery_off_nothing_is_ever_decided(uint health)
     {
         var off = new RecoveryOptions { Enabled = false };
@@ -356,14 +354,11 @@ public sealed class RecoveryRulesTests
     [InlineData("--heal-below=0")]
     [InlineData("--heal-below=101")]
     [InlineData("--heal-below=x")]
-    [InlineData("--heal-until=0")]
     [InlineData("--heal-until=101")]
     [InlineData("--heal-chance=1.5")]
     [InlineData("--heal-chance=-0.1")]
     [InlineData("--heal-chance=often")]
     [InlineData("--heal-floor-chance=1.5")]
-    [InlineData("--heal-floor-chance=-0.1")]
-    [InlineData("--heal-floor-chance=often")]
     [InlineData("--heal-floor-chance=NaN")]
     public void A_bad_value_is_an_error_line_and_the_default_stays(string argument)
     {

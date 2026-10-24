@@ -57,7 +57,7 @@ internal sealed class LoginRig : IDisposable
     private readonly DatUiImageSource _images;
     private double _now;
 
-    public LoginRig(DatSetFixture fixture, Action<IInboundMessageHandler>? standIn = null, bool retailDisconnect = false, uint? startMode = null, int window = 800, bool charGen = true, bool throneOfDestiny = true, int seed = 7, UiRetailGlitches glitches = UiRetailGlitches.None, bool view3D = false, ICg3DViewHost? viewHost = null, bool liveGame = false, int? windowHeight = null, bool stageShell = false, Func<IUiImageSource, IUiImageSource>? wrapImages = null)
+    public LoginRig(DatSetFixture fixture, Action<IInboundMessageHandler>? standIn = null, bool retailDisconnect = false, uint? startMode = null, int window = 800, bool charGen = true, bool throneOfDestiny = true, int seed = 7, UiRetailGlitches glitches = UiRetailGlitches.None, bool view3D = false, ICg3DViewHost? viewHost = null, bool liveGame = false, int? windowHeight = null, bool stageShell = false, Func<IUiImageSource, IUiImageSource>? wrapImages = null, bool examineIcon = false)
     {
         Fixture = fixture;
         Log = new RecordingLogSink();
@@ -80,6 +80,7 @@ internal sealed class LoginRig : IDisposable
                 EnumMaps = fixture.Dats.EnumMaps,
                 Log = Log,
                 RetailGlitches = glitches,
+                ExamineIcon = examineIcon,
             },
             UiScalePolicy.Choose(window, windowHeight ?? (window * 3 / 4)));
         Manager.Input.Bindings = RetailKeyBindings.Load(fixture.Dats);

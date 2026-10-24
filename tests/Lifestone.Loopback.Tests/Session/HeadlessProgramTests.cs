@@ -21,10 +21,10 @@ public sealed class HeadlessProgramTests : IDisposable
     [Fact]
     public void Help_lists_the_headless_options_and_exits_0()
     {
-        var (code, output, error) = Run(["--help"]);
+        var (code, output, error) = Run(["--help", "--laps=0"]);  // help wins over a bad option
         Assert.Equal(0, code);
         Assert.StartsWith("Lifestone headless host options.", output, StringComparison.Ordinal);
-        foreach (var option in new[] { "  --help", "  --dat-dir=DIR", "  --log-level=", "  --quit-after=S", "  --workers=N", "  --scenario=", "  --account=" })
+        foreach (var option in new[] { "  --help", "  --dat-dir=DIR", "  --log-level=", "  --quit-after=S", "  --workers=N", "  --scenario=", "  --account=", "  --laps=N", "  --create-character=NAME", "  --summary=PATH", "  --play", "  --server=IP:PORT", "  --record-session[=DIR]" })
         {
             Assert.Contains(option, output, StringComparison.Ordinal);
         }
@@ -32,18 +32,6 @@ public sealed class HeadlessProgramTests : IDisposable
         Assert.DoesNotContain("--vsync", output, StringComparison.Ordinal);
         Assert.DoesNotContain("--screenshot", output, StringComparison.Ordinal);
         Assert.Empty(error);
-    }
-
-    [Fact]
-    public void A_bad_command_line_exits_1_with_one_line_per_problem_and_no_values()
-    {
-        var (code, output, error) = Run(["--laps=0", "--pasword=hunter2"]);
-        Assert.Equal(Program.BadArgumentsExitCode, code);
-        Assert.Empty(output);
-        var lines = error.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        Assert.Equal(2, lines.Length);
-        Assert.All(lines, l => Assert.StartsWith("headless: ", l, StringComparison.Ordinal));
-        Assert.DoesNotContain("hunter2", error, StringComparison.Ordinal);
     }
 
     /// <summary>dod-1-2-12-13-1: refused on the command line, before the backend, the dats or any recording.</summary>

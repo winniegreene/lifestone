@@ -26,7 +26,7 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
         {
             var keyboard = map.Bindings.Where(b => map.DeviceOf(b.Control) == RetailDeviceType.Keyboard).ToArray();
             Assert.NotEmpty(keyboard);
-            foreach (var dik in new[] { LifestoneHotkeys.ToolsKey, LifestoneHotkeys.InspectorKey })
+            foreach (var dik in new[] { LifestoneHotkeys.ToolsKey, LifestoneHotkeys.InspectorKey, LifestoneHotkeys.AutoBuffKey })
             {
                 // No binding of the key in any input map, whatever meta keys it needs; and it is no meta key either.
                 Assert.DoesNotContain(keyboard, b => b.Control.Semantic == dik);
@@ -43,7 +43,7 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
 
         // Lifestone's own input map is none of retail's.
         Assert.DoesNotContain(game.Bindings.Concat(engine.Bindings), b => b.InputMapId == LifestoneHotkeys.InputMap);
-        Assert.DoesNotContain(game.Bindings.Concat(engine.Bindings), b => b.ActionId is LifestoneHotkeys.OpenToolsAction or LifestoneHotkeys.OpenInspectorAction);
+        Assert.DoesNotContain(game.Bindings.Concat(engine.Bindings), b => b.ActionId is LifestoneHotkeys.OpenToolsAction or LifestoneHotkeys.OpenInspectorAction or LifestoneHotkeys.AutoBuffAction);
     }
 
     [RequiresLocalDatsFact]
@@ -52,6 +52,7 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
         var reachable = GodotKeyCodes.MappedKeycodes.Select(code => GodotKeyCodes.ToDik(code, UiKeyLocation.Unspecified)).ToHashSet();
         Assert.Contains(LifestoneHotkeys.ToolsKey, reachable);
         Assert.Contains(LifestoneHotkeys.InspectorKey, reachable);
+        Assert.Contains(LifestoneHotkeys.AutoBuffKey, reachable);
         Assert.Equal(0x41, LifestoneHotkeys.ToolsKey);
         Assert.Equal(0x46, LifestoneHotkeys.InspectorKey);
     }
@@ -62,13 +63,15 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
         var retail = RetailKeyBindings.Load(fixture.Dats);
         var both = retail.With(LifestoneHotkeys.Bindings);
 
-        Assert.Equal(retail.Bindings.Count + 2, both.Bindings.Count);
+        Assert.Equal(retail.Bindings.Count + 3, both.Bindings.Count);
         Assert.Equal(retail.Bindings, both.Bindings.Take(retail.Bindings.Count));
         Assert.False(retail.TryFindBestMatch(LifestoneHotkeys.InputMap, RetailKeyBindings.Keyboard(LifestoneHotkeys.ToolsKey), 0, 1, out _));
         Assert.True(both.TryFindBestMatch(LifestoneHotkeys.InputMap, RetailKeyBindings.Keyboard(LifestoneHotkeys.ToolsKey), 0, 1, out var tools));
         Assert.Equal(LifestoneHotkeys.OpenToolsAction, tools.ActionId);
         Assert.True(both.TryFindBestMatch(LifestoneHotkeys.InputMap, RetailKeyBindings.Keyboard(LifestoneHotkeys.InspectorKey), 0, 1, out var inspector));
         Assert.Equal(LifestoneHotkeys.OpenInspectorAction, inspector.ActionId);
+        Assert.True(both.TryFindBestMatch(LifestoneHotkeys.InputMap, RetailKeyBindings.Keyboard(LifestoneHotkeys.AutoBuffKey), 0, 1, out var autoBuff));
+        Assert.Equal(LifestoneHotkeys.AutoBuffAction, autoBuff.ActionId);
     }
 
     [Fact]
@@ -96,6 +99,17 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
         scene.Input.KeyDown(DikScanCodes.Scroll);
         scene.Input.KeyUp(DikScanCodes.Scroll);
         Assert.Equal((1, 2), (opened, hotkeys.InspectorPresses));
+
+        // Pause (the auto-buff) before the host wires it: counted and logged as a named TODO; wired, it calls back.
+        scene.Input.KeyDown(DikScanCodes.Pause);
+        scene.Input.KeyUp(DikScanCodes.Pause);
+        Assert.Equal(1, hotkeys.AutoBuffPresses);
+        Assert.Contains(scene.Log.Entries, e => e.Message.Contains("TODO(m4-autobuff-key-unwired)", StringComparison.Ordinal));
+        var toggled = 0;
+        hotkeys.ToggleAutoBuff = () => toggled++;
+        scene.Input.KeyDown(DikScanCodes.Pause);
+        scene.Input.KeyUp(DikScanCodes.Pause);
+        Assert.Equal((1, 2), (toggled, hotkeys.AutoBuffPresses));
 
         // A key held down repeats nothing; other keys are none of ours.
         scene.Input.KeyDown(DikScanCodes.F7);

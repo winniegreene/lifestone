@@ -82,7 +82,7 @@ public partial class PortalTunnelView : CanvasLayer
     /// <param name="services">The shared services.</param>
     /// <param name="setupId">The tunnel Setup (<see cref="PortalSpaceAssets.TunnelSetupId"/>).</param>
     /// <param name="tunnel">The tunnel object, posed once so the first frame shows its first pose.</param>
-    public static PortalTunnelView Create(GameServices services, uint setupId, TunnelObject tunnel)
+    public static PortalTunnelView Create(GameServices services, uint setupId, TunnelObject tunnel, double? restFovDegrees = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(tunnel);
@@ -127,7 +127,7 @@ public partial class PortalTunnelView : CanvasLayer
 
         node.Pose(tunnel);
         node.PlaceCamera(0.0);
-        node.View.SetLens(CameraLens.FromPortal(new PortalLens(PortalZoom.FocalFromVerticalFov((services.Options.Fov ?? GameOptions.DefaultFov) * Math.PI / 180.0), Overridden: true)));
+        node.View.SetLens(CameraLens.FromPortal(new PortalLens(PortalZoom.FocalFromVerticalFov((restFovDegrees ?? services.Options.Fov ?? GameOptions.DefaultFov) * Math.PI / 180.0), Overridden: true)));
         node.View.RenderOnce();
         return node;
     }

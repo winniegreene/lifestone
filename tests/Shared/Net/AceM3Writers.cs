@@ -75,6 +75,19 @@ public static class AceM3Writers
             w.Write(equipMask);
         });
 
+    /// <summary>GE 0x0196 <c>GameEventViewContents</c>: the container, then a count and (guid, ContainerType) per entry (M4 P5a fix r4: a side pack's contents at the login).</summary>
+    public static byte[] ViewContents(uint player, uint sequence, uint container, IReadOnlyList<(uint Guid, uint ContainerType)> entries) =>
+        Event(player, sequence, 0x0196, w =>
+        {
+            w.Write(container);
+            w.Write(entries.Count);
+            foreach (var (guid, type) in entries)
+            {
+                w.Write(guid);
+                w.Write(type);
+            }
+        });
+
     /// <summary>GE 0x019A <c>GameEventItemServerSaysMoveItem</c>: the item.</summary>
     public static byte[] PutObjectIn3D(uint player, uint sequence, uint item) => Event(player, sequence, 0x019A, w => w.Write(item));
 

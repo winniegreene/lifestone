@@ -24,6 +24,7 @@ public sealed class TerrainBlendPackingTests(DatSetFixture fixture) : IClassFixt
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_vertices_carry_flat_cell_data_and_retail_corner_uvs()
     {
@@ -60,6 +61,7 @@ public sealed class TerrainBlendPackingTests(DatSetFixture fixture) : IClassFixt
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Block_edge_normals_differ_between_neighbours_as_in_retail()
     {

@@ -215,10 +215,13 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
     public string MageField { get; private set; } = LoginCheckShell.NotApplicable;
 
     /// <summary>
-    /// Whether the account's character list holds <see cref="FighterTemplate.CharacterName"/> (case-insensitive), for the verdict line's <c>fighter=</c> (M4 1.1 s5, report-only):
+    /// Whether the account's character list holds <see cref="FighterTemplate.Name"/> (case-insensitive), for the verdict line's <c>fighter=</c> (M4 1.1 s5, report-only):
     /// the same rule as <see cref="MageField"/>.
     /// </summary>
     public string FighterField { get; private set; } = LoginCheckShell.NotApplicable;
+
+    /// <summary>The fighter template of the account the check runs on (M4 P4, D31: <see cref="Fighter.FighterTemplate.ForAccount"/> of <c>--account</c>); the Hunter by default.</summary>
+    public FighterTemplate FighterTemplate { get; init; } = FighterTemplate.Hunter;
 
     /// <summary>The report-only fields as the verdict line carries them: <c> level=&lt;n|?&gt; mage_char=&lt;present|absent|pending-delete&gt; fighter=&lt;present|absent|pending-delete&gt;</c> (they never fail the check).</summary>
     public string ReportFields => Fields(LevelField, MageField, FighterField);
@@ -272,7 +275,7 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
     public static string MageOf(IEnumerable<CharacterSlot> characters) => ListedAs(characters, MageTemplate.CharacterName);
 
     /// <summary>The <c>fighter=</c> value for a character list: <c>present</c>, <c>pending-delete</c> or <c>absent</c> (the name is compared case-insensitively).</summary>
-    public static string FighterOf(IEnumerable<CharacterSlot> characters) => ListedAs(characters, FighterTemplate.CharacterName);
+    public static string FighterOf(IEnumerable<CharacterSlot> characters, FighterTemplate? template = null) => ListedAs(characters, (template ?? FighterTemplate.Hunter).Name);
 
     private static string ListedAs(IEnumerable<CharacterSlot> characters, string name)
     {
@@ -456,7 +459,7 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
         if (MageField == LoginCheckShell.NotApplicable)
         {
             MageField = MageOf(session.State.Characters.Entries);
-            FighterField = FighterOf(session.State.Characters.Entries);
+            FighterField = FighterOf(session.State.Characters.Entries, FighterTemplate);
         }
 
         foreach (var c in session.State.Characters.Entries)

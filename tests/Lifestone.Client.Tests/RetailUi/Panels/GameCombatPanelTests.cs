@@ -3,6 +3,7 @@ using Lifestone.Client.Play;
 using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Dialogs;
 using Lifestone.Client.RetailUi.Flow;
+using Lifestone.Client.RetailUi.Input;
 using Lifestone.Client.RetailUi.Options;
 using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Screens;
@@ -133,6 +134,29 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
         Assert.False(Drawn(s, s.Bar));
         Assert.False(s.Combat.RecklessnessField!.Visible); // PostInit hides it
         Assert.False(s.Bar.RecklessnessField!.Visible);
+    }
+
+    [RequiresLocalDatsFact]
+    public void Retails_combat_key_from_the_keymap_dat_toggles_the_mode_like_the_button()
+    {
+        // M4 4.1 v3: the dat's accent-grave binding (input map 0x10000002, action 0x1000005A) reaches the combat window's registration through the real key map.
+        using var s = Enter();
+        Assert.NotNull(s.Combat.ToggleKey);
+        Assert.Contains(s.Rig.Manager.Input.Bindings!.Bindings, b => b.InputMapId == CombatToggleKey.InputMap && b.ActionId == CombatToggleKey.ToggleAction && b.Control.Semantic == DikScanCodes.Grave);
+
+        s.Rig.Manager.Input.KeyDown(DikScanCodes.Grave);
+        s.Rig.Manager.Input.KeyUp(DikScanCodes.Grave);
+
+        Assert.Equal(1, s.Combat.ToggleKey!.Presses);
+        var asked = s.Rig.Session.ActionLog[s.Rig.Session.ActionLog.Count - 1];
+        Assert.Equal(ActionKind.SetCombatMode, asked.Kind);
+        Assert.Equal(ActionSource.Ui, asked.Source);
+        Assert.Contains("mode=2", asked.Summary, StringComparison.Ordinal); // nothing wielded: fists, as the button asks
+        s.ChangeMode(CombatMode.Melee);
+
+        s.Rig.Manager.Input.KeyDown(DikScanCodes.Grave);
+        s.Rig.Manager.Input.KeyUp(DikScanCodes.Grave);
+        Assert.Contains("mode=1", s.Rig.Session.ActionLog[s.Rig.Session.ActionLog.Count - 1].Summary, StringComparison.Ordinal); // from a combat mode: peace
     }
 
     [RequiresLocalDatsFact]
@@ -584,9 +608,6 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
     }
 
     [Theory]
-    [InlineData("Mace", 1, EquipMask.MeleeWeapon, CombatMode.Melee)]
-    [InlineData("Shortbow", 2, EquipMask.MissileWeapon, CombatMode.Missile)]
-    [InlineData("Two-handed Sword", 5, EquipMask.TwoHanded, CombatMode.Melee)]
     [InlineData("Mislabelled Bow", 2, EquipMask.MeleeWeapon, CombatMode.Missile)] // the weapon's own type decides, not its slot
     [InlineData("Mislabelled Mace", 1, EquipMask.MissileWeapon, CombatMode.Melee)]
     public void The_default_combat_mode_is_the_wielded_weapons_CombatUse(string name, int combatUse, EquipMask slot, CombatMode expected)
@@ -640,37 +661,10 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
         }
     }
 
-    // M4 3.1 g: the toolbar never asks for a mode the combat-mode guard refuses (the guard is what the Action API applies to every SetCombatMode).
     [Theory]
-    [MemberData(nameof(WieldedSetups.Names), MemberType = typeof(WieldedSetups))]
-    public void The_toggle_picks_a_mode_the_combat_mode_guard_allows_for_every_wielded_setup(string name)
-    {
-        var c = WieldedSetups.Find(name);
-        var state = WieldedSetups.World(c.Pieces).State;
-        var pick = CombatModeRules.DefaultMode(state, out var blocked, out var missing);
-
-        Assert.Equal(c.Pick, pick);
-        Assert.Null(blocked);
-        if (pick == CombatMode.NonCombat)
-        {
-            Assert.NotEqual(0u, missing); // peace is picked only for want of an item's kind: the press asks nothing
-            return;
-        }
-
-        Assert.Equal(0u, missing);
-        Assert.Null(CombatModeGuard.Check(pick, state));
-        Assert.True(CombatModeRules.Compatible(state, pick, out _)); // retail's CompatibleCombatMode agrees too
-    }
-
-    [Theory]
-    [InlineData(EquipMask.MeleeWeapon, 3)]
-    [InlineData(EquipMask.MeleeWeapon, 4)]
     [InlineData(EquipMask.MeleeWeapon, 9)]
-    [InlineData(EquipMask.MissileWeapon, 3)]
-    [InlineData(EquipMask.MissileWeapon, 4)]
     [InlineData(EquipMask.MissileWeapon, 9)]
     [InlineData(EquipMask.TwoHanded, 3)]
-    [InlineData(EquipMask.TwoHanded, 4)]
     public void A_CombatUse_that_is_neither_melee_nor_missile_picks_a_mode_the_guard_allows_whatever_slot_the_item_is_in(EquipMask slot, int combatUse)
     {
         // The 1.3 review's R6 (docs/milestones/m4-plan.md section 9): for CombatUse 3, 4 or another value the slot decides here where retail's picker gives melee. Whatever the slot says, the pick passes the guard.

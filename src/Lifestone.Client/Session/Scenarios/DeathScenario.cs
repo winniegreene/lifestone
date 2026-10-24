@@ -97,7 +97,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     public const double VitaeSeconds = 10;
 
     /// <summary>
-    /// The total experience a character needs for a level (null at or above the cap): the vitae stage's level guard. When null the session's own table (<see cref="IGameSessionView.XpTable"/>) is used, and when neither is loaded the stage
+    /// The total experience a character needs for a level (null at or above the cap): the vitae stage's level-crossing log (D42: a grant may cross a level; M3 D37's refusal is replaced). When null the session's own table (<see cref="IGameSessionView.XpTable"/>) is used, and when neither is loaded the stage
     /// fails loudly. Hosts set it from <see cref="LevelXpOf"/>.
     /// </summary>
     public Func<int, ulong?>? LevelXp { get; set; }
@@ -163,6 +163,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     private bool _enteredHere;
     private readonly DenExit _exit;
     private bool _failLeave;
+    private bool _failVitae;
     private bool _vitaeSent;
     private long? _vitaePaid;
     private int? _vitaeAfter;
@@ -406,6 +407,11 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             if (_failLeave)
             {
                 return FailLeaveStep(session);
+            }
+
+            if (_failVitae)
+            {
+                return VitaeStep(session, session.Clock.Now);
             }
 
             if (_failLogOff && _pending is { Outcome: { } left })
@@ -1378,6 +1384,16 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <summary>The failed run's end in the world, out of the den: the log off when the scenario owns the session (as the fight scenario's failure, so the next login is not refused as CharacterInWorld), else Failed at once (the game's leg logs off itself).</summary>
     private ScenarioStatus FailInWorld(IGameSessionView session)
     {
+        // P5a r3: the vitae stage also runs after a failure (out of the den, before the log off). Round 3's two death runs both failed in the fight, so the success-only stage never ran, the mage's vitae grew from 20% to
+        // 40% across the gate and the lowered skills failed the heal and buff loops after it. The verdict logged by Fail stays the run's; the stage only pays what ACE's rule asks (D42), and its own failure is logged by name.
+        if ((_stages & DeathStages.Vitae) != 0 && !_vitaeDone && session.State.Phase == SessionPhase.InWorld)
+        {
+            _failVitae = true;
+            _log.Info(LogCategory, "vitae after the failure: the run still pays its vitae before it ends as failed (the next run must not start under this run's penalty); the verdict above stays the run's");
+            Enter("vitae", session.Clock.Now);
+            return ScenarioStatus.Running;
+        }
+
         if (!_endSession)
         {
             Dispose();
@@ -1472,12 +1488,24 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         var levelXp = LevelXp ?? (session.XpTable is { } table ? LevelXpOf(table) : null);
         if (levelXp is null)
         {
-            return VitaeFail(session, q, "no XpTable is loaded, so the grant cannot be checked against the next level (TODO(m3-vitae-xptable))");
+            return VitaeFail(session, q, "no XpTable is loaded, so a level crossing by the grant cannot be named (TODO(m3-vitae-xptable))");
         }
 
-        if (q.Level >= 1 && levelXp(q.Level + 1) is { } next && (ulong)Math.Max(0, q.TotalExperience) + (ulong)amount >= next)
+        // D42 (the owner, 2026-10-23, replacing M3 D37's "never across a level"): the grant may cross a level, because a clear costs millions of experience against a level step of a similar size and a gate's two death runs
+        // could never both fit. The grant stays bounded (exactly what clears the vitae, never more) and a crossing is logged loudly.
+        if (q.Level >= 1)
         {
-            return VitaeFail(session, q, string.Create(CultureInfo.InvariantCulture, $"clearing the {VitaePercentOf(q)}% vitae needs {amount:N0} experience, which would cross level {q.Level + 1} (total {q.TotalExperience:N0} of {next:N0}); not granted"));
+            var reached = (ulong)Math.Max(0, q.TotalExperience) + (ulong)amount;
+            var to = q.Level;
+            while (levelXp(to + 1) is { } next && reached >= next)
+            {
+                to++;
+            }
+
+            if (to > q.Level)
+            {
+                _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitae_level_crossed=yes level={q.Level}->{to} (clearing the {VitaePercentOf(q)}% vitae needs {amount:N0} experience; total {q.TotalExperience:N0}; D42 allows it)"));
+            }
         }
 
         _vitaeAsked = amount;
@@ -1495,6 +1523,12 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         _vitaePaid = _vitaeSent ? _vitaeAsked : 0;
         _vitaeAfter = after;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitae: paid {_vitaePaid:N0} experience, {after}% left"));
+        if (_failVitae)
+        {
+            _failVitae = false;
+            return FailInWorld(session);
+        }
+
         return Finish(session, clock);
     }
 
@@ -1503,6 +1537,13 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         _vitaeDone = true;
         _vitaePaid = _vitaeSent ? _vitaeAsked : 0;
         _vitaeAfter = VitaePercentOf(q);
+        if (_failVitae)
+        {
+            _failVitae = false;
+            _log.Error(LogCategory, "vitae after the failure: " + why);
+            return FailInWorld(session);
+        }
+
         return Fail(session, "vitae: " + why);
     }
 

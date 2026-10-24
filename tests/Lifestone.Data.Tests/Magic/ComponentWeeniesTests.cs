@@ -49,6 +49,7 @@ public sealed class ComponentWeeniesTests(DatSetFixture fixture) : IClassFixture
         Assert.Throws<InvalidDataException>(() => ComponentWeenies.DecodeClientEnumToId(Record(3, [3], (1, 691))));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Each_pinned_name_class_id_and_destruction_modifier_equals_the_dats()
     {

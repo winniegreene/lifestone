@@ -39,6 +39,7 @@ public sealed class CellQueriesTests(InteriorsFixture fixture) : IClassFixture<I
         Assert.False(CellQueries.SegmentCrossesPolygon(new Vector3(3f, 0f, 0f), new Vector3(3f, 0f, 2f), Square)); // beside
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Floors_are_found_under_the_eye_within_the_reach()
     {

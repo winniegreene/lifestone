@@ -246,6 +246,7 @@ internal sealed class LiveNetClient : IDisposable
     /// <summary>Logs in as the test account. The secrets' bytes are zeroed here; the session zeroes its own copy of the password.</summary>
     public void Login()
     {
+        Lifestone.Loopback.Tests.Session.LiveCharacter.Release(Console.WriteLine, BackendProbe.TestAccountKey); // a shared session of the account is logged off first (ACE boots a second login)
         var secrets = File.ReadAllBytes(BackendProbe.MainCheckoutFiles.SecretsFile);
         try
         {

@@ -3,6 +3,7 @@ using Lifestone.Client.Avatars;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Tests.Session;
 using Lifestone.Net.Messages;
+using Lifestone.Net.Session;
 using Lifestone.Net.Types;
 using static Lifestone.Client.Tests.Session.ReducerHarness;
 
@@ -187,6 +188,43 @@ public sealed class SessionAvatarAdapterTests
         EnterAsHuman(w.H);
         Assert.Equal(0, w.Adapter.Pending);
         Assert.Equal(0, w.Adapter.Stats.Received);
+    }
+
+    [Fact]
+    public void A_logoff_delete_create_and_enter_leaves_one_player_and_no_stale_avatars()
+    {
+        const uint NewPlayer = 0x50000002;
+        var w = new World();
+        EnterAsHuman(w.H);
+        w.H.Reducer.OnCreateObject(w.H.Context, Human(Npc, 1, Position(Cell, x: 9)), false);
+        w.Adapter.Drain();
+        Assert.Equal(2, w.Avatars.Count);
+        Assert.Equal(ReducerHarness.PlayerGuid, w.Avatars.Player!.Guid);
+
+        // The log off to the character list: the world, the player's own object with it, is gone.
+        w.H.Phase(SessionPhase.Connecting, SessionPhase.InWorld);
+        w.H.Phase(SessionPhase.InWorld, SessionPhase.LoggingOff);
+        w.H.Reducer.OnCharacterLogOff(w.H.Context);
+        w.H.Reducer.OnSessionEvent(SessionEvent.LoggedOff(w.H.Time.GetTimestamp(), SessionPhase.CharacterSelect));
+        w.H.Phase(SessionPhase.LoggingOff, SessionPhase.CharacterSelect);
+        w.Adapter.Drain();
+        Assert.Equal(0, w.H.State.Objects.Count);
+        Assert.Equal(0, w.Avatars.Count);
+        Assert.Null(w.Avatars.Player);
+
+        // The character delete, a new character created, and its world entered.
+        w.H.Reducer.OnCharacterDeleteAck(w.H.Context);
+        w.H.Reducer.OnPlayerCreate(w.H.Context, new PlayerCreateMsg(NewPlayer));
+        var msg = Human(NewPlayer, 1, Position(Cell, x: 5));
+        w.H.Reducer.OnCreateObject(w.H.Context, msg, false);
+        w.H.Reducer.OnCreateObject(w.H.Context, Human(Other, 1, Position(Cell, x: 12)), false);
+        w.Adapter.Drain();
+
+        Assert.Equal(w.H.State.Objects.Count, w.Avatars.Count);
+        Assert.Equal(2, w.Avatars.Count);
+        Assert.Equal(NewPlayer, w.Avatars.Player!.Guid);
+        Assert.False(w.Avatars.TryGet(ReducerHarness.PlayerGuid, out _));
+        Assert.True(w.Adapter.Stats.Failed + w.Adapter.Stats.Unknown == 0, $"failed {w.Adapter.Stats.Failed}, unknown {w.Adapter.Stats.Unknown}");
     }
 
     /// <summary>A reducer, an avatar set over the synthetic world, and an adapter between them.</summary>

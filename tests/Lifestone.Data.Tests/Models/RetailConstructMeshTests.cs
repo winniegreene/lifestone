@@ -112,6 +112,7 @@ public sealed class RetailConstructMeshTests(CellsFixture fixture) : IClassFixtu
         Assert.Throws<InvalidDataException>(() => CellMeshBuilder.Build(structure, [Textured0], _ => 2u));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_cells_build_the_same_mesh_through_both_adapters()
     {

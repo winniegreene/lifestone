@@ -18,6 +18,7 @@ public sealed class XpTableTests(DatSetFixture fixture, ITestOutputHelper output
         40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 125,
     ];
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Six_lists_with_their_lengths_and_the_level_cap()
     {
@@ -38,6 +39,7 @@ public sealed class XpTableTests(DatSetFixture fixture, ITestOutputHelper output
         Assert.Equal(275, xp.LevelCap);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_list_is_cumulative_from_zero()
     {
@@ -65,6 +67,7 @@ public sealed class XpTableTests(DatSetFixture fixture, ITestOutputHelper output
         Assert.Equal([0ul, 0, 1000, 2777, 5697, 10248], xp.CharacterLevelXpList.Take(6));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Experience_to_level_126_and_the_credits_by_then()
     {
@@ -92,6 +95,7 @@ public sealed class XpTableTests(DatSetFixture fixture, ITestOutputHelper output
         Assert.Equal(9u, xp.SkillCreditsThroughLevel(10)); // levels 2-10
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Xp_to_raise_helpers_read_the_cumulative_lists()
     {

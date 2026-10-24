@@ -112,6 +112,7 @@ public sealed class PlayerStreamingFocusTests(DatSetFixture fixture) : IClassFix
         Assert.Contains("0x00070143", entry.Line, StringComparison.Ordinal);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_dats_classify_the_town_network_as_a_dungeon_and_a_holtburg_house_as_seeing_outside()
     {

@@ -8,58 +8,15 @@ using Lifestone.Tests.Shared.Net;
 namespace Lifestone.Net.Tests.FakeAce;
 
 /// <summary>
-/// The fake server's scripted game, which the session tests (N5, N6) stand on: the login failures ACE produces, the
-/// character operations, entering the world, LoginComplete, the movement echo, logoff, the tool replies and the
-/// character-select ping. Driven by a <see cref="RawAceClient"/> with messages from the product's codecs.
+/// The fake server's scripted game that no session test reaches (the session tests, N5 and N6, drive the product against
+/// the same fake and cover the login failures, character operations, entering the world, movement and logoff): the closed
+/// world, a 54-skill create, another account's enter-world, the tool replies and the character-select ping. Driven by a
+/// <see cref="RawAceClient"/> with messages from the product's codecs.
 /// </summary>
 public sealed class FakeAceScriptTests
 {
     private const string Account = "tester";
     private const string Password = "test-password-1";
-
-    [Fact]
-    public void An_unknown_account_is_auto_created_lower_cased_and_the_list_carries_that_name()
-    {
-        var harness = new SessionHarness(new FakeAceScript());
-        using var client = Login(harness, "NewPlayer", Password);
-
-        Assert.True(CharacterListCodec.TryParse(Message(client, MessageOpcodes.CharacterList), out var list));
-        Assert.Equal("newplayer", list.Account);
-        Assert.Empty(list.Characters);
-        Assert.True(harness.Script.Accounts.ContainsKey("newplayer"));
-    }
-
-    [Fact]
-    public void Without_auto_creation_an_unknown_account_gets_the_connect_request_then_F659_0A()
-    {
-        var harness = new SessionHarness(new FakeAceScript { AllowAutoAccountCreation = false });
-        using var client = new RawAceClient(harness);
-        client.SendLoginRequest("nobody", Password);
-        harness.RunFor(TimeSpan.FromMilliseconds(100));
-        client.Drain();
-
-        Assert.NotNull(client.ConnectRequestPacket);
-        Assert.Equal(0x0Au, CharacterError(client));
-        Assert.Equal(2u, client.Received.Last().Sequence);
-        Assert.Equal(FakeAceTermination.NotAuthorizedAccountNotFound, harness.Server.History.Single().TerminationReason);
-    }
-
-    [Fact]
-    public void A_second_login_boots_the_first_and_both_get_F659_01()
-    {
-        var harness = Harness();
-        using var first = Login(harness, Account, Password);
-        using var second = new RawAceClient(harness);
-        second.SendLoginRequest(Account, Password);
-        harness.RunFor(TimeSpan.FromMilliseconds(100));
-        first.Drain();
-        second.Drain();
-
-        Assert.Equal(0x01u, CharacterError(first));
-        Assert.Equal(0x01u, CharacterError(second));
-        Assert.Equal(1, harness.Server.Counters.Terminations[FakeAceTermination.AccountLoggedIn]);
-        Assert.Equal(1, harness.Server.Counters.Terminations[FakeAceTermination.AccountInUse]);
-    }
 
     [Fact]
     public void A_closed_world_refuses_the_connect_response_with_F659_15()
@@ -80,79 +37,6 @@ public sealed class FakeAceScriptTests
     }
 
     [Fact]
-    public void A_wrong_client_version_is_booted_without_a_connect_request()
-    {
-        var harness = Harness();
-        using var client = new RawAceClient(harness);
-        client.SendLoginRequest(Account, Password, clientVersion: "1801");
-        harness.RunFor(TimeSpan.FromMilliseconds(100));
-        client.Drain();
-
-        Assert.Null(client.ConnectRequestPacket);
-        var boot = Assert.Single(client.Received);
-        Assert.True(boot.Has(RawAceClient.EncryptedChecksum));
-        Assert.Equal(0u, boot.Sequence);  // ACE's sequence wraps from its unprimed maximum to 0
-        Assert.Equal(FakeAceTermination.ClientVersionIncorrect, harness.Server.History.Single().TerminationReason);
-    }
-
-    [Fact]
-    public void A_banned_account_gets_F7C1_with_the_seconds_left()
-    {
-        var script = new FakeAceScript();
-        var account = script.AddAccount(Account, Password);
-        var harness = new SessionHarness(script);
-        account.BanExpires = harness.Time.GetUtcNow().AddHours(1);
-        account.BanReason = "testing";
-        using var client = new RawAceClient(harness);
-        client.SendLoginRequest(Account, Password);
-        harness.RunFor(TimeSpan.FromMilliseconds(100));
-        client.Drain();
-
-        Assert.True(AccountBannedCodec.TryParse(Message(client, MessageOpcodes.AccountBanned), out var banned));
-        Assert.InRange(banned.SecondsRemaining, 3590u, 3600u);
-        Assert.Equal(" - testing", banned.Reason);
-    }
-
-    [Fact]
-    public void The_server_full_reject_comes_from_a_throwaway_session()
-    {
-        var script = new FakeAceScript { MaximumSessions = 1 };
-        script.AddAccount(Account, Password);
-        script.AddAccount("other", Password);
-        var harness = new SessionHarness(script);
-        using var first = Login(harness, Account, Password);
-        using var second = new RawAceClient(harness);
-        second.SendLoginRequest("other", Password);
-        harness.Step();
-        second.Drain();
-
-        Assert.Equal(0x15u, CharacterError(second));
-        Assert.Single(harness.Server.Sessions);
-    }
-
-    [Fact]
-    public void Create_answers_ok_and_a_taken_name_answers_NameInUse_twice_as_ace_does()
-    {
-        var harness = Harness();
-        using var client = Login(harness, Account, Password);
-        var fragmentsBefore = client.MessagesBySequence.Count;
-
-        Send(harness, client, 2, Create("Newcomer", 55));
-        Assert.True(CharGenResponseCodec.TryParse(client.Messages.Skip(fragmentsBefore).Single(), out var created));
-        Assert.Equal(CharGenResult.Ok, created.Result);
-        Assert.Equal("Newcomer", created.Name);
-        var character = harness.Script.Accounts[Account].Characters.Single();
-        Assert.Equal(created.Guid, character.Guid);
-        Assert.Equal(55, character.Skills.Length);
-
-        var before = client.MessagesBySequence.Count;
-        Send(harness, client, 3, Create("newcomer", 55));
-        var answers = client.Messages.Skip(before).ToList();
-        Assert.Equal(2, answers.Count);
-        Assert.All(answers, a => Assert.Equal(AceWireWriters.CharacterCreateResponse(3), a));
-    }
-
-    [Fact]
     public void Create_with_54_skills_boots_the_session()
     {
         var harness = Harness();
@@ -162,71 +46,6 @@ public sealed class FakeAceScriptTests
 
         Assert.Equal(FakeAceTermination.ClientVersionIncorrect, harness.Server.History.Single().TerminationReason);
         Assert.Contains(MessageOpcodes.AccountBoot, client.Opcodes);
-    }
-
-    [Fact]
-    public void Delete_acknowledges_then_lists_the_character_greyed_and_restore_brings_it_back()
-    {
-        var harness = Harness(withCharacter: true);
-        using var client = Login(harness, Account, Password);
-
-        var before = client.MessagesBySequence.Count;
-        Send(harness, client, 2, Build(w => CharacterDeleteCodec.Write(w, Account, 0)));
-        var answers = client.Messages.Skip(before).ToList();
-        Assert.Equal(AceWireWriters.CharacterDeleteAck(), answers[0]);
-        Assert.True(CharacterListCodec.TryParse(answers[1], out var list));
-        Assert.Equal(1u, list.Characters.Single().DeleteTimeout);
-
-        before = client.MessagesBySequence.Count;
-        Send(harness, client, 3, Build(w => CharacterRestoreCodec.Write(w, 0x50000001, "Hero", Account)));
-        Assert.True(CharGenResponseCodec.TryParse(client.Messages.Skip(before).Single(), out var restored));
-        Assert.Equal(new CharGenResponseMsg(CharGenResult.Ok, 0x50000001, "Hero", 0), restored);
-        Assert.Null(harness.Script.Accounts[Account].Characters.Single().DeleteTime);
-    }
-
-    [Fact]
-    public void Entering_the_world_logging_in_moving_and_logging_off_follow_ace()
-    {
-        var harness = Harness(withCharacter: true);
-        using var client = Login(harness, Account, Password);
-        var session = harness.Server.Sessions.Single();
-
-        Send(harness, client, 2, Build(CharacterEnterWorldCodec.WriteRequest));
-        Assert.Equal(MessageOpcodes.CharacterEnterWorldServerReady, client.Opcodes[^1]);
-
-        Send(harness, client, 3, Build(w => CharacterEnterWorldCodec.Write(w, 0x50000001, Account)));
-        var opcodes = client.Opcodes;
-        Assert.Equal(MessageOpcodes.PlayerCreate, opcodes[^(2 + harness.Script.WorldObjectsOnEnter)]);
-        Assert.Equal(1 + harness.Script.WorldObjectsOnEnter, opcodes.Count(o => o == MessageOpcodes.ObjectCreate));
-        Assert.Equal(FakeAceSessionState.WorldConnected, session.State);
-        Assert.True(session.Teleporting);
-        var self = client.Messages.First(m => BinaryPrimitives.ReadUInt32LittleEndian(m) == MessageOpcodes.ObjectCreate);
-        Assert.Equal(FakeAceSession.EnteringPhysicsState, BinaryPrimitives.ReadUInt32LittleEndian(self.AsSpan(4 + 4 + 4 + 4)));
-
-        // Before LoginComplete a position is ignored.
-        Send(harness, client, 4, AutonomousPosition(new AcePosition(0x860201AD, 13, -28, 0.005f)));
-        Assert.Empty(session.AcceptedPositions);
-
-        Send(harness, client, 5, Build(w => LoginCompleteCodec.Write(w, 1)));
-        Assert.False(session.Teleporting);
-        var setState = client.Messages.Last();
-        Assert.Equal(AceWireWriters.SetState(0x50000001, 0x400 | 0x400000, 1, 1), setState);
-
-        Send(harness, client, 6, AutonomousPosition(new AcePosition(0x860201AD, 14, -28, 0.005f)));
-        Assert.Equal(14f, session.AcceptedPositions.Single().X);
-        Assert.Equal(MessageOpcodes.UpdatePosition, client.Opcodes[^1]);
-
-        Send(harness, client, 7, Build(w => CharacterLogOffCodec.Write(w, 0x50000001)));
-        var before = client.MessagesBySequence.Count;
-        harness.RunFor(TimeSpan.FromSeconds(5.9));
-        client.Drain();
-        Assert.Equal(before, client.MessagesBySequence.Count);
-        harness.RunFor(TimeSpan.FromSeconds(0.3));
-        client.Drain();
-        Assert.Equal(
-            new[] { MessageOpcodes.CharacterLogOff, MessageOpcodes.CharacterList, MessageOpcodes.ServerName },
-            client.Opcodes.Skip(before));
-        Assert.Equal(FakeAceSessionState.AuthConnected, session.State);
     }
 
     [Fact]
@@ -286,17 +105,6 @@ public sealed class FakeAceScriptTests
             .Where(m => GameEventEnvelope.TryReadHeader(m, out var h) && h.EventType == 0x01EA)
             .ToList();
         Assert.Equal(2, pings.Count);
-    }
-
-    [Fact]
-    public void Shutdown_sends_F659_04()
-    {
-        var harness = Harness();
-        using var client = Login(harness, Account, Password);
-        harness.Server.Shutdown();
-        harness.RunFor(TimeSpan.FromMilliseconds(50));
-        client.Drain();
-        Assert.Equal(0x04u, CharacterError(client));
     }
 
     private static SessionHarness Harness(bool withCharacter = false)
@@ -367,21 +175,4 @@ public sealed class FakeAceScriptTests
             w.Pad(4 * 4);  // start area, is-admin, is-envoy, checksum
         });
     }
-
-    private static byte[] AutonomousPosition(AcePosition p) => Build(w =>
-    {
-        GameActionEnvelope.WriteHeader(w, 9, GameActionTypes.AutonomousPosition);
-        w.WriteUInt32(p.Cell);
-        w.WriteFloat(p.X);
-        w.WriteFloat(p.Y);
-        w.WriteFloat(p.Z);
-        w.WriteFloat(p.Qw);
-        w.WriteFloat(p.Qx);
-        w.WriteFloat(p.Qy);
-        w.WriteFloat(p.Qz);
-        w.WriteUInt32(0);  // instance and server-control sequences
-        w.WriteUInt32(0);  // teleport and force-position sequences
-        w.WriteByte(1);    // contact
-        w.AlignTo4();
-    });
 }

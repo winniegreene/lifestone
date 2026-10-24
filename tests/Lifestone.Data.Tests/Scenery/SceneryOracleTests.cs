@@ -18,6 +18,7 @@ namespace Lifestone.Data.Tests.Scenery;
 /// BaseLoc orientation is tilted.</item>
 /// </list>
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class SceneryOracleTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     /// <summary>Largest z difference accepted from ACE's float plane math (measured maximum 0.43 mm).</summary>

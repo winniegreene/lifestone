@@ -23,26 +23,8 @@ public sealed class HuntLegRunnerTests
     }
 
     [Fact]
-    public void The_help_names_the_check_its_verdict_fields_its_frames_and_its_options()
+    public void The_hunt_options_are_registered()
     {
-        var help = OptionCatalog.Registry.Find("--login-check")!.Help;
-        var shot = OptionCatalog.Registry.Find("--play-screenshot")!.Help;
-
-        Assert.Contains("'hunt' (M4 1.2)", help, StringComparison.Ordinal);
-        Assert.Contains("hunt done ok=", help, StringComparison.Ordinal);
-        Assert.Contains("never part of 'all'", help, StringComparison.Ordinal);
-        Assert.Contains("<stem>-swing.png", help, StringComparison.Ordinal);
-        Assert.Contains("<stem>-arrow.png", help, StringComparison.Ordinal);
-        // M4 1.3 s3: what is judged now (HuntLegVerdict) and the melee frames (HuntUiShotPlan.Names), attack_frame_max_ms report-only.
-        Assert.Contains("melee swings>=1, missile shots>=1 and hits>=1", help, StringComparison.Ordinal);
-        Assert.Contains("attack_frame_max_ms=<x|n/a>", help, StringComparison.Ordinal);
-        Assert.Contains("attack_frame_max_ms, the slowest frame", help, StringComparison.Ordinal);
-        Assert.Contains("every other field is report-only (fighter, misses, returned, and corpses_opened and corpse_items", help, StringComparison.Ordinal);
-        foreach (var frame in Lifestone.Client.Session.Scenarios.HuntUiShotPlan.Names)
-        {
-            Assert.Contains("<stem>-" + frame + ".png", help, StringComparison.Ordinal);
-        }
-        Assert.Contains("--login-check=hunt", shot, StringComparison.Ordinal);
         foreach (var name in new[] { "--hunt-kills", "--hunt-seconds", "--hunt-weapon" })
         {
             Assert.True(OptionCatalog.Registry.IsKnown(name), name);
@@ -58,7 +40,7 @@ public sealed class HuntLegRunnerTests
         Assert.Contains("new HuntScenario(_options,", runner, StringComparison.Ordinal);
         Assert.Contains("endSession: false", runner, StringComparison.Ordinal); // the leg logs off itself
         Assert.Contains("HuntLegVerdict.Compose(", runner, StringComparison.Ordinal);
-        Assert.Contains("HuntScenario.NameCheck(c.Name)", runner, StringComparison.Ordinal);
+        Assert.Contains("HuntScenario.NameCheck(c.Name, _template)", runner, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -145,9 +127,7 @@ public sealed class HuntLegRunnerTests
         var wait = body.IndexOf("ContainerWindowDraw.Drawn", StringComparison.Ordinal);
         Assert.True(wait > 0, "the corpse frame must wait for the drawn window");
         Assert.True(wait < body.IndexOf("var pose = _mode.Rig?.Chase.Pose;", StringComparison.Ordinal), "the wait comes before the projection rule");
-        Assert.Contains("the corpse frame waits for the container window", body, StringComparison.Ordinal);
         Assert.Contains("_uiPlan.IsGivenUp(HuntUiShotPlan.Corpse)", body, StringComparison.Ordinal);
-        Assert.Contains("the corpse frame was given up", body, StringComparison.Ordinal);
 
         // The frame's line carries the window's title and cell count and the corpse's ObjDesc counts (q6-corpse-objdesc-live).
         Assert.Contains("CorpseText(session, scenario, container)", body, StringComparison.Ordinal);

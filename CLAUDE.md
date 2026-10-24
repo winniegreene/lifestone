@@ -81,9 +81,10 @@ Every brief cites this section instead of restating it. All of these are in forc
   pre-authorised for the leads: docs/milestones/m4-plan.md §7, D8, as M3 D6 was). Slices never run `server\*.ps1`, `tools\play.ps1`
   against a live server, Loopback or Soak tests, or `smoke.ps1 -Backend require|start`; loopback tests they write must
   compile and say what they prove, and the lead runs them.
-- **Accounts:** automation uses `accounts.test` only. The graduated test characters (`Lifestone Smoke`, `Lifestone
-  Loopback`) are the baseline and are never reset or levelled. M3's `BSD Mage` (m3-plan.md §7, D3) and M4's
-  `Holtburg Hunter` (m4-plan.md §7, D1) are levelled only by their build scenarios and by the loops' kills and are
+- **Accounts:** automation uses the three test accounts `test`, `test-melee` and `test-archer` only. The graduated test
+  characters (`Lifestone Smoke`, `Lifestone Loopback`) are the baseline and are never reset or levelled. M3's `BSD Mage`
+  (m3-plan.md §7, D3) and M4's `Holtburg Hunter` (m4-plan.md §7, D1), `Holtburg Brawler` (`test-melee`) and `Holtburg
+  Archer` (`test-archer`) (both M4 D31) are levelled only by their build scenarios and by the loops' kills and are
   never reset or purged. Only `Lifestone Throwaway` may be levelled freely or purged. A new test character is the
   owner's decision.
 - **Off limits:** never open or print the user profile's `.lifestone-secrets` key file, the values in

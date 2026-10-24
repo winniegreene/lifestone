@@ -25,9 +25,6 @@ public sealed class DeathCorpseOptionsTests
 
     [Theory]
     [InlineData("--death-recover-corpse=off", false)]
-    [InlineData("--death-recover-corpse=no", false)]
-    [InlineData("--death-recover-corpse=on", true)]
-    [InlineData("--death-recover-corpse", true)]
     public void Recover_corpse_takes_on_and_off(string argument, bool expected)
     {
         var o = Parse(argument);
@@ -36,18 +33,8 @@ public sealed class DeathCorpseOptionsTests
         Assert.Equal(expected, o.RecoverCorpse);
     }
 
-    [Fact]
-    public void A_bad_recover_corpse_value_is_an_error_and_keeps_the_default()
-    {
-        var o = Parse("--death-recover-corpse=maybe");
-
-        Assert.Equal(["--death-recover-corpse: 'maybe' is not on or off"], o.Errors);
-        Assert.True(o.RecoverCorpse);
-    }
-
     [Theory]
     [InlineData("0", 0.0)]
-    [InlineData("40", 40.0)]
     [InlineData("72.5", 72.5)]
     [InlineData("100", 100.0)]
     public void Min_health_takes_zero_to_a_hundred_percent(string value, double expected)
@@ -68,18 +55,6 @@ public sealed class DeathCorpseOptionsTests
 
         Assert.Equal([error], o.Errors);
         Assert.Equal(DeathOptions.DefaultRecoverMinHealthPercent, o.RecoverMinHealthPercent);
-    }
-
-    [Fact]
-    public void The_options_read_together_with_the_others_and_show_in_the_log_line_only_when_not_the_default()
-    {
-        var o = Parse("--death-seconds=120", "--death-recover-corpse=off", "--death-recover-min-health=75");
-
-        Assert.Empty(o.Errors);
-        Assert.Equal(120.0, o.Seconds);
-        Assert.False(o.RecoverCorpse);
-        Assert.Equal(75.0, o.RecoverMinHealthPercent);
-        Assert.Equal("seconds=120 recover_corpse=off recover_min_health=75", o.ToString());
     }
 
     [Fact]

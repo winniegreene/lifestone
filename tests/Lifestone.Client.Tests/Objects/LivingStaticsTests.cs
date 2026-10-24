@@ -16,6 +16,7 @@ namespace Lifestone.Client.Tests.Objects;
 /// Living statics (docs/objects.md §1.7): retail <c>CPhysicsObj::animate_static_object</c> stepping, default scripts that
 /// light Holtburg's torches and chimneys, the emitters' draw range, and default animations (Holtburg's circling birds).
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class LivingStaticsTests(ObjectsFixture fixture, ITestOutputHelper output) : IClassFixture<ObjectsFixture>
 {
     private const uint StandingTorch = 0x020005D8; // default script 0x330006F8: flame 0x3200002F + glow 0x32000829

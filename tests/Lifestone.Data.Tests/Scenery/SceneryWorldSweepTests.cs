@@ -6,6 +6,7 @@ using Xunit.Abstractions;
 namespace Lifestone.Data.Tests.Scenery;
 
 /// <summary>Whole-world scenery: every landblock generates, every placement satisfies the retail invariants.</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class SceneryWorldSweepTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     [RequiresDatsFact]

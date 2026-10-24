@@ -23,6 +23,7 @@ public sealed class InteriorVisibilityTests(InteriorsFixture fixture) : IClassFi
         return data;
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [MemberData(nameof(Dungeons))]
     public void In_a_dungeon_only_the_viewer_cell_and_its_stab_list_are_drawn_and_never_the_landscape(string key)
@@ -53,6 +54,7 @@ public sealed class InteriorVisibilityTests(InteriorsFixture fixture) : IClassFi
         Assert.True(union.Count == 1 || down.VisibleCells.Count < union.Count, $"{down.VisibleCells.Count} of {union.Count}");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void In_a_building_the_landscape_is_drawn_only_when_an_outside_portal_is_in_view()
     {
@@ -73,6 +75,7 @@ public sealed class InteriorVisibilityTests(InteriorsFixture fixture) : IClassFi
         Assert.All(new[] { north, east }, v => Assert.Contains(cell.Id, v.ViewerCells));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Outdoors_a_doorway_in_view_shows_its_cells_clipped_to_its_cone()
     {

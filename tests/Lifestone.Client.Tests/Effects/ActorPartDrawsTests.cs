@@ -12,6 +12,7 @@ namespace Lifestone.Client.Tests.Effects;
 /// <see cref="ActorPartDraws.DegradesDisabled"/> (retail <c>Render::degrades_disabled</c>, which <c>CreatureMode::Render</c>
 /// sets): on the user's dats, a human's parts degrade with distance in the world, and never in creature mode.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class ActorPartDrawsTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     [RequiresDatsFact]

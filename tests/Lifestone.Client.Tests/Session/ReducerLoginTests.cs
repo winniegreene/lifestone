@@ -190,6 +190,56 @@ public sealed class ReducerLoginTests
     }
 
     [Fact]
+    public void A_0x0D_while_entering_the_world_is_held_until_the_session_says_retry_or_give_up_and_a_retry_is_counted_and_logged_P5a_Fgate()
+    {
+        var h = new ReducerHarness();
+        h.Phase(SessionPhase.CharacterSelect, SessionPhase.EnteringWorld);
+
+        // Three refusals the session retries (the machine queues RetryScheduled; the message reaches the reducer first): nothing is published, each is counted.
+        for (var i = 1; i <= 3; i++)
+        {
+            h.Reducer.OnCharacterError(h.Context, new CharacterErrorMsg(0x0D));
+            Assert.Empty(h.Of<CharacterErrorReceived>());
+            h.Reducer.OnSessionEvent(SessionEvent.RetryScheduled(h.Time.GetTimestamp(), SessionPhase.EnteringWorld, i + 1, TimeSpan.FromSeconds(5), 0x0D, "refused"));
+            Assert.Empty(h.Of<CharacterErrorReceived>());
+            Assert.Contains(h.Log.Entries, e => e.Message.Contains($"login_retries={i})", StringComparison.Ordinal));
+        }
+
+        // The session gives up: PhaseChanged and CharacterErrorReceived are queued after the message. One error is published, once.
+        h.Reducer.OnCharacterError(h.Context, new CharacterErrorMsg(0x0D));
+        Assert.Empty(h.Of<CharacterErrorReceived>());
+        h.Phase(SessionPhase.EnteringWorld, SessionPhase.CharacterSelect);
+        h.Reducer.OnSessionEvent(SessionEvent.CharacterErrorReceived(h.Time.GetTimestamp(), SessionPhase.CharacterSelect, 0x0D));
+        Assert.Equal([0x0Du], h.Of<CharacterErrorReceived>().Select(e => e.Code));
+
+        // The pairing still balances: a later error at the list publishes exactly once.
+        h.Reducer.OnCharacterError(h.Context, new CharacterErrorMsg(0x01));
+        h.Reducer.OnSessionEvent(SessionEvent.CharacterErrorReceived(h.Time.GetTimestamp(), SessionPhase.CharacterSelect, 0x01));
+        Assert.Equal([0x0Du, 0x01u], h.Of<CharacterErrorReceived>().Select(e => e.Code));
+    }
+
+    [Fact]
+    public void A_retry_event_that_arrives_before_the_refusal_message_is_also_counted_and_a_failed_session_drops_the_held_refusal_P5a_Fgate()
+    {
+        var h = new ReducerHarness();
+        h.Phase(SessionPhase.CharacterSelect, SessionPhase.EnteringWorld);
+        h.Reducer.OnSessionEvent(SessionEvent.RetryScheduled(h.Time.GetTimestamp(), SessionPhase.EnteringWorld, 2, TimeSpan.FromSeconds(5), 0x0D, "refused"));
+        h.Reducer.OnCharacterError(h.Context, new CharacterErrorMsg(0x0D));
+        Assert.Empty(h.Of<CharacterErrorReceived>());
+        Assert.Contains(h.Log.Entries, e => e.Message.Contains("login_retries=1)", StringComparison.Ordinal));
+
+        // A refusal the machine turns into a session failure is the failure's to report, not a character error.
+        h.Reducer.OnCharacterError(h.Context, new CharacterErrorMsg(0x0D));
+        h.Reducer.OnSessionEvent(SessionEvent.Failed(h.Time.GetTimestamp(), new SessionFailure(SessionFailureKind.CharacterError, SessionPhase.EnteringWorld, "ended", 0x0D)));
+        Assert.Empty(h.Of<CharacterErrorReceived>());
+
+        // A non-retryable code while entering the world is published at once, as before.
+        h.Phase(SessionPhase.Failed, SessionPhase.EnteringWorld);
+        h.Reducer.OnCharacterError(h.Context, new CharacterErrorMsg(0x0B));
+        Assert.Equal([0x0Bu], h.Of<CharacterErrorReceived>().Select(e => e.Code));
+    }
+
+    [Fact]
     public void A_dat_mismatch_fails_with_DataCheckMismatch()
     {
         var h = new ReducerHarness();
@@ -229,7 +279,7 @@ public sealed class ReducerLoginTests
         Assert.Equal(0u, h.State.Self.Guid);
         Assert.Null(h.State.Self.Position);
         Assert.Equal(SelfTravel.NotInWorld, h.State.Self.Travel);
-        Assert.Equal(0x80000100u, Assert.Single(h.Of<ObjectDeleted>()).Guid);
+        Assert.Equal(new[] { ReducerHarness.PlayerGuid, 0x80000100u }, h.Of<ObjectDeleted>().Select(d => d.Guid).Order().ToArray());
         Assert.Equal(new SelfTravelChanged(SelfTravel.Arriving, SelfTravel.NotInWorld), Assert.Single(h.Of<SelfTravelChanged>()));
     }
 

@@ -31,60 +31,25 @@ internal static class LiveRun
     /// <summary>The throwaway character's name (created when absent, as InventoryLiveTests does).</summary>
     internal const string Throwaway = "Lifestone Throwaway";
 
-    /// <summary>Runs <paramref name="scenario"/> against the live backend and prints the run's summary line to <paramref name="output"/>; the recording goes to <c>cache/m4/&lt;item&gt;/live</c> of the main checkout (M4 3.1 s4: the item names the folder, default 2.1's).</summary>
-    internal static HeadlessRunResult Run(ITestOutputHelper output, DatSet dats, IScenario scenario, string name, double seconds, List<string>? logLines = null, string item = "2-1")
+    /// <summary>Runs <paramref name="scenario"/> against the live backend and prints the run's summary line to <paramref name="output"/>; the recording goes to <c>cache/m4/&lt;item&gt;/live</c> of the main checkout (M4 3.1 s4: the item names the folder, default 2.1's; M4 D31: <paramref name="character"/> logs in on its own test account, default the characters of <c>test</c>).</summary>
+    internal static HeadlessRunResult Run(ITestOutputHelper output, IScenario scenario, string name, double seconds, List<string>? logLines = null, string item = "2-1", string? character = null, bool ownLogin = false)
     {
-        var files = BackendProbe.MainCheckoutFiles;
-        var log = new RecordingLogSink();
-        var folder = Path.Combine(RepositoryFiles.MainCheckout, "cache", "m4", item, "live");
-        Directory.CreateDirectory(folder);
-        var path = Path.Combine(folder, DateTimeOffset.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture) + "-" + name + RecordingFormat.FileExtension);
-        HeadlessRunResult result;
-        using (var recording = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.Read))
-        {
-            var secrets = File.ReadAllBytes(files.SecretsFile);
-            HeadlessRunner runner;
-            try
-            {
-                runner = HeadlessRunner.Start(
-                    new HeadlessRunOptions
-                    {
-                        Session = new SessionOptions { Account = BackendProbe.TestAccountKey, Server = BackendProbe.Probe().AceEndPoint! },
-                        QuitAfterSeconds = seconds,
-                    },
-                    scenario,
-                    secrets,
-                    File.ReadAllBytes(files.PidsFile),
-                    dats,
-                    TimeProvider.System,
-                    log,
-                    recording);
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(secrets);
-            }
-
-            var context = new GameThreadSynchronizationContext();
-            using (context.Install())
-            using (runner)
-            {
-                result = runner.Run(context, CancellationToken.None);
-            }
-        }
-
-        logLines?.AddRange(log.Lines);
-        output.WriteLine(result.SummaryLine(Path.GetFileName(path)));
-        foreach (var line in log.Lines.Where(l => l.Contains("[hunt]", StringComparison.Ordinal) || l.Contains("WARN", StringComparison.Ordinal) || l.Contains("ERROR", StringComparison.Ordinal)))
+        var live = LiveCharacter.Run(output, scenario, name, seconds, character ?? Throwaway, item, ownLogin);
+        logLines?.AddRange(live.Lines);
+        output.WriteLine(live.Result.SummaryLine(live.RecordingName));
+        foreach (var line in live.Lines.Where(l => l.Contains("[hunt]", StringComparison.Ordinal) || l.Contains("WARN", StringComparison.Ordinal) || l.Contains("ERROR", StringComparison.Ordinal)))
         {
             output.WriteLine(line);
         }
 
-        return result;
+        return live.Result;
     }
 
-    /// <summary>Between two sessions of one test: ACE needs the previous log off to finish before the account logs in again.</summary>
+    /// <summary>Between two sessions of one test: ACE needs the previous log off to finish before the account logs in again. <see cref="LiveCharacter"/> pauses by itself before it logs an account in again (M4 P4); this stays for a test that logs in on its own.</summary>
     internal static void Pause() => Thread.Sleep(TimeSpan.FromSeconds(6));
+
+    /// <summary>True while a scenario runs over a shared session (<see cref="LiveCharacter"/>): a leg must not log the character off at its end, which would end the session.</summary>
+    internal static volatile bool KeepSession;
 }
 
 /// <summary>The script machinery every live leg shares: the step loop, the follower that walks the client's body when ACE moves it, the waits, the checks and the throwaway's entry.</summary>
@@ -259,6 +224,33 @@ internal abstract class LiveLeg(string name, IReadOnlyList<uint> classes, Action
     }
 
     /// <summary>
+    /// M4 P4 sfix2: a consumable the test needs but an earlier test may have used up (the hunts drink the Archer's potions, the kits lose their uses). When <paramref name="find"/> returns 0 the mod's <c>item</c> verb
+    /// grants one <paramref name="wcid"/> (an item, never a creature, D23) and the leg waits until it is in the pack; the Log says so. Returns the guid, or 0 when the grant failed (a failed check).
+    /// </summary>
+    protected IEnumerable<ActionHandle?> GrantIfMissing(Func<uint> find, uint wcid, string what, Action<uint> found, int? stack = null)
+    {
+        var held = find();
+        if (held != 0)
+        {
+            found(held);
+            yield break;
+        }
+
+        Log($"the pack holds no {what} (wcid {wcid}; an earlier test used it up): granting one with the item verb");
+        var spawn = S.Tools.SpawnItem(wcid, stack, ActionSource.Host);
+        yield return spawn;
+        if (!Check(spawn.Result is not null, $"the {what} grant (wcid {wcid}) failed: " + Describe(spawn)))
+        {
+            yield break;
+        }
+
+        foreach (var h in WaitHeld(spawn.Result!.Guid, what)) { yield return h; }
+
+        foreach (var h in Pause(1)) { yield return h; } // the grant's own messages settle before the next action
+        found(find());
+    }
+
+    /// <summary>
     /// A <c>place loc</c> (or poi), the end of the own teleport and a 3 s settle; a refusal is a failed check. The end of the teleport is what ACE waits for before it takes another place, a move or a give
     /// (2.1-R2: its teleporting flag clears when it handles the post-teleport LoginComplete, which portal space sends 5.6 s after the place): the travel reaches TeleportArrived, then Present, and the LoginComplete is sent.
     /// </summary>
@@ -347,8 +339,17 @@ internal abstract class LiveLeg(string name, IReadOnlyList<uint> classes, Action
         return set;
     }
 
+    /// <summary>True when the session's entry (<see cref="LiveCharacter"/>) already put the character in the world, arrived with its qualities known: a leg then skips its own login.</summary>
+    protected bool AlreadyInWorld => S.State.Phase == SessionPhase.InWorld && S.State.Self.Guid != 0 && S.State.Self.Travel == SelfTravel.Present && S.State.Self.Qualities.IsKnown;
+
     protected IEnumerable<ActionHandle?> LogOffAndQuit()
     {
+        if (LiveRun.KeepSession)
+        {
+            Log("the shared session stays logged in (no log off at the end of the leg)");
+            yield break;
+        }
+
         Stage = "logging-off";
         var off = S.Actions.LogOff(ActionSource.Host);
         yield return off;
@@ -365,6 +366,14 @@ internal abstract class LiveLeg(string name, IReadOnlyList<uint> classes, Action
     /// <summary>Logs in as Lifestone Throwaway (created when absent, as InventoryLiveTests does), enters the world and waits for the arrival (the player present with its qualities, so LoginComplete has completed); never another character.</summary>
     protected IEnumerable<ActionHandle?> EnterThrowaway()
     {
+        if (AlreadyInWorld)
+        {
+            Stage = "running";
+            Follow ??= new HuntFollow(dats, new RecordingLogSink());
+            Log("already in the world: the shared session's entry logged the character in");
+            yield break;
+        }
+
         Stage = "login";
         var login = S.Actions.Login(ActionSource.Host);
         yield return login;

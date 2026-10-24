@@ -82,8 +82,17 @@ internal static class ActionPolicy
     /// <summary>RestoreCharacter: until F643.</summary>
     internal const double RestoreSeconds = 10;
 
-    /// <summary>EnterWorld: until F746 and the player's CreateObject.</summary>
-    internal const double EnterWorldSeconds = 30;
+    /// <summary>
+    /// EnterWorld: until F746 and the player's CreateObject. The network session enforces its own 30 s cap on each try (<c>SessionTimeouts.EnterWorld</c>) and fails the request when it is spent; this is the action's backstop, which
+    /// adds the wait the default retry policy gives a character ACE still holds online (0x0D, <c>LoginRetryPolicy.CharacterInWorldWait</c>), so the wait is the session's to end and not a silent timeout here.
+    /// </summary>
+    internal const double EnterWorldSeconds = 30 + Lifestone.Net.Session.LoginRetryPolicy.DefaultCharacterInWorldWaitSeconds + EnterWorldSlackSeconds;
+
+    /// <summary>
+    /// The seconds the EnterWorld backstop outlasts the session's own named failure (M4 4.1 fix2b, review R13): the session sends up to 15 resends 5 s apart and each restarts its 30 s cap at its due time, so the last allowed try can end a
+    /// few seconds past 30 + the wait (the round trips of the 0x0D answers); without the slack the generic tracker timeout would fire a moment before "refused after waiting 75 s".
+    /// </summary>
+    internal const double EnterWorldSlackSeconds = 5;
 
     /// <summary>LoginComplete: until the server clears Hidden.</summary>
     internal const double LoginCompleteSeconds = 15;

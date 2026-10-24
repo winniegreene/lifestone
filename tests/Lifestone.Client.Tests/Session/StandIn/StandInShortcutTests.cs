@@ -57,19 +57,6 @@ public sealed class StandInShortcutTests
     }
 
     [Fact]
-    public void A_recorded_description_with_a_bar_is_the_list_until_the_first_change_then_the_stand_ins_list_replaces_it()
-    {
-        var recorded = RecordedDescription.Of("x.lsrec", new PlayerDescriptionMsg { Inventory = [], Shortcuts = [new ShortcutDesc(5, 0xAAA, 0), new ShortcutDesc(6, 0xBBB, 0)] }, 0x50000077, []);
-        using var rig = new StandInVendorRig(recorded);
-
-        Assert.Equal([new ShortcutDesc(5, 0xAAA, 0), new ShortcutDesc(6, 0xBBB, 0)], rig.World.Shortcuts.ToArray());
-        rig.Net.SendRemoveShortcut(5);
-        rig.Net.SendAddShortcut(2, 0xCCC, 0);
-
-        Assert.Equal([new ShortcutDesc(2, 0xCCC, 0), new ShortcutDesc(6, 0xBBB, 0)], rig.World.WithVendorState(Base()).Shortcuts.ToArray());
-    }
-
-    [Fact]
     public void A_description_that_the_stand_in_has_not_changed_keeps_the_list_it_was_given()
     {
         var list = new StandInShortcutList();

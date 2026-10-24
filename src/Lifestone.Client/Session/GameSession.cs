@@ -58,7 +58,7 @@ internal sealed record LiveSessionSetup(
 /// <see cref="char"/> array, never a string) until it is disposed, so <see cref="Reconnect"/> needs no secret; the network
 /// session zeroes its own copy on reaching character select.</para>
 /// </remarks>
-public sealed class GameSession : IGameSessionView, IDisposable
+public sealed class GameSession : IGameSessionView, Lifestone.Client.RetailUi.Panels.ISpellComponentIcons, IDisposable
 {
     /// <summary>The runner token of a recording whose host gave no header.</summary>
     internal const string DefaultRunner = "session";
@@ -207,6 +207,15 @@ public sealed class GameSession : IGameSessionView, IDisposable
         {
             _log.Warn(SessionLog.Category, "TODO(m3-stat-tables): the XpTable or the SkillTable did not load; the skills page has no list or prices: " + ex.Message);
         }
+
+        try
+        {
+            _componentTable = Lifestone.Data.Magic.SpellComponentTableData.Load(dats); // the components page's icons (M4 4.1 fix, review R9; closes TODO(m3-component-icon) for a session with dats)
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or KeyNotFoundException)
+        {
+            _log.Warn(SessionLog.Category, "TODO(m3-component-icon): the SpellComponentTable did not load; the components page draws the pack object's icon in its place: " + ex.Message);
+        }
     }
 
     /// <summary>Gives the session its XpTable and SkillTable directly (tests and hosts that hold them already).</summary>
@@ -218,8 +227,13 @@ public sealed class GameSession : IGameSessionView, IDisposable
         _skillTable = skillTable;
     }
 
+    private Lifestone.Data.Magic.SpellComponentTableData? _componentTable;
     private Lifestone.Data.CharacterCreation.XpTableData? _xpTable;
     private Lifestone.Data.CharacterCreation.SkillTableData? _skillTable;
+
+    /// <summary>The SpellComponentTable's icon (a RenderSurface DID) of the component with table id <paramref name="componentId"/>, as <c>gmSpellComponentUI::MakeIcon</c> (11.6096 0x0048A250) draws it; 0 when the table is not loaded or lacks the id.</summary>
+    /// <param name="componentId">The SpellComponentTable id.</param>
+    public uint ComponentIcon(uint componentId) => _componentTable is { } table && table.Components.TryGetValue(componentId, out var info) ? info.IconId : 0u;
 
     /// <inheritdoc/>
     public Lifestone.Data.Magic.SpellInfo? Spell(uint id) => _actions.FindSpell(id);

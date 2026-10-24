@@ -6,9 +6,10 @@ using Lifestone.Data.Ui;
 namespace Lifestone.Client.RetailUi.LifestonePanels;
 
 /// <summary>
-/// The two keys that open Lifestone's own panels (owner decision D41): <b>F7</b> toggles the tools panel and <b>Scroll Lock</b> opens the automation inspector. Both are keys retail's
+/// The keys that open Lifestone's own panels (owner decision D41): <b>F7</b> toggles the tools panel and <b>Scroll Lock</b> opens the automation inspector; and (M4 4.1 lane c) <b>Pause</b> toggles the auto-buff
+/// (the re-buff driver, <c>--buff-auto</c>). All are keys retail's
 /// default game map (KEYMAP <c>gmDefault</c>, MasterInputMap 0x14000000, <c>gmDefaultMap</c>) does not bind to anything, with or without Shift, Ctrl or Alt (and the engine map,
-/// KEYMAP <c>Default</c> 0x14000002, binds neither either): F7 and Scroll Lock are DirectInput scan codes 0x41 and 0x46, and F1-F6 and F8-F12 are all bound in <c>gmDefaultMap</c>
+/// KEYMAP <c>Default</c> 0x14000002, binds none of them either): F7, Scroll Lock and Pause are DirectInput scan codes 0x41, 0x46 and 0xC5, and F1-F6 and F8-F12 are all bound in <c>gmDefaultMap</c>
 /// (<c>LifestoneHotkeysTests</c> proves it over the dats). They were free in M1 too (F7 was the interiors' debug key, dropped in play mode by D41).
 /// </summary>
 /// <remarks>
@@ -27,6 +28,12 @@ public sealed class LifestoneHotkeys : IInputActionSink
 
     /// <summary>The action of Scroll Lock: open the automation inspector.</summary>
     public const uint OpenInspectorAction = 0x7F000002;
+
+    /// <summary>The action of Pause: toggle the auto-buff (the re-buff driver; M4 4.1 lane c).</summary>
+    public const uint AutoBuffAction = 0x7F000003;
+
+    /// <summary>The auto-buff key: Pause, DirectInput scan code 0xC5 (named in <c>--buff-auto</c>'s help; a key retail's game map does not bind, <c>LifestoneHotkeysTests</c> proves it over the dats).</summary>
+    public const int AutoBuffKey = DikScanCodes.Pause;
 
     /// <summary>The tools key: F7, DirectInput scan code 0x41.</summary>
     public const int ToolsKey = DikScanCodes.F7;
@@ -49,11 +56,12 @@ public sealed class LifestoneHotkeys : IInputActionSink
         _log = log;
     }
 
-    /// <summary>Lifestone's bindings: F7 to <see cref="OpenToolsAction"/>, Scroll Lock to <see cref="OpenInspectorAction"/>, no meta keys.</summary>
+    /// <summary>Lifestone's bindings: F7 to <see cref="OpenToolsAction"/>, Scroll Lock to <see cref="OpenInspectorAction"/>, Pause to <see cref="AutoBuffAction"/>, no meta keys.</summary>
     public static IReadOnlyList<RetailBinding> Bindings { get; } =
     [
         new(InputMap, OpenToolsAction, RetailKeyBindings.Keyboard(ToolsKey), 0, FunctionKeyActivation),
         new(InputMap, OpenInspectorAction, RetailKeyBindings.Keyboard(InspectorKey), 0, FunctionKeyActivation),
+        new(InputMap, AutoBuffAction, RetailKeyBindings.Keyboard(AutoBuffKey), 0, FunctionKeyActivation),
     ];
 
     /// <summary>Called when F7 is pressed (the tools panel's toggle).</summary>
@@ -61,6 +69,12 @@ public sealed class LifestoneHotkeys : IInputActionSink
 
     /// <summary>Called when Scroll Lock is pressed (the inspector's <c>Open</c>); null until the inspector is wired.</summary>
     public Action? OpenInspector { get; set; }
+
+    /// <summary>Called when Pause is pressed (the auto-buff's toggle, wired by the play host); null until the host wires it.</summary>
+    public Action? ToggleAutoBuff { get; set; }
+
+    /// <summary>How many times Pause was pressed.</summary>
+    public int AutoBuffPresses { get; private set; }
 
     /// <summary>How many times F7 was pressed.</summary>
     public int ToolsPresses { get; private set; }
@@ -77,7 +91,7 @@ public sealed class LifestoneHotkeys : IInputActionSink
         ArgumentNullException.ThrowIfNull(router);
         if (router.Bindings is not { } current)
         {
-            _log.Error("lifestone", "F7 and Scroll Lock are registered but the host has set no key bindings on the router yet, so they do nothing until it does (TODO(g7-hotkeys-unbound))");
+            _log.Error("lifestone", "F7, Scroll Lock and Pause are registered but the host has set no key bindings on the router yet, so they do nothing until it does (TODO(g7-hotkeys-unbound))");
         }
         else if (!current.Bindings.Contains(Bindings[0]))
         {
@@ -130,6 +144,18 @@ public sealed class LifestoneHotkeys : IInputActionSink
                 else
                 {
                     _log.Warn("lifestone", "Scroll Lock (the automation inspector) was pressed but the inspector is not connected yet (TODO(g7-inspector-unwired): the host wired nothing to OpenInspector)");
+                }
+
+                return true;
+            case AutoBuffAction:
+                AutoBuffPresses++;
+                if (ToggleAutoBuff is { } autoBuff)
+                {
+                    autoBuff();
+                }
+                else
+                {
+                    _log.Warn("lifestone", "Pause (the auto-buff toggle) was pressed but nothing is wired to it (TODO(m4-autobuff-key-unwired): the play host wires ToggleAutoBuff when it starts)");
                 }
 
                 return true;

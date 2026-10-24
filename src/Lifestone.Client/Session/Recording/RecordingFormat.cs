@@ -116,4 +116,18 @@ public static class RecordingFormat
         RecordingHeader.RequireToken(runner, nameof(runner));
         return createdUtc.ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture) + "-" + runner + FileExtension;
     }
+
+    /// <summary>
+    /// The same name made unique per process: <c>&lt;UTC&gt;-&lt;runner&gt;-&lt;pid&gt;.lsrec</c>, for example <c>20261012T142233Z-headless-4711.lsrec</c>. Two headless
+    /// processes started in the same second shared the plain name and the second could not create its log (P5a live round 1).
+    /// </summary>
+    /// <param name="createdUtc">When the recording started.</param>
+    /// <param name="runner">Who records.</param>
+    /// <param name="processId">The process id.</param>
+    public static string FileName(DateTimeOffset createdUtc, string runner, int processId)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(processId);
+        var plain = FileName(createdUtc, runner);
+        return plain[..^FileExtension.Length] + "-" + processId.ToString(CultureInfo.InvariantCulture) + FileExtension;
+    }
 }

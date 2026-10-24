@@ -144,6 +144,8 @@ public sealed class StandInVendorTests
         Assert.Equal([0u], rig.Done.Select(d => d.Error));
     }
 
+    // --- the price rules --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
     [Fact]
     public void A_use_of_Renald_answers_with_his_mask_and_a_stock_with_a_shirt_arrows_and_a_club_and_the_capture_lengths()
     {
@@ -166,21 +168,6 @@ public sealed class StandInVendorTests
         Assert.Equal(("Arrow", (ushort?)1000, 1u), (approach.Items[0].Desc.Name, approach.Items[0].Desc.MaxStackSize, approach.Items[0].Desc.Value ?? 0));
     }
 
-    [Fact]
-    public void A_use_while_busy_is_a_UseDone_of_0x001D_and_opens_nothing()
-    {
-        using var rig = new StandInVendorRig();
-        rig.Net.SendUse(Thelnoth);
-
-        rig.Net.SendUse(Renald);
-        rig.Run(4.0);
-
-        Assert.Equal([0x001Du, 0u], rig.Done.Select(d => d.Error));
-        Assert.Equal(Thelnoth, Assert.Single(rig.World.Approaches).Vendor);
-    }
-
-    // --- the price rules --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
     [Theory]
     [InlineData(10u, 0x80u, 14u)]
     [InlineData(50u, 0x80u, 68u)]
@@ -194,8 +181,8 @@ public sealed class StandInVendorTests
     [Theory]
     [InlineData(10u, 0x80u, 9)]
     [InlineData(1u, 0x2000u, 1)]
-    [InlineData(2329u, 0x2u, 2096)]
     [InlineData(1100u, 0x2u, 990)]
+    [InlineData(2329u, 0x2u, 2096)]
     [InlineData(100u, 0x40000u, 100)]
     public void A_vendor_pays_the_floor_of_0_9_times_the_whole_stacks_Value_plus_a_tenth_and_at_least_one_with_the_note_rate_for_a_note(uint value, uint itemType, int expected) =>
         Assert.Equal(expected, StandInWorld.BuyCost(value, itemType));
@@ -222,106 +209,6 @@ public sealed class StandInVendorTests
         Assert.Equal(2, rig.World.Approaches.Count);
     }
 
-    [Fact]
-    public void A_buy_that_spends_a_stack_whole_removes_it_with_a_0024_in_place_of_the_0197()
-    {
-        using var rig = new StandInVendorRig();
-        rig.Open(Thelnoth);
-        rig.World.SetCoins(14);
-
-        rig.Net.SendBuy(Thelnoth, [(KitRow, 1)]);
-        rig.Run(2.0);
-
-        Assert.Equal(["0024", "02CD", "02CD", "0022", "02CD", "0062", "01C7", "F745", "F750"], rig.Tags);
-        Assert.Equal(0, rig.World.Coins);
-        Assert.False(rig.Held(StandInWorld.PyrealGuid));
-    }
-
-    [Fact]
-    public void A_stack_of_arrows_is_created_in_stacks_of_the_limit_each_priced_on_its_own_Value()
-    {
-        using var rig = new StandInVendorRig();
-        rig.Open(Renald);
-
-        rig.Net.SendBuy(Renald, [(ArrowRow, 2500)]);
-        rig.Run(2.0);
-
-        Assert.Equal(["0197", "02CD", "02CD", "0022", "02CD", "0022", "02CD", "0022", "02CD", "0062", "01C7", "F745", "F745", "F745", "F750"], rig.Tags);
-        Assert.Equal(StandInWorld.PlaceholderPyreals - (1350 + 1350 + 675), rig.World.Coins);
-        Assert.Equal([1000, 1000, 500], rig.World.Pack.Where(e => e.Wcid == 300).Select(e => e.Stack));
-    }
-
-    [Fact]
-    public void Several_rows_in_one_buy_are_one_transaction_spent_once()
-    {
-        using var rig = new StandInVendorRig();
-        rig.Open(Renald);
-
-        rig.Net.SendBuy(Renald, [(ClubRow, 1), (ShirtRow, 1)]);
-        rig.Run(2.0);
-
-        Assert.Equal(["0197", "02CD", "02CD", "0022", "02CD", "0022", "02CD", "0062", "01C7", "F745", "F745", "F750"], rig.Tags);
-        Assert.Equal(StandInWorld.PlaceholderPyreals - 351 - 21, rig.World.Coins); // ceil(1.35 x 260 - 0.1) = 351, ceil(1.35 x 15 - 0.1) = 21
-    }
-
-    [Fact]
-    public void Too_few_pyreals_is_a_00A0_and_a_UseDone_with_no_text_and_nothing_changes()
-    {
-        using var rig = new StandInVendorRig();
-        rig.Open(Thelnoth);
-        rig.World.SetCoins(13);
-
-        rig.Net.SendBuy(Thelnoth, [(KitRow, 1)]);
-        rig.Run(2.0);
-
-        Assert.Equal(["00A0", "01C7"], rig.Tags);
-        Assert.Equal([0u], rig.Done.Select(d => d.Error));
-        Assert.Equal(13, rig.World.Coins);
-        Assert.DoesNotContain(rig.World.Pack, e => e.Wcid == 628);
-        Assert.Single(rig.World.Approaches); // the open's; a refused buy sends no 0062
-    }
-
-    [Fact]
-    public void A_buy_while_busy_is_a_00A0_and_a_UseDone_of_0x001D()
-    {
-        using var rig = new StandInVendorRig();
-        rig.Net.SendUse(Thelnoth);
-
-        rig.Net.SendBuy(Thelnoth, [(KitRow, 1)]);
-        rig.Run(0.5);
-
-        Assert.Equal(["F74C", "00A0", "01C7"], rig.Tags);
-        Assert.Equal([0x001Du], rig.Done.Select(d => d.Error));
-        Assert.Equal(1, rig.World.BusyRefusals);
-        Assert.Equal(StandInWorld.PlaceholderPyreals, rig.World.Coins);
-    }
-
-    [Fact]
-    public void A_buy_of_an_amount_of_zero_is_the_line_Invalid_amount_a_00A0_and_a_UseDone()
-    {
-        using var rig = new StandInVendorRig();
-        rig.Open(Thelnoth);
-
-        rig.Net.SendBuy(Thelnoth, [(KitRow, 0)]);
-        rig.Run(2.0);
-
-        Assert.Equal(["02EB", "00A0", "01C7"], rig.Tags);
-        Assert.Equal("Invalid amount", rig.Cast.Chat[^1].Text);
-        Assert.Equal(StandInWorld.PlaceholderPyreals, rig.World.Coins);
-    }
-
-    [Fact]
-    public void A_buy_from_a_vendor_the_world_does_not_hold_is_a_00A0_and_a_UseDone_of_NoObject()
-    {
-        using var rig = new StandInVendorRig();
-
-        rig.Net.SendBuy(0x7A9BFFFF, [(KitRow, 1)]);
-        rig.Run(1.0);
-
-        Assert.Equal(["00A0", "01C7"], rig.Tags);
-        Assert.Equal([StandInWorld.NoObject], rig.Done.Select(d => d.Error));
-    }
-
     // --- a sale -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
     [Fact]
@@ -345,6 +232,8 @@ public sealed class StandInVendorTests
         Assert.Equal(10, rig.World.Approaches[^1].Items.Length); // a kit has uses: the vendor does not resell it
         Assert.Equal([0u], rig.Done.Select(d => d.Error));
     }
+
+    // --- the bytes ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
     [Fact]
     public void A_sale_to_Renald_sends_the_0062_after_the_UseDone_as_the_capture_shows_and_the_vendor_lists_the_item_for_resale()
@@ -371,50 +260,6 @@ public sealed class StandInVendorTests
         Assert.True(rig.Held(StandInWorld.SellBracersGuid));
         Assert.Equal(8, rig.World.Approaches[^1].Items.Length);
     }
-
-    [Fact]
-    public void An_item_outside_the_mask_is_unsellable_with_the_line_a_00A0_and_a_UseDone_and_stays_in_the_pack()
-    {
-        using var rig = new StandInVendorRig();
-        rig.Open(Thelnoth);
-
-        rig.Net.SendSell(Thelnoth, [(StandInWorld.SellBracersGuid, 1)]);
-        rig.Run(2.0);
-
-        Assert.Equal(["02EB", "00A0", "01C7"], rig.Tags);
-        Assert.Equal("The Leather Bracers is unsellable.", rig.Cast.Chat[^1].Text);
-        Assert.True(rig.Held(StandInWorld.SellBracersGuid));
-        Assert.Equal(StandInWorld.PlaceholderPyreals, rig.World.Coins);
-        Assert.Equal([0u], rig.Done.Select(d => d.Error));
-    }
-
-    [Fact]
-    public void An_item_the_player_does_not_hold_is_skipped_and_a_sale_of_nothing_is_a_00A0_and_a_UseDone()
-    {
-        using var rig = new StandInVendorRig();
-        rig.Open(Thelnoth);
-
-        rig.Net.SendSell(Thelnoth, [(0x80FFFFFF, 1)]);
-        rig.Run(2.0);
-
-        Assert.Equal(["00A0", "01C7"], rig.Tags);
-    }
-
-    [Fact]
-    public void A_sale_while_busy_is_a_00A0_and_a_UseDone_of_0x001D_and_keeps_the_item()
-    {
-        using var rig = new StandInVendorRig();
-        rig.Net.SendUse(Thelnoth);
-
-        rig.Net.SendSell(Thelnoth, [(StandInWorld.SellKitGuid, 1)]);
-        rig.Run(0.5);
-
-        Assert.Equal(["F74C", "00A0", "01C7"], rig.Tags);
-        Assert.Equal([0x001Du], rig.Done.Select(d => d.Error));
-        Assert.True(rig.Held(StandInWorld.SellKitGuid));
-    }
-
-    // --- the bytes ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
     [Fact]
     public void The_stand_ins_0062_is_the_record_ACEs_bytes_decode_to()

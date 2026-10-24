@@ -86,6 +86,7 @@ public sealed class MotionInterpreterPlaybackTests(DatSetFixture fixture) : ICla
         AssertInStep(motion, player, expected: 0);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_human_walks_runs_and_stops_with_the_tables_cycles_and_runs_at_the_run_rate()
     {

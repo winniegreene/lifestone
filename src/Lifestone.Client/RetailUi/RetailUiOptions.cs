@@ -39,6 +39,7 @@ public enum RetailUiMode
 /// <item><term>--retail-ui-only</term><description>Run the retail UI alone: no world, no sky.</description></item>
 /// <item><term>--retail-ui-glitches</term><description>Restore the retail glitches Lifestone fixes by default
 /// (<see cref="UiRetailGlitches.All"/>; docs/retail-ui.md §14), the fidelity rule's flag.</description></item>
+/// <item><term>--examine-icon=on|off</term><description>The examine window's item icon, an addition to retail (default off: the window is drawn as retail draws it).</description></item>
 /// <item><term>--retail-disconnect</term><description>Retail's exit from the disconnected screen (D43); by default its button reconnects.</description></item>
 /// </list>
 /// </remarks>
@@ -86,6 +87,9 @@ public sealed record RetailUiOptions
 
     /// <summary>The disconnected screen's button exits, as retail's (<c>--retail-disconnect</c>, D43).</summary>
     public bool RetailDisconnect { get; init; }
+
+    /// <summary><c>--examine-icon on|off</c> (default off, retail): the examine window's item icon, an addition to retail (M4 4.1 fix, review R8; <see cref="UiServices.ExamineIcon"/>).</summary>
+    public bool ExamineIcon { get; init; }
 
     /// <summary>The problems <see cref="Parse(IEnumerable{string})"/> found, one line each; the option keeps its default.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
@@ -156,6 +160,9 @@ public sealed record RetailUiOptions
                     break;
                 case "--retail-effects-stale-info":
                     options = options with { Glitches = options.Glitches | UiRetailGlitches.EffectsStaleInfo };
+                    break;
+                case "--examine-icon":
+                    options = options with { ExamineIcon = OptionValues.Choice(argument, errors, options.ExamineIcon, ("on", true), ("off", false)) };
                     break;
                 case "--retail-disconnect":
                     options = options with { RetailDisconnect = true };

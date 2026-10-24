@@ -14,6 +14,7 @@ public sealed class LayoutCatalogueTests(DatSetFixture fixture) : IClassFixture<
 
     private UiLayouts Layouts => new(Dats);
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void The_UILAYOUT_group_names_81_layouts_and_20_are_templates_only()
     {
@@ -32,6 +33,7 @@ public sealed class LayoutCatalogueTests(DatSetFixture fixture) : IClassFixture<
         Assert.False(layouts.TryResolveLayoutEnum(0, out _));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsTheory]
     [InlineData(UiLayoutEnums.ContextMenu, 0x2100003Bu, "ContextMenu")]
     [InlineData(UiLayoutEnums.Dialog, 0x2100003Cu, "Dialog")]
@@ -58,6 +60,7 @@ public sealed class LayoutCatalogueTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal((layoutId, 800, 600), (layout.Id, layout.Width, layout.Height));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Unknown_enums_layouts_and_elements_fail_loudly()
     {
@@ -74,6 +77,7 @@ public sealed class LayoutCatalogueTests(DatSetFixture fixture) : IClassFixture<
         Assert.Contains("layout 0x21000004 (UILAYOUT enum 0x10000005) has no top-level element 0x1000039D", error.Message, StringComparison.Ordinal);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Every_mode_root_is_a_top_level_element_of_its_layout()
     {
@@ -101,6 +105,7 @@ public sealed class LayoutCatalogueTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal(2, layouts.GetLayout(0x21000004u).Elements.Count);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void The_dialog_layout_holds_one_full_screen_element_per_dialog_class()
     {
@@ -120,6 +125,7 @@ public sealed class LayoutCatalogueTests(DatSetFixture fixture) : IClassFixture<
         });
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void The_gameplay_root_holds_the_floating_window_shell()
     {
@@ -151,6 +157,7 @@ public sealed class LayoutCatalogueTests(DatSetFixture fixture) : IClassFixture<
         Assert.DoesNotContain(bases.Values, n => n is "classic_chat" or "classic_radar" or "classic_vitals" or "classic_toolbar" or "classic_panel");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact] // models the machine without the language dat, so it needs only portal and cell
     public void Without_the_language_dat_the_layouts_name_the_missing_file()
     {

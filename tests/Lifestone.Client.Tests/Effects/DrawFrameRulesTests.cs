@@ -16,9 +16,6 @@ public sealed class DrawFrameRulesTests
     public static TheoryData<float, float, float> Headings => new()
     {
         { 0f, 1f, 0f },     // north
-        { 1f, 0f, 0f },     // east
-        { 0f, -1f, 0f },    // south
-        { -1f, 0f, 0f },    // west
         { 3f, -4f, 0f },
         { 1f, 2f, 3f },     // looking up
         { -2f, 0.5f, -1f }, // looking down

@@ -472,7 +472,7 @@ public sealed class UiDrag
             || _manager.CreateRootElementByDataId(layout, template) is not UiItem icon)
         {
             _iconFailed = true;
-            _manager.Services.Log.Warn("retailui", "the drag has no icon: the item cell template could not be made as a root element (the item is still carried; TODO(m4-drag-icon))");
+            _manager.Services.Log.Warn("retailui", "the drag has no icon: the item cell template of the source list could not be made as a root element, so the composed icon (the cell's icon, underlay, overlay, type background and glow, UIElement_UIItem 0x004E2E60 over IconData::RenderIcons 0x0058DFB0) is not drawn under the pointer (the item is still carried; TODO(m4-drag-icon))");
             return null;
         }
 

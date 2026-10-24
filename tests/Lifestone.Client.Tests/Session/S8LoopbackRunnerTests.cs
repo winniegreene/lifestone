@@ -166,7 +166,7 @@ public sealed class S8LoopbackRunnerTests
         var h = new ActionHarness(server: SessionTestData.RefusedIpById[endPoint]);
         h.Present();
         var controller = new SpyController();
-        h.Api.Move.Bind(controller);
+        h.Api.Move.Bind(controller, false);
         var before = h.Log.Entries.Count;
 
         var handle = HandleRunners[runner](h);
@@ -186,7 +186,7 @@ public sealed class S8LoopbackRunnerTests
     {
         var h = new ActionHarness(server: SessionTestData.AllowedById[endPoint]);
         h.Present();
-        h.Api.Move.Bind(new SpyController());
+        h.Api.Move.Bind(new SpyController(), false);
         var handle = HandleRunners[runner](h);
 
         Assert.NotEqual(ActionOutcomeKind.Refused, handle.Outcome?.Kind);

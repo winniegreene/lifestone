@@ -76,6 +76,7 @@ public sealed class SurfaceShaderVariantTests(DatSetFixture fixture) : IClassFix
         Assert.Empty(SurfaceShaderVariant.Reachable([Material(SurfaceType.Base1Image | SurfaceType.InvAlpha)])); // error material
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_end_of_retail_surfaces_need_26_shader_variants()
     {
@@ -86,6 +87,7 @@ public sealed class SurfaceShaderVariantTests(DatSetFixture fixture) : IClassFix
         Assert.True(SurfaceShaderVariant.Reachable(materials, exactCutouts: true).Count < 26);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_end_of_retail_surface_maps_to_a_variant_with_the_documented_counts()
     {
@@ -158,6 +160,7 @@ public sealed class SurfaceShaderVariantTests(DatSetFixture fixture) : IClassFix
         Assert.Equal(opaqueTextured, detailed.WithDetail(SurfaceDetail.None));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Detail_variants_of_the_end_of_retail_surfaces()
     {

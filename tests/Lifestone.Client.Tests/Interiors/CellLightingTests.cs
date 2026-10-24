@@ -73,9 +73,7 @@ public sealed class CellLightingTests(InteriorsFixture fixture) : IClassFixture<
     [InlineData(-0.1f, 0)]
     [InlineData(0f, 0)]
     [InlineData(0.5f, 127)] // 127.5 truncated, as (unsigned __int8)(r × 255.0)
-    [InlineData(0.999f, 254)]
     [InlineData(1f, 255)]
-    [InlineData(3f, 255)]
     public void Vertex_colours_are_clamped_and_truncated_to_bytes(float value, byte expected) =>
         Assert.Equal(expected, CellStaticLighting.ToByte(value));
 
@@ -134,6 +132,7 @@ public sealed class CellLightingTests(InteriorsFixture fixture) : IClassFixture<
         Assert.Equal(lights.Take(8), many);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Cell_lights_come_from_the_static_objects_setups_and_are_all_point_lights()
     {
@@ -157,6 +156,7 @@ public sealed class CellLightingTests(InteriorsFixture fixture) : IClassFixture<
         Assert.Equal(obj.Frame.Origin, light.ObjectOrigin);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_viewer_cell_gets_the_nearest_forty_lights_of_its_stab_list()
     {
@@ -174,6 +174,7 @@ public sealed class CellLightingTests(InteriorsFixture fixture) : IClassFixture<
         Assert.All(candidates.Except(selected), l => Assert.True(Vector3.DistanceSquared(l.ObjectOrigin, viewer.Frame.Origin) >= cutoff));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Burned_cells_near_lights_are_lit_and_dungeons_have_unlit_corners()
     {

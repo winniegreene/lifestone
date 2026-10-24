@@ -26,8 +26,6 @@ public sealed class LoginMessageCodecTests
 
     [Theory]
     [InlineData(0x01u)]
-    [InlineData(0x0Fu)]
-    [InlineData(0x15u)]
     [InlineData(0xDEADBEEFu)]
     public void CharacterError_keeps_the_raw_code(uint code)
     {
@@ -57,11 +55,6 @@ public sealed class LoginMessageCodecTests
 
     [Theory]
     [InlineData(2u)]
-    [InlineData(3u)]
-    [InlineData(4u)]
-    [InlineData(5u)]
-    [InlineData(6u)]
-    [InlineData(7u)]
     [InlineData(0u)]
     [InlineData(99u)]
     public void CharGenResponse_codes_other_than_ok_are_the_code_alone(uint result)

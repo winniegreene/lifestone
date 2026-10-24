@@ -147,6 +147,8 @@ public sealed partial class ThrowawayLegRunner : Node
     /// <inheritdoc/>
     public override void _ExitTree() => _scenario?.Dispose();
 
+    private readonly GcFrameWatch _gcWatch = new();
+
     /// <summary>
     /// The frame times of the two windows the other legs report: from the moment the new character began entering the world to the end of the settle (<c>enter_to_walk_max_ms</c>),
     /// and from the Places click to a second after the player is present again at Holtburg (<c>teleport_frame_max_ms</c>). The engine's delta is the previous frame's whole time.
@@ -154,6 +156,7 @@ public sealed partial class ThrowawayLegRunner : Node
     private void SampleFrame(double delta)
     {
         var ms = delta * 1000.0;
+        var gc = _gcWatch.Step(); // the collector's work in the interval the delta measures (M4 P4 g3fix, TODO(m4-throwaway-teleport-frame))
         var enterWindow = !double.IsNaN(_scenario.EnterAt) && double.IsNaN(_scenario.SettledAt);
         var teleportWindow = !double.IsNaN(_scenario.PlaceAskedAt) && (double.IsNaN(_scenario.PlaceArrivedAt) || InTail());
         if (!double.IsNaN(_scenario.PlaceArrivedAt) && double.IsNaN(_teleportTailStart))
@@ -181,7 +184,15 @@ public sealed partial class ThrowawayLegRunner : Node
                 ms > FrameLimitMilliseconds ? LogLevel.Warning : LogLevel.Info,
                 LogCategory,
                 ms > FrameLimitMilliseconds ? "throwaway: a frame over 50 ms" : "throwaway: a frame near the 50 ms limit",
-                [("ms", ms), ("stage", _scenario.Stage), ("window", enterWindow ? "enter-to-walk" : "teleport"), ("tunnel", false)]);
+                [
+                    ("ms", ms),
+                    ("stage", _scenario.Stage),
+                    ("window", enterWindow ? "enter-to-walk" : "teleport"),
+                    ("tunnel", false),
+                    ("process_ms_previous_frame", Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000.0),
+                    ("render_setup_cpu_ms", RenderingServer.GetFrameSetupTimeCpu()),
+                    .. gc.Fields(),
+                ]);
         }
 
         bool InTail() => double.IsNaN(_teleportTailStart) || _runSeconds - _teleportTailStart <= TeleportTailSeconds;

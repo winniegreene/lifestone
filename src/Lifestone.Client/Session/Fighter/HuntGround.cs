@@ -286,4 +286,53 @@ public static class HuntGround
 
     /// <summary>The point <c>place loc</c> sends the hunt to: the cell's centre at the terrain height plus 0.5 m.</summary>
     public static Vector3 PlacePoint(HuntCell cell, float terrainHeight) => new(cell.X, cell.Y, terrainHeight + 0.5f);
+
+    /// <summary>The terrain type range of water (16 to 20, ACE's table, <c>LandblockStruct.cs:62</c>), as <c>HuntGroundDatTests</c> reads it.</summary>
+    private const int FirstWaterType = 16, LastWaterType = 20;
+
+    /// <summary>
+    /// The height of a seek point (M4 P4 seek): the terrain height at (<paramref name="x"/>, <paramref name="y"/>) in the landblock of <paramref name="cellId"/>, or null when the landblock has no terrain, a corner of the
+    /// 24 m cell holding the point is water, or a surface normal sampled over that cell (a 3 x 3 grid) is under <c>PhysicsGlobals.FloorZ</c> (the walker cannot stand there): the same rules the fixed cells were read with.
+    /// </summary>
+    public static float? SeekHeight(DatSet dats, uint cellId, float x, float y)
+    {
+        ArgumentNullException.ThrowIfNull(dats);
+        if (x < 0 || y < 0 || x >= 192 || y >= 192)
+        {
+            return null;
+        }
+
+        var terrain = dats.GetLandblockTerrain(LandblockCoord.FromId(cellId));
+        if (terrain is null)
+        {
+            return null;
+        }
+
+        var cx = (int)(x / 24);
+        var cy = (int)(y / 24);
+        for (var vx = cx; vx <= cx + 1; vx++)
+        {
+            for (var vy = cy; vy <= cy + 1; vy++)
+            {
+                if (terrain.TerrainType(vx, vy) is >= FirstWaterType and <= LastWaterType)
+                {
+                    return null;
+                }
+            }
+        }
+
+        var sampler = new TerrainSampler(terrain, dats.TerrainRegion.LandHeightTable);
+        for (var i = 0; i < 3; i++)
+        {
+            for (var j = 0; j < 3; j++)
+            {
+                if (sampler.GetNormal((cx * 24) + 1 + (i * 11f), (cy * 24) + 1 + (j * 11f)).Z < Lifestone.Data.Physics.PhysicsGlobals.FloorZ)
+                {
+                    return null;
+                }
+            }
+        }
+
+        return sampler.GetHeight(x, y);
+    }
 }

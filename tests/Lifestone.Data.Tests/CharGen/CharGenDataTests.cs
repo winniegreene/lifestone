@@ -9,6 +9,7 @@ public sealed class CharGenDataTests(DatSetFixture fixture, Xunit.Abstractions.I
 {
     private DatSet Dats => fixture.Dats;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void CharGen_and_SkillTable_resolve_through_UNIQUEDB()
     {
@@ -19,6 +20,7 @@ public sealed class CharGenDataTests(DatSetFixture fixture, Xunit.Abstractions.I
         Assert.Equal("Weenie_SkillTable", Dats.EnumMaps.NameOf(CharGenData.UniqueDb, SkillTableData.UniqueDbEnum));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Thirteen_heritages_with_their_credits()
     {
@@ -38,6 +40,7 @@ public sealed class CharGenDataTests(DatSetFixture fixture, Xunit.Abstractions.I
         Assert.Equal("TODO(retailui-data): CharGen 0x0E000002 has no heritage 14.", error.Message);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Five_start_areas_and_the_Academy_location_matches_protocol_md()
     {
@@ -62,6 +65,7 @@ public sealed class CharGenDataTests(DatSetFixture fixture, Xunit.Abstractions.I
         Assert.Equal([4], data.GetHeritage(12).PrimaryStartAreas);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_SkillTable_has_38_skills_and_55_advancement_classes()
     {
@@ -75,6 +79,7 @@ public sealed class CharGenDataTests(DatSetFixture fixture, Xunit.Abstractions.I
         Assert.False(skills.TryGetSkill(1, out _)); // a retired skill
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_skill_CharGen_names_exists_and_every_chargen_skill_is_below_55()
     {
@@ -89,6 +94,7 @@ public sealed class CharGenDataTests(DatSetFixture fixture, Xunit.Abstractions.I
             id => Assert.True(skills.TryGetSkill(id, out var s) && s.ChargenUse, $"template skill {id}"));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Skill_costs_take_the_heritages_then_the_SkillTables()
     {
@@ -101,6 +107,7 @@ public sealed class CharGenDataTests(DatSetFixture fixture, Xunit.Abstractions.I
         Assert.Equal((-1, -1), (data.GetSkillTrainedCost(1, 1, skills), data.GetSkillSpecializedCost(1, 1, skills))); // not in the table
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Aluvian_mage_skill_costs_and_the_52_credit_plan_of_D14()
     {
@@ -141,6 +148,7 @@ public sealed class CharGenDataTests(DatSetFixture fixture, Xunit.Abstractions.I
         Assert.Equal(34, new uint[] { 31, 32, 33, 16 }.Sum(id => data.GetSkillTrainedCost(id, aluvian, skills)));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_gear_offers_colours_from_its_ClothingTable()
     {

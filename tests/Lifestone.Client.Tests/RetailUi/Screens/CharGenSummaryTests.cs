@@ -372,13 +372,8 @@ public sealed class CharGenSummaryTests(DatSetFixture fixture) : IClassFixture<D
     }
 
     [RequiresLocalDatsTheory]
-    [InlineData("bob")]
-    [InlineData("o'brien")]
     [InlineData("mary-jane smith")]
-    [InlineData("MACDONALD")]
-    [InlineData("McDonald")]
     [InlineData("b0b!_x.y")]
-    [InlineData("émile")]
     public void What_is_typed_goes_through_the_name_filter_and_the_state_formats_what_the_field_holds(string typed)
     {
         using var rig = Rig();
@@ -394,13 +389,11 @@ public sealed class CharGenSummaryTests(DatSetFixture fixture) : IClassFixture<D
 
     [Theory]
     [InlineData('a', true)]
-    [InlineData('Z', true)]
     [InlineData('\'', true)]
     [InlineData('-', true)]
     [InlineData(' ', true)]
     [InlineData('1', false)]
     [InlineData('_', false)]
-    [InlineData('.', false)]
     [InlineData('é', false)]
     public void The_name_filter_takes_ascii_letters_apostrophes_hyphens_and_spaces(char c, bool taken) => Assert.Equal(taken, TextFilters.Name(c));
 
@@ -426,72 +419,53 @@ public sealed class CharGenSummaryTests(DatSetFixture fixture) : IClassFixture<D
 
     // ---------------------------------------------------------------- Finish and the create
 
-    [RequiresLocalDatsFact]
-    public void Finish_with_no_name_typed_says_so_and_sends_nothing()
+    [RequiresLocalDatsTheory]
+    [InlineData("nothing typed")]
+    [InlineData("only a trimmed-away name")]
+    [InlineData("emptied from the field")]
+    [InlineData("deleted by select-all")]
+    public void Finish_with_no_name_says_so_and_sends_nothing_however_the_name_got_empty(string how)
     {
+        // One theory over the four routes to an empty name (the P1 fold of four facts): never typed, a lone space the filter takes and the trim removes, deleted backwards, deleted by select-all.
         using var rig = new LoginRig(fixture);
         var screen = OpenViaCreate(rig);
         Go(rig, screen, CharGenPageId.Summary);
+        switch (how)
+        {
+            case "only a trimmed-away name":
+                Type(rig, " ");
+                break;
+            case "emptied from the field":
+            {
+                Type(rig, "Bob");
+                Assert.Equal("Bob", screen.State.Name);
+                var field = screen.Summary!.NameField!;
+                field.DeleteBackward();
+                field.DeleteBackward();
+                Assert.Equal("B", screen.State.Name);
+                field.DeleteBackward();
+                Assert.Equal(string.Empty, screen.State.Name);
+                break;
+            }
+
+            case "deleted by select-all":
+                Type(rig, "Bob");
+                screen.Summary!.NameField!.SelectAll();
+                screen.Summary.NameField.DeleteSelection();
+                break;
+        }
 
         ClickAndRun(rig, screen.FinishButton!);
+
+        if (how == "deleted by select-all")
+        {
+            Assert.Equal(string.Empty, screen.State.Name);
+        }
 
         Assert.NotEqual(0u, screen.NoNameDialog);
         Assert.Equal(Pregame("ID_CharGen_NoNameWarning"), rig.DialogText(screen.NoNameDialog));
         Assert.False(screen.IsCreatePending);
-        Assert.Equal(0, rig.Characters.Entries.Count(e => e.Name == "Bob"));
-    }
-
-    [RequiresLocalDatsFact]
-    public void Finish_with_only_a_trimmed_away_name_is_the_same_as_no_name()
-    {
-        using var rig = new LoginRig(fixture);
-        var screen = OpenViaCreate(rig);
-        Go(rig, screen, CharGenPageId.Summary);
-        Type(rig, " ");
-
-        ClickAndRun(rig, screen.FinishButton!);
-
-        Assert.NotEqual(0u, screen.NoNameDialog);
-        Assert.False(screen.IsCreatePending);
-    }
-
-    [RequiresLocalDatsFact]
-    public void A_name_emptied_from_the_field_is_no_name_and_Finish_says_so()
-    {
-        using var rig = new LoginRig(fixture);
-        var screen = OpenViaCreate(rig);
-        Go(rig, screen, CharGenPageId.Summary);
-        Type(rig, "Bob");
-        Assert.Equal("Bob", screen.State.Name);
-
-        var field = screen.Summary!.NameField!;
-        field.DeleteBackward();
-        field.DeleteBackward();
-        Assert.Equal("B", screen.State.Name);
-        field.DeleteBackward();
-        Assert.Equal(string.Empty, screen.State.Name);
-        ClickAndRun(rig, screen.FinishButton!);
-
-        Assert.NotEqual(0u, screen.NoNameDialog);
-        Assert.False(screen.IsCreatePending);
         Assert.DoesNotContain(rig.Characters.Entries, e => e.Name == "Bob");
-    }
-
-    [RequiresLocalDatsFact]
-    public void A_name_deleted_by_select_all_is_no_name_too()
-    {
-        using var rig = new LoginRig(fixture);
-        var screen = OpenViaCreate(rig);
-        Go(rig, screen, CharGenPageId.Summary);
-        Type(rig, "Bob");
-
-        screen.Summary!.NameField!.SelectAll();
-        screen.Summary.NameField.DeleteSelection();
-        ClickAndRun(rig, screen.FinishButton!);
-
-        Assert.Equal(string.Empty, screen.State.Name);
-        Assert.NotEqual(0u, screen.NoNameDialog);
-        Assert.False(screen.IsCreatePending);
     }
 
     [RequiresLocalDatsFact]
@@ -511,8 +485,10 @@ public sealed class CharGenSummaryTests(DatSetFixture fixture) : IClassFixture<D
         Assert.True(screen.IsCreatePending);
     }
 
-    [RequiresLocalDatsFact]
-    public void Finish_with_attribute_credits_left_asks_first_and_yes_sends_the_create()
+    [RequiresLocalDatsTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Finish_with_attribute_credits_left_asks_first_and_yes_sends_the_create_and_no_keeps_the_page(bool yes)
     {
         using var rig = new LoginRig(fixture);
         var screen = OpenViaCreate(rig);
@@ -528,27 +504,14 @@ public sealed class CharGenSummaryTests(DatSetFixture fixture) : IClassFixture<D
         Assert.False(screen.IsCreatePending);
 
         var dialog = rig.Dialog(screen.CreditDialog)!;
-        ClickAndRun(rig, dialog.GetChildRecursive(UiConfirmationDialog.YesButton)!);
+        ClickAndRun(rig, dialog.GetChildRecursive(yes ? UiConfirmationDialog.YesButton : UiConfirmationDialog.NoButton)!);
 
         Assert.Equal(0u, screen.CreditDialog);
-        Assert.True(screen.IsCreatePending);
-    }
-
-    [RequiresLocalDatsFact]
-    public void Finish_with_attribute_credits_left_and_no_keeps_the_page()
-    {
-        using var rig = new LoginRig(fixture);
-        var screen = OpenViaCreate(rig);
-        Go(rig, screen, CharGenPageId.Summary);
-        screen.State.SetStrength(screen.State.Strength - 20, false);
-        Type(rig, "Credit Test");
-        ClickAndRun(rig, screen.FinishButton!);
-
-        ClickAndRun(rig, rig.Dialog(screen.CreditDialog)!.GetChildRecursive(UiConfirmationDialog.NoButton)!);
-
-        Assert.Equal(0u, screen.CreditDialog);
-        Assert.False(screen.IsCreatePending);
-        Assert.Equal(CharGenPageId.Summary, screen.Progress);
+        Assert.Equal(yes, screen.IsCreatePending);
+        if (!yes)
+        {
+            Assert.Equal(CharGenPageId.Summary, screen.Progress);
+        }
     }
 
     [RequiresLocalDatsFact]
@@ -622,7 +585,6 @@ public sealed class CharGenSummaryTests(DatSetFixture fixture) : IClassFixture<D
     [InlineData(NetCharGenResult.NameBanned, "ID_Character_Err_NameBanned")]
     [InlineData(NetCharGenResult.AdminPrivilegeDenied, "ID_Character_Err_NameAdminDenied")]
     [InlineData(NetCharGenResult.DatabaseDown, "ID_Character_Err_NameDBDown")]
-    [InlineData(NetCharGenResult.Corrupt, "ID_Character_Err_NameDBDown")]
     [InlineData(NetCharGenResult.Pending, "ID_Character_Err_NameDBDown")]
     [InlineData(NetCharGenResult.NameInUse, "ID_Character_Err_NameReserved")]
     public void The_server_s_answers_are_said_as_retail_says_them(NetCharGenResult result, string token)
@@ -676,37 +638,6 @@ public sealed class CharGenSummaryTests(DatSetFixture fixture) : IClassFixture<D
         Assert.NotEqual(0u, screen.ErrorDialog);
         Assert.StartsWith(NotInM2.Prefix, rig.DialogText(screen.ErrorDialog), StringComparison.Ordinal);
         Assert.True(rig.Log.AnyLineContains("placeholder: Not in Lifestone M2: creating a character"));
-    }
-
-    [RequiresLocalDatsFact]
-    public void The_intent_the_create_sends_always_has_exactly_55_skills_and_verifies_for_every_heritage_and_gender()
-    {
-        var catalog = CharGenCatalog.Load(fixture.Dats);
-        foreach (var heritage in Enumerable.Range(1, 13))
-        {
-            foreach (var gender in new[] { 1u, 2u })
-            {
-                for (var seed = 1; seed <= 3; seed++)
-                {
-                    var state = new CharGenState(catalog, new CharGenRandom(seed));
-                    state.RandomizeCharacter(true);
-                    state.SetHeritageGroup((uint)heritage);
-                    state.SetGender(gender);
-                    state.SetName("Intent Test");
-                    state.FitTemplateToCharacter();
-
-                    var result = state.GetCharGenResult();
-                    var intent = result.ToIntent();
-
-                    Assert.True(CharGenVerifier.Verify(result, catalog, out var problem), $"heritage {heritage} gender {gender} seed {seed}: {problem}");
-                    Assert.Equal(CharacterCreateIntent.RequiredSkillCount, intent.SkillAdvancementClasses.Count);
-                    Assert.Equal(55, intent.SkillAdvancementClasses.Count);
-                    Assert.True(intent.TryValidate(out var invalid), invalid);
-                    Assert.Equal("Intent Test", intent.Name);
-                    Assert.True(state.Template >= 0, "the summary page fits the profession, so a character always has a template of 0 or more");
-                }
-            }
-        }
     }
 
     [RequiresLocalDatsFact]

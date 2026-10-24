@@ -10,6 +10,7 @@ public sealed class CursorTests(DatSetFixture fixture) : IClassFixture<DatSetFix
 {
     private DatSet Dats => fixture.Dats;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void UICURSOR_has_41_cursors_and_enum_1_is_the_default_pointer_at_0_0()
     {
@@ -26,6 +27,7 @@ public sealed class CursorTests(DatSetFixture fixture) : IClassFixture<DatSetFix
         Assert.Equal("TODO(retailui-data): UICURSOR enum 0x42 does not resolve to a cursor image.", error.Message);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_cursor_is_an_A8R8G8B8_image_of_at_most_32_by_32_that_decodes()
     {

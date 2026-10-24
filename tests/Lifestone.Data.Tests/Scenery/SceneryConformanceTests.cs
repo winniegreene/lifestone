@@ -10,6 +10,7 @@ namespace Lifestone.Data.Tests.Scenery;
 /// Conformance of the retail scenery funnel on the user's dats, with each stage re-derived independently
 /// (TerrainMeshBuilder geometry, raw LandBlockInfo buildings, 64-bit hash transcription, the ACE oracle).
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class SceneryConformanceTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     private static readonly LandblockCoord A9B3 = new(0xA9, 0xB3);

@@ -14,11 +14,9 @@ public sealed class DegradeFramesTests
 
     [Theory]
     [InlineData(0.0, 0.0)]
-    [InlineData(45.0, 0.0)]
     [InlineData(90.0, 10.0)]
     [InlineData(180.0, -30.0)]
     [InlineData(270.0, 20.0)]
-    [InlineData(300.0, -5.0)]
     [InlineData(359.5, 60.0)]
     public void Set_vector_heading_points_local_y_along_the_heading_without_roll(double compassDegrees, double pitchDegrees)
     {

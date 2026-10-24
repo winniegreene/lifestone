@@ -56,6 +56,9 @@ public sealed record BuffResult
     /// <summary>Revitalize casts that fired.</summary>
     public int Revitalizes { get; init; }
 
+    /// <summary>Mana Potions drunk and confirmed (a fighter's pass; M4 P5a C7).</summary>
+    public int ManaPotions { get; init; }
+
     /// <summary>The lowest current mana the cycle saw, or null when it never read any.</summary>
     public uint? ManaMin { get; init; }
 
@@ -74,7 +77,7 @@ public sealed record BuffResult
     /// <summary>The buff lines cast and landed in this pass (upgrades included).</summary>
     public int Cast { get; init; }
 
-    /// <summary>Of <see cref="Cast"/>, the armour lines (Impenetrability, Bludgeon Bane) cast and landed: a new cycle object does not remember an earlier one's armour casts, so a second run recasts them (<c>TODO(m3-buff-armour-memory)</c>).</summary>
+    /// <summary>Of <see cref="Cast"/>, the armour lines (Impenetrability, Bludgeon Bane) cast and landed. A second cycle object on the same session casts none that the shared <see cref="ArmourBuffLedger"/> knows (M4 4.1 lane b; closes <c>TODO(m3-buff-armour-memory)</c>).</summary>
     public int ArmourCast { get; init; }
 
     /// <summary>The armour pieces whose cast was surpassed by a stronger version of the line they already held, counted active for the line (<c>surpassed=</c>; closes <c>TODO(m3-buff-armour-surpassed)</c>).</summary>
@@ -92,6 +95,9 @@ public sealed record BuffResult
     /// <summary>The reason the pass failed, or null when it did not.</summary>
     public string? Failure { get; init; }
 
+    /// <summary>The fighter's caster swap around the pass (M4 P5a C1b): <c>swapped=yes|no swap_s=n</c>, set by <see cref="RebuffDriver"/> once the swap is back; null for the mage, who never swaps (its <see cref="Fields"/> are unchanged).</summary>
+    public string? SwapFields { get; init; }
+
     /// <summary>The verdict fields: <c>buffs=a/w levels=... rebuffed=yes|no min_remaining_s=n fizzles=n transfers=f/t revitalizes=n mana_min=n cycle_s=n mode_changes=n misses=...</c> (and <c>forced=yes</c> for a forced pass).</summary>
     public string Fields { get; init; } = string.Empty;
 
@@ -102,7 +108,7 @@ public sealed record BuffResult
         var mana = r.ManaMin is { } m ? m.ToString(CultureInfo.InvariantCulture) : "n/a";
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"buffs={r.Active}/{r.Wanted} levels={r.Levels} rebuffed={(r.Rebuffed ? "yes" : "no")} min_remaining_s={min} fizzles={r.Fizzles} transfers={r.TransfersFired}/{r.TransfersTried} revitalizes={r.Revitalizes} mana_min={mana} cycle_s={Math.Floor(r.CycleSeconds).ToString("0", CultureInfo.InvariantCulture)} mode_changes={r.ModeChanges} misses={misses}{(r.Forced ? " forced=yes" : string.Empty)} surpassed={r.Surpassed}");
+            $"buffs={r.Active}/{r.Wanted} levels={r.Levels} rebuffed={(r.Rebuffed ? "yes" : "no")} min_remaining_s={min} fizzles={r.Fizzles} transfers={r.TransfersFired}/{r.TransfersTried} revitalizes={r.Revitalizes}{(r.ManaPotions > 0 ? " mana_potions=" + r.ManaPotions.ToString(CultureInfo.InvariantCulture) : string.Empty)} mana_min={mana} cycle_s={Math.Floor(r.CycleSeconds).ToString("0", CultureInfo.InvariantCulture)} mode_changes={r.ModeChanges} misses={misses}{(r.Forced ? " forced=yes" : string.Empty)} surpassed={r.Surpassed}");
     }
 }
 
@@ -126,8 +132,10 @@ public sealed record BuffResult
 /// player, <c>WorldObject_Magic.cs</c> 430-452) and ends the cast with UseDone 0 (<see cref="Actions.Trackers.CastTracker"/> ends such a cast as Sent). So the cycle takes the pieces from the chat lines the cast
 /// produced: a worn armour piece (item type Armor or Clothing) with no line is a named miss.</para>
 /// <para><b>Expiry.</b> A self cast's expiry is its registry entry's start plus its duration (<see cref="ActiveEnchantment.ExpirySeconds"/>, the spell id the line holds in
-/// <see cref="PlayerQualities.ActiveEnchantments"/>); an armour line's is the cast's UseDone time plus the SpellTable duration, kept per worn piece (<c>TODO(m3-buff-armour-memory)</c>: the cycle object remembers it;
-/// a new object does not know an earlier object's armour casts, since the server sends no registry for an item). A piece whose line says "surpassed" holds a stronger version of the line and is counted active (retail keeps the stronger enchantment; <see cref="BuffResult.Surpassed"/>, <c>surpassed=</c>; closes <c>TODO(m3-buff-armour-surpassed)</c>).</para>
+/// <see cref="PlayerQualities.ActiveEnchantments"/>); an armour line's is the cast's UseDone time plus the SpellTable duration, kept per worn piece in the
+/// <see cref="ArmourBuffLedger"/> (M4 4.1 lane b; closes <c>TODO(m3-buff-armour-memory)</c>): the ledger is the session's, so a new cycle object knows an earlier object's armour casts, a piece taken off loses its lines, and after a login
+/// that left the ledger empty the worn pieces are appraised once (<see cref="ArmourLedgerSeeder"/>; the server sends no registry for an item, only an appraisal's enchantment ids, which carry no clock). A line found that way has an unknown time
+/// left and is due at once (no saved time: the conservative rule; with the host's store the previous session's seconds left are restored, ACE's clock stopping while the owner is offline). A piece whose line says "surpassed" holds a stronger version of the line and is counted active (retail keeps the stronger enchantment; <see cref="BuffResult.Surpassed"/>, <c>surpassed=</c>; closes <c>TODO(m3-buff-armour-surpassed)</c>).</para>
 /// <para><b>The mana loop</b> (D24, retail's way): before a cast whose cost (<see cref="GearCasts.ManaCeiling"/>: the base mana and ACE's armour surcharge, <c>Creature_Magic.cs</c> 14-60) is above the current mana,
 /// the cycle casts Stamina to Mana Self at the highest level whose chance reaches the threshold and whose own cost is affordable, tried again until one fires (a try is a separate cast; <see cref="BuffOptions.TransferTries"/>
 /// fizzles in a row fail the cycle); when the stamina is too low for a transfer to cover the shortfall (<see cref="BuffStatMods.Transfer"/> gives the yield) it casts Revitalize Self first by the same rule; when neither can
@@ -158,6 +166,9 @@ public sealed class BuffCycle
     /// <summary>The stage while a combat-mode change (NonCombat for a regeneration wait, Magic back) is in flight.</summary>
     public const string StageMode = "mode";
 
+    /// <summary>The stage while the worn pieces are appraised to seed an empty armour ledger (M4 4.1 lane b).</summary>
+    public const string StageSeed = "seed";
+
     /// <summary>The stage of a finished pass.</summary>
     public const string StageDone = "done";
 
@@ -173,9 +184,29 @@ public sealed class BuffCycle
     /// <summary>The most mana casts one buff line may need before the cycle fails (a loud bound against a loop that never reaches the cost).</summary>
     public const int ManaCastLimitPerLine = 64;
 
+    /// <summary>
+    /// The mana casts (transfers and Revitalizes) in a row that do not lift the line's highest mana (M4 P5a fix r4): after them the line casts no more of them and waits for regeneration (<c>mana-futile:</c>, logged by
+    /// name). A Revitalize spends mana for the stamina the next transfer draws on, so a few in a row are an investment; eight that lift nothing are the round 4 trade. A fighter's profile only (<see cref="IBuffProfile.TransfersAhead"/>): the mage's pool and Mana Conversion make its loop another economy, which round 4 passed. Not retail: Lifestone's own.
+    /// </summary>
+    public const int FutileManaCasts = 8;
+
+    /// <summary>The lines whose mana casts were stopped as futile (<see cref="FutileManaCasts"/>).</summary>
+    public int FutileStops { get; private set; }
+
+    /// <summary>
+    /// The most Stamina to Mana casts a fighter's pass sends when it holds no Mana Potion (M4 P5a C7; the vitals keeper's <see cref="Vitals.VitalsKeeper.FighterTransferCap"/>), and only at a stamina of <see cref="Vitals.VitalsOptions.DefaultStaminaUntilPercent"/> or more.
+    /// A fighter's Revitalize costs mana itself and the transfer gives back less than the pair took, so the fighter's pass drinks Mana Potions instead of chaining them and never casts Revitalize for the sake of mana. Not retail: Lifestone's own bound, named in the log when it stops a cast.
+    /// </summary>
+    public const int FighterTransferCap = Vitals.VitalsKeeper.FighterTransferCap;
+
+    /// <summary>How long the cycle waits for the mana to change after a confirmed Mana Potion before it sets potions aside and names it.</summary>
+    public const double PotionVitalWaitSeconds = Vitals.VitalsKeeper.PotionVitalWaitSeconds;
+
+    /// <summary>Mana Potions this cycle drank and confirmed (a fighter's profile only; M4 P5a C7).</summary>
+    public int ManaPotions => _manaPotions;
+
     private const int MaxPieces = 32;
-    private const string TransferLineName = "Stamina to Mana Self";
-    private const string BoostLineName = "Revitalize Self";
+    private const int MaxWorn = 64;
 
     private static readonly string[] Roman = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
 
@@ -192,6 +223,8 @@ public sealed class BuffCycle
         ["Item Enchantment Mastery Self"] = "ItemM",
         ["Life Magic Mastery Self"] = "LifeM",
         ["Mana Mastery Self"] = "ManaM",
+        ["Heavy Weapon Mastery Self"] = "HeavyM",
+        ["Missile Weapon Mastery Self"] = "MissileM",
         ["Arcane Enlightenment Self"] = "Arcane",
         ["Magic Resistance Self"] = "MagRes",
         ["Invulnerability Self"] = "Invuln",
@@ -214,6 +247,7 @@ public sealed class BuffCycle
         Mana,
         ManaWait,
         Casting,
+        Seed,
         ManaCasting,
         ModeAway,
         ModeBack,
@@ -231,6 +265,7 @@ public sealed class BuffCycle
     {
         Transfer,
         Boost,
+        Potion,
     }
 
     private sealed class WantedLine(int index, ProfileLine line, string shortName, SpellInfo?[] infos, bool armour)
@@ -245,14 +280,6 @@ public sealed class BuffCycle
 
         public bool Armour { get; } = armour;
 
-        /// <summary>The index of the level of this armour line last cast (the memory below), or -1.</summary>
-        public int CastIndex { get; set; } = -1;
-
-        public uint[] PieceGuid { get; } = new uint[MaxPieces];
-
-        public double[] PieceExpiry { get; } = new double[MaxPieces];
-
-        public int PieceCount { get; set; }
     }
 
     private readonly IActionApi _actions;
@@ -270,6 +297,9 @@ public sealed class BuffCycle
     private readonly List<string> _missDetails = [];
     private readonly uint[] _expectedGuid = new uint[MaxPieces];
     private readonly string[] _expectedName = new string[MaxPieces];
+    private readonly uint[] _wornGuid = new uint[MaxWorn];
+    private readonly ArmourBuffLedger _ledger;
+    private readonly ArmourLedgerSeeder? _seeder;
     private Phase _phase = Phase.Idle;
     private bool _rebuff;
     private bool _forced;
@@ -278,6 +308,9 @@ public sealed class BuffCycle
     private int _castIndex;
     private int _lineFizzles;
     private int _manaCasts;
+    private int _castsSincePeak;
+    private uint _linePeak;
+    private bool _manaFutile;
     private bool _wasActive;
     private ActionHandle? _pending;
     private ManaKind _manaKind;
@@ -294,6 +327,14 @@ public sealed class BuffCycle
     private int _fired;
     private int _tried;
     private int _revitalizes;
+    private int _manaPotions;
+    private int _fighterTransfers;
+    private bool _potionsOff;
+    private bool _potionWaiting;
+    private uint _potionBefore;
+    private double _potionWaitUntil;
+    private bool _capNoted;
+    private readonly List<uint> _potionScratch = [];
     private uint _manaMin = uint.MaxValue;
     private int _passRecast;
     private bool _upgrading;
@@ -303,6 +344,7 @@ public sealed class BuffCycle
     private int _modeChanges;
     private double _passStart;
     private int _expectedCount;
+    private bool _noArmourLogged;
     private uint _lifeSkill;
 
     /// <summary>The buff cycle over a session's Action API and read model.</summary>
@@ -310,8 +352,11 @@ public sealed class BuffCycle
     /// <param name="spells">The SpellTable's spells (<c>SpellTableData.Spells</c>): costs, forms and durations.</param>
     /// <param name="options">The cycle's options.</param>
     /// <param name="log">Where the cycle logs.</param>
-    public BuffCycle(IGameSessionView session, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log)
-        : this((session ?? throw new ArgumentNullException(nameof(session))).Actions, session.State, spells, options, log)
+    /// <param name="ledger">The armour lines' memory of the session (M4 4.1 lane b; <see cref="ArmourBuffLedger.For"/>): shared by every cycle object on the session, and seeded by an appraisal of the worn pieces when it is empty after a login. Null: the cycle keeps a private ledger and seeds nothing.</param>
+    /// <param name="store">Where the ledger's remaining seconds are kept across a log-off, or null (the conservative rule); read once, when the ledger is seeded.</param>
+    /// <param name="profile">The character's buff profile (M4 P5a): the lines and the order they are cast in; null is the mage's <see cref="ArenaProfile.Buffs"/>.</param>
+    public BuffCycle(IGameSessionView session, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null, IBuffProfile? profile = null)
+        : this((session ?? throw new ArgumentNullException(nameof(session))).Actions, session.State, spells, options, log, ledger, store, profile)
     {
     }
 
@@ -321,7 +366,10 @@ public sealed class BuffCycle
     /// <param name="spells">The SpellTable's spells: costs, forms and durations.</param>
     /// <param name="options">The cycle's options.</param>
     /// <param name="log">Where the cycle logs.</param>
-    public BuffCycle(IActionApi actions, GameState state, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log)
+    /// <param name="ledger">The armour lines' memory of the session (see the other constructor), or null for a private ledger that seeds nothing.</param>
+    /// <param name="store">Where the ledger's remaining seconds are kept across a log-off, or null.</param>
+    /// <param name="profile">The character's buff profile (M4 P5a): the lines and the order they are cast in; null is the mage's <see cref="ArenaProfile.Buffs"/>.</param>
+    public BuffCycle(IActionApi actions, GameState state, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null, IBuffProfile? profile = null)
     {
         ArgumentNullException.ThrowIfNull(actions);
         ArgumentNullException.ThrowIfNull(state);
@@ -332,8 +380,10 @@ public sealed class BuffCycle
         _state = state;
         _options = options;
         _log = log;
+        _ledger = ledger ?? new ArmourBuffLedger();
+        Profile = profile ?? ArenaProfile.Buffs;
 
-        var lines = OrderedLines;
+        var lines = Profile.BuffOrder;
         _order = new WantedLine[lines.Count];
         for (var i = 0; i < lines.Count; i++)
         {
@@ -346,8 +396,25 @@ public sealed class BuffCycle
             }
         }
 
-        _transferLine = ArenaProfile.LineNamed(TransferLineName) ?? throw new InvalidOperationException("the profile has no line " + TransferLineName);
-        _boostLine = ArenaProfile.LineNamed(BoostLineName) ?? throw new InvalidOperationException("the profile has no line " + BoostLineName);
+        _transferLine = Profile.ManaTransferLine;
+        _boostLine = Profile.StaminaRestoreLine;
+        if (ledger is not null)
+        {
+            var armour = new List<ArmourLineSpells>();
+            foreach (var w in _order)
+            {
+                if (w.Armour)
+                {
+                    armour.Add(new ArmourLineSpells(w.Line.Name, w.Infos));
+                }
+            }
+
+            if (armour.Count > 0)
+            {
+                _seeder = new ArmourLedgerSeeder(actions, state, spells, armour, ledger, log, store); // a profile with no armour line (the fighters') has no armour memory to seed
+            }
+        }
+
         _transferInfos = InfosOf(_transferLine, spells);
         _boostInfos = InfosOf(_boostLine, spells);
         _transferRows = new TransferRow?[_transferInfos.Length];
@@ -357,35 +424,14 @@ public sealed class BuffCycle
         }
     }
 
-    /// <summary>The buff lines in the order the cycle casts them: Focus, Willpower and Creature Enchantment Mastery first, then the other Mastery lines, then the rest in the profile's order (the owner's dependency order; the spell bars use it too).</summary>
-    public static IReadOnlyList<ProfileLine> OrderedLines { get; } = BuildOrder();
+    /// <summary>The armour lines' memory this cycle reads and writes (a private one when none was passed in).</summary>
+    public ArmourBuffLedger Ledger => _ledger;
 
-    private static List<ProfileLine> BuildOrder()
-    {
-        var lines = new List<ProfileLine>();
-        foreach (var name in new[] { "Focus Self", "Willpower Self", "Creature Enchantment Mastery Self" })
-        {
-            lines.Add(ArenaProfile.LineNamed(name) ?? throw new InvalidOperationException("the profile has no line " + name));
-        }
+    /// <summary>The buff profile this cycle casts (the character's lines and their order).</summary>
+    public IBuffProfile Profile { get; }
 
-        foreach (var line in ArenaProfile.Lines)
-        {
-            if (line.IsBuff && line.Name.EndsWith("Mastery Self", StringComparison.Ordinal) && !lines.Contains(line))
-            {
-                lines.Add(line);
-            }
-        }
-
-        foreach (var line in ArenaProfile.Lines)
-        {
-            if (line.IsBuff && !lines.Contains(line))
-            {
-                lines.Add(line);
-            }
-        }
-
-        return lines;
-    }
+    /// <summary>The mage's buff lines in the order the cycle casts them: Focus, Willpower and Creature Enchantment Mastery first, then the other Mastery lines, then the rest in the profile's order (the owner's dependency order; the spell bars use it too). Another profile's order is <see cref="IBuffProfile.BuffOrder"/>.</summary>
+    public static IReadOnlyList<ProfileLine> OrderedLines => ArenaProfile.Buffs.BuffOrder;
 
     /// <summary>Where the cycle is (one of the <c>Stage...</c> constants).</summary>
     public string Stage { get; private set; } = StageIdle;
@@ -426,23 +472,29 @@ public sealed class BuffCycle
     /// <summary>
     /// Starts a re-buff pass: only the lines with less than the margin left are cast, at the level the rule gives now. <paramref name="forced"/> (decision D25 as narrowed) recasts only the one line closest to expiry while it is still active
     /// (its margin is that line's remaining time plus one second; when no line is active every line is due), and the result says so (<see cref="BuffResult.RecastWhileActive"/>).
-    /// <para><c>TODO(m3-buff-rebuff-driver)</c> (review 2.1-R10): nothing drives the timed re-buff yet. <c>StartRebuff(forced: false)</c> and <see cref="RebuffDue"/> have no caller outside the tests, which prove the schedule on a fake clock;
-    /// the auto-buff goal will call them. A named TODO is enough for 2.1: no code path reaches them in a run, so nothing can silently skip a re-buff.</para>
+    /// <para>The caller is <see cref="RebuffDriver"/> (M4 4.1 lane a; closes <c>TODO(m3-buff-rebuff-driver)</c>, review 2.1-R10): while <c>--buff-auto on</c> it asks <see cref="RebuffDue"/> every <c>--buff-auto-check-s</c> and, when a line is due and no guard holds,
+    /// starts <c>StartRebuff(forced: false)</c> and steps this cycle to the pass's end. It never calls the forced pass; that stays the buff scenario's and the check's.</para>
     /// </summary>
     /// <param name="now">The session clock's time.</param>
     /// <param name="forced">True for the forced pass (an explicit parameter, never a default).</param>
     /// <returns>False when a pass is already running.</returns>
     public bool StartRebuff(double now, bool forced) => Begin(now, rebuff: true, forced);
 
-    /// <summary>The names of the wanted lines whose remaining time at <paramref name="now"/> is under <paramref name="margin"/> (a line with no active buff has none left: it is due). <c>TODO(m3-buff-rebuff-driver)</c>: no driver calls this outside the tests yet (see <see cref="StartRebuff"/>).</summary>
+    /// <summary>The names of the wanted lines whose remaining time at <paramref name="now"/> is under <paramref name="margin"/> (a line with no active buff has none left: it is due). <see cref="RebuffDriver"/> calls this at each of its checks (closes <c>TODO(m3-buff-rebuff-driver)</c>).</summary>
     /// <param name="now">The session clock's time.</param>
     /// <param name="margin">The margin in seconds (<see cref="double.PositiveInfinity"/> lists every line).</param>
     public IReadOnlyList<string> RebuffDue(double now, double margin)
     {
         var due = new List<string>();
-        CollectExpected();
+        var worn = CollectExpected();
         foreach (var w in _order)
         {
+            if (w.Armour && worn == 0)
+            {
+                NoteNoArmour();
+                continue; // nothing is worn to enchant: an armour line is not wanted (review R4)
+            }
+
             ActiveState(w, now, out _, out var remaining);
             if (remaining < margin)
             {
@@ -451,6 +503,41 @@ public sealed class BuffCycle
         }
 
         return due;
+    }
+
+    /// <summary>True when the armour ledger still has to be seeded by the appraisal of the worn pieces and the restore of the saved store (<see cref="StartSeed"/>), so the armour lines cannot be counted due yet (review R2).</summary>
+    public bool SeedPending => _seeder is not null && _ledger.NeedsSeed;
+
+    /// <summary>
+    /// Starts only the seed: the worn pieces are appraised and the saved seconds restored, with no combat mode change and no cast (review R2). The caller steps <see cref="StepSeed"/> until it is not <see cref="BuffStatus.Running"/>.
+    /// </summary>
+    /// <param name="now">The session clock's time.</param>
+    /// <returns>False when a pass is running or there is nothing to seed.</returns>
+    public bool StartSeed(double now)
+    {
+        if (Status == BuffStatus.Running || !SeedPending)
+        {
+            return false;
+        }
+
+        CollectExpected();
+        _seeder!.Start(now, _expectedGuid.AsSpan(0, _expectedCount));
+        return true;
+    }
+
+    /// <summary>Advances the seed <see cref="StartSeed"/> began; <see cref="BuffStatus.Done"/> when it has finished (the ledger is then seeded).</summary>
+    public BuffStatus StepSeed() => _seeder?.Step() ?? BuffStatus.Done;
+
+    /// <summary>Logs once that the armour lines are not wanted while nothing is worn (review R4); the flag is cleared when a piece is worn again.</summary>
+    private void NoteNoArmour()
+    {
+        if (_noArmourLogged)
+        {
+            return;
+        }
+
+        _noArmourLogged = true;
+        _log.Info(LogCategory, "no armour or clothing piece is worn, so the armour lines are not wanted (no cast, no re-buff for them) until one is");
     }
 
     /// <summary>The seconds left on the buff that ends soonest over the wanted lines that are active at <paramref name="now"/>, or NaN when none is.</summary>
@@ -494,6 +581,9 @@ public sealed class BuffCycle
                 case Phase.Casting:
                     again = CastOutcome(now);
                     break;
+                case Phase.Seed:
+                    again = _seeder!.Step() == BuffStatus.Running ? false : Launch(now);
+                    break;
                 case Phase.ManaCasting:
                     again = ManaOutcome(now);
                     break;
@@ -532,6 +622,10 @@ public sealed class BuffCycle
         _passStart = now;
         _line = 0;
         _passCast = 0;
+        _fighterTransfers = 0;
+        _capNoted = false;
+        _potionsOff = false;
+        _potionWaiting = false;
         _passArmour = 0;
         _passSurpassed = 0;
         _misses.Clear();
@@ -547,6 +641,27 @@ public sealed class BuffCycle
             return Fail(now, "the player is not in the magic combat mode (ACE ends a cast made in another mode with a bare UseDone): the caller changes the mode before the cycle starts");
         }
 
+        if (_seeder is not null && _ledger.NeedsSeed)
+        {
+            // M4 4.1 lane b: a login left the ledger empty, so the worn pieces are appraised once before the first line is chosen (the appraisal tells which armour lines are already on).
+            CollectExpected();
+            _seeder.Start(now, _expectedGuid.AsSpan(0, _expectedCount));
+            if (_seeder.Status == BuffStatus.Running)
+            {
+                _phase = Phase.Seed;
+                Stage = StageSeed;
+                return true;
+            }
+        }
+
+        return Launch(now);
+    }
+
+    /// <summary>The pass proper, after the armour ledger is seeded (or needs nothing): the forced pass picks its line, the start is logged and the first line is next.</summary>
+    private bool Launch(double now)
+    {
+        var forced = _forced;
+        var rebuff = _rebuff;
         var forcedNote = string.Empty;
         if (forced)
         {
@@ -587,6 +702,13 @@ public sealed class BuffCycle
         while (_line < _order.Length)
         {
             var w = _order[_line];
+            if (_rebuff && w.Armour && _expectedCount == 0)
+            {
+                NoteNoArmour();
+                _line++;
+                continue; // a re-buff pass wants no armour line while nothing is worn (review R4); the ordered cycle still records the miss
+            }
+
             var index = Choose(w, out var why);
             if (index == int.MinValue)
             {
@@ -648,6 +770,9 @@ public sealed class BuffCycle
             _wasActive = active;
             _lineFizzles = 0;
             _manaCasts = 0;
+            _castsSincePeak = 0;
+            _linePeak = 0;
+            _manaFutile = false;
             _phase = Phase.Mana;
             Stage = StageMana;
             return true;
@@ -704,6 +829,25 @@ public sealed class BuffCycle
         }
 
         NoteMana(mana);
+        if (_potionWaiting)
+        {
+            // M4 P5a C7: a Mana Potion was confirmed; the mana is read again once the vital's update has come (bounded, named on failure).
+            if (mana != _potionBefore)
+            {
+                _potionWaiting = false;
+            }
+            else if (now < _potionWaitUntil)
+            {
+                return false;
+            }
+            else
+            {
+                _potionWaiting = false;
+                _potionsOff = true;
+                _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana potion: the mana did not change within {PotionVitalWaitSeconds:0} s of a confirmed Mana Potion (still {mana} of {max}); no more Mana Potions this pass"));
+            }
+        }
+
         var need = GearCasts.ManaCeiling(info, _state.Self.Inventory.Equipped.Count);
         if (mana >= need)
         {
@@ -718,6 +862,12 @@ public sealed class BuffCycle
                 return BeginMode(CombatMode.Magic, Phase.ModeBack);
             }
 
+            if (PreemptTransfer(mana, max, need, out var aheadIndex, out var aheadNeed))
+            {
+                SendMana(ManaKind.Transfer, aheadIndex, mana, max, aheadNeed);
+                return false;
+            }
+
             SendBuff(w, info, need);
             return false;
         }
@@ -725,6 +875,24 @@ public sealed class BuffCycle
         if (max < need)
         {
             return Fail(now, string.Create(CultureInfo.InvariantCulture, $"{info.Name} costs up to {need} mana and the maximum is {max} (current {mana})"));
+        }
+
+        if (Profile.TransfersAhead && !_potionsOff && VitalsMeansFind(out var potion, out var potionCount))
+        {
+            // M4 P5a C7: the fighter's pass drinks Mana Potions for its mana instead of chaining transfers and Revitalizes (round 5: three Revitalizes between two transfers cost 130 mana).
+            if (_phase == Phase.ManaWait)
+            {
+                _waitStart = double.NaN;
+            }
+
+            _potionBefore = mana;
+            _manaKind = ManaKind.Potion;
+            _need = need;
+            _pending = _actions.Drink(potion, ActionSource.Host);
+            _phase = Phase.ManaCasting;
+            Stage = StageManaCasting;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: Mana Potion 0x{potion:X8} ({potionCount} held), mana {mana} of {max}, {need} needed for {_order[_line].Line.Name}"));
+            return false;
         }
 
         if (_phase == Phase.ManaWait)
@@ -745,7 +913,23 @@ public sealed class BuffCycle
             return Fail(now, string.Create(CultureInfo.InvariantCulture, $"{ManaCastLimitPerLine} mana casts did not bring the mana to the {need} {info.Name} needs ({mana} of {max})"));
         }
 
-        var action = Decide(mana, max, need, out var index, out var failure);
+        if (mana > _linePeak)
+        {
+            _linePeak = mana;
+            _castsSincePeak = 0;
+        }
+
+        if (!_manaFutile && Profile.TransfersAhead && _castsSincePeak >= FutileManaCasts)
+        {
+            // M4 P5a fix r4: round 4's Archer, drained, traded stamina and mana back and forth (Stamina to Mana, then Revitalize) for 64 casts with the mana never past 36: casts that do not lift the line's peak stop for the line.
+            _manaFutile = true;
+            FutileStops++;
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana-futile: {_castsSincePeak} mana casts did not lift the mana past {_linePeak} (now {mana} of {max}); no more transfers or Revitalizes for {info.Name}: the mana wait regenerates the {need} (at most {_options.ManaWaitSeconds:0.#} s)"));
+        }
+
+        var index = -1;
+        var failure = string.Empty;
+        var action = _manaFutile ? ManaAction.Wait : Decide(mana, max, need, out index, out failure);
         switch (action)
         {
             case ManaAction.Fail:
@@ -786,6 +970,51 @@ public sealed class BuffCycle
     }
 
     /// <summary>
+    /// A profile that <see cref="IBuffProfile.TransfersAhead"/> (a fighter's, M4 P5a C4) casts the transfer before the buff when the mana left after the buff would be under what the strongest transfer castable at the chance costs: a pool of 225
+    /// that pays 50 a buff would otherwise run to 5 or 25, below the cost of any good transfer, and wait for regeneration (a fighter regenerates 1 mana a 5 s tick). The transfer is the ordinary one (<see cref="Decide"/>: it must give back more than it costs and
+    /// cover the shortfall to <paramref name="aheadNeed"/>, or help while the stamina cannot be raised). Only in the ordered pass, and not before its last line; <see cref="ManaCastLimitPerLine"/> bounds it.
+    /// </summary>
+    private bool PreemptTransfer(uint mana, uint max, uint need, out int index, out uint aheadNeed)
+    {
+        index = -1;
+        aheadNeed = need;
+        if (!Profile.TransfersAhead || _rebuff || _upgrading || _line >= _order.Length - 1 || _manaCasts >= ManaCastLimitPerLine)
+        {
+            return false;
+        }
+
+        if ((!_potionsOff && VitalsMeansFind(out _, out _)) || !FighterTransferAllowed())
+        {
+            return false; // M4 P5a C7: a held Mana Potion is drunk when the next line needs the mana; no potion: a transfer ahead only at a high stamina and within the cap
+        }
+
+        if (!GearCasts.TryCurrentSkill(_state.Self.Qualities, MageTemplate.LifeMagic, out var skill, out _))
+        {
+            return false; // the mana loop proper names the missing skill when it matters
+        }
+
+        _lifeSkill = skill;
+
+        var reserve = 0u;
+        for (var i = _transferInfos.Length - 1; i >= 0; i--)
+        {
+            if (_transferInfos[i] is { } info && GearCasts.Chance(skill, _transferLine.Spells[i].Power) >= _options.CastChance)
+            {
+                reserve = GearCasts.ManaCeiling(info, 0);
+                break;
+            }
+        }
+
+        if (reserve == 0 || mana - need >= reserve || max < need + reserve)
+        {
+            return false;
+        }
+
+        aheadNeed = need + reserve;
+        return Decide(mana, max, aheadNeed, out index, out _) == ManaAction.Transfer;
+    }
+
+    /// <summary>
     /// What to cast to reach <paramref name="need"/> mana (D24). A transfer if one is castable (a level that passes the chance and costs no more than the mana) and its yield (<see cref="BuffStatMods.Transfer"/>, ACE's
     /// <c>HandleCastSpell_Transfer</c>) covers the shortfall, or helps and the stamina cannot be raised; else Revitalize when the stamina is not full; else wait.
     /// </summary>
@@ -814,6 +1043,22 @@ public sealed class BuffCycle
         q.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out var staminaMax);
         var transfer = PickMana(_transferLine, _transferInfos, skill, mana);
         var boost = PickMana(_boostLine, _boostInfos, skill, mana);
+        if (Profile.TransfersAhead)
+        {
+            // M4 P5a C7: the fighter's order. Revitalize is never cast for the sake of mana (it costs mana itself); Stamina to Mana only at a high stamina and within the cap, else the mana wait regenerates.
+            boost = -1;
+            if (transfer >= 0 && !FighterTransferAllowed())
+            {
+                if (!_capNoted)
+                {
+                    _capNoted = true;
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fighter mana order: no Mana Potion to drink; Stamina to Mana only at stamina {Vitals.VitalsOptions.DefaultStaminaUntilPercent}% or more and at most {FighterTransferCap} casts a pass (now stamina {stamina} of {staminaMax}, {_fighterTransfers} cast(s)): the mana wait regenerates instead"));
+                }
+
+                transfer = -1;
+            }
+        }
+
         if (transfer >= 0)
         {
             var info = _transferInfos[transfer]!;
@@ -858,17 +1103,36 @@ public sealed class BuffCycle
         return -1;
     }
 
+    /// <summary>True when a held Mana Potion exists (M4 P5a C7); no allocation.</summary>
+    private bool VitalsMeansFind(out uint guid, out int count) => Vitals.VitalsMeans.FindManaPotions(_state, _potionScratch, out guid, out count);
+
+    /// <summary>A fighter's Stamina to Mana is allowed at a stamina of <see cref="Vitals.VitalsOptions.DefaultStaminaUntilPercent"/> or more and within <see cref="FighterTransferCap"/> casts (M4 P5a C7); a mage's always.</summary>
+    private bool FighterTransferAllowed()
+    {
+        if (!Profile.TransfersAhead)
+        {
+            return true;
+        }
+
+        return _fighterTransfers < FighterTransferCap && _state.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out var staminaMax) && staminaMax != 0 && 100.0 * stamina / staminaMax >= Vitals.VitalsOptions.DefaultStaminaUntilPercent;
+    }
+
     private void SendMana(ManaKind kind, int index, uint mana, uint max, uint need)
     {
         var line = kind == ManaKind.Transfer ? _transferLine : _boostLine;
         var info = (kind == ManaKind.Transfer ? _transferInfos : _boostInfos)[index]!;
         _manaKind = kind;
         _need = need;
+        _castsSincePeak++;
         _chatMark = _state.Chat.Total;
         _manaCasts++;
         if (kind == ManaKind.Transfer)
         {
             _tried++;
+            if (Profile.TransfersAhead)
+            {
+                _fighterTransfers++;
+            }
         }
 
         _pending = _actions.Cast(info.Id);
@@ -890,6 +1154,25 @@ public sealed class BuffCycle
         if (_state.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var mana, out _))
         {
             NoteMana(mana);
+        }
+
+        if (kind == ManaKind.Potion)
+        {
+            if (outcome.Succeeded)
+            {
+                _manaPotions++;
+                _potionWaiting = true;
+                _potionWaitUntil = now + PotionVitalWaitSeconds;
+            }
+            else
+            {
+                _potionsOff = true;
+                _log.Warn(LogCategory, $"mana potion: the Mana Potion was not carried out ({outcome.Kind} 0x{outcome.Code:X4}: {outcome.Detail}); no more Mana Potions this pass");
+            }
+
+            _phase = Phase.Mana;
+            Stage = StageMana;
+            return true;
         }
 
         if (outcome.Succeeded)
@@ -1088,10 +1371,9 @@ public sealed class BuffCycle
         var fresh = (int)Math.Min(chat.Count, chat.Total - _chatMark);
         var count = CollectExpected();
         var prefix = "You cast " + info.Name + " on ";
-        w.CastIndex = _castIndex;
-        w.PieceCount = 0;
         string? missing = null;
         var missingCount = 0;
+        var recorded = 0;
         for (var p = 0; p < count; p++)
         {
             var found = false;
@@ -1117,12 +1399,12 @@ public sealed class BuffCycle
 
             if (found)
             {
-                w.PieceGuid[w.PieceCount] = _expectedGuid[p];
-                w.PieceExpiry[w.PieceCount] = doneAt + info.Duration;
-                w.PieceCount++;
+                _ledger.Record(_expectedGuid[p], w.Line.Name, info.Id, doneAt, info.Duration);
+                recorded++;
             }
             else
             {
+                _ledger.Forget(_expectedGuid[p], w.Line.Name); // a cast that did not name the piece leaves nothing known about it
                 missingCount++;
                 missing = (missing is null ? string.Empty : missing + ";") + _expectedName[p].Replace(' ', '_');
             }
@@ -1139,7 +1421,7 @@ public sealed class BuffCycle
         else
         {
             Landed(w, info);
-            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{w.Line.Name}: {w.PieceCount} pieces enchanted, each ends {info.Duration:0} s after the cast's UseDone (at {doneAt + info.Duration:0.#} on the session clock; now {now:0.#})"));
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{w.Line.Name}: {recorded} pieces enchanted, each ends {info.Duration:0} s after the cast's UseDone (at {doneAt + info.Duration:0.#} on the session clock; now {now:0.#})"));
         }
     }
 
@@ -1163,33 +1445,37 @@ public sealed class BuffCycle
         remaining = 0;
         if (w.Armour)
         {
-            if (w.CastIndex < 0 || _expectedCount == 0)
+            // The ledger's memory (M4 4.1 lane b; closes TODO(m3-buff-armour-memory)): every worn piece must hold the line, the least time left counts and the lowest level among the pieces is the line's level. A piece the
+            // ledger holds with an unknown time left (an appraisal found the line and no saved time restored it) is present and due at once: 0 seconds left.
+            if (_expectedCount == 0)
             {
                 return false;
             }
 
             var least = double.PositiveInfinity;
+            var lowest = int.MaxValue;
             for (var p = 0; p < _expectedCount; p++)
             {
-                var left = -1.0;
-                for (var m = 0; m < w.PieceCount; m++)
-                {
-                    if (w.PieceGuid[m] == _expectedGuid[p])
-                    {
-                        left = w.PieceExpiry[m] - now;
-                        break;
-                    }
-                }
-
-                if (left <= 0)
+                if (!_ledger.TryGet(_expectedGuid[p], w.Line.Name, out var entry) || !_spellOf.TryGetValue(entry.SpellId, out var at) || at.Line != w.Index)
                 {
                     return false;
                 }
 
+                var left = 0.0;
+                if (entry.TimeKnown)
+                {
+                    left = entry.ExpiresAt - now;
+                    if (left <= 0)
+                    {
+                        return false;
+                    }
+                }
+
                 least = Math.Min(least, left);
+                lowest = Math.Min(lowest, at.Index);
             }
 
-            index = w.CastIndex;
+            index = lowest;
             remaining = least;
             return true;
         }
@@ -1224,6 +1510,13 @@ public sealed class BuffCycle
     {
         var equipped = _state.Self.Inventory.Equipped;
         var count = 0;
+        var worn = Math.Min(equipped.Count, MaxWorn);
+        for (var i = 0; i < worn; i++)
+        {
+            _wornGuid[i] = equipped[i].Guid;
+        }
+
+        _ledger.Prune(_wornGuid.AsSpan(0, worn)); // a piece taken off loses its lines
         for (var i = 0; i < equipped.Count && count < MaxPieces; i++)
         {
             if (_state.Objects.TryGet(equipped[i].Guid, out var item) && (item.ItemType & ArmourOrClothing) != 0)
@@ -1235,6 +1528,11 @@ public sealed class BuffCycle
         }
 
         _expectedCount = count;
+        if (count > 0)
+        {
+            _noArmourLogged = false;
+        }
+
         return count;
     }
 
@@ -1296,6 +1594,7 @@ public sealed class BuffCycle
             TransfersFired = _fired,
             TransfersTried = _tried,
             Revitalizes = _revitalizes,
+            ManaPotions = _manaPotions,
             ManaMin = _manaMin == uint.MaxValue ? null : _manaMin,
             Misses = [.. _misses],
             MissDetails = [.. _missDetails],

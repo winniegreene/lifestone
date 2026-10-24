@@ -81,6 +81,7 @@ public sealed class GoldenViewpointsTests(SkyDatsFixture fixture) : IClassFixtur
         Assert.StartsWith("@teleloc 0x0187", GoldenViewpoints.AceTeleloc(mines.Global, 0.0), StringComparison.Ordinal);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Each_view_gets_a_date_whose_retail_day_group_is_the_one_wanted()
     {

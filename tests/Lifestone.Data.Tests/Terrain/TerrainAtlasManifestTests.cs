@@ -9,6 +9,7 @@ public sealed class TerrainAtlasManifestTests(DatSetFixture fixture) : IClassFix
 {
     private TerrainAtlasManifest Manifest => TerrainAtlasManifest.FromDatSet(fixture.Dats);
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Region_texmerge_has_the_documented_shape()
     {
@@ -31,6 +32,7 @@ public sealed class TerrainAtlasManifestTests(DatSetFixture fixture) : IClassFix
         Assert.Equal(0x0500145Cu, m.TerrainLayers[m.LayerForTerrainType(0)].SurfaceTextureId);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Terrain_layers_are_unique_and_follow_GetTerrainTex()
     {
@@ -53,6 +55,7 @@ public sealed class TerrainAtlasManifestTests(DatSetFixture fixture) : IClassFix
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_referenced_texture_exists_and_has_the_sizes_retail_merges_with()
     {
@@ -84,6 +87,7 @@ public sealed class TerrainAtlasManifestTests(DatSetFixture fixture) : IClassFix
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Alpha_maps_list_a_highres_level_first_and_retail_picks_it_when_present()
     {
@@ -115,6 +119,7 @@ public sealed class TerrainAtlasManifestTests(DatSetFixture fixture) : IClassFix
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Detail_textures_come_from_the_first_four_descs_and_only_building_and_environment_detail_are_ever_used()
     {

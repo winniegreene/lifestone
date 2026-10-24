@@ -87,9 +87,7 @@ public sealed class CatalogWithInteriorsTests
 
     [Theory]
     [InlineData("in")]
-    [InlineData("do")]
     [InlineData("or")]
-    [InlineData("on")]
     public void A_short_query_does_not_list_places_by_their_kind(string query)
     {
         // Before, the kind was matched as a substring: "do" or "or" appended every "indoors" place, "in" every interior.

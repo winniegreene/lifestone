@@ -19,7 +19,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// M3 2.1 s1, the buff scenario against the bundled ACE (<c>--scenario=buff</c>). WRITTEN AND COMPILED BY THE SLICE, RUN BY THE LEAD (it takes about as long as a cycle at the live regeneration rate: 1,300 s of session time, plus
 /// the second run). On <c>BSD Mage</c> only (the test account; it must exist: run the mage build first) the headless runner enters the mage, has the gear on, enters the magic combat mode, casts the profile's 24 buff lines in the
 /// owner's order (the mana loop's Stamina to Mana and Revitalize casts between them, a regeneration wait spent in non-combat), upgrades the lines the buffed skill now gives a higher level, recasts the line closest to expiry while it is
-/// still active (D25 as narrowed: one cast), returns to non-combat and logs off. Time limit 3,000 s.
+/// still active (D25 as narrowed: one cast), returns to non-combat. Time limit 3,000 s a run. Since M4 P4 the first run is over the mage's shared session (one login per test process; the mage is put in peace mode first); the
+/// second run keeps a login of its own (<c>ownLogin</c>): its point is that the registry then comes from the server's PlayerDescription.
 /// </summary>
 /// <remarks>
 /// <para><b>What it proves</b> (each assertion names the ACE behaviour it relies on).
@@ -30,7 +31,7 @@ namespace Lifestone.Loopback.Tests.Session;
 /// own per-cast log line (the spell id and the skill it read), except the one cast after a logged fizzle, which is one level down.
 /// (d) After the upgrade pass every line is at VII or better (the plan's prediction: s0a's chain, from skill 316: Focus and Willpower VI first, VII after the buffs have raised the skill); the numbers are printed when it is not.
 /// (e) <c>rebuffed=yes forced=yes</c> and <c>min_remaining_s</c> above 0: a line was recast while still active, by a margin of its remaining time plus one second, and no line was left expired.
-/// (f) The second run, on a new session (the registry now comes from the server's PlayerDescription): its ordered pass casts no self line (<c>self_casts=0</c>: the buff casts of the ordered pass, the forced pass excluded since it
+/// (f) The second run, on a new login of its own (the registry now comes from the server's PlayerDescription): its ordered pass casts no self line (<c>self_casts=0</c>: the buff casts of the ordered pass, the forced pass excluded since it
 /// always casts one, and the two armour lines excluded since a new cycle object does not know an earlier session's armour casts, <c>TODO(m3-buff-armour-memory)</c>: <c>armour_casts</c> is at most 2); it still ends
 /// <c>buffs=24/24</c> with no miss. How it counts: <see cref="BuffScenario.CycleCast"/> minus <see cref="BuffScenario.CycleArmourCast"/>, which is the cycle's own count of landed casts in the ordered pass.
 /// </para>
@@ -40,6 +41,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[LiveSharedSession]
 public sealed class BuffLoopLiveTests(ITestOutputHelper output)
 {
     /// <summary>The headless limit of the runs, in seconds (a cycle is about 1,300 s at the live rate).</summary>
@@ -59,7 +62,7 @@ public sealed class BuffLoopLiveTests(ITestOutputHelper output)
         using var dats = DatSet.Open();
         var spells = SpellTableData.Load(dats).Spells;
 
-        var first = RunOnce(dats, spells, "first", out var firstLog);
+        var first = RunOnce(spells, "first", ownLogin: false, out var firstLog);
         var match = Verdict.Match(first.VerdictFields());
         Assert.True(match.Success, first.VerdictFields());
         output.WriteLine("buff_live " + first.VerdictFields());
@@ -85,8 +88,8 @@ public sealed class BuffLoopLiveTests(ITestOutputHelper output)
         output.WriteLine($"buff_live_first cycle_casts={first.CycleCast} (24 or more on an unbuffed mage; fewer when it arrives buffed)");
         AssertRuleLevels(firstLog, due);
 
-        // (f) The second run, on a new session: no self line is cast by its ordered pass.
-        var second = RunOnce(dats, spells, "second", out var secondLog);
+        // (f) The second run, on a new login of its own: no self line is cast by its ordered pass.
+        var second = RunOnce(spells, "second", ownLogin: true, out var secondLog);
         var again = Verdict.Match(second.VerdictFields());
         Assert.True(again.Success, second.VerdictFields());
         var selfCasts = second.CycleCast - second.CycleArmourCast;
@@ -146,50 +149,12 @@ public sealed class BuffLoopLiveTests(ITestOutputHelper output)
         Assert.True(wrong.Count == 0, string.Join("; ", wrong));
     }
 
-    private BuffScenario RunOnce(DatSet dats, IReadOnlyDictionary<uint, SpellInfo> spells, string label, out IReadOnlyList<string> buffLines)
+    private BuffScenario RunOnce(IReadOnlyDictionary<uint, SpellInfo> spells, string label, bool ownLogin, out IReadOnlyList<string> buffLines)
     {
-        var files = BackendProbe.MainCheckoutFiles;
         var log = new RecordingLogSink();
-        var secrets = File.ReadAllBytes(files.SecretsFile);
-        BuffScenario scenario;
-        HeadlessRunner runner;
-        try
-        {
-            string account;
-            using (var credentials = PlayAccounts.Parse(secrets, AccountChoice.FromOption(BackendProbe.TestAccountKey, AccountChoice.Default)))
-            {
-                account = credentials.Account;
-            }
+        var scenario = new BuffScenario(spells, LiveMage.KitAccount(), new BuffOptions(), log, endSession: false) { RequireCharacter = true };
+        var result = LiveMage.Run(output, scenario, "buff-" + label, QuitAfterSeconds, ownLogin).Result;
 
-            scenario = new BuffScenario(spells, account, new BuffOptions(), log);
-            runner = HeadlessRunner.Start(
-                new HeadlessRunOptions
-                {
-                    Session = new SessionOptions { Account = BackendProbe.TestAccountKey, Server = BackendProbe.Probe().AceEndPoint! },
-                    QuitAfterSeconds = QuitAfterSeconds,
-                },
-                scenario,
-                secrets,
-                File.ReadAllBytes(files.PidsFile),
-                dats,
-                TimeProvider.System,
-                log,
-                recording: null);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(secrets);
-        }
-
-        HeadlessRunResult result;
-        var context = new GameThreadSynchronizationContext();
-        using (context.Install())
-        using (runner)
-        {
-            result = runner.Run(context, CancellationToken.None);
-        }
-
-        output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"[{label}] {result.SummaryLine("memory")}"));
         output.WriteLine($"[{label}] buff {scenario.VerdictFields()}");
         var lines = log.Lines.Where(l => l.Contains("[buff]", StringComparison.Ordinal) || l.Contains("[gear]", StringComparison.Ordinal) || l.Contains("WARN", StringComparison.Ordinal) || l.Contains("ERROR", StringComparison.Ordinal)).ToList();
         foreach (var line in lines)

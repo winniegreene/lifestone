@@ -63,6 +63,7 @@ public sealed class HoltburgApproach : IApproachWalk
     private readonly List<ObjectMoved> _moves = [];
     private IDisposable? _movesSubscription;
     private OfflineWalker? _walker;
+    private MoveIntents? _move;
     private PresenceGatedMovementSink? _gate;
     private RouteDriver? _driver;
     private bool _placed;
@@ -110,6 +111,8 @@ public sealed class HoltburgApproach : IApproachWalk
         _gate = new PresenceGatedMovementSink(session.Actions.Movement, () => session.State.Self.Travel == SelfTravel.Present);
         _world.SetTime(now);
         _walker = OfflineWalker.Create(_dats, _world, _log, weenie, _geometry, id: self.Guid, sink: _gate);
+        _move = session.Actions.Move; // scripted movement goes through IActionApi.Move (the human's keys, R2)
+        _move.Bind(_walker.Controller, _walker.Controller.Options.RunByDefault);
         _movesSubscription = session.Events.Subscribe<ObjectMoved>((in ObjectMoved e) =>
         {
             if (e.IsSelf)
@@ -153,7 +156,7 @@ public sealed class HoltburgApproach : IApproachWalk
         var from = _walker.Position;
         var route = new ScriptedRoute("lifestone-approach", [new RouteGoal(target, stopWithinMetres, Stop: true, DwellSeconds: 0)]);
         _driver?.Abandon();
-        _driver = new RouteDriver(_walker.Controller, route);
+        _driver = new RouteDriver(_walker.Controller, route, _move!);
         description = $"from cell 0x{from.CellId:X8} toward cell 0x{target.CellId:X8}, stopping within {stopWithinMetres:0.0##} m";
         return true;
     }
@@ -206,6 +209,11 @@ public sealed class HoltburgApproach : IApproachWalk
 
         _disposed = true;
         _driver?.Abandon();
+        if (_move is not null && _walker is not null)
+        {
+            _move.Unbind(_walker.Controller);
+        }
+
         _movesSubscription?.Dispose();
     }
 

@@ -1,0 +1,48 @@
+using System.Text.RegularExpressions;
+using Lifestone.Client.Session.Credentials;
+using Lifestone.Client.Tests.Repository;
+
+namespace Lifestone.Client.Tests.Session;
+
+/// <summary>M4 D31: the three test accounts and their characters are one list in code, and tools\lib\Play.psm1 keeps the same set.</summary>
+public sealed class TestAccountsTests
+{
+    private const string PlayModule = "tools/lib/Play.psm1";
+
+    [Fact]
+    public void The_list_is_the_three_accounts_with_one_fighter_each_for_melee_and_archer()
+    {
+        Assert.Equal(["test", "test-melee", "test-archer"], TestAccounts.Keys);
+        Assert.Equal(["Lifestone Smoke", "Lifestone Loopback", "Lifestone Throwaway", "BSD Mage", "Holtburg Hunter"], TestAccounts.Characters["test"]);
+        Assert.Equal(["Holtburg Brawler"], TestAccounts.Characters["test-melee"]);
+        Assert.Equal(["Holtburg Archer"], TestAccounts.Characters["test-archer"]);
+        Assert.Equal(TestAccounts.Keys.Order(StringComparer.Ordinal), TestAccounts.Characters.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(TestAccounts.Characters.Values.Sum(c => c.Count), TestAccounts.Characters.Values.SelectMany(c => c).Distinct(StringComparer.OrdinalIgnoreCase).Count()); // no character on two accounts
+    }
+
+    [Theory]
+    [InlineData("Holtburg Brawler", "test-melee")]
+    [InlineData("holtburg archer", "test-archer")]
+    [InlineData("BSD Mage", "test")]
+    [InlineData("Lifestone Throwaway", "test")]
+    public void A_character_belongs_to_its_account(string character, string account) => Assert.Equal(account, TestAccounts.AccountOf(character));
+
+    [Fact]
+    public void Unlisted_characters_and_the_play_account_are_not_test_accounts()
+    {
+        Assert.Null(TestAccounts.AccountOf("Somebody Else"));
+        Assert.False(TestAccounts.IsTestAccount("play"));
+        Assert.False(TestAccounts.IsTestAccount("TEST"));
+        Assert.False(TestAccounts.IsTestAccount(null));
+    }
+
+    [Fact]
+    public void Play_psm1_automated_set_equals_the_list_in_code()
+    {
+        var text = CheckoutFiles.ReadText(PlayModule);
+        var match = Regex.Match(text, @"\$script:AutomatedAccounts\s*=\s*@\(([^)]*)\)");
+        Assert.True(match.Success, "Play.psm1 must define $script:AutomatedAccounts = @('..', ..)");
+        var keys = Regex.Matches(match.Groups[1].Value, "'([^']+)'").Select(m => m.Groups[1].Value).ToArray();
+        Assert.Equal(TestAccounts.Keys, keys);
+    }
+}

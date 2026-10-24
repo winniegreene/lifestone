@@ -13,14 +13,16 @@
       test        dotnet test Lifestone.slnx --no-build --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure"; detail = passed/failed/skipped
                   totals, the passed count of each test assembly and the slowest tests (the VSTest trx logger's per-test timings,
                   top 20 in cache\slice-check\test-times.txt). -MinTests N fails the stage when fewer than N tests passed (the
-                  "count never decreases" gate: N is the DEFAULT count; the Exhaustive tier is counted by its own stage). Without
+                  coverage floor, D28: N is the DEFAULT count; the Exhaustive tier is counted by its own stage). Without
                   -MinTests the floor is the baseline file tests\Shared\test-count-baseline.json (M4 1.1 s3: "default" for this stage, "exhaustive" for the
-                  exhaustive stage; the lead writes it at each merge, a slice never lowers it); an explicit -MinTests wins, and the detail names the
+                  exhaustive stage; the lead writes it at each merge and lowers it only for named deletions whose behaviour is proved elsewhere, m4-plan.md D28; a slice never lowers it); an explicit -MinTests wins, and the detail names the
                   floor's source ("floor 7968 (baseline file)" or "(-MinTests)"). Tier=Timing (the lead runs it alone) and Status=KnownFailure (never in
                   the green total) are left out of the default filter
-      exhaustive  dotnet test Lifestone.slnx --no-build --filter "Tier=Exhaustive": the dat sweeps (every GfxObj, landblock and cell),
-                  left out of the default filter because they cost about 55 s of an 85 s run. -Exhaustive adds the stage; -Smoke implies
-                  it (G-A); the lead runs it before a merge. Per-test timings as above (exhaustive-times.txt)
+      exhaustive  dotnet test Lifestone.slnx --no-build --filter "Tier=Exhaustive": every test that reads the retail dats (the dat
+                  sweeps over every GfxObj, landblock and cell, and the decoder and asset pins), left out of the default filter (M4 polish
+                  cut d, D30). -Exhaustive adds the stage; -Smoke implies it (G-A); the lead runs it before a merge. A slice that
+                  touches src/Lifestone.Data (or a dat reader in Client) runs `slice-check -Exhaustive`. Per-test timings as above
+                  (exhaustive-times.txt)
       steps       the steps of -Steps (and, with -Changed, the steps the diff touches) through ONE tools\smoke.ps1 process
                   (-Only <steps> -NoBuild -Backend auto), so the Godot command lines live only there; one line per step with the
                   step's own detail and seconds. The name retail-ui-checks is an alias of smoke's retail-ui step. A
@@ -93,7 +95,7 @@ $stepAliases = @{ 'retail-ui-checks' = 'retail-ui' }
 # The default tests leave out the loopback tests (backend), the soak tier (merge gates) and the Exhaustive tier (its own stage).
 $testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure'
 $exhaustiveFilter = 'Tier=Exhaustive'
-# M4 1.1 s3: the count never decreases. The baseline file is the default floor; an explicit -MinTests wins (and is the only floor of the default count when given).
+# M4 1.1 s3, amended by M4 D28 (coverage, not count): the count is a floor that only the lead lowers, for named deletions. The baseline file is the default floor; an explicit -MinTests wins (and is the only floor of the default count when given).
 $baselineFile = Join-Path $repoRoot 'tests\Shared\test-count-baseline.json'
 $maxFailureLines = 15
 $clock = [Diagnostics.Stopwatch]::StartNew()
@@ -243,7 +245,7 @@ function Invoke-TestRun([string] $stage, [string] $filter, [int] $minimum) {
     if ($pass -and $minimum -gt 0 -and $passed -lt $minimum) {
         $pass = $false
         $detail += "; below -MinTests $minimum"
-        $failure = @("$passed tests passed, -MinTests requires at least $minimum (the count must never decrease)")
+        $failure = @("$passed tests passed, -MinTests requires at least $minimum (the floor drops only for the lead's named deletions: m4-plan.md D28)")
     }
     elseif (-not $pass) {
         $failure = Get-TestFailureLines $lines
@@ -403,7 +405,7 @@ function Invoke-SmokeStage {
         $failure = @()
         if ($pass -and $MinTests -gt 0 -and $count[0] -lt $MinTests) {
             $pass = $false; $detail += "; below -MinTests $MinTests"
-            $failure = @("$($count[0]) tests passed, -MinTests requires at least $MinTests (the count must never decrease)")
+            $failure = @("$($count[0]) tests passed, -MinTests requires at least $MinTests (the floor drops only for the lead's named deletions: m4-plan.md D28)")
         }
         elseif (-not $pass) { $failure = Get-StepFailureLines $run 'test' }
         Write-Stage 'test' $(if ($pass) { 'PASS' } else { 'FAIL' }) $detail $testRow.Seconds $failure $run.Log

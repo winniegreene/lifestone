@@ -13,9 +13,10 @@ namespace Lifestone.Client.Movement.Routes;
 /// (<c>--offline-player-checks</c>, the same walks the tests run): not retail, the way a player walks to a door.
 /// </summary>
 /// <remarks>
-/// <para>A doorway is a portal of a cell that leads outside (<see cref="CellPortalData.LeadsOutside"/>) in an upright polygon. The street side of
-/// it is the portal's centre moved along its normal toward the outside (<see cref="CellRoutePlanner.Waypoint"/>), dropped onto the terrain; the rooms inside
-/// are <see cref="CellRoutePlanner"/>'s waypoints.</para>
+/// <para>A doorway is a portal of a cell that leads outside (<see cref="CellPortalData.LeadsOutside"/>) in an upright polygon
+/// (<see cref="CellRoutePlanner.IsUpright"/>; the lean is the planner's <c>maxLean</c>). The street side of
+/// it is the portal's centre moved along its normal toward the outside (<see cref="CellRoutePlanner.DoorwayOf"/>), dropped onto the terrain; the rooms inside
+/// are the generalised <see cref="CellRoutePlanner"/>'s waypoints (P5a: the one planner indoors).</para>
 /// </remarks>
 public static class BuildingRoutes
 {
@@ -45,12 +46,12 @@ public static class BuildingRoutes
     /// <paramref name="roomCellId"/>, a stand there, and the same way back to the start (<see cref="ScriptedRoute.Start"/>).
     /// </summary>
     /// <exception cref="InvalidOperationException">The cell has no walkable doorway outside, or no walkable doorways join the rooms.</exception>
-    public static ScriptedRoute InAndOut(string name, LandblockCellSet cells, PhysicsWorld world, uint doorCellId, uint roomCellId, float startMetres = StartMetres)
+    public static ScriptedRoute InAndOut(string name, LandblockCellSet cells, PhysicsWorld world, uint doorCellId, uint roomCellId, float startMetres = StartMetres, float maxLean = 0f)
     {
         ArgumentNullException.ThrowIfNull(cells);
         ArgumentNullException.ThrowIfNull(world);
-        var (_, _, centre, outward) = Doorway(cells, doorCellId);
-        var planner = new CellRoutePlanner(cells);
+        var planner = new CellRoutePlanner(cells, maxLean);
+        var (_, _, centre, outward) = Doorway(cells, planner, doorCellId);
         var path = planner.Plan(doorCellId, roomCellId)
             ?? throw new InvalidOperationException($"No walkable doorways lead from cell 0x{doorCellId:X8} to cell 0x{roomCellId:X8}.");
         var step = OutdoorPoint(world, cells.Coord, centre + (outward * DoorStepMetres));
@@ -84,7 +85,7 @@ public static class BuildingRoutes
     {
         ArgumentNullException.ThrowIfNull(cells);
         ArgumentNullException.ThrowIfNull(world);
-        var (_, _, centre, outward) = Doorway(cells, doorCellId);
+        var (_, _, centre, outward) = Doorway(cells, new CellRoutePlanner(cells), doorCellId);
         var along = new Vector3(outward.Y, -outward.X, 0f); // the wall's direction, to the player's right facing out
         var start = OutdoorPoint(world, cells.Coord, centre + (outward * WallApproachMetres) - (along * WallStartAlongMetres));
         var goal = OutdoorPoint(world, cells.Coord, centre - (outward * WallApproachMetres) - (along * WallGoalAlongMetres));
@@ -112,35 +113,17 @@ public static class BuildingRoutes
         return new CellFrame(cellId, new AcFrame(origin, Quaternion.Identity));
     }
 
-    /// <summary>The first upright outside portal of <paramref name="doorCellId"/>: the cell, the portal, its centre (landblock space) and the horizontal direction out.</summary>
-    private static (EnvCellData Cell, CellPortalData Portal, Vector3 Centre, Vector3 Outward) Doorway(LandblockCellSet cells, uint doorCellId)
+    /// <summary>The first outside portal of <paramref name="doorCellId"/> a human fits through: the cell, the portal, its centre (landblock space) and the horizontal direction out.</summary>
+    private static (EnvCellData Cell, CellPortalData Portal, Vector3 Centre, Vector3 Outward) Doorway(LandblockCellSet cells, CellRoutePlanner planner, uint doorCellId)
     {
         var cell = cells.GetCell(doorCellId)
             ?? throw new InvalidOperationException($"Landblock {cells.Coord} has no cell 0x{doorCellId:X8}.");
-        var structure = cells.GetStructure(cell);
         foreach (var portal in cell.Portals)
         {
-            if (!portal.LeadsOutside || structure.GetPortal(portal.PolygonId) is not { } polygon)
+            if (portal.LeadsOutside && planner.IsUpright(cell, portal) && planner.DoorwayOf(cell, portal) is { } doorway)
             {
-                continue;
+                return (cell, portal, doorway.Centre, doorway.Outward);
             }
-
-            var normal = cell.Frame.RotateToParent(polygon.Plane.Normal);
-            if (MathF.Abs(normal.Z) > 0.1f)
-            {
-                continue;
-            }
-
-            var centre = Vector3.Zero;
-            foreach (var vertex in polygon.Vertices)
-            {
-                centre += cell.Frame.LocalToParent(vertex);
-            }
-
-            centre /= polygon.Vertices.Length;
-            var outward = portal.PortalSide ? normal : -normal; // toward the neighbour, here the outdoors (CellRoutePlanner.Waypoint)
-            outward.Z = 0f;
-            return (cell, portal, centre, Vector3.Normalize(outward));
         }
 
         throw new InvalidOperationException($"Cell 0x{doorCellId:X8} has no upright doorway to the outside.");

@@ -142,6 +142,20 @@ public sealed class GearScenario : IScenario
         }
     }
 
+    /// <summary>
+    /// Why the player in the world is not BSD Mage (its name, or that the name is not known yet), or null when it is: the check of <see cref="RequireCharacter"/>, shared by the live legs that run the gear inside their own script
+    /// over a session already in the world.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    public static string? WrongCharacter(IGameSessionView session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var name = session.State.Self.Name;
+        return string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : $"the character in the world is '{name ?? "(name not known)"}', not {MageTemplate.CharacterName}: nothing is sent for it";
+    }
+
     /// <inheritdoc/>
     public string Name => ScenarioName;
 
@@ -153,6 +167,12 @@ public sealed class GearScenario : IScenario
 
     /// <summary>The limit on the arrival, in seconds.</summary>
     public double ArrivalSeconds { get; }
+
+    /// <summary>
+    /// True (a host that keeps one session for several scenarios, M4 P4): a player already in the world must be <see cref="MageTemplate.CharacterName"/>, else the run fails at once and sends nothing (no log off, the session is not this
+    /// scenario's). False (the default; the offline stand-in's player has its own name): the player in the world is taken as the mage.
+    /// </summary>
+    public bool RequireCharacter { get; set; }
 
     /// <summary>The limit on a started kit spawn, in seconds: <see cref="SpawnBaseSeconds"/> plus a second a kit line (the lane allows two requests a second).</summary>
     public double SpawnLimit { get; }
@@ -259,6 +279,15 @@ public sealed class GearScenario : IScenario
             case "start":
                 if (session.State.Phase == SessionPhase.InWorld && session.State.Self.Guid != 0)
                 {
+                    if (RequireCharacter && WrongCharacter(session) is { } wrong)
+                    {
+                        // Nothing was sent: no grant, no wield, no log off (the shared session belongs to the host).
+                        Failure = wrong;
+                        _log.Error(LogCategory, Failure);
+                        _log.Info(LogCategory, "verdict " + VerdictFields());
+                        return Go("failed", ScenarioStatus.Failed);
+                    }
+
                     // Already in the world (a host that logged in itself, or the offline stand-in): nothing to log in.
                     EnteredGuid = session.State.Self.Guid;
                     _arrivalStart = session.Clock.Now;

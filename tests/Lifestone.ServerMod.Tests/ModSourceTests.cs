@@ -377,7 +377,7 @@ public sealed partial class ModSourceTests
         Assert.Contains("caller.Session.Characters.RemoveAll(c => c.Id == target.Guid);", code, StringComparison.Ordinal);
 
         // The graduated test characters are spelled once, in the rules.
-        Assert.Contains("[\"Lifestone Smoke\", \"Lifestone Loopback\", \"BSD Mage\", \"Holtburg Hunter\"]", File.ReadAllText(Path.Combine(ProjectFolder, "Core", "CharPurgeRules.cs")), StringComparison.Ordinal);
+        Assert.Contains("[\"Lifestone Smoke\", \"Lifestone Loopback\", \"BSD Mage\", \"Holtburg Hunter\", \"Holtburg Brawler\", \"Holtburg Archer\"]", File.ReadAllText(Path.Combine(ProjectFolder, "Core", "CharPurgeRules.cs")), StringComparison.Ordinal);
         var spelled = CSharp(ModRoot)
             .Where(p => !p.EndsWith("CharPurgeRules.cs", StringComparison.Ordinal))
             .Where(p => File.ReadAllLines(p).Any(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal) && l.Contains("Lifestone Smoke", StringComparison.Ordinal)))

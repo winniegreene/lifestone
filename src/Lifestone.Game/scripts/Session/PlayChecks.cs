@@ -57,20 +57,17 @@ public sealed partial class PlayChecks : Node
         Teleports = [new StandInTeleport(4.0, AcademyCell, AcademyOrigin)],
         Objects =
         [
-            new StandInObject(0x80000A01, "Stand-in Guard", new System.Numerics.Vector3(3f, 0f, 0f), DescriptionFlags: 0x10), // attackable: a gold creature blip
-            new StandInObject(0x80000A02, "Stand-in Statue", new System.Numerics.Vector3(0f, 4f, 0f), MotionTable: 0, BlipColor: 8), // the server's yellow blip colour
+            new StandInObject(StatueGuid, "Stand-in Statue", new System.Numerics.Vector3(0f, 4f, 0f), MotionTable: 0, BlipColor: 8), // the server's yellow blip colour
             new StandInObject(PortalGuid, "Stand-in Portal", new System.Numerics.Vector3(-3f, 0f, 0f), MotionTable: 0, PortalTo: new StandInTeleport(0, AcademyCell, AcademyOrigin)),
 
             new StandInObject(ApparitionGuid, "Stand-in Apparition", new System.Numerics.Vector3(-2f, 5f, 0f), MotionTable: 0, UnhideAfter: 0.0), // D63: created hidden, unhidden with the player: its materialise fade is drawn by the same path as the player's
 
-            new StandInObject(0x80000A04, "Stand-in Drudge", new System.Numerics.Vector3(2f, 9f, 0f), MotionTable: 0, DescriptionFlags: 0x10), // g5b: an attackable creature ahead of the player, selected by the selection checks (name, health, indicator)
-
             // g3b: placeholders so the radar has blips of each colour away from the centre; all behind or beside the player (south), out of the click checks' way.
-            new StandInObject(0x80000A10, "Stand-in Creature", new System.Numerics.Vector3(-20f, -25f, 0f), MotionTable: 0, DescriptionFlags: 0x10), // gold
-            new StandInObject(0x80000A11, "Stand-in Vendor", new System.Numerics.Vector3(25f, -10f, 0f), MotionTable: 0, DescriptionFlags: 0x200), // yellow
+            // M4 4.1 t2 (D23, D26): the attackable placeholders (a guard, a drudge and a creature, whose gold blip was the creature colour) are retired with the stand-in's tuskers; the gold blip is judged by GameRadarTests.
+            new StandInObject(0x80000A11, "Stand-in Vendor", new System.Numerics.Vector3(25f, -10f, 0f), MotionTable: 0, BlipColor: 8), // yellow (the server colour; the vendor bit made it a creature-typed person, retired by M4 4.1 t2: the stand-in's two real vendors are the only people it adds)
             new StandInObject(0x80000A12, "Stand-in Lifestone", new System.Numerics.Vector3(-35f, -5f, 0f), MotionTable: 0, BlipColor: 1), // the server's blue
-            new StandInObject(0x80000A13, "Stand-in Player Killer", new System.Numerics.Vector3(10f, -40f, 0f), MotionTable: 0, DescriptionFlags: 0x8 | 0x20), // red
-            new StandInObject(0x80000A14, "Stand-in Player", new System.Numerics.Vector3(-5f, -55f, 0f), MotionTable: 0, DescriptionFlags: 0x8), // white
+            new StandInObject(0x80000A13, "Stand-in Player Killer", new System.Numerics.Vector3(10f, -40f, 0f), MotionTable: 0, BlipColor: 5), // red (the server colour 5; the player bits made it a creature-typed person, M4 4.1 t2; RadarRules.BlipColor proves the bits in GameRadarTests)
+            new StandInObject(0x80000A14, "Stand-in Player", new System.Numerics.Vector3(-5f, -55f, 0f), MotionTable: 0, BlipColor: 3), // white (the server colour 3)
         ],
         Speech = [new StandInSpeech(1.0, "Stand-in Town Crier", 0x80000A03, "Hear ye: the portal to the Academy stands open.")], // a placeholder speaker for the chat window
         Scripts = [new StandInScript(1.2, 0, (uint)DatReaderWriter.Enums.PlayScript.LevelUp, 1f)], // M3 1.3 s0: one F755 on the player (the human table's LevelUp: 3 particle emitters and a sound hook), as ACE sends a level-up's effect
@@ -107,6 +104,9 @@ public sealed partial class PlayChecks : Node
 
     /// <summary>The stand-in portal's object id (a server object's: 0x80000000 and up). A Use of it teleports the player to the Academy.</summary>
     public const uint PortalGuid = 0x80000A03;
+
+    /// <summary>The stand-in statue's object id: a non-creature placeholder (M4 4.1 t2: the selection checks select it where they selected the retired drudge).</summary>
+    public const uint StatueGuid = 0x80000A02;
 
     /// <summary>The stand-in object the server creates hidden and unhides with the player (the materialise fade of an object, D63).</summary>
     public const uint ApparitionGuid = 0x80000A05;
@@ -669,6 +669,12 @@ public sealed partial class PlayChecks : Node
 
     private async Task RunAsync()
     {
+        if (_services.Options.Play.LookShotsDirectory is not null)
+        {
+            Log.Info(LogCategory, "play checks: not run, --play-look-shots runs instead (it quits the run itself, PlayMode.LookShots.cs)"); // M4 4.1 v0, logged by fix2b (review R11)
+            return;
+        }
+
         var exitCode = 1;
         try
         {
@@ -855,16 +861,16 @@ public sealed partial class PlayChecks : Node
             _mode.Status.Visible && _mode.Status.Text == PlayStatusLine.StandInNote,
             $"visible={_mode.Status.Visible} text='{_mode.Status.Text.Replace('\n', '|')}'");
 
-        // g3b: the radar shows the stand-in portal 3 m west of the player (the player faces north, the visit is outdoors: 75 m, two pixels a metre and a half): a purple cross left of the centre.
+        // g3b: the radar shows the stand-in portal 3 m west of the player (the player faces north, the visit is outdoors: 75 m, two pixels a metre and a half): a purple cross left of the centre, and the statue 4 m north of it as a yellow blip (server colour 8; M4 4.1 t2: the gold guard is retired).
         var radar = shell?.RadarUi;
         await WaitFor(() => radar is { } r && r.Blips.Any(b => b.Guid == PortalGuid), 5.0);
         var portalBlip = radar?.Blips.FirstOrDefault(b => b.Guid == PortalGuid);
-        var guardBlip = radar?.Blips.FirstOrDefault(b => b.Guid == 0x80000A01);
+        var statueBlip = radar?.Blips.FirstOrDefault(b => b.Guid == StatueGuid);
         Check(
             "the-radar-shows-the-stand-in-portal-as-a-purple-cross-left-of-the-centre",
             radar is { Range: 75.0, Radius: 50 } && portalBlip is { Shape: Lifestone.Client.RetailUi.Radar.RadarBlipShape.Cross, Argb: 0xFFBF63FF, Y: 60 } && portalBlip.Value.X is >= 57 and <= 58
-                && guardBlip is { Argb: 0xFFFFAA00, Y: 60 } && guardBlip.Value.X is >= 61 and <= 62 && radar.Blips.Count == Visit.Objects.Length && shell is { Placeholders: var left } && !left.Contains("radar"),
-            $"range={radar?.Range} blips={radar?.Blips.Count}/{Visit.Objects.Length} portal=({portalBlip?.X}, {portalBlip?.Y}) 0x{portalBlip?.Argb:X8} {portalBlip?.Shape} guard=({guardBlip?.X}, {guardBlip?.Y}) 0x{guardBlip?.Argb:X8} updates={radar?.Updates}");
+                && statueBlip is { } yellow && (yellow.Argb >> 8) == 0xFFFFFF && statueBlip.Value.X is >= 59 and <= 61 && statueBlip.Value.Y is >= 56 and <= 59 && radar.Blips.Count == Visit.Objects.Length && shell is { Placeholders: var left } && !left.Contains("radar"),
+            $"range={radar?.Range} blips={radar?.Blips.Count}/{Visit.Objects.Length} portal=({portalBlip?.X}, {portalBlip?.Y}) 0x{portalBlip?.Argb:X8} {portalBlip?.Shape} statue=({statueBlip?.X}, {statueBlip?.Y}) 0x{statueBlip?.Argb:X8} updates={radar?.Updates}");
 
         // g7: the fields the login check adds to its verdict, read here from the same watch and the same description: the shell up with no bare-world frame, the vitals filled (the stand-in's 52, 120, 75),
         // the spew box having heard portal space, the stacked window shown (the stand-in's options choose it) and the radar's blips counted.
@@ -1164,23 +1170,10 @@ public sealed partial class PlayChecks : Node
         await PanelChecksAsync(shell);
         await ToolsPanelWhereAndXpAsync(session, ui); // G7 lane A: Where am I and Add XP through the panel, and its review frame
         await ThrowawayToolOpsAsync(session, ui); // p2: the throwaway leg's driver presses the same buttons (PlayChecks.Throwaway.cs)
-        // M3 4.2 p5a C4: --play-skip-scenarios (the smoke's shell-frames run) leaves out the two scenarios that cost the run most of its time (the fight's cast-to-kill and the death's wait for the tuskers); a plain run judges them.
-        var skipScenarios = _services.Options.Play.SkipScenarios;
-        if (skipScenarios)
-        {
-            Log.Info(LogCategory, "scenarios skipped (--play-skip-scenarios): the stand-in's fight and death checks are not run in this run", ("fight", "skipped"), ("death", "skipped"));
-        }
-
-        if (!skipScenarios)
-        {
-            await FightChecksAsync(); // M3 3.1 fb: the stand-in's fight (PlayChecks.Fight.cs), after the tools teleport
-        }
+        // M4 4.1 t1 (D26, m4-standin-tusker-retire): the stand-in's fight and death checks are retired with the tuskers they fought (no stand-in creature appears in any drawn run; D23). Their behaviour is proved by the live
+        // legs (bsd-fight, bsd-death, hunt), the scripted scenario unit tests and the trackers' unit tests. The smoke's --play-skip-scenarios, a no-op since then, is removed (M4 4.1 fix2b).
 
         await ProjectileChecksAsync(); // M3 3.1 fc: the projectile on screen (PlayChecks.Projectile.cs)
-        if (!skipScenarios)
-        {
-            await DeathChecksAsync(); // M3 3.2 db: the stand-in's death (PlayChecks.Death.cs), after the fight checks
-        }
 
         // --- picking and selection (G5 W7): the stand-in portal is picked at its projected screen point; a double click Uses it ---
         var picking = _mode.Picking;
@@ -1217,7 +1210,7 @@ public sealed partial class PlayChecks : Node
         rig.Controller.OnWorldPointer(1, 1, UiMouseButton.Left, true, false);
         rig.Controller.OnWorldPointer(1, 1, UiMouseButton.Left, false, false);
         Check("a-click-on-empty-space-clears-the-selection", !selection.HasSelection, $"selected=0x{selection.Selected:X8}");
-        await SelectionShellChecks(ui); // g5b: the toolbar's name and health and the vivid target indicator for the stand-in drudge (docs/retail-ui.md section 21.7)
+        await SelectionShellChecks(ui); // g5b: the toolbar's name and the vivid target indicator for the stand-in statue (M4 4.1 t2) (docs/retail-ui.md section 21.7)
         tunnelsBefore = _tunnelShowings;
         teleportsBefore = _mode.Flow.Teleports;
         var completesBeforePortal = _portal?.Director.LoginCompletesSent ?? 0; // M3 3.2 dd: the death checks before this section add LoginCompletes of their own (one each); this check counts the portal's
@@ -1263,8 +1256,7 @@ public sealed partial class PlayChecks : Node
         await KitChecksAsync(session); // (see the next line)
         await KitLookFramesAsync(session, ui?.Screens?.Flow.CurrentScreen as GamePlayScreen); // M3 4.2 p6: with --play-frames, the kit worn and its review frames (PlayChecks.KitLook.cs)
         // M3 1.4 s0 (the line above): SpawnGear against the stand-in: the kit arrives in the pack (kit=n/n), a second run asks for nothing (kit_topup=0)
-        await AttackChecksAsync(session); // M4 1.2 s3: a melee kill and a missile hit on the stand-in (PlayChecks.Attack.cs)
-        await ContainerChecksAsync(session); // M4 2.1 s4a: the stand-in tusker's corpse opened, an item picked up and dropped (PlayChecks.Containers.cs)
+        await ContainerChecksAsync(session); // M4 2.1 s4a, 4.1 t1: the stand-in's chest opened, an item picked up and dropped, the loot rows (PlayChecks.Containers.cs; no creature, D23)
         await DragChecksAsync(session); // M4 2.2 s3: an item dragged from the pack to a side pack with the real router's mouse events (PlayChecks.Drag.cs)
 
         // --- a boot by the server: the player is taken away and the retail disconnected screen has the button that reconnects (D43) ---
@@ -1372,12 +1364,13 @@ public sealed partial class PlayChecks : Node
     }
 
     /// <summary>
-    /// g5b (docs/retail-ui.md section 21.7): selecting the stand-in drudge shows its name in the toolbar, the stand-in answers the health query and the meter shows the fraction, the vivid
-    /// target indicator is drawn for it (corners or the off-screen arrow), and clearing the selection clears all of it.
+    /// g5b (docs/retail-ui.md section 21.7): selecting the stand-in statue (a non-creature placeholder; M4 4.1 t2 retired the attackable drudge it used to select, D23) shows its name in the toolbar, asks the stand-in no health query (only an
+    /// attackable object is asked, <c>SelectionRules.QueriesHealth</c>: the health fraction of an attackable object is proved by <c>GameSelectionTests</c>, which draw nothing), the vivid target indicator is drawn for it (corners or the off-screen
+    /// arrow), and clearing the selection clears all of it.
     /// </summary>
     private async Task SelectionShellChecks(RetailUiLayer? ui)
     {
-        const uint guardGuid = 0x80000A04; // the stand-in drudge: attackable, ahead of the player
+        const uint statueGuid = StatueGuid; // the stand-in statue: a non-creature, ahead of the player
         var shell = ui?.Screens?.Flow.CurrentScreen as GamePlayScreen;
         var display = shell?.SelectionUi;
         Check("the-shell-has-the-selection-display-and-no-selection-placeholder", display is not null && !shell!.Placeholders.Contains("selection"), $"display={(display is null ? "none" : "built")} placeholders={string.Join(",", shell?.Placeholders ?? [])}");
@@ -1387,22 +1380,23 @@ public sealed partial class PlayChecks : Node
         }
 
         var picking = _mode.Picking;
-        await WaitFor(() => _mode.Layer?.IsDrawn(guardGuid) == true && picking.TryProject(guardGuid, out _, out _), 20.0);
-        _mode.Selection.Select(guardGuid);
-        var named = await WaitFor(() => display.Selected == guardGuid && display.FieldShown && display.NameText == "Stand-in Drudge", 5.0);
-        Check("selecting-the-stand-in-drudge-shows-its-name-in-the-toolbar", named, $"selected=0x{display.Selected:X8} field={display.FieldShown} name='{display.NameText}'");
-        var healthy = await WaitFor(() => display.HealthShown, 10.0);
+        await WaitFor(() => _mode.Layer?.IsDrawn(statueGuid) == true && picking.TryProject(statueGuid, out _, out _), 20.0);
+        var queriesBefore = display.Queries;
+        _mode.Selection.Select(statueGuid);
+        var named = await WaitFor(() => display.Selected == statueGuid && display.FieldShown && display.NameText == "Stand-in Statue", 5.0);
+        Check("selecting-the-stand-in-statue-shows-its-name-in-the-toolbar", named, $"selected=0x{display.Selected:X8} field={display.FieldShown} name='{display.NameText}'");
+        await Frames(10);
         Check(
-            "the-stand-in-answers-the-health-query-and-the-toolbar-shows-a-fraction",
-            healthy && display.LastQuery is { Outcome.Kind: ActionOutcomeKind.Confirmed } && Math.Abs(display.HealthFraction!.Value - 0.6f) < 0.001f,
-            $"queries={display.Queries} outcome={display.LastQuery?.Outcome?.Kind} health={display.HealthFraction?.ToString("0.00") ?? "none"}");
+            "selecting-a-non-attackable-stand-in-object-asks-no-health-and-shows-no-meter",
+            display.Queries == queriesBefore && !display.HealthShown,
+            $"queries={display.Queries - queriesBefore} health_shown={display.HealthShown}");
         var indicator = display.Indicator;
         var drawn = await WaitFor(() => indicator.State != Lifestone.Client.RetailUi.Selection.VividTargetState.Hidden, 5.0);
-        picking.TryProject(guardGuid, out var guardRect, out var guardOnScreen);
+        picking.TryProject(statueGuid, out var statueRect, out var statueOnScreen);
         Check(
-            "the-vivid-target-indicator-is-drawn-for-the-selected-drudge",
+            "the-vivid-target-indicator-is-drawn-for-the-selected-statue",
             drawn && indicator.OptionOn && indicator.Enabled,
-            $"state={indicator.State} frame={indicator.FrameBox} arrow={indicator.ArrowPosition} arrow_image={indicator.ArrowImage} rect={guardRect} on_screen={guardOnScreen} option={indicator.OptionOn}");
+            $"state={indicator.State} frame={indicator.FrameBox} arrow={indicator.ArrowPosition} arrow_image={indicator.ArrowImage} rect={statueRect} on_screen={statueOnScreen} option={indicator.OptionOn}");
         await Frames(4);
         SaveReviewFrame("05-shell-selection-and-vivid-indicator");
 

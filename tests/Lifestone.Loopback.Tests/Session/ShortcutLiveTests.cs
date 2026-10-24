@@ -11,10 +11,10 @@ using Xunit.Abstractions;
 namespace Lifestone.Loopback.Tests.Session;
 
 /// <summary>
-/// M4 3.2 h1, the shortcut bar against the bundled ACE: Holtburg Hunter puts a Handy Healing Kit on slot 0 and a Potion of Healing on slot 1 through <see cref="IActionApi.AddShortcut"/>, ends the session, enters again (the description's
+/// M4 3.2 h1, the shortcut bar against the bundled ACE: Holtburg Archer (test-archer; M4 P4: the Hunter's test) puts a Handy Healing Kit on slot 0 and a Potion of Healing on slot 1 through <see cref="IActionApi.AddShortcut"/>, ends the session, enters again (the description's
 /// list must show both: ACE keeps the list and returns it in the next login's player description), drinks the potion by <see cref="IActionApi.UseShortcut"/> (slot 1; the hunter is usually at full health, so the potion is spent as
 /// <see cref="HealResultKind.Wasted"/>, which is fine and is printed), removes both through <see cref="IActionApi.RemoveShortcut"/>, ends the session, and enters a third time (the list must be empty). WRITTEN AND COMPILED BY THE SLICE,
-/// RUN BY THE LEAD: it needs the backend with the Lifestone server mod ready, Holtburg Hunter built (<c>--scenario=fighter-build</c>) and holding a Handy Healing Kit 628 and a stack of Potions of Healing 377 in its main pack.
+/// RUN BY THE LEAD: it needs the backend with the Lifestone server mod ready, Holtburg Archer built (<c>--scenario=fighter-build --account=test-archer</c>) and holding a Handy Healing Kit 628 and a stack of Potions of Healing 377 in its main pack.
 /// The character is never reset, purged or levelled: it ends changed only by one potion spent. Rows left on the bar by an earlier failed run are removed at the start of the first session.
 /// <para>Run it alone with <c>dotnet test tests/Lifestone.Loopback.Tests --filter "FullyQualifiedName~ShortcutLiveTests" --logger "console;verbosity=detailed"</c>; each session is recorded to <c>cache/m4/3-2/live</c> of the main checkout
 /// (derived data, gitignored). About 3 minutes (three sessions and two 6 s pauses).</para>
@@ -23,6 +23,9 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </summary>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test-archer")]
+[LoopbackCharacter("Holtburg Archer")]
+[LiveSharedSession]
 public sealed class ShortcutLiveTests(ITestOutputHelper output)
 {
     private const uint KitWcid = 628;
@@ -36,21 +39,16 @@ public sealed class ShortcutLiveTests(ITestOutputHelper output)
     /// relog_listed 2, the use Confirmed (Drank or Wasted), removed 2, relog_empty yes.
     /// </summary>
     [LoopbackFact]
-    public void Holtburg_Hunter_adds_a_kit_and_a_potion_relogs_drinks_by_slot_and_removes_both()
+    public void Holtburg_Archer_adds_a_kit_and_a_potion_relogs_drinks_by_slot_and_removes_both()
     {
         using var dats = DatSet.Open();
         var facts = new Facts();
         var legs = new List<ShortcutLeg>();
         foreach (var (part, name) in new[] { (Part.Add, "shortcuts-add"), (Part.Use, "shortcuts-use"), (Part.Verify, "shortcuts-verify") })
         {
-            if (legs.Count > 0)
-            {
-                LiveRun.Pause();
-            }
-
             var leg = new ShortcutLeg(name, part, output.WriteLine, dats, facts);
             legs.Add(leg);
-            var result = LiveRun.Run(output, dats, leg, name, 300, item: Item);
+            var result = LiveRun.Run(output, leg, name, 300, item: Item, character: FighterTemplate.Archer.Name, ownLogin: true); // a relog is the point: each session logs in and out on its own
             output.WriteLine(facts.Verdict());
             Assert.True(leg.Problems.Count == 0, name + ": the checks that failed: " + string.Join("; ", leg.Problems) + " | " + facts.Verdict());
             Assert.True(result.Ok, name + ": " + result.Failure + " | " + facts.Verdict());
@@ -143,6 +141,14 @@ public sealed class ShortcutLiveTests(ITestOutputHelper output)
 
         private IEnumerable<ActionHandle?> Enter()
         {
+            if (AlreadyInWorld)
+            {
+                Stage = "running";
+                Follow ??= new HuntFollow(Dats, new RecordingLogSink());
+                Log("already in the world: the shared session's entry logged the character in");
+                yield break;
+            }
+
             Stage = "login";
             var login = S.Actions.Login(ActionSource.Host);
             yield return login;
@@ -150,8 +156,8 @@ public sealed class ShortcutLiveTests(ITestOutputHelper output)
             Follow ??= new HuntFollow(Dats, new RecordingLogSink());
 
             Stage = "choosing";
-            CharacterSlot? slot = S.State.Characters.Entries.OrderBy(c => c.PendingDeletion).ThenBy(c => c.Guid).Cast<CharacterSlot?>().FirstOrDefault(c => string.Equals(c!.Value.Name, FighterTemplate.CharacterName, StringComparison.OrdinalIgnoreCase));
-            Require(slot is { PendingDeletion: false }, $"'{FighterTemplate.CharacterName}' is not on the account (or is pending deletion): build it first; this test never creates or purges a character");
+            CharacterSlot? slot = S.State.Characters.Entries.OrderBy(c => c.PendingDeletion).ThenBy(c => c.Guid).Cast<CharacterSlot?>().FirstOrDefault(c => string.Equals(c!.Value.Name, FighterTemplate.Archer.Name, StringComparison.OrdinalIgnoreCase));
+            Require(slot is { PendingDeletion: false }, $"'{FighterTemplate.Archer.Name}' is not on the account (or is pending deletion): build it first; this test never creates or purges a character");
             Stage = "entering";
             var enter = S.Actions.EnterWorld(slot!.Value.Guid, ActionSource.Host);
             yield return enter;
@@ -197,10 +203,12 @@ public sealed class ShortcutLiveTests(ITestOutputHelper output)
                 Check(clean.Outcome is { Kind: ActionOutcomeKind.Sent }, $"clean-up of slot {slot}: {Describe(clean)}");
             }
 
-            var kit = FirstInPack(KitWcid);
-            var potion = FirstInPack(PotionWcid);
-            Require(kit != 0, "the hunter holds no Handy Healing Kit 628 with uses left in its main pack (the lead tops it up)");
-            Require(potion != 0, "the hunter holds no Potion of Healing 377 in its main pack (the lead tops it up)");
+            // M4 P4 sfix2: the hunt tests before this one drink the Archer's potions, so the test grants what it needs with the mod's item verb (as VendorLiveTests grants its pyreals) when the pack holds none.
+            uint kit = 0, potion = 0;
+            foreach (var h in GrantIfMissing(() => FirstInPack(KitWcid), KitWcid, "Handy Healing Kit 628", g => kit = g)) { yield return h; }
+            foreach (var h in GrantIfMissing(() => FirstInPack(PotionWcid), PotionWcid, "Potion of Healing 377", g => potion = g)) { yield return h; }
+            Require(kit != 0, "the hunter holds no Handy Healing Kit 628 with uses left in its main pack (the grant with the item verb failed)");
+            Require(potion != 0, "the hunter holds no Potion of Healing 377 in its main pack (the grant with the item verb failed)");
             facts.Kit = kit;
             facts.Potion = potion;
 

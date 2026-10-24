@@ -150,6 +150,19 @@ public static class CombatModeRules
             return null;
         }
 
+        // M4 4.1 v3: the client never asks for a mode the wielded weapons forbid (a melee mode with a caster or a launcher wielded, the case retail's picker cannot produce but a mixed-up setup can: a mace and a wand together). ACE would
+        // answer ActionCancelled and flash the wrong stance, and the Action API's guard refuses the send anyway; saying so here keeps the press from creating a refused handle and puts the reason in the chat.
+        var wieldedNow = CombatModeGuard.Read(session.State);
+        var problem = CombatModeGuard.Judge((int)requested, in wieldedNow);
+        if (problem != CombatModeProblem.None)
+        {
+            manager.Services.Log.Warn("retailui", "combat toggle: " + CombatModeGuard.Describe(problem, (int)requested, in wieldedNow));
+            Say(manager, notice, CombatModeGuard.Culprit(problem, in wieldedNow) is { } culprit
+                ? $"You can't enter {ModeWord(requested)} mode while wielding the {culprit.Name}"
+                : $"[Lifestone] You can't enter {ModeWord(requested)} mode"); // no culprit to name: retail's own text (ClientCombatSystem::SetCombatMode 11.6096 0x0056CB80) always names the weapon, so this line is Lifestone's and says so
+            return null;
+        }
+
         if (InPortalSpace(session.State.Self.Travel))
         {
             Say(manager, notice, PortalSpaceText);
@@ -350,6 +363,7 @@ public sealed class GameCombatPanel : UiElement
 
     private readonly List<UiOptionCheckbox> _boxes = new(3);
     private UiLoginContext? _context;
+    private CombatToggleKey? _toggleKey;
     private GameOptions? _options;
     private GameToolbar? _toolbar;
     private PlayerOptionDef? _advancedOption;
@@ -392,6 +406,9 @@ public sealed class GameCombatPanel : UiElement
 
     /// <summary>The three option check boxes.</summary>
     public IReadOnlyList<UiOptionCheckbox> OptionCheckboxes => _boxes;
+
+    /// <summary>The combat key's registration (retail's accent-grave key, see <see cref="CombatToggleKey"/>), or null before <see cref="Attach"/>.</summary>
+    public CombatToggleKey? ToggleKey => _toggleKey;
 
     /// <summary>The window's recklessness field (null when the layout lacks it).</summary>
     public UiElement? RecklessnessField => _recklessness;
@@ -459,6 +476,7 @@ public sealed class GameCombatPanel : UiElement
             },
             wanted => _tick.Want(wanted),
             todo => context.Manager.LogOnce("combat:" + todo[..Math.Min(todo.Length, 48)], LogSeverity.Warning, todo));
+        _toggleKey = new CombatToggleKey(context.Session, context.Manager, () => ChatNotice); // retail's combat key (M4 4.1 v3)
         context.Manager.Services.Log.Warn("retailui", "TODO(m3-combat-tooltips): the combat window's check boxes have no tooltips (the _Help strings are not shown)");
         SetCombatMode(context.Session.State.Self.Qualities.CombatMode);
     }
@@ -560,6 +578,8 @@ public sealed class GameCombatPanel : UiElement
         _tick?.Want(false);
         Attacks?.Dispose();
         Attacks = null;
+        _toggleKey?.Dispose();
+        _toggleKey = null;
         base.OnDeleting();
     }
 

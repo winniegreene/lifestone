@@ -41,7 +41,7 @@ public readonly record struct WieldedWeapons(WorldObject? Caster, WorldObject? L
 /// <remarks>
 /// <para><b>The rules</b>, from ACE and retail. ACE's <c>Player.HandleActionChangeCombatMode_Inner</c> (<c>Player_Combat.cs</c> 778-884, ACE 95ef426d) puts the player back in peace when a melee mode is asked for while a missile
 /// weapon or a caster is wielded (812-822), when a missile mode is asked for without a missile weapon (824-835) and when a magic mode is asked for without a caster (872-882); <c>HandleActionChangeCombatMode</c> (737-760) first runs
-/// <c>CheckWeaponCollision</c> (<c>Player_Inventory.cs</c> 1878-2030, the combat-mode branch from 2009) and answers an illegal pair of wielded weapons with the WeenieError ActionCancelled. ACE finds the caster as the item in the held slot
+/// <c>CheckWeaponCollision</c> (<c>Player_Inventory.cs:1878-2056</c> at ACE 95ef426d, the combat-mode branch from 2009) and answers an illegal pair of wielded weapons with the WeenieError ActionCancelled. ACE finds the caster as the item in the held slot
 /// (<c>Creature_Equipment.cs</c> 141-144, <c>GetEquippedWand</c>) and the missile weapon as the item in the missile slot (150-153, <c>GetEquippedMissileWeapon</c>, a launcher or a stack of thrown weapons). Retail's own picker,
 /// <c>ClientCombatSystem::GetDefaultCombatMode</c> (11.6096 0x0056C050), never asks for such a mode: it reads the weapon's CombatUse (2 gives missile, else melee) and the held item's caster bit (ItemType 0x8000). So the toolbar
 /// cannot reach the refusal; a script or a test can, and the client would draw the wrong stance for a moment before ACE's revert.</para>

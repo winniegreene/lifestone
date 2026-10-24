@@ -137,6 +137,7 @@ public sealed class ClothingObjDescTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal(setup is 0x02001907 or 0x02001A20, ClothingObjDesc.GetHeritageFallbackSetupId(setup) == 0);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_CharGen_Setups_that_need_the_heritage_fallback_are_listed()
     {

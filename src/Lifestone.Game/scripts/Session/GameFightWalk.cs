@@ -2,6 +2,7 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement.Routes;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.World;
 
@@ -10,7 +11,7 @@ namespace Lifestone.Game.Sessions;
 /// <summary>
 /// The fight loop's walk in the game (M3 3.1 fd; <c>TODO(m3-fight-no-walker)</c> closed for the game): an <see cref="IFightWalk"/> over the game's own player. Headless, <see cref="DenWalk"/> makes a walker of its own
 /// in a physics world of its own; in the game the walker belongs to the player controller (it ticks, streams collision, is placed by every teleport and follows the server's moves and MoveTos), so this class only
-/// plans the legs on the den's floor (<see cref="DenPlanner"/>, built on the leg's loading worker) and drives that controller with a <see cref="RouteDriver"/>, as <see cref="RoutePlay"/> does through
+/// plans the legs on the den's floor (<see cref="RoomGraph"/> with the den's lean, <see cref="DenRooms"/>, built on the leg's loading worker) and drives that controller with a <see cref="RouteDriver"/>, as <see cref="RoutePlay"/> does through
 /// <see cref="RoutePlayHost"/>. The movement goes out through the host's sink (the presence gate over the session's movement channel); no audit sits in between (<c>TODO(m3-fight-walk-audit)</c>, as <see cref="DenWalk"/>).
 /// </summary>
 /// <remarks>The leg order is <see cref="DenWalk.Tour"/>: the next spawn cell after the one the player stands in that has a walk from it.</remarks>
@@ -19,7 +20,7 @@ internal sealed class GameFightWalk : IFightWalk
     private const string LogCategory = "fight";
 
     private readonly RoutePlayHost _host;
-    private readonly DenPlanner _planner;
+    private readonly RoomGraph _planner;
     private readonly ILogSink _log;
     private RouteDriver? _driver;
     private bool _prepared;
@@ -32,7 +33,7 @@ internal sealed class GameFightWalk : IFightWalk
     /// <param name="host">The player's walker, through the scenario host play mode was given.</param>
     /// <param name="planner">The den's floor planner (built on a worker).</param>
     /// <param name="log">Where the walk logs.</param>
-    public GameFightWalk(RoutePlayHost host, DenPlanner planner, ILogSink log)
+    public GameFightWalk(RoutePlayHost host, RoomGraph planner, ILogSink log)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(planner);
@@ -83,14 +84,14 @@ internal sealed class GameFightWalk : IFightWalk
                 continue;
             }
 
-            if (_planner.Plan("den-leg-" + (_legs + 1), in from, cellId, DenWalk.StopWithinMetres) is not { } route)
+            if (_planner.PlanScripted("den-leg-" + (_legs + 1), in from, cellId, DenWalk.StopWithinMetres, DenWalk.StopDwellSeconds) is not { } route)
             {
                 _log.Warn(LogCategory, "no walk joins the player's cell and a waypoint", new LogField("from", $"0x{from.CellId:X8}"), new LogField("to", $"0x{cellId:X8}"));
                 continue;
             }
 
             _driver?.Abandon();
-            _driver = new RouteDriver(walker.Controller, route);
+            _driver = new RouteDriver(walker.Controller, route, session.Actions.Move);
             _legs++;
             _legStart = session.Clock.Now;
             description = $"leg {_legs} from 0x{from.CellId:X8} to 0x{cellId:X8} ({route.Goals.Count} goals)";

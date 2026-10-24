@@ -13,7 +13,7 @@ namespace Lifestone.Client.Session.Scenarios;
 
 /// <summary>
 /// M4's level-40 fighter (<c>--scenario=fighter-build</c>, spec 5.10, plan 4.1 s2, owner decision D1): find the test account's
-/// <see cref="FighterTemplate.CharacterName"/> or create it with <see cref="FighterTemplate.CreationIntent"/>, enter the world as that character and
+/// <see cref="FighterTemplate.Name"/> or create it with <see cref="FighterTemplate.CreationIntent"/>, enter the world as that character and
 /// nobody else, and bring it to the template, the kit and Holtburg. Idempotent and resumable on <see cref="MageBuildScenario"/>'s rule: every step is
 /// sent only if the read model still shows it is needed, so a ready fighter is only verified and a half-built one gets just the missing steps, in order.
 /// Then it logs off and quits as the other scenarios do.
@@ -23,20 +23,23 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <c>status</c> (the access level must be Player, D11, and the mod must report <c>xp</c> and <c>item</c>), <c>building</c>, <c>placing</c>,
 /// <c>logging-off</c>, <c>quitting</c>, <c>done</c>. The scenario never selects, deletes or enters another character; an absent name with no free slot fails the
 /// run, and the entered character's name is checked against the template's before every step that acts on it (<see cref="NameCheck"/>).</para>
-/// <para><b>Building</b>, in this order, each only if still needed: (a) the mod's <c>xp</c> for exactly <see cref="XpTableData.XpForLevel"/>(40) minus
-/// <see cref="PlayerQualities.TotalExperience"/> (never when the fighter is at or past it); (b) <see cref="IActionApi.TrainSkill"/> for each template skill
+/// <para><b>Building</b>, in this order, each only if still needed: (a) the mod's <c>xp</c> for exactly <see cref="XpTableData.XpForLevel"/>(<see cref="FighterTemplate.Level"/>: 40 for the Hunter, 55 for the Brawler and the Archer since M4 P5a, D33 and D38) minus
+/// <see cref="PlayerQualities.TotalExperience"/> (never when the fighter is at or past it, except that the shortfall of the plan's remaining raises is granted too); (b) <see cref="IActionApi.TrainSkill"/> for each template skill
 /// the read model shows untrained, with <see cref="TrainCredits"/> (<c>TODO(m4-healing-minlevel)</c>: s0 found Healing has MinLevel 2 in the SkillTable; the
 /// creation asks for it trained, and if ACE refuses that the creation fails by name and the remedy is this train step, so the creation moves Healing to
 /// <see cref="FighterTemplate.TrainedLater"/>; the live build proves which); (c) the raise of each <see cref="FighterTemplate.Targets"/> entry in plan order
-/// with <see cref="StatTarget.XpRemaining"/>; (d) the kit, one <see cref="PlayerTools.SpawnItem"/> at a time over <see cref="FighterKit.Items"/> (it does not
-/// stack, so the two healing kits are two grants; a stack line is topped up by the missing count, and a top-up is not merged: the count is what is judged);
+/// with <see cref="StatTarget.XpRemaining"/> (for the Brawler and the Archer: the base plan's stats first, then Quickness, Run, Focus, Self, the three schools and Max Mana; a stat already at or above its rank is left, so a rerun only adds); (c2) <see cref="PlayerTools.LearnSpells"/> of the fighter's
+/// <see cref="FighterProfile.SpellsToLearn"/> in chunks (M4 P5a, owner decision D33: the Hunter has no profile and learns nothing; a ready fighter's chunks all answer known and teach nothing); (d) the kit, one <see cref="PlayerTools.SpawnItem"/> at a time over <see cref="FighterKit.Items"/> (it does not
+/// stack, so the two healing kits are two grants; a stack line is topped up by the missing count, and a top-up is not merged: the count is what is judged; with a SpellTable and an account the kit also holds the spell components of the profile's spells,
+/// <see cref="FighterComponents"/>, so a rerun grants exactly what casts have burned since: the build only adds, and <c>kit=</c> names a short component as <c>Name:held/needed</c>);
 /// (e) the Mace wielded and the five leather pieces worn by <see cref="IActionApi.Wield"/> on <see cref="GearScenario"/>'s pattern (a worn piece that is not a
 /// kit line and covers the slots goes to the pack first); (f) <see cref="PlayerTools.Place"/> to Holtburg's point of interest when the player is not in its
 /// landblock (no bind: item 1.2's hunt binds). Every action waits for its outcome; anything but Confirmed fails the run naming the step and the outcome.
 /// A precondition the read model has not caught up with is waited for <see cref="SettleSeconds"/> on the session clock per reason, then fails by name;
 /// nothing is ever sent twice.</para>
 /// <para><b>The verdict</b> (<see cref="VerdictFields"/>, logged as <c>[fighter] verdict ...</c>):
-/// <c>fighter=ready|built|failed level=&lt;n&gt; template=ok|short [template_short=...] kit=ok|&lt;missing&gt; wielded=&lt;wcid&gt;|0 worn=&lt;count&gt;</c>.
+/// <c>fighter=ready|built|failed level=&lt;n&gt; template=ok|short [template_short=...] kit=ok|&lt;missing&gt; wielded=&lt;wcid&gt;|0 worn=&lt;count&gt;</c>, then, for a template that trains magic (the Brawler and the Archer), <c>magic=trained|short:&lt;schools&gt;|not_entered spells=&lt;known+learned&gt;/&lt;ids&gt;</c>
+/// (<c>trained</c> when Creature Enchantment and Life Magic are both trained).
 /// <c>kit</c> is <c>ok</c> or the lines still short as <c>Name:held/needed</c> joined by commas (no spaces); <c>wielded</c> is the Mace's weenie class id when it
 /// is wielded; <c>worn</c> counts the leather pieces worn. <c>ready</c> means no step was needed, <c>built</c> that some were and everything ended met.</para>
 /// </remarks>
@@ -54,11 +57,14 @@ public sealed class FighterBuildScenario : IScenario
     /// <summary>How long the teleport to Holtburg may take, in seconds on the session clock.</summary>
     public const double PlaceSeconds = 30;
 
-    /// <summary>The mod verbs the build uses (the experience grant and the item grant), which the status stage requires the mod to report.</summary>
-    internal static readonly string[] RequiredVerbs = [ToolVerbs.Xp, ToolVerbs.Item];
+    /// <summary>The mod verbs the build uses (the experience grant, the item grant and, since M4 P5a, the spellbook), which the status stage requires the mod to report.</summary>
+    internal static readonly string[] RequiredVerbs = [ToolVerbs.Xp, ToolVerbs.Item, ToolVerbs.Spell + " " + ToolVerbs.SpellLearn];
+
+    /// <summary>The most spell ids one <c>spell learn</c> carries.</summary>
+    public const int SpellChunk = PlayerTools.MaxSpellIds;
 
     /// <summary>
-    /// The SkillTable's trained cost (credits) of each skill the template trains, Aluvian (<c>FighterTemplateDatTests</c> pins them against the dats): Melee Defense 10, Missile Weapons 6, Healing 6.
+    /// The SkillTable's trained cost (credits) of each skill the template trains, Aluvian (<c>FighterTemplateDatTests</c> and <c>FighterMagicDatTests</c> pin them against the dats): Melee Defense 10, Missile Weapons 6, Healing 6, Creature Enchantment 8, Item Enchantment 8, Life Magic 12, Mana Conversion 6 (M4 P5a C7; the same 6 as the mage's, pinned by <c>MageTemplateDatTests</c> and <c>FighterMagicDatTests</c>).
     /// ACE refuses any other number. Heavy Weapons (12) is specialised at creation and cannot be specialised later.
     /// </summary>
     public static IReadOnlyDictionary<uint, int> TrainCredits { get; } = new Dictionary<uint, int>
@@ -66,8 +72,23 @@ public sealed class FighterBuildScenario : IScenario
         [FighterTemplate.MeleeDefense] = 10,
         [FighterTemplate.MissileWeapons] = 6,
         [FighterTemplate.Healing] = 6,
+        [FighterTemplate.CreatureEnchantment] = 8,
+        [FighterTemplate.ItemEnchantment] = 8,
+        [FighterTemplate.LifeMagic] = 12,
+        [FighterTemplate.ManaConversion] = 6,
     };
 
+    /// <summary>The short name of a magic school's skill in the verdict's <c>magic=</c> (creature, item, life).</summary>
+    internal static string SchoolShortName(uint skillId) => skillId switch
+    {
+        FighterTemplate.CreatureEnchantment => "creature",
+        FighterTemplate.ItemEnchantment => "item",
+        FighterTemplate.LifeMagic => "life",
+        FighterTemplate.ManaConversion => "mana",
+        _ => throw new ArgumentOutOfRangeException(nameof(skillId), skillId, "TODO(m4-template-skill): a magic skill the verdict has no short name for"),
+    };
+
+    private readonly FighterTemplate _template;
     private readonly XpTableData _table;
     private readonly IReadOnlyList<uint> _retailClasses;
     private readonly ILogSink _log;
@@ -77,17 +98,32 @@ public sealed class FighterBuildScenario : IScenario
     private readonly ReasonTimer _wait = new(SettleSeconds);
     private readonly uint _holtburgLandblock;
     private readonly TeleportDestination _holtburg;
+    private readonly FighterProfile? _profile;
+    private readonly FighterKit _gear;
+    private readonly IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? _spellInfos;
+    private GearReading? _gearReading;
+    private int _pack = -1;
+    private bool _gearNoted;
     private ActionHandle? _pending;
     private InFlight? _inFlight;
     private ToolHandle<ToolStatus>? _status;
     private bool _createTried;
+    private readonly bool _recreate;
+    private bool _recreated;
+    private string? _mismatch;
+    private uint _oldGuid;
     private bool _xpSent;
+    private int _spellChunk;
+    private int _spellsKnown;
+    private int _spellsLearned;
+    private string _magic = "not_entered";
     private double _arrivalStart = double.NaN;
     private double _placeStart = double.NaN;
     private bool _finished;
     private int _level;
     private TemplateCheck? _check;
     private string _kit = "not_entered";
+    private string _caster = "not_entered";
     private uint _wielded;
     private int _worn;
 
@@ -96,17 +132,51 @@ public sealed class FighterBuildScenario : IScenario
     /// <param name="retailClasses"><see cref="HeadlessCharacter.RetailSkillClasses"/> of the dats (for the creation).</param>
     /// <param name="log">Where the scenario logs.</param>
     /// <param name="arrivalSeconds">The limit on the arrival.</param>
-    public FighterBuildScenario(XpTableData table, IReadOnlyList<uint> retailClasses, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds)
+    /// <param name="template">The fighter to build (default <see cref="FighterTemplate.Hunter"/>).</param>
+    /// <param name="spells">
+    /// The SpellTable's spells (<see cref="Lifestone.Data.Magic.SpellTableData.Spells"/>) and <paramref name="account"/> the account's name as the server stores it (M4 P5a fix F-abil): given together, a fighter that has a spell profile (the Brawler and the Archer)
+    /// is also granted the spell components its spells burn (<see cref="FighterComponents"/>, in the formula that account casts; the name is hashed and never stored or logged). Given neither, the kit has no components and a TODO is logged.
+    /// </param>
+    /// <param name="account">The account's name (see <paramref name="spells"/>).</param>
+    /// <param name="recreate">M4 P5a C5 (owner decision D40): when the entered character's innate attributes differ from the template's, delete it through the client's retail character delete (ACE frees the name once it is pending deletion), wait for the list to show it pending, create the template's character and build that; the mod's purge is never used. Without it a mismatch fails the build (<c>template=mismatch:...</c>) before anything is bought. For the Brawler and the Archer only.</param>
+    public FighterBuildScenario(XpTableData table, IReadOnlyList<uint> retailClasses, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, FighterTemplate? template = null, IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? spells = null, string? account = null, bool recreate = false)
     {
+        _template = template ?? FighterTemplate.Hunter;
+        _recreate = recreate;
+        if (recreate && _template.Key == FighterTemplate.Hunter.Key)
+        {
+            throw new ArgumentException("--fighter-recreate is for the Brawler and the Archer only (test-melee, test-archer); the Hunter is never re-created", nameof(recreate));
+        }
+
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(retailClasses);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(arrivalSeconds);
-        if (table.CharacterLevelXpList.Count <= FighterTemplate.TargetLevel)
+        if (table.CharacterLevelXpList.Count <= _template.Level)
         {
-            throw new ArgumentException($"TODO(m3-xp-table): the XpTable ends before level {FighterTemplate.TargetLevel}", nameof(table));
+            throw new ArgumentException($"TODO(m3-xp-table): the XpTable ends before level {_template.Level}", nameof(table));
         }
 
+        _profile = FighterProfile.For(_template);
+        if ((spells is null) != string.IsNullOrEmpty(account))
+        {
+            throw new ArgumentException("the SpellTable and the account name are given together or not at all", spells is null ? nameof(spells) : nameof(account));
+        }
+
+        if (_profile is not null && spells is not null)
+        {
+            _gear = _template.Kit.WithComponents(FighterComponents.For(_profile, spells, account!));
+        }
+        else
+        {
+            _gear = _template.Kit;
+            if (_profile is not null)
+            {
+                log.Warn(LogCategory, "TODO(m4-fighter-components): no SpellTable and account were given, so the kit carries no spell components: a Harm Self, Heal Self or buff cast would be refused (0x0400 YouDontHaveAllTheComponents)");
+            }
+        }
+
+        _spellInfos = spells;
         _table = table;
         _retailClasses = [.. retailClasses];
         _log = log;
@@ -136,8 +206,13 @@ public sealed class FighterBuildScenario : IScenario
     /// <summary>The steps sent, in order (<c>xp</c>, <c>train</c>, <c>raise</c>, <c>item</c>, <c>wield</c> and <c>place</c> lines, as logged), for the run's record and the tests.</summary>
     public IReadOnlyList<string> SentSteps => _steps;
 
-    /// <summary>The steps counted in the verdict's ready or built decision (every step sent).</summary>
-    public int BuiltSteps => _steps.Count;
+    /// <summary>The steps counted in the verdict's ready or built decision (every step sent; a spell chunk counts when it taught at least one spell).</summary>
+    public int BuiltSteps => _steps.Count - _knownChunks;
+
+    private int _knownChunks;
+
+    /// <summary>The spells the mod answered as known or learned, over the chunks asked so far.</summary>
+    public int SpellsAccounted => _spellsKnown + _spellsLearned;
 
     /// <inheritdoc/>
     public double? WhereMaxMetres => null;
@@ -146,13 +221,20 @@ public sealed class FighterBuildScenario : IScenario
     /// <remarks>Always 0: the scenario sends no movement.</remarks>
     public long Unmatched => 0;
 
+    /// <summary>The kit the build grants: the template's, with the spell components of the profile's spells when the scenario was given a SpellTable and an account (M4 P5a fix F-abil).</summary>
+    public FighterKit Kit => _gear;
+
     /// <summary>The verdict fields (no character name, no account).</summary>
     public string VerdictFields()
     {
         var failed = Failure is not null || !_finished;
         var state = failed ? "failed" : BuiltSteps > 0 ? "built" : "ready";
-        var template = _check is { AllMet: true } ? "template=ok" : "template=short";
-        if (_check is null)
+        var template = _mismatch is not null ? "template=mismatch:" + _mismatch : _check is { AllMet: true } ? "template=ok" : "template=short";
+        if (_mismatch is not null)
+        {
+            // the innate attributes differ from the template's: nothing was bought, so there is no short list to name
+        }
+        else if (_check is null)
         {
             template += " template_short=not_entered";
         }
@@ -161,11 +243,22 @@ public sealed class FighterBuildScenario : IScenario
             template += " template_short=" + MageBuildScenario.ShortField(_check);
         }
 
-        return string.Create(CultureInfo.InvariantCulture, $"fighter={state} level={_level} {template} kit={_kit} wielded={_wielded} worn={_worn}");
+        var magic = _profile is null ? string.Empty : string.Create(CultureInfo.InvariantCulture, $" magic={_magic} spells={SpellsAccounted}/{_profile.SpellsToLearn.Count}");
+        var recreated = _recreated ? " recreated=yes old=pending-deletion" : string.Empty;
+        // M4 P5a C6: the gear (report-only in its first gate): gear=<in place>/<pieces> gear_magic=on|off|n/a spells_active=<active>/<wanted> pack=<main-pack items>/102.
+        var gear = _template.Kit.Gear is null ? string.Empty : _gearReading is { } g ? string.Create(CultureInfo.InvariantCulture, $" gear={g.Worn}/{g.Total} gear_magic={g.Magic} spells_active={g.SpellsField}") : " gear=not_entered";
+        var pack = _pack < 0 || _template.Kit.Gear is null ? string.Empty : string.Create(CultureInfo.InvariantCulture, $" pack={_pack}/{GearKit.PackCapacity}");
+        return string.Create(CultureInfo.InvariantCulture, $"fighter={state} level={_level} {template} kit={_kit} wielded={_wielded} worn={_worn}{magic}{gear}{pack}{recreated}");
     }
 
+    /// <summary>
+    /// Where the kit's caster is after the last snapshot (M4 P5a C1b): <c>pack</c> (the build keeps it there; <see cref="CasterSwap"/> wields it for a pass), <c>hand</c> (the build fails: it takes it off first), <c>none</c> (<c>kit=</c> names it as short),
+    /// <c>n/a</c> for a template with no caster (the Hunter) or <c>not_entered</c> before the inventory is known. Not part of the verdict line.
+    /// </summary>
+    public string Caster => _caster;
+
     /// <summary>True when <paramref name="name"/> is the fighter template's character (case-insensitive, as the character list matches).</summary>
-    public static bool NameCheck(string? name) => string.Equals(name, FighterTemplate.CharacterName, StringComparison.OrdinalIgnoreCase);
+    public static bool NameCheck(string? name, FighterTemplate? template = null) => string.Equals(name, (template ?? FighterTemplate.Hunter).Name, StringComparison.OrdinalIgnoreCase);
 
     /// <inheritdoc/>
     public ScenarioStatus Step(IGameSessionView session, double now)
@@ -208,7 +301,7 @@ public sealed class FighterBuildScenario : IScenario
                     }
 
                     Created = true;
-                    _log.Info(LogCategory, "created " + FighterTemplate.CharacterName);
+                    _log.Info(LogCategory, "created " + _template.Name);
                     return Go("choosing");
                 }
 
@@ -244,6 +337,48 @@ public sealed class FighterBuildScenario : IScenario
                 }
 
                 break;
+
+            case "recreate-logoff":
+                if (Settled(out var offOutcome))
+                {
+                    if (offOutcome.Kind != ActionOutcomeKind.Confirmed)
+                    {
+                        return Fail(session, "recreate: logging off to the character list", offOutcome);
+                    }
+
+                    _pending = actions.DeleteCharacter(_oldGuid, ActionSource.Host);
+                    return Go("recreate-delete");
+                }
+
+                break;
+
+            case "recreate-delete":
+                if (Settled(out var deleteOutcome))
+                {
+                    if (deleteOutcome.Kind != ActionOutcomeKind.Confirmed)
+                    {
+                        return Fail(session, "recreate: deleting the old character through the client's retail character delete", deleteOutcome);
+                    }
+
+                    return Go("recreate-verify");
+                }
+
+                break;
+
+            case "recreate-verify":
+                foreach (var listed in session.State.Characters.Entries)
+                {
+                    if (listed.Guid == _oldGuid && listed.PendingDeletion)
+                    {
+                        _recreated = true;
+                        _createTried = false;
+                        Created = false;
+                        _log.Warn(LogCategory, "recreated=yes old=pending-deletion: the old " + _template.Name + " is listed as pending deletion (restorable in ACE's window); creating the template's character");
+                        return Go("choosing");
+                    }
+                }
+
+                return Waiting(session, "the server has not listed the old character as pending deletion");
 
             case "status":
                 return StatusStep(session);
@@ -296,15 +431,20 @@ public sealed class FighterBuildScenario : IScenario
         var characters = session.State.Characters;
         foreach (var c in characters.Entries)
         {
-            if (NameCheck(c.Name))
+            if (NameCheck(c.Name, _template))
             {
                 if (c.PendingDeletion)
                 {
+                    if (_recreate)
+                    {
+                        continue; // M4 P5a C5: a re-creating run ignores the old character that is pending deletion
+                    }
+
                     return Fail(session, "choosing: the fighter is pending deletion (restore it first)");
                 }
 
                 EnteredGuid = c.Guid;
-                _log.Info(LogCategory, (Created ? "entering the character just created" : "entering the existing character") + " " + FighterTemplate.CharacterName);
+                _log.Info(LogCategory, (Created ? "entering the character just created" : "entering the existing character") + " " + _template.Name);
                 _pending = session.Actions.EnterWorld(c.Guid, ActionSource.Host);
                 return Go("entering");
             }
@@ -319,12 +459,12 @@ public sealed class FighterBuildScenario : IScenario
         {
             return Fail(
                 session,
-                string.Create(CultureInfo.InvariantCulture, $"choosing: the account has no free character slot ({characters.Entries.Count} of {characters.SlotCount} used), so {FighterTemplate.CharacterName} was not created; no other character is touched"));
+                string.Create(CultureInfo.InvariantCulture, $"choosing: the account has no free character slot ({characters.Entries.Count} of {characters.SlotCount} used), so {_template.Name} was not created; no other character is touched"));
         }
 
         _createTried = true;
-        _log.Info(LogCategory, "absent; creating " + FighterTemplate.CharacterName + " with the template's creation intent");
-        _pending = session.Actions.CreateCharacter(FighterTemplate.CreationIntent(FighterTemplate.CharacterName, _retailClasses), ActionSource.Host);
+        _log.Info(LogCategory, "absent; creating " + _template.Name + " with the template's creation intent");
+        _pending = session.Actions.CreateCharacter(_template.CreationIntent(_template.Name, _retailClasses), ActionSource.Host);
         return Go("creating");
     }
 
@@ -365,7 +505,7 @@ public sealed class FighterBuildScenario : IScenario
             return Waiting(session, "the entered character's name is not known");
         }
 
-        return NameCheck(name) ? null : Fail(session, "the entered character is not " + FighterTemplate.CharacterName + ": nothing is sent for it");
+        return NameCheck(name, _template) ? null : Fail(session, "the entered character is not " + _template.Name + ": nothing is sent for it");
     }
 
     // ------------------------------------------------------------------------------------------------ building
@@ -387,6 +527,10 @@ public sealed class FighterBuildScenario : IScenario
             }
 
             _log.Info(LogCategory, step.Label + ": confirmed" + (outcome.Detail is null ? string.Empty : " (" + outcome.Detail + ")"));
+            if (step.OnConfirmed?.Invoke() is { } problem)
+            {
+                return Fail(session, problem);
+            }
         }
 
         if (!q.IsKnown)
@@ -401,17 +545,37 @@ public sealed class FighterBuildScenario : IScenario
 
         var actions = session.Actions;
 
-        // (a) experience to level 40, once.
-        var wanted = _table.XpForLevel(FighterTemplate.TargetLevel);
-        var total = (ulong)Math.Max(0, q.TotalExperience);
-        if (total < wanted)
+        // M4 P5a C5 (owner decision D40): a character created with another attribute split than the template's gets nothing bought on top.
+        _mismatch = InnateMismatch(q);
+        if (_mismatch is not null)
         {
-            if (_xpSent)
+            if (!_recreate || _recreated)
             {
-                return Waiting(session, "the total experience is below the target level's after the xp verb");
+                return Fail(
+                    session,
+                    "building: the character's innate (creation) attributes differ from the " + _template.Name + " template (" + _mismatch + (_recreated ? "; the re-created character is wrong too" : "; run with --fighter-recreate to delete it and create the template's") + "); nothing is bought on top");
             }
 
-            if (q.Level < 1 || q.Level >= FighterTemplate.TargetLevel || _table.XpForLevel(q.Level) > total || total >= _table.XpForLevel(q.Level + 1))
+            _oldGuid = EnteredGuid;
+            _log.Warn(LogCategory, "template=mismatch:" + _mismatch + "; --fighter-recreate: logging off, deleting the old " + _template.Name + " through the retail character delete (never the mod's purge) and creating the template's");
+            _pending = actions.LogOff(ActionSource.Host);
+            return Go("recreate-logoff");
+        }
+
+        // (a) experience to the target level, once; and, for a fighter built to an earlier plan (one of its stats may sit above this plan's rank), what the plan's raises still cost beyond the experience it has to spend (M4 P5a C1c: only adds, never resets).
+        var wanted = _template.LevelXp(_table);
+        var total = (ulong)Math.Max(0, q.TotalExperience);
+        var grant = total < wanted ? wanted - total : 0UL;
+        var available = (ulong)Math.Max(0, q.AvailableExperience);
+        var needed = RemainingPlanCost(q);
+        if (needed > available + grant)
+        {
+            grant = needed - available;
+        }
+
+        if (grant > 0 && !_xpSent)
+        {
+            if (total < wanted && (q.Level < 1 || q.Level >= _template.Level || _table.XpForLevel(q.Level) > total || total >= _table.XpForLevel(q.Level + 1)))
             {
                 return Fail(
                     session,
@@ -419,19 +583,23 @@ public sealed class FighterBuildScenario : IScenario
             }
 
             _xpSent = true;
-            var amount = wanted - total;
             return Send(
-                string.Create(CultureInfo.InvariantCulture, $"xp {amount:N0} (to {wanted:N0}, level {FighterTemplate.TargetLevel}; has {total:N0})"),
-                session.Tools.AddXp((long)amount, ActionSource.Host));
+                string.Create(CultureInfo.InvariantCulture, $"xp {grant:N0} (to {Math.Max(wanted, total + grant):N0}, level {_template.Level}; has {total:N0})"),
+                session.Tools.AddXp((long)grant, ActionSource.Host));
         }
 
-        if (q.Level < FighterTemplate.TargetLevel)
+        if (total < wanted)
+        {
+            return Waiting(session, "the total experience is below the target level's after the xp verb");
+        }
+
+        if (q.Level < _template.Level)
         {
             return Waiting(session, "the level is below the target with the experience granted");
         }
 
         // (b) a template skill the read model shows untrained, with the SkillTable's credits (a partial character, or the Healing remedy).
-        foreach (var target in FighterTemplate.Targets.Where(t => t.Kind == MageStatKind.Skill))
+        foreach (var target in _template.Targets.Where(t => t.Kind == MageStatKind.Skill))
         {
             if (!q.TryGetSkill(target.Id, out var desc))
             {
@@ -462,7 +630,7 @@ public sealed class FighterBuildScenario : IScenario
         }
 
         // (c) the plan's raises, in order, each to its target ranks.
-        foreach (var target in FighterTemplate.Targets)
+        foreach (var target in _template.Targets)
         {
             if (!ReadStat(q, target, out var ranks, out var spent))
             {
@@ -500,6 +668,22 @@ public sealed class FighterBuildScenario : IScenario
             return Send(label, handle);
         }
 
+        // (c2) the profile's spellbook, in chunks the mod accepts. A ready fighter's chunks all answer known and teach nothing.
+        if (_profile is not null)
+        {
+            var ids = _profile.SpellsToLearn;
+            var first = _spellChunk * SpellChunk;
+            if (first < ids.Count)
+            {
+                var chunk = ids.Skip(first).Take(SpellChunk).ToArray();
+                var learn = session.Tools.LearnSpells(chunk, ActionSource.Host);
+                return Send(
+                    string.Create(CultureInfo.InvariantCulture, $"learn spells {first + 1}-{first + chunk.Length} of {ids.Count}"),
+                    learn,
+                    onConfirmed: () => TallySpells(learn, chunk.Length));
+            }
+        }
+
         // (d) the kit, one grant at a time.
         if (KitStep(session) is { } kit)
         {
@@ -510,6 +694,12 @@ public sealed class FighterBuildScenario : IScenario
         if (WieldStep(session) is { } wield)
         {
             return wield;
+        }
+
+        // (e2) the component stacks into the side packs, so the main pack keeps its headroom (M4 P5a C6, D41).
+        if (PackStep(session) is { } packed)
+        {
+            return packed;
         }
 
         // (f) Holtburg.
@@ -531,6 +721,29 @@ public sealed class FighterBuildScenario : IScenario
         }
 
         return Finish(session);
+    }
+
+    private string? TallySpells(ToolHandle<SpellLearnResult> handle, int asked)
+    {
+        if (handle.Result is not { } result || result.Spells.Count != asked)
+        {
+            return $"learning spells: the mod answered {handle.Result?.Spells.Count.ToString(CultureInfo.InvariantCulture) ?? "no result"} for {asked} ids";
+        }
+
+        if (!result.Ok)
+        {
+            return "learning spells: ids not in the spell table: " + string.Join(", ", result.UnknownIds);
+        }
+
+        _spellsKnown += result.Known;
+        _spellsLearned += result.Learned;
+        _spellChunk++;
+        if (result.Learned == 0)
+        {
+            _knownChunks++; // a chunk that taught nothing is a check, not a build step: a second run adds nothing
+        }
+
+        return null;
     }
 
     private ScenarioStatus Placing(IGameSessionView session)
@@ -562,9 +775,19 @@ public sealed class FighterBuildScenario : IScenario
     private ScenarioStatus Finish(IGameSessionView session)
     {
         Snapshot(session);
-        if (_kit != "ok" || _wielded != FighterKit.MaceWcid || _worn != FighterKit.Worn.Count(i => i.Role == FighterRole.Armour))
+        if (_kit != "ok" || _wielded != _template.WieldedWeaponWcid || _worn != _template.Kit.Worn.Count(i => i.Role == FighterRole.Armour))
         {
             return Fail(session, $"the build ended short of the kit: kit={_kit} wielded={_wielded} worn={_worn}");
+        }
+
+        if (FinishGear(session) is { } gearFailure)
+        {
+            return gearFailure;
+        }
+
+        if (_caster == "hand")
+        {
+            return Fail(session, "the build ended with the caster in the hand: a fighter keeps it in the pack (CasterSwap wields it for a pass)");
         }
 
         var stillWielded = FighterItems.WieldedLauncher(session.State, _scratch) is { } launcher ? "the launcher '" + launcher.Name + "'" : FighterItems.WieldedAmmunition(session.State) != 0 ? "ammunition" : null;
@@ -574,6 +797,11 @@ public sealed class FighterBuildScenario : IScenario
         }
 
         _finished = true;
+        if (BuiltSteps == 0)
+        {
+            _log.Info(LogCategory, "nothing to add: the fighter already has its level, its stats, its magic and its kit");
+        }
+
         _pending = session.Actions.LogOff(ActionSource.Host);
         return Go("logging-off");
     }
@@ -595,7 +823,7 @@ public sealed class FighterBuildScenario : IScenario
             return Waiting(session, "a held item has no world object yet");
         }
 
-        foreach (var line in FighterKit.Items)
+        foreach (var line in _gear.Items)
         {
             var have = counts.GetValueOrDefault(line.Wcid);
             var need = line.Item.Stack;
@@ -629,7 +857,7 @@ public sealed class FighterBuildScenario : IScenario
             return cleared;
         }
 
-        foreach (var line in FighterKit.Worn)
+        foreach (var line in _template.Kit.Worn)
         {
             var item = line.Item;
             var equipped = false;
@@ -678,6 +906,12 @@ public sealed class FighterBuildScenario : IScenario
                 return Waiting(session, "a kit piece is not in the pack");
             }
 
+            if (_template.Kit.Gear?.PieceOf(item.Wcid) is { } gearPiece && FighterGearCheck.Refused(_template.Kit.Gear, FighterGearCheck.ArcaneLore(state.Self.Qualities)).Contains(gearPiece))
+            {
+                // M4 P5a C6: a named refusal, never a silent skip: ACE would equip the piece and leave its spells off (WorldObject_Use.cs:205-209 at ACE 95ef426d).
+                return Fail(session, $"wielding: the {item.Name} (weenie {item.Wcid}) needs Arcane Lore {gearPiece.ItemDifficulty} and the character has {FighterGearCheck.ArcaneLore(state.Self.Qualities)?.ToString(CultureInfo.InvariantCulture) ?? "none (untrained or unknown)"}: train Arcane Lore (--fighter-recreate) before the gear");
+            }
+
             if (!_sent.Add("wield " + item.Wcid))
             {
                 return Fail(session, $"wielding: the {item.Name} was confirmed but the inventory model does not show it worn");
@@ -691,7 +925,7 @@ public sealed class FighterBuildScenario : IScenario
     }
 
     /// <summary>
-    /// M4 3.1 fix2, the repair tool for a hunter a half-done weapon swap left wielding the Shortbow: ACE refuses the Mace (<c>CheckWeaponCollision</c>, <c>Player_Inventory.cs</c>: WeenieError 0) while a launcher is wielded, so a wielded
+    /// M4 3.1 fix2, the repair tool for a hunter a half-done weapon swap left wielding the Shortbow: ACE refuses the Mace (<c>CheckWeaponCollision</c>, <c>Player_Inventory.cs:1878-2056</c> at ACE 95ef426d, the melee branch from 1962: WeenieError 0) while a launcher is wielded, so a wielded
     /// ammunition stack and then a wielded launcher are taken off into the pack, one at a time and each waited for (the ammunition first, as the hunt's restore does), before the Mace is wielded. The build ends with no launcher and
     /// no ammunition wielded. Nothing is sent when none is wielded, so a ready character still costs no step. Returns Running (a step sent, or a loud failure) or null when the slots are clear.
     /// </summary>
@@ -707,6 +941,12 @@ public sealed class FighterBuildScenario : IScenario
         if (FighterItems.WieldedLauncher(state, _scratch) is { } launcher)
         {
             return TakeOff(session, launcher.Guid, $"the wielded launcher '{launcher.Name}'");
+        }
+
+        // M4 P5a C1b: a buff pass that stopped half-way (CasterSwap) can leave the kit's caster in the hand, and ACE refuses the Mace while a Held item is wielded (CheckWeaponCollision, Player_Inventory.cs:1979-1997 at ACE 95ef426d).
+        if (_template.Kit.HasCaster && FighterItems.Find(state, _scratch, _template.Kit.CasterWcid, out var caster, out var casterWielded) && casterWielded)
+        {
+            return TakeOff(session, caster, "the wielded caster");
         }
 
         return null;
@@ -727,13 +967,13 @@ public sealed class FighterBuildScenario : IScenario
         inventory.TryGetEquipped(guid, out var e) && e.Location != 0 && (e.Location & ~(uint)item.ValidLocations) == 0;
 
     /// <summary>The guid of a worn object that is not a line of the kit and occupies a location <paramref name="item"/> would take (0 when none).</summary>
-    private static uint BlockingPiece(IGameSessionView session, GearItem item)
+    private uint BlockingPiece(IGameSessionView session, GearItem item)
     {
         var worn = session.State.Self.Inventory.Equipped;
         for (var i = 0; i < worn.Count; i++)
         {
             var e = worn[i];
-            if (e.Location == 0 || (e.Location & (uint)item.ValidLocations) == 0 || !session.State.Objects.TryGet(e.Guid, out var o) || FighterKit.ItemOf(o.Weenie.WeenieClassId) is not null)
+            if (e.Location == 0 || (e.Location & (uint)item.ValidLocations) == 0 || !session.State.Objects.TryGet(e.Guid, out var o) || _template.Kit.ItemOf(o.Weenie.WeenieClassId) is not null)
             {
                 continue;
             }
@@ -744,7 +984,176 @@ public sealed class FighterBuildScenario : IScenario
         return 0;
     }
 
+    // ------------------------------------------------------------------------------------------------ the side packs and the gear's check (M4 P5a C6)
+
+    /// <summary>
+    /// Merges the next component stack into its line's stack in a side pack, or moves it into a side pack with room (<see cref="IActionApi.MoveToPack"/>), and returns Running, or null when every line is one stack in a side pack. The kit grants the packs before the components
+    /// (<see cref="FighterKit.Items"/> order). M4 P5a fix r4: the item tool creates a top-up as a new stack ("created Gold Scarab ... in your pack"), so a rerun's top-up is merged into the line's stack in a side pack (<see cref="IActionApi.MergeStack"/>, GameAction 0x0054)
+    /// instead of taking a slot of its own; round 4's Brawler had filled three packs of 24 with its 44 lines and the reruns' fragments. A fragment already in a side pack is merged the same way, so a character built before this fix is tidied by its next build.
+    /// A ready character sends nothing. A pack with no room, or a merge or move the model does not show, fails by name.
+    /// </summary>
+    private ScenarioStatus? PackStep(IGameSessionView session)
+    {
+        var state = session.State;
+        var inventory = state.Self.Inventory;
+        if (!inventory.IsKnown || !_gear.SidePackLines.Any())
+        {
+            return null;
+        }
+
+        var componentWcids = new HashSet<uint>(_gear.SidePackLines.Select(c => c.Wcid));
+        if (MergeStep(session, componentWcids) is { } merged)
+        {
+            return merged;
+        }
+
+        foreach (var entry in inventory.Pack)
+        {
+            if (!state.Objects.TryGet(entry.Guid, out var o) || !componentWcids.Contains(o.Weenie.WeenieClassId) || inventory.Find(entry.Guid).Kind != InventoryPlaceKind.MainPack)
+            {
+                continue;
+            }
+
+            uint target = 0;
+            for (var i = 0; i < inventory.SidePacks.Count && target == 0; i++)
+            {
+                if (inventory.ItemsIn(inventory.SidePacks[i].Guid).Count < FighterKit.SidePackSlots)
+                {
+                    target = inventory.SidePacks[i].Guid;
+                }
+            }
+
+            if (target == 0)
+            {
+                return inventory.SidePacks.Count < _gear.SidePacks
+                    ? Waiting(session, "the side packs are not in the inventory model yet")
+                    : Fail(session, $"pack-full: no side pack has room for the {o.Weenie.Name} ({inventory.SidePacks.Count} side packs of {FighterKit.SidePackSlots} slots hold the {_gear.ComponentSlots} component lines; the kit carries {_gear.SidePacks})");
+            }
+
+            if (!_sent.Add("pack " + entry.Guid.ToString("X8", CultureInfo.InvariantCulture)))
+            {
+                return Fail(session, $"the side packs: the {o.Weenie.Name} was moved but the inventory model still shows it in the main pack");
+            }
+
+            return Send($"put the {o.Weenie.Name} into the side pack 0x{target:X8}", session.Actions.MoveToPack(entry.Guid, target, 0, ActionSource.Host));
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// M4 P5a fix r4: merges a component stack (in the main pack or a side pack) whole into another stack of its weenie that lies in a side pack and has room for it (the lowest guid first, so every rerun picks the same keeper), and returns Running, or null when no two stacks of a line can merge.
+    /// ACE merges a whole stack only within its MaxStackSize (<c>Player_Inventory.cs</c> <c>HandleActionStackableMerge</c>, ACE 95ef426d); a pair that would pass it stays two stacks.
+    /// </summary>
+    private ScenarioStatus? MergeStep(IGameSessionView session, HashSet<uint> componentWcids)
+    {
+        var state = session.State;
+        var inventory = state.Self.Inventory;
+        var stacks = new List<(uint Guid, uint Wcid, int Size, int Max, bool InSide)>();
+        foreach (var guid in HeldGuids(inventory))
+        {
+            if (state.Objects.TryGet(guid, out var o) && componentWcids.Contains(o.Weenie.WeenieClassId) && o.Weenie.StackSize is { } size && o.Weenie.MaxStackSize is { } max)
+            {
+                stacks.Add((guid, o.Weenie.WeenieClassId, (int)size, (int)max, inventory.Find(guid).Kind == InventoryPlaceKind.InSidePack));
+            }
+        }
+
+        foreach (var keeper in stacks.Where(k => k.InSide).OrderBy(k => k.Guid))
+        {
+            foreach (var from in stacks)
+            {
+                if (from.Wcid != keeper.Wcid || from.Guid == keeper.Guid || (from.InSide && from.Guid < keeper.Guid) || keeper.Size + from.Size > keeper.Max)
+                {
+                    continue;
+                }
+
+                var name = state.Objects.TryGet(from.Guid, out var fo) ? fo.Weenie.Name : "stack";
+                if (!_sent.Add(string.Create(CultureInfo.InvariantCulture, $"merge {from.Guid:X8} {keeper.Guid:X8}")))
+                {
+                    return Fail(session, $"the side packs: the {name} was merged but the inventory model still shows the stack 0x{from.Guid:X8}");
+                }
+
+                return Send(string.Create(CultureInfo.InvariantCulture, $"merge the {name} x {from.Size} into its stack 0x{keeper.Guid:X8} ({keeper.Size} of {keeper.Max})"), session.Actions.MergeStack(from.Guid, keeper.Guid, from.Size, ActionSource.Host));
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The guids of the items in the main pack and in every side pack.</summary>
+    private static IEnumerable<uint> HeldGuids(PlayerInventory inventory)
+    {
+        foreach (var entry in inventory.Pack)
+        {
+            yield return entry.Guid;
+        }
+
+        for (var i = 0; i < inventory.SidePacks.Count; i++)
+        {
+            foreach (var entry in inventory.ItemsIn(inventory.SidePacks[i].Guid))
+            {
+                yield return entry.Guid;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The end checks of the gear and the pack: every piece in place (a named list otherwise), the main pack inside <see cref="GearKit.PackCapacity"/> minus <see cref="FighterKit.MainPackHeadroom"/> (the loot, a bought kit and the caster swap's unwield need the slots: a full pack
+    /// refused all of them in live round 2), and the silent pieces named as <c>TODO(m4-gear-mana)</c> (a worn piece none of whose wearer spells is active: its mana ran out or it never activated; nothing recharges the items yet). Null when the build may finish.
+    /// </summary>
+    private ScenarioStatus? FinishGear(IGameSessionView session)
+    {
+        if (_pack > GearKit.PackCapacity - FighterKit.MainPackHeadroom)
+        {
+            return Fail(session, $"pack-full: the main pack holds {_pack} of {GearKit.PackCapacity} items; the build keeps at least {FighterKit.MainPackHeadroom} slots free after the kit, so {GearKit.PackCapacity - FighterKit.MainPackHeadroom} is the most (the old loot is the cause: re-create the fighter or clear the pack)");
+        }
+
+        if (_gearReading is not { } reading)
+        {
+            return null;
+        }
+
+        if (!reading.Complete)
+        {
+            return Fail(session, $"the build ended short of the gear: gear={reading.Worn}/{reading.Total}, missing {string.Join(", ", reading.Short.Select(p => p.Name + " (weenie " + p.Wcid + ")"))}");
+        }
+
+        if (!_gearNoted)
+        {
+            _gearNoted = true;
+            foreach (var piece in reading.Silent)
+            {
+                _log.Warn(LogCategory, $"TODO(m4-gear-mana): the {piece.Name} (weenie {piece.Wcid}) is worn but none of its wearer spells is active: its mana ({piece.ItemMana}, {piece.ManaHours:0.#} h at its rate) ran out or it never activated; nothing recharges gear yet (mana stones or a re-grant come later)");
+            }
+
+            _log.Info(LogCategory, $"gear: {reading.Worn}/{reading.Total} in place, gear_magic={reading.Magic}, spells_active={reading.SpellsField}, pack={_pack}/{GearKit.PackCapacity}");
+        }
+
+        return null;
+    }
+
     // ------------------------------------------------------------------------------------------------ the record
+
+    private static readonly string[] AttributeNames = ["Strength", "Endurance", "Quickness", "Coordination", "Focus", "Self"];
+
+    /// <summary>The first attribute whose creation value is not the template's, as <c>Name have/want</c>, or null when the six match (or the attributes are not known).</summary>
+    private string? InnateMismatch(PlayerQualities q)
+    {
+        if (!q.IsKnown)
+        {
+            return null;
+        }
+
+        for (uint id = FighterTemplate.Strength; id <= FighterTemplate.Self; id++)
+        {
+            if (q.TryGetAttribute(id, out var attribute) && attribute.Start != _template.CreationValue(id))
+            {
+                return string.Create(CultureInfo.InvariantCulture, $"{AttributeNames[id - 1]} {attribute.Start}/{_template.CreationValue(id)}");
+            }
+        }
+
+        return null;
+    }
 
     private void Snapshot(IGameSessionView session)
     {
@@ -752,8 +1161,19 @@ public sealed class FighterBuildScenario : IScenario
         var q = state.Self.Qualities;
         if (q.IsKnown)
         {
+            _mismatch = InnateMismatch(q);
             _level = q.Level;
-            _check = FighterTemplate.IsMet(q);
+            _check = _template.IsMet(q);
+            if (_template.HasMagic)
+            {
+                // M4 P5a C1c (D38): the verdict names the schools the character has trained, in skill id order (creature, item, life).
+                var trained = _template.TrainedLater.Where(id => q.TryGetSkill(id, out var skill) && skill.AdvancementClass >= HeadlessCharacter.TrainedSkill).ToArray();
+                _magic = (trained.Length == _template.TrainedLater.Count ? "trained" : "short") + ":" + (trained.Length == 0 ? "none" : string.Join('+', trained.Select(SchoolShortName)));
+            }
+            else
+            {
+                _magic = "none";
+            }
         }
 
         var inventory = state.Self.Inventory;
@@ -764,7 +1184,7 @@ public sealed class FighterBuildScenario : IScenario
 
         var counts = GearInventory.CountAll(state, out _);
         var short_ = new List<string>();
-        foreach (var line in FighterKit.Items)
+        foreach (var line in _gear.Items)
         {
             var have = counts.GetValueOrDefault(line.Wcid);
             if (have < line.Item.Stack)
@@ -774,11 +1194,12 @@ public sealed class FighterBuildScenario : IScenario
         }
 
         _kit = short_.Count == 0 ? "ok" : string.Join(',', short_);
+        _caster = !_template.Kit.HasCaster ? "n/a" : FighterItems.Find(state, _scratch, _template.Kit.CasterWcid, out _, out var casterEquipped) ? (casterEquipped ? "hand" : "pack") : "none";
         _wielded = 0;
         _worn = 0;
         var wornArmour = new List<uint>();
         GearInventory.Collect(state, _scratch);
-        foreach (var line in FighterKit.Worn)
+        foreach (var line in _template.Kit.Worn)
         {
             for (var i = 0; i < _scratch.Count; i++)
             {
@@ -798,7 +1219,27 @@ public sealed class FighterBuildScenario : IScenario
             }
         }
 
-        _worn = FighterKit.CountWornArmour(wornArmour);
+        _worn = _template.Kit.CountWornArmour(wornArmour);
+        _pack = inventory.Pack.Count;
+        if (_template.Kit.Gear is { } gearSet)
+        {
+            _gearReading = FighterGearCheck.Read(state, gearSet, _spellInfos, _scratch);
+        }
+    }
+
+    /// <summary>The experience every raise of the plan still costs from the read model's spent experience (a stat at or above its target costs nothing; a stat the description lacks is left to the raise step to fail by name).</summary>
+    private ulong RemainingPlanCost(PlayerQualities q)
+    {
+        ulong sum = 0;
+        foreach (var target in _template.Targets)
+        {
+            if (ReadStat(q, target, out var ranks, out var spent) && ranks < target.Ranks)
+            {
+                sum += target.XpRemaining(_table, spent);
+            }
+        }
+
+        return sum;
     }
 
     private static bool ReadStat(PlayerQualities q, StatTarget target, out int ranks, out uint spent)
@@ -835,12 +1276,12 @@ public sealed class FighterBuildScenario : IScenario
 
     // ------------------------------------------------------------------------------------------------ plumbing
 
-    private ScenarioStatus Send(string label, ActionHandle handle)
+    private ScenarioStatus Send(string label, ActionHandle handle, Func<string?>? onConfirmed = null)
     {
         _wait.Reset();
         _log.Info(LogCategory, label);
         _steps.Add(label);
-        _inFlight = new InFlight(label, handle);
+        _inFlight = new InFlight(label, handle, onConfirmed);
         return ScenarioStatus.Running;
     }
 
@@ -884,5 +1325,5 @@ public sealed class FighterBuildScenario : IScenario
         return ScenarioStatus.Failed;
     }
 
-    private sealed record InFlight(string Label, ActionHandle Handle);
+    private sealed record InFlight(string Label, ActionHandle Handle, Func<string?>? OnConfirmed = null);
 }

@@ -59,11 +59,31 @@ public sealed partial class HuntScenario : IScenario
     /// <summary>The most busy refusals one recovery answers with a wait; the next counts as a refusal like any other.</summary>
     public const int MaxHealBusyRetries = 10;
 
+    /// <summary>
+    /// The wait before an Attack that ACE refused as busy is sent again at the same target, in seconds. ACE refuses a targeted attack while the player is busy (<c>Player_Melee.cs</c> 68-70 and <c>Player_Missile.cs</c> 59 @95ef426d:
+    /// <c>IsBusy</c>, a teleport or a suicide), which a pick-up's motion or the corpse's close just before leaves set for a moment: not a refusal of the target. P5a round 3: the level-55 Brawler's hunt excluded 8 live creatures this
+    /// way and ran the belt dry ("no creature of the table in the band"). Not retail: Lifestone's own bound.
+    /// </summary>
+    public const double AttackBusyRetrySeconds = 1;
+
+    /// <summary>The most busy refusals one target answers with a wait (<c>busy_retries=</c> counts them); the next excludes the target like any other refusal.</summary>
+    public const int MaxAttackBusyRetries = 4;
+
     /// <summary>How often the Healing skill's value is read again, in seconds (the read may allocate while enchantments are on).</summary>
     public const double SkillRefreshSeconds = 5;
 
-    /// <summary>The health fraction under which a fight is abandoned.</summary>
+    /// <summary>The health fraction under which a melee fight is abandoned.</summary>
     public const float RetreatShare = 0.3f;
+
+    /// <summary>
+    /// The health fraction under which a missile fight is abandoned (M4 P4 sfix, <c>TODO(m4-archer-retreat)</c> closed in part): the archer has 199 health and an Olthoi Nymph of level 30 hits for about 67, a third of it, so two blows left it at 32%, over
+    /// <see cref="RetreatShare"/>, and the third killed it (proof-per-test.log, MissileLiveTests). At 50% the second blow ends the fight and the hunt places the player back, with the shooter's 20 m between it and the next blow.
+    /// </summary>
+    public const float MissileRetreatShare = 0.5f;
+
+    /// <summary>The retreat line of a hunt with <paramref name="weapon"/>.</summary>
+    /// <param name="weapon">The hunt's weapon.</param>
+    public static float RetreatShareFor(HuntWeapon weapon) => weapon == HuntWeapon.Missile ? MissileRetreatShare : RetreatShare;
 
     /// <summary>The distance within which a listed melee target is looked for, in metres.</summary>
     public const float MeleeRange = 60f;
@@ -73,6 +93,28 @@ public sealed partial class HuntScenario : IScenario
 
     /// <summary>The most cells the hunt stands in before it fails for want of a listed creature in the band.</summary>
     public const int MaxCells = 4;
+
+    /// <summary>
+    /// The environment misses in a row (no hit or evade between) after which a missile hunt cancels the attack and walks on (M4 P4 bow): ACE launches a real projectile and
+    /// auto-repeats from one MissileAttack, so a trunk between the shooter and the target is hit again and again (the live forest run: 104 arrows, no hit). The shape of M3's
+    /// <see cref="FightScenario.MissesBeforeWalking"/>; the count is fixed, not an option.
+    /// </summary>
+    public const int BlockedBeforeWalking = 3;
+
+    /// <summary>
+    /// How far from the ground's current cell the hunt looks for a creature it already knows when none is in the acquire range (M4 P4 seek), in metres: the client holds the 3x3 landblocks around the player, and the
+    /// seek never takes the hunt off its ground.
+    /// </summary>
+    public const float SeekRadiusMetres = 250f;
+
+    /// <summary>The most seeks in one run (each creature at most once; a run that keeps seeking without a fight falls back to the cells).</summary>
+    public const int MaxSeeks = 8;
+
+    /// <summary>The distance a missile seek stands from its creature, in metres.</summary>
+    public const float MissileSeekMetres = 20f;
+
+    /// <summary>The distance a melee seek stands from its creature, in metres.</summary>
+    public const float MeleeSeekMetres = 3f;
 
     /// <summary>The settle after an arrival, in seconds on the session clock.</summary>
     public const double SettleSeconds = 3;
@@ -115,6 +157,7 @@ public sealed partial class HuntScenario : IScenario
     public const float AttackBar = 0.5f;
 
     private readonly HuntOptions _options;
+    private readonly FighterTemplate _template;
     private readonly ILogSink _log;
     private readonly Func<HuntCell, float?> _groundHeight;
     private readonly HuntGroundRow _ground;
@@ -123,6 +166,16 @@ public sealed partial class HuntScenario : IScenario
     private readonly uint _holtburgLandblock;
     private readonly HuntTally _tally = new();
     private readonly List<uint> _excluded = [];
+    private readonly List<uint> _blockedHere = [];
+    private readonly List<uint> _seekTried = [];
+    private GlobalPosition _anchor;
+    private int _seeks;
+    private bool _clearLineTodoLogged;
+    private bool _seekTodoLogged;
+    private int _blockedWalks;
+
+    /// <summary>The times the walk-on rule fired (<see cref="BlockedBeforeWalking"/> environment misses in a row).</summary>
+    public int BlockedWalks => _blockedWalks;
     private readonly List<uint> _scratch = [];
     private readonly HashSet<string> _sent = [];
     private readonly ReasonTimer _wait = new(WaitSeconds);
@@ -163,6 +216,12 @@ public sealed partial class HuntScenario : IScenario
     private int _kitRefusals;
     private double _busyUntil;
     private int _busyRetries;
+    private double _attackBusyUntil = double.NaN;
+    private int _attackBusyRetries;
+    private int _attackBusyTotal;
+    private long _damageAtTarget;
+    private int _oneBlowKills;
+    private bool _oneBlowLogged;
     private int _potionRefusals;
     private bool _kitOff;
     private bool _potionOff;
@@ -227,16 +286,35 @@ public sealed partial class HuntScenario : IScenario
     /// <param name="log">Where the scenario logs.</param>
     /// <param name="groundHeight">The terrain height at a cell's centre (<see cref="HuntGround.TerrainHeight"/> over the dats), or null when unknown: the hunt will not go to a cell it has no height for.</param>
     /// <param name="ground">The ground to hunt (default <see cref="HuntGround.LowB"/>; <see cref="HuntOptions.GroundRow"/> is the <c>--hunt-ground</c> choice); a row that is not <see cref="HuntGroundRow.InUse"/> is refused.</param>
+    /// <param name="template">The fighter being hunted with (default <see cref="FighterTemplate.Hunter"/>): its name is the character entered, its kit decides the weapon swap and the restore; a weapon its kit has none of is refused.</param>
     /// <param name="arrivalSeconds">The limit on the arrival after Enter.</param>
     /// <param name="follow">The client's own body, headless (<see cref="HuntFollow"/>): it follows the server's MoveTo of the approach and reports its positions, as retail's client physics does; null in the game (the player controller's walker already does it) and in hosts without physics, where the distance is the session's.</param>
     /// <param name="endSession">False for a host that logs off itself (a leg of the login check, the offline stand-in, which refuses the log off and the quit): the run ends at the return.</param>
-    public HuntScenario(HuntOptions options, ILogSink log, Func<HuntCell, float?> groundHeight, HuntGroundRow? ground = null, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, IHuntFollow? follow = null)
+    public HuntScenario(HuntOptions options, ILogSink log, Func<HuntCell, float?> groundHeight, HuntGroundRow? ground = null, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, IHuntFollow? follow = null, FighterTemplate? template = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(groundHeight);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(arrivalSeconds);
+        _template = template ?? FighterTemplate.Hunter;
+        if (!_template.CanHuntWith(options.Weapon))
+        {
+            throw new ArgumentException($"--hunt-weapon: the {_template.Key} fighter has no {(options.Weapon == HuntWeapon.Missile ? "bow" : "melee weapon")} in its kit", nameof(options));
+        }
+
         _ground = ground ?? HuntGround.LowB;
+        if (_template.TargetBand is { } band && ReferenceEquals(_ground, _template.DefaultGround == HuntGroundChoice.Belt ? HuntGround.LowB : HuntGround.LowNorthForestMix))
+        {
+            _ground = _ground with { MinLevel = band.Min, MaxLevel = band.Max };
+            log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"ground: the {_template.Key} fighter takes the band {_ground.MinLevel}-{_ground.MaxLevel} of {_ground.Name} (its template's band)"));
+        }
+
+        if (_template.AvoidedTargets.Count > 0)
+        {
+            _ground = _ground with { Table = [.. _ground.Table.Where(c => !_template.AvoidedTargets.Contains(c.Wcid))] };
+            log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"ground: the {_template.Key} fighter never picks {_template.AvoidedTargets.Count} creature(s) of the table (its template's avoided targets: they resist its weapon)"));
+        }
+
         if (!_ground.InUse)
         {
             throw new ArgumentException($"TODO(m4-hunt-ground-unused): the ground '{_ground.Name}' is not in use (HuntGroundRow.InUse is false)", nameof(ground));
@@ -253,6 +331,12 @@ public sealed partial class HuntScenario : IScenario
         _holtburg = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
         _holtburgLandblock = _holtburg.Location.Position.CellId >> 16;
     }
+
+    /// <summary>
+    /// The height of a dry, walkable point (the landblock of the cell id, x, y within it), or null when it is water, steep or unread (<see cref="HuntGround.SeekHeight"/> over the dats). Null (the default): the hunt never
+    /// seeks and keeps to its fixed cells.
+    /// </summary>
+    public Func<uint, float, float, float?>? SeekHeight { get; init; }
 
     /// <inheritdoc/>
     public string Name => ScenarioName;
@@ -341,6 +425,12 @@ public sealed partial class HuntScenario : IScenario
     /// <summary>The kills' corpses whose open was Confirmed (<c>corpses_opened</c>; M4 2.1 s4a).</summary>
     public int CorpsesOpened => _corpsesOpened;
 
+    /// <summary>
+    /// The kills of a target that took no damage line before it died (<c>one_blow_kills</c>; P5a round 3): ACE writes the attacker's damage notice only while the target lives (<c>Player_Combat.cs</c> 157 @95ef426d:
+    /// <c>damageEvent.HasDamage &amp;&amp; target.IsAlive</c>), so a lethal first blow is seen only by its kill notice (01AD). A level-55 fighter kills every belt creature this way.
+    /// </summary>
+    public int OneBlowKills => _oneBlowKills;
+
     /// <summary>The entries the opened corpses showed, summed (<c>corpse_items</c>).</summary>
     public int CorpseItems => _corpseItems;
 
@@ -362,12 +452,12 @@ public sealed partial class HuntScenario : IScenario
 
     /// <summary>The run's own facts, beside the verdict: the weapon, the bind, the health (report-only start and end), the cells and the sends.</summary>
     public string DetailFields() =>
-        string.Create(CultureInfo.InvariantCulture, $"weapon={_options.Weapon.ToString().ToLowerInvariant()} bound={(_bound ? "yes" : "no")} potions={_healTally.Potions} heal_failed_rolls={_healTally.FailedRolls} heal_points={_healTally.Points} heal_wasted={_healTally.Wasted} cells={_cellsTried} attacks={_attacks} refused={_refused} restored={(Restored ? "yes" : "no")} stalls={_stalls} charge_retries={_chargeRetriesTotal} corpses_missed={_corpsesMissed} corpses_refused={_corpsesRefused} looted={_tally.Looted} loot_skipped={_tally.LootSkipped} health_start_pct={Pct(_healthBefore)} health_end_pct={Pct(_healthLast)} {VendorFields()}");
+        string.Create(CultureInfo.InvariantCulture, $"weapon={_options.Weapon.ToString().ToLowerInvariant()} bound={(_bound ? "yes" : "no")} potions={_healTally.Potions} heal_failed_rolls={_healTally.FailedRolls} heal_points={_healTally.Points} heal_wasted={_healTally.Wasted} cells={_cellsTried} attacks={_attacks} refused={_refused} busy_retries={_attackBusyTotal} one_blow_kills={_oneBlowKills} restored={(Restored ? "yes" : "no")} stalls={_stalls} charge_retries={_chargeRetriesTotal} corpses_missed={_corpsesMissed} corpses_refused={_corpsesRefused} looted={_tally.Looted} loot_skipped={_tally.LootSkipped} health_start_pct={Pct(_healthBefore)} health_end_pct={Pct(_healthLast)} {VendorFields()}");
 
     private static string Pct(double share) => double.IsNaN(share) ? "n/a" : (share * 100).ToString("0", CultureInfo.InvariantCulture);
 
     /// <summary>True when <paramref name="name"/> is the fighter template's character.</summary>
-    public static bool NameCheck(string? name) => FighterBuildScenario.NameCheck(name);
+    public static bool NameCheck(string? name, FighterTemplate? template = null) => FighterBuildScenario.NameCheck(name, template);
 
     /// <inheritdoc/>
     public ScenarioStatus Step(IGameSessionView session, double now)
@@ -392,6 +482,7 @@ public sealed partial class HuntScenario : IScenario
         {
             _attached = true;
             _tally.Start(session);
+            _tally.OutcomeLogged = line => _log.Info(LogCategory, line);
             _subscriptions.Add(session.Events.Subscribe<ObjectMoved>(OnMoved));
             _subscriptions.Add(session.Events.Subscribe<AttackChanged>(OnAttackChanged));
             _subscriptions.Add(session.Events.Subscribe<ChatReceived>(OnChat));
@@ -537,7 +628,7 @@ public sealed partial class HuntScenario : IScenario
     {
         foreach (var c in session.State.Characters.Entries)
         {
-            if (NameCheck(c.Name))
+            if (NameCheck(c.Name, _template))
             {
                 if (c.PendingDeletion)
                 {
@@ -545,13 +636,13 @@ public sealed partial class HuntScenario : IScenario
                 }
 
                 EnteredGuid = c.Guid;
-                _log.Info(LogCategory, "entering the existing character " + FighterTemplate.CharacterName);
+                _log.Info(LogCategory, "entering the existing character " + _template.Name);
                 _pending = session.Actions.EnterWorld(c.Guid, ActionSource.Host);
                 return Enter("entering");
             }
         }
 
-        return Fail(session, "choosing: " + FighterTemplate.CharacterName + " is not in the character list (run --scenario=fighter-build first; the hunt creates nobody)");
+        return Fail(session, "choosing: " + _template.Name + " is not in the character list (run --scenario=fighter-build first; the hunt creates nobody)");
     }
 
     private ScenarioStatus NameStep(IGameSessionView session)
@@ -567,17 +658,17 @@ public sealed partial class HuntScenario : IScenario
             return ScenarioStatus.Running;
         }
 
-        if (!NameCheck(name))
+        if (!NameCheck(name, _template))
         {
             _fighter = "wrong";
-            return Fail(session, "the entered character is not " + FighterTemplate.CharacterName + ": nothing is sent for it");
+            return Fail(session, "the entered character is not " + _template.Name + ": nothing is sent for it");
         }
 
         _fighter = "ok";
         _acting = true;
         _wait.Reset();
         _log.Info(LogCategory, $"the hunt is {_options}; ground {_ground.Name}: {_cells.Count} usable cell(s) of {_ground.Cells.Count}");
-        _log.Info(LogCategory, $"recovery: {_options.Recovery}; checked before the first fight and between kills, never during a fight: the retreat at {RetreatShare * 100:0}% health ends a fight (TODO(m4-hunt-infight-heal))");
+        _log.Info(LogCategory, $"recovery: {_options.Recovery}; checked before the first fight and between kills, never during a fight: the retreat at {RetreatShareFor(_options.Weapon) * 100:0}% health ends a fight (TODO(m4-hunt-infight-heal))");
         if (_cells.Count == 0)
         {
             return Fail(session, "the ground has no usable cell (TODO(m4-belt-cell-terrain): every cell reads water or steep)");
@@ -1020,22 +1111,39 @@ public sealed partial class HuntScenario : IScenario
         // M4 3.1 fix2: the lookup lets an equipped instance win over a pack copy of its class (the loot adds duplicates; the gate's first hunter test waited for ever on a second Shortbow in the pack).
         // The label names the guid, so the same step on another instance is a new step and the same step on the same instance is never sent twice.
         var state = session.State;
-        if (FighterItems.Find(state, _scratch, FighterKit.MaceWcid, out var mace, out var maceWielded) && maceWielded)
+        if (FighterItems.Find(state, _scratch, _template.Kit.WeaponWcid, out var mace, out var maceWielded) && maceWielded)
         {
             _swapped = true;
             _maceAside = mace;
             return Send(session, $"the Mace to the pack (ACE refuses the bow while it is wielded) 0x{mace:X8}", session.Actions.MoveToPack(mace, source: ActionSource.Host), "swap", fatal: true);
         }
 
-        if (!FighterItems.Find(state, _scratch, FighterKit.ShortbowWcid, out var bow, out var bowWielded))
+        // M4 P4 arch: the kit's launcher and ammunition, never the other template's or an older build's (an Archer built before holds the Shortbow and the Arrows beside the Longbow and the Greater Frost
+        // Arrows): the lookup is by the kit's wcid, so both held means the kit's is chosen; a wielded launcher or ammunition of another class goes to the pack first (ammunition first).
+        var launcherWcid = _template.Kit.LauncherWcid;
+        var launcherName = _template.Kit.ItemOf(launcherWcid)?.Item.Name ?? "launcher";
+        var ammoWcid = _template.Kit.AmmoWcid;
+        var strayAmmo = FighterItems.WieldedAmmunition(state);
+        if (strayAmmo != 0 && state.Objects.TryGet(strayAmmo, out var strayAmmoObject) && strayAmmoObject.Weenie.WeenieClassId != ammoWcid)
         {
-            return Fail(session, "swap: the Shortbow is not in the pack (run --scenario=fighter-build first)");
+            return Send(session, $"the other ammunition (weenie {strayAmmoObject.Weenie.WeenieClassId}) 0x{strayAmmo:X8} to the pack (the kit's is weenie {ammoWcid})", session.Actions.MoveToPack(strayAmmo, source: ActionSource.Host), "swap", fatal: true);
+        }
+
+        if (FighterItems.WieldedLauncher(state, _scratch) is { } strayLauncher && strayLauncher.Weenie.WeenieClassId != launcherWcid)
+        {
+            _swapped = true;
+            return Send(session, $"the other launcher (weenie {strayLauncher.Weenie.WeenieClassId}) 0x{strayLauncher.Guid:X8} to the pack (the kit's is weenie {launcherWcid})", session.Actions.MoveToPack(strayLauncher.Guid, source: ActionSource.Host), "swap", fatal: true);
+        }
+
+        if (!FighterItems.Find(state, _scratch, launcherWcid, out var bow, out var bowWielded))
+        {
+            return Fail(session, $"swap: the {launcherName} is not in the pack (run --scenario=fighter-build first)");
         }
 
         if (!bowWielded)
         {
             _swapped = true;
-            return Send(session, $"wield the Shortbow 0x{bow:X8}", session.Actions.Wield(bow, EquipMask.MissileWeapon, ActionSource.Host), "swap", fatal: true);
+            return Send(session, $"wield the {launcherName} 0x{bow:X8}", session.Actions.Wield(bow, EquipMask.MissileWeapon, ActionSource.Host), "swap", fatal: true);
         }
 
         // Live round 3: the fighter-build top-up had added arrows as a second stack, and the wield of the first one found was never seen in the read model. Every Arrow stack is merged into the largest, which is
@@ -1043,7 +1151,7 @@ public sealed partial class HuntScenario : IScenario
         var stacks = ArrowStacks(session);
         if (stacks.Count == 0)
         {
-            return Fail(session, "swap: the Arrows are not in the pack (run --scenario=fighter-build first)");
+            return Fail(session, "swap: the ammunition (the kit's weenie " + _template.Kit.AmmoWcid + ") is not in the pack (run --scenario=fighter-build first)");
         }
 
         var largest = stacks[0];
@@ -1076,7 +1184,7 @@ public sealed partial class HuntScenario : IScenario
             return Send(session, $"wield the Arrows 0x{largest.Guid:X8} ({largest.Size})", session.Actions.Wield(largest.Guid, EquipMask.MissileAmmo, ActionSource.Host), "swap", fatal: true);
         }
 
-        _log.Info(LogCategory, "swap: the Shortbow and the Arrows are wielded");
+        _log.Info(LogCategory, $"swap: the {launcherName} and the ammunition (weenie {ammoWcid}) are wielded");
         return Enter("ground");
     }
 
@@ -1099,11 +1207,18 @@ public sealed partial class HuntScenario : IScenario
 
         if (FighterItems.WieldedLauncher(state, _scratch) is { } launcher)
         {
-            var name = launcher.Weenie.WeenieClassId == FighterKit.ShortbowWcid ? "the Shortbow" : $"the launcher '{launcher.Name}'";
+            var name = launcher.Weenie.WeenieClassId == _template.Kit.LauncherWcid ? $"the {_template.Kit.ItemOf(_template.Kit.LauncherWcid)!.Item.Name}" : $"the launcher '{launcher.Name}'";
             return Send(session, $"{name} to the pack 0x{launcher.Guid:X8}", session.Actions.MoveToPack(launcher.Guid, source: ActionSource.Host), "wind-restore", fatal: false);
         }
 
-        if (!FighterItems.Find(state, _scratch, FighterKit.MaceWcid, out var mace, out var maceWielded, _maceAside))
+        if (!_template.Kit.HasMelee)
+        {
+            Restored = true;
+            _log.Info(LogCategory, $"restore: the {_template.Key} template has no melee weapon; no launcher and no ammunition are wielded");
+            return Enter("wind-home");
+        }
+
+        if (!FighterItems.Find(state, _scratch, _template.Kit.WeaponWcid, out var mace, out var maceWielded, _maceAside))
         {
             if (_swapped)
             {
@@ -1138,7 +1253,7 @@ public sealed partial class HuntScenario : IScenario
         var stacks = new List<ArrowStack>();
         foreach (var guid in _scratch)
         {
-            if (state.Objects.TryGet(guid, out var o) && o.Weenie.WeenieClassId == FighterKit.ArrowWcid)
+            if (state.Objects.TryGet(guid, out var o) && o.Weenie.WeenieClassId == _template.Kit.AmmoWcid)
             {
                 var size = state.Self.Inventory.TryGetStack(guid, out var known, out _) ? known : o.Weenie.StackSize ?? 1u;
                 stacks.Add(new ArrowStack(guid, size, o.Weenie.MaxStackSize, state.Self.Inventory.Find(guid).Kind == InventoryPlaceKind.Equipped));
@@ -1229,6 +1344,7 @@ public sealed partial class HuntScenario : IScenario
     /// <summary>Sends the player to the next usable cell that has a height; null when none is left.</summary>
     private ScenarioStatus? NextCell(IGameSessionView session)
     {
+        _blockedHere.Clear(); // a blocked target is skipped in its cell only
         while (++_cellIndex < _cells.Count)
         {
             var cell = _cells[_cellIndex];
@@ -1239,6 +1355,7 @@ public sealed partial class HuntScenario : IScenario
             }
 
             var point = HuntGround.PlacePoint(cell, height);
+            _anchor = AcCoordinates.ToGlobal(new CellPosition(cell.CellId, point));
             var name = "hunt cell 0x" + cell.CellId.ToString("X8", CultureInfo.InvariantCulture);
             var destination = new TeleportDestination(name, [], new WorldLocation(name, new CellPosition(cell.CellId, point), HasHeight: true, HeadingDegrees: 0), "hunt ground");
             _cellsTried++;
@@ -1260,9 +1377,20 @@ public sealed partial class HuntScenario : IScenario
 
         var missile = _options.Weapon == HuntWeapon.Missile;
         var listed = missile ? MissileRange : MeleeRange;
+        if (missile && !_clearLineTodoLogged)
+        {
+            _clearLineTodoLogged = true;
+            _log.Warn(LogCategory, "acquire: TODO(m4-missile-clear-line): the missile pick takes the nearest creature with no check of the line to it (M3's sweep, GameFightWalk.HasClearLine, needs the game host's physics world, which the hunt does not hold); a blocked shooter walks on after " + BlockedBeforeWalking.ToString(CultureInfo.InvariantCulture) + " environment misses in a row");
+        }
+
         if (Pick(session, listed, out var guid))
         {
             return Chosen(session, guid);
+        }
+
+        if (SeekHeight is not null && _seeks < MaxSeeks && TrySeek(session, missile))
+        {
+            return ScenarioStatus.Running;
         }
 
         if (_cellsTried < MaxCells && _cellIndex + 1 < _cells.Count)
@@ -1274,19 +1402,99 @@ public sealed partial class HuntScenario : IScenario
         return Fail(session, string.Create(CultureInfo.InvariantCulture, $"acquire: no creature of the table in the band {_ground.MinLevel}-{_ground.MaxLevel} within {listed:0} m of the player after {_cellsTried} cell(s) ({_ground.Table.Count} creatures are listed; an unlisted creature is never a target)"));
     }
 
+    /// <summary>
+    /// The seek (M4 P4 seek): nothing of the band is in the acquire range, but the client holds every creature ACE sent it (the 3x3 landblocks around the player). The nearest creature of the ground's table in its band,
+    /// outdoors and within <see cref="SeekRadiusMetres"/> of the ground's current cell, that this run has not sought, is gone to: <c>place loc</c> to a dry point at the weapon's distance from it (the side the player is
+    /// on first, then around it), facing it, then the acquire runs as ever. A creature with no dry point is skipped. False when there is none (the fixed cells follow).
+    /// </summary>
+    private bool TrySeek(IGameSessionView session, bool missile)
+    {
+        if (session.State.Self.Position is not { } here)
+        {
+            return false;
+        }
+
+        var objects = session.State.Objects;
+        var skipped = new List<uint>();
+        var distance = missile ? MissileSeekMetres : MeleeSeekMetres;
+        var origin = here.ToGlobal();
+        while (true)
+        {
+            int? LevelOf(uint candidate)
+            {
+                if (_excluded.Contains(candidate) || _blockedHere.Contains(candidate) || _seekTried.Contains(candidate) || skipped.Contains(candidate) || !objects.TryGet(candidate, out var o)
+                    || o.Position is not { } p || !p.IsOutdoor || Horizontal(p.ToGlobal(), _anchor) > SeekRadiusMetres)
+                {
+                    return null;
+                }
+
+                return _ground.LevelOf(o.Weenie.WeenieClassId);
+            }
+
+            if (!objects.NearestCreature(in here, SeekRadiusMetres * 2, 0, null, _ground.MinLevel, _ground.MaxLevel, LevelOf, out var guid) || !objects.TryGet(guid, out var target) || target.Position is not { } at)
+            {
+                return false;
+            }
+
+            var goal = at.ToGlobal();
+            var away = new Vector2((float)(origin.X - goal.X), (float)(origin.Y - goal.Y));
+            away = away.LengthSquared() < 1e-4f ? new Vector2(0, -1) : Vector2.Normalize(away);
+            foreach (var turn in SeekTurns)
+            {
+                var (sin, cos) = MathF.SinCos(turn * (MathF.PI / 180f));
+                var direction = new Vector2((away.X * cos) - (away.Y * sin), (away.X * sin) + (away.Y * cos));
+                var spot = new GlobalPosition(goal.X + (direction.X * distance), goal.Y + (direction.Y * distance), 0);
+                if (!AcCoordinates.TryGetOutdoorCell(spot, out var cell) || SeekHeight!(cell.CellId, cell.Local.X, cell.Local.Y) is not { } height)
+                {
+                    continue;
+                }
+
+                var point = new Vector3(cell.Local.X, cell.Local.Y, height + 0.5f);
+                var heading = AcCoordinates.HeadingOf(goal.X - spot.X, goal.Y - spot.Y);
+                var name = "hunt seek 0x" + cell.CellId.ToString("X8", CultureInfo.InvariantCulture);
+                var destination = new TeleportDestination(name, [], new WorldLocation(name, new CellPosition(cell.CellId, point), HasHeight: true, HeadingDegrees: heading), "hunt seek");
+                if (!_seekTodoLogged)
+                {
+                    _seekTodoLogged = true;
+                    _log.Warn(LogCategory, "seek: TODO(m4-seek-terrain-only): the point is chosen from the dats' terrain only (water and slope); a building, a static object or the creature's own position can be in the way, and place loc is not told (the bow's walk-on and the next seek cover a blocked spot)");
+                }
+
+                _seekTried.Add(guid);
+                _seeks++;
+                _tally.NoteSeek();
+                _leftHome = true;
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"seek: '{target.Name}' level {_ground.LevelOf(target.Weenie.WeenieClassId) ?? 0} at {Horizontal(goal, origin):0} m; place loc to {point.X:0.#},{point.Y:0.#} in 0x{cell.CellId:X8} ({distance:0.#} m from it)"));
+                BeginPlace(session, destination, "acquire-settle", home: false);
+                return true;
+            }
+
+            _log.Warn(LogCategory, $"seek: '{target.Name}' 0x{guid:X8} has no dry walkable point at {distance:0.#} m around it; skipped");
+            skipped.Add(guid);
+        }
+    }
+
+    /// <summary>The angles around a creature the seek tries for a dry point, in degrees from the side the player is on.</summary>
+    private static readonly float[] SeekTurns = [0f, 45f, -45f, 90f, -90f, 135f, -135f, 180f];
+
+    private static double Horizontal(GlobalPosition a, GlobalPosition b) => Math.Sqrt(((a.X - b.X) * (a.X - b.X)) + ((a.Y - b.Y) * (a.Y - b.Y)));
+
     /// <summary>The nearest creature of the ground's table in its level band: the level is the table's by weenie class id; a refused target is excluded apart from the level.</summary>
     private bool Pick(IGameSessionView session, float range, out uint guid)
     {
         guid = 0;
         var objects = session.State.Objects;
-        int? LevelOf(uint candidate) => _excluded.Contains(candidate) ? null : objects.TryGet(candidate, out var o) ? _ground.LevelOf(o.Weenie.WeenieClassId) : null;
+        int? LevelOf(uint candidate) => _excluded.Contains(candidate) || _blockedHere.Contains(candidate) ? null : objects.TryGet(candidate, out var o) ? _ground.LevelOf(o.Weenie.WeenieClassId) : null;
         return session.State.Self.Position is { } here && objects.NearestCreature(in here, range, 0, null, _ground.MinLevel, _ground.MaxLevel, LevelOf, out guid);
     }
 
     private ScenarioStatus Chosen(IGameSessionView session, uint guid)
     {
         _target = guid;
+        _tally.ClearBlockedRun();
         _chargeRetries = 0;
+        _attackBusyRetries = 0;
+        _attackBusyUntil = double.NaN;
+        _damageAtTarget = _tally.DamageDealt;
         var found = session.State.Objects.TryGet(guid, out var o);
         _targetName = found ? o!.Name : string.Empty;
         _log.Info(LogCategory, $"acquire: target '{_targetName}' wcid {(found ? o!.Weenie.WeenieClassId : 0)} level {(found ? _ground.LevelOf(o!.Weenie.WeenieClassId) ?? 0 : 0)} 0x{guid:X8}");
@@ -1336,9 +1544,16 @@ public sealed partial class HuntScenario : IScenario
 
     private ScenarioStatus? TimeOrHealthEnds(IGameSessionView session)
     {
-        if (HealthShare(session) is { } share && share < RetreatShare)
+        if (HealthShare(session) is { } share && share < RetreatShareFor(_options.Weapon))
         {
-            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"retreat: the health fell to {share * 100:0}% (under {RetreatShare * 100:0}%) with {_tally.Kills} kill(s); cancelling the attack and returning"));
+            if (KillsDone())
+            {
+                // P4 g4: the Archer reached its kills, then a creature kept hitting it while it looted; a retreat after the goal ends the hunt as done.
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"retreat: the health fell to {share * 100:0}% (under {RetreatShareFor(_options.Weapon) * 100:0}%) after the goal ({_tally.Kills} kill(s)); ending the hunt and returning"));
+                return Succeed(session);
+            }
+
+            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"retreat: the health fell to {share * 100:0}% (under {RetreatShareFor(_options.Weapon) * 100:0}%) with {_tally.Kills} kill(s); cancelling the attack and returning"));
         }
 
         if (!double.IsNaN(_huntStart) && _clock - _huntStart > _options.Seconds)
@@ -1376,6 +1591,11 @@ public sealed partial class HuntScenario : IScenario
         {
             _log.Info(LogCategory, $"fight: the target 0x{_target:X8} is dead or gone; the next");
             return Exclude(session);
+        }
+
+        if (_clock < _attackBusyUntil)
+        {
+            return ScenarioStatus.Running; // the busy refusal's wait (AttackBusyRetrySeconds)
         }
 
         if (session.Attack.Active)
@@ -1432,6 +1652,15 @@ public sealed partial class HuntScenario : IScenario
             return EndedWithoutStart(session, 0x0036); // the approach was cancelled before the tracker saw it start: the same retry
         }
 
+        if (sent.Code == BusyCode && _attackBusyRetries < MaxAttackBusyRetries)
+        {
+            _attackBusyRetries++;
+            _attackBusyTotal++;
+            _attackBusyUntil = _clock + AttackBusyRetrySeconds;
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight: the server was busy (0x001D) for the attack on '{_targetName}' 0x{_target:X8}; the same target again in {AttackBusyRetrySeconds:0} s (busy retry {_attackBusyRetries} of {MaxAttackBusyRetries}; busy_retries counts them)"));
+            return Enter("fight-send");
+        }
+
         _refused++;
         _log.Warn(LogCategory, $"fight: the attack on '{_targetName}' 0x{_target:X8} was refused ({Describe(sent)}); excluding it and picking the next");
         return Exclude(session);
@@ -1446,8 +1675,18 @@ public sealed partial class HuntScenario : IScenario
 
         if (_tally.Kills > _killsAtTarget || !TargetAlive(session))
         {
+            if (_tally.Kills > _killsAtTarget && _tally.DamageDealt == _damageAtTarget)
+            {
+                _oneBlowKills++;
+            }
+
             _log.Info(LogCategory, _tally.Kills > _killsAtTarget ? $"fight: the kill notice came ({_tally.Kills} of {_options.Kills}); waiting for the sequence's Done" : $"fight: the target 0x{_target:X8} is dead or gone; waiting for the sequence's Done");
             return EnterKillWait(session);
+        }
+
+        if (_options.Weapon == HuntWeapon.Missile && _tally.BlockedRun >= BlockedBeforeWalking)
+        {
+            return WalkOn(session);
         }
 
         var attack = session.Attack;
@@ -1499,6 +1738,19 @@ public sealed partial class HuntScenario : IScenario
 
         if (_tally.DamageDealt > 0)
         {
+            return true;
+        }
+
+        if (_oneBlowKills > 0)
+        {
+            // P5a round 3: the kills' own notices are the damage's evidence when a kill was one lethal blow (ACE: no damage line for it, Player_Combat.cs 157). Hunting on for a damage line never ends for a fighter that
+            // out-levels the ground: the Brawler hunted 13 kills for a goal of 3 and emptied the belt.
+            if (!_oneBlowLogged)
+            {
+                _oneBlowLogged = true;
+                _log.Info(LogCategory, $"kills={_tally.Kills} of {_options.Kills} reached with damage_dealt=0 and one_blow_kills={_oneBlowKills}: ACE writes no damage line for a lethal blow (Player_Combat.cs 157 @95ef426d); the hunt ends");
+            }
+
             return true;
         }
 
@@ -1573,7 +1825,7 @@ public sealed partial class HuntScenario : IScenario
 
     /// <summary>True when the retreat rule (the health share under <see cref="RetreatShare"/>) or the hunt's seconds say the hunt must not wait for the corpse sequence.</summary>
     private bool GuardFires(IGameSessionView session) =>
-        (HealthShare(session) is { } share && share < RetreatShare) || (!double.IsNaN(_huntStart) && _clock - _huntStart > _options.Seconds);
+        (HealthShare(session) is { } share && share < RetreatShareFor(_options.Weapon)) || (!double.IsNaN(_huntStart) && _clock - _huntStart > _options.Seconds);
 
     /// <summary>Abandons the corpse sequence (an open view is closed fire-and-forget, a loop in flight is abandoned and its pick-up kept to drain, an open in flight is remembered), as the retreat rule and the hunt's seconds do.</summary>
     private void AbandonCorpse(IGameSessionView session)
@@ -1842,6 +2094,22 @@ public sealed partial class HuntScenario : IScenario
 
         _ = Exclude(session);
         return BetweenKills(session); // M4 3.1 s3: the recovery rule runs here, after the corpse sequence and the attack's Done and before the next acquire (never during a fight)
+    }
+
+    /// <summary>The walk-on rule: <see cref="BlockedBeforeWalking"/> arrows in a row hit the environment, so the attack is cancelled, the target is skipped in this cell and the next pick (or the next cell) follows.</summary>
+    private ScenarioStatus WalkOn(IGameSessionView session)
+    {
+        _blockedWalks++;
+        _log.Warn(LogCategory, $"fight: {_tally.BlockedRun} environment misses in a row at '{_targetName}' 0x{_target:X8} (blocked shots {_tally.Blocked}); cancelling the attack and walking on (the target is skipped in this cell)");
+        _ = session.Actions.CancelAttack(ActionSource.Host); // fire and go on: the sequence's Done is waited for in fight-send
+        if (!_blockedHere.Contains(_target))
+        {
+            _blockedHere.Add(_target);
+        }
+
+        _tally.ClearBlockedRun();
+        _target = 0;
+        return Enter("acquire");
     }
 
     private ScenarioStatus Exclude(IGameSessionView session)

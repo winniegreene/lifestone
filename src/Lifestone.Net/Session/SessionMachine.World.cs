@@ -496,20 +496,26 @@ internal sealed partial class SessionMachine
             return;
         }
 
-        if (_enterWorld is { } request && _options.Retry.RetryableCharacterErrors.Contains(code) && request.Attempt < _options.Retry.Attempts)
+        if (_enterWorld is { } request && _options.Retry.DecideEnterWorldRetry(code, request.Attempt, request.WaitedInWorld) is { Retry: true } decision)
         {
-            var delay = _options.Retry.Delay;
-            _enterWorld = request with { Attempt = request.Attempt + 1, EnterWorldSent = false, RetryAt = _time.GetTimestamp() + Ticks(delay) };
+            var delay = decision.Delay;
+            var dueAt = _time.GetTimestamp() + Ticks(delay);
+            var waited = decision.WaitsForServer ? request.WaitedInWorld + delay : request.WaitedInWorld;
+            // A wait for the server to let go of the character restarts the request's own time cap at the resend, so the cap bounds each try and not the wait (the wait has its own cap in the policy).
+            _enterWorld = request with { Attempt = request.Attempt + 1, EnterWorldSent = false, RetryAt = dueAt, WaitedInWorld = waited, StartedAt = decision.WaitsForServer ? dueAt : request.StartedAt };
             Raise(SessionEvent.RetryScheduled(_time.GetTimestamp(), Phase, request.Attempt + 1, delay, code, $"the server refused to enter the world with {name}"));
-            Log(NetLogLevel.Warning,
-                $"enter world: CharacterError 0x{code:X2} ({name}); attempt {request.Attempt + 1} of {_options.Retry.Attempts} in {delay.TotalSeconds:0.#} s");
+            var retryText = decision.WaitsForServer
+                ? $"attempt {request.Attempt + 1} in {delay.TotalSeconds:0.#} s; ACE still holds the character online (a previous session that has not finished logging off), waited {waited.TotalSeconds:0.#} of at most {_options.Retry.CharacterInWorldWait.TotalSeconds:0.#} s"
+                : $"attempt {request.Attempt + 1} of {_options.Retry.Attempts} in {delay.TotalSeconds:0.#} s";
+            Log(NetLogLevel.Warning, $"enter world: CharacterError 0x{code:X2} ({name}); {retryText}");
             return;
         }
 
+        var heldFor = _enterWorld?.WaitedInWorld ?? TimeSpan.Zero;
         _enterWorld = null;
         SetPhase(SessionPhase.CharacterSelect);
         Raise(SessionEvent.CharacterErrorReceived(_time.GetTimestamp(), Phase, code));
-        Log(NetLogLevel.Warning, $"enter world: refused with CharacterError 0x{code:X2} ({name}); back to character select");
+        Log(NetLogLevel.Warning, $"enter world: refused with CharacterError 0x{code:X2} ({name}){(heldFor > TimeSpan.Zero ? $" after waiting {heldFor.TotalSeconds:0.#} s for ACE to let go of the character" : string.Empty)}; back to character select");
     }
 
     /// <summary>A PlayerCreate, a self ObjectCreate or a PlayerTeleport: the next LoginComplete is expected.</summary>
@@ -551,5 +557,8 @@ internal sealed partial class SessionMachine
 
         /// <summary>When the next F7C8 is due after a retryable error; null otherwise.</summary>
         public long? RetryAt { get; init; }
+
+        /// <summary>The delays already spent waiting for the server to let go of the character (0x0D refusals).</summary>
+        public TimeSpan WaitedInWorld { get; init; }
     }
 }

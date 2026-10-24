@@ -14,6 +14,7 @@ public sealed class WaveDecodeTests(DatSetFixture fixture) : IClassFixture<DatSe
     /// <summary>The dats' only non-PCM wave.</summary>
     private const uint Mp3Wave = 0x0A000393;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_wave_decodes_exactly_785_pcm_and_one_mp3()
@@ -76,6 +77,7 @@ public sealed class WaveDecodeTests(DatSetFixture fixture) : IClassFixture<DatSe
             histogram);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_wave_matches_DatReaderWriter_byte_for_byte()
@@ -91,6 +93,7 @@ public sealed class WaveDecodeTests(DatSetFixture fixture) : IClassFixture<DatSe
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [InlineData(0x0A000316u, 3.0)] // the tunnel hum
     [InlineData(0x0A000246u, 1.11)] // UI_EnterPortal
@@ -106,6 +109,7 @@ public sealed class WaveDecodeTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal(wave.Samples.Length / 2, wave.SampleFrames);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_mp3_wave_has_an_mpeglayer3_header_and_raw_frames()
     {
@@ -121,6 +125,7 @@ public sealed class WaveDecodeTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal(5120, wave.Samples.Length);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Ids_outside_the_wave_range_are_absent()
     {

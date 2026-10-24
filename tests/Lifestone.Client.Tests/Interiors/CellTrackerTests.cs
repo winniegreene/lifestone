@@ -7,6 +7,7 @@ using Lifestone.Data.World.Cells;
 namespace Lifestone.Client.Tests.Interiors;
 
 /// <summary>The viewer's cell as the camera moves (retail <c>CObjCell::find_cell_list</c> rules plus the free-camera search).</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class CellTrackerTests(InteriorsFixture fixture) : IClassFixture<InteriorsFixture>
 {
     private static readonly LandblockCoord Holtburg = InteriorsFixture.Holtburg;

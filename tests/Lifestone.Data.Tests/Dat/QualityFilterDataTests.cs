@@ -7,6 +7,7 @@ namespace Lifestone.Data.Tests.Dat;
 /// The portal's quality filter that <c>CEnchantmentRegistry::EnchantAttribute2nd</c> asks (<c>ACQualityFilter::QueryAttribute2nd</c>; enum 0x1000000C of enum group 3): it decodes exactly,
 /// and it names the secondary attributes a client may enchant (M3 2.2 a1, closing <c>TODO(g4-quality-filter)</c>).
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class QualityFilterDataTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     [RequiresDatsFact]

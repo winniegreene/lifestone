@@ -15,6 +15,7 @@ public sealed class FontTests(DatSetFixture fixture) : IClassFixture<DatSetFixtu
 {
     private DatSet Dats => fixture.Dats;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_portal_holds_49_fonts_and_FONT_names_48_enums_for_39_DIDs_one_of_them_absent()
     {
@@ -38,6 +39,7 @@ public sealed class FontTests(DatSetFixture fixture) : IClassFixture<DatSetFixtu
         Assert.Equal(11, fonts.FontIds.Except(entries.Values).Count());
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void FixedSys_15_is_a_loud_named_gap()
     {
@@ -56,6 +58,7 @@ public sealed class FontTests(DatSetFixture fixture) : IClassFixture<DatSetFixtu
         Assert.Equal("TODO(retailui-data): Font 0x40000033 is not in client_portal.dat.", error.Message);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [InlineData(0x4u, 0x40000000u, "Palatino_Linotype_16")]
     [InlineData(UiFonts.DefaultEnum, 0x40000002u, "Default")]
@@ -73,6 +76,7 @@ public sealed class FontTests(DatSetFixture fixture) : IClassFixture<DatSetFixtu
         Assert.Same(font, fonts.GetFont(fontId)); // converted once
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Font_0x40000000_has_1050_glyphs_of_at_most_16_by_16_and_baseline_12()
     {
@@ -86,6 +90,7 @@ public sealed class FontTests(DatSetFixture fixture) : IClassFixture<DatSetFixtu
         Assert.Equal((0x06005EE5u, 0x06005EE6u), (font.ForegroundSurfaceId, font.BackgroundSurfaceId));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Glyph_lookup_follows_GetCharDesc_glyph_0_inside_the_range_and_question_mark_outside_it()
     {
@@ -148,6 +153,7 @@ public sealed class FontTests(DatSetFixture fixture) : IClassFixture<DatSetFixtu
         Assert.StartsWith("TODO(retailui-data): Font 0x40000F03 holds no glyph", error.Message, StringComparison.Ordinal);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Glyph_SetFont_falls_back_to_the_Gulim_font_for_characters_below_a_fonts_range()
     {
@@ -163,6 +169,7 @@ public sealed class FontTests(DatSetFixture fixture) : IClassFixture<DatSetFixtu
         Assert.Null(fonts.ResolveGlyphFont('A', null));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_font_converts_and_every_glyph_lies_inside_its_atlases()

@@ -133,6 +133,7 @@ public sealed class MovementBindingsTests(DatSetFixture fixture) : IClassFixture
         Assert.True(model.ViewerOffset.X < 0f); // rotated left
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void The_actions_have_the_names_and_the_toggle_types_the_dats_give_them()
     {
@@ -174,6 +175,7 @@ public sealed class MovementBindingsTests(DatSetFixture fixture) : IClassFixture
         Assert.Equal("Toggle Alternate Camera Mode", NameOf(5, CameraBindings.AlternateMode));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsTheory]
     [InlineData(DikScanCodes.W, "cmd 45000005")]
     [InlineData(DikScanCodes.Up, "cmd 45000005")]
@@ -194,6 +196,7 @@ public sealed class MovementBindingsTests(DatSetFixture fixture) : IClassFixture
         Assert.Equal([$"{press} True", $"{press} False"], intents.Calls);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Strafe_has_its_alt_arrow_bindings_and_the_alt_key_does_not_turn()
     {
@@ -207,6 +210,7 @@ public sealed class MovementBindingsTests(DatSetFixture fixture) : IClassFixture
         Assert.Equal(["cmd 65000010 True", "cmd 65000010 False", "cmd 6500000F True", "cmd 6500000F False"], intents.Calls);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Space_charges_and_releases_the_jump_the_run_key_holds_and_s_stops()
     {
@@ -226,6 +230,7 @@ public sealed class MovementBindingsTests(DatSetFixture fixture) : IClassFixture
         Assert.Equal(["run True", "run False", "cmd 41000003 True"], intents.Calls.Skip(2));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Q_toggles_autorun_and_a_movement_key_ends_it_through_the_router()
     {
@@ -238,6 +243,7 @@ public sealed class MovementBindingsTests(DatSetFixture fixture) : IClassFixture
         Assert.Equal(["autorun", "autorun", "cmd 45000005 True", "cmd 45000005 False"], intents.Calls);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsTheory]
     [InlineData(DikScanCodes.Subtract, "closer")]
     [InlineData(DikScanCodes.Add, "farther")]
@@ -289,6 +295,7 @@ public sealed class MovementBindingsTests(DatSetFixture fixture) : IClassFixture
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void The_middle_button_is_the_mouse_look_and_f2_the_alternate_camera_mode_with_the_arrow_keys_working_the_camera()
     {

@@ -49,6 +49,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
 
     private DatSet Dats => fixture.Dats;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void A_tools_panel_reads_registers_and_resolves_against_its_retail_templates()
     {
@@ -91,6 +92,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal(UiIncorporation.X | UiIncorporation.Y | UiIncorporation.Width | UiIncorporation.Height, bar.BaseState.Incorporation);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Malformed_values_are_reported_per_field_and_nothing_is_returned()
     {
@@ -174,6 +176,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal("$: a layout must be a JSON object", Assert.Single(errors));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Embedded_data_and_strings_by_enum_without_tables_are_refused()
     {
@@ -192,6 +195,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
         Assert.Contains(errors, e => e.StartsWith("$.elements[2].properties.UICore_Text_entry.tableEnum: 0x10000001 does not resolve to a StringTable (the reader was given no string tables)", StringComparison.Ordinal));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Arrays_structs_numbers_and_hex_ids_read_by_the_master_type()
     {
@@ -244,6 +248,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
         Assert.Throws<ArgumentException>(() => layouts.Register(new UiLayout(0x21000099u, 800, 600, new Dictionary<uint, UiElementDesc>())));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Layout_files_hold_only_ids_property_names_and_Lifestones_own_text()
     {
@@ -263,6 +268,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void The_embedded_layout_files_register_on_the_first_lookup_and_every_element_resolves()
     {
@@ -283,6 +289,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
         Assert.NotNull(layouts.AccessElementDesc(0x7F000010u, 0x7F000100u));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void The_layout_hygiene_walk_finds_literals_nested_in_arrays_and_structs()
     {
@@ -350,6 +357,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
     private static string Panel(string did, string element) =>
         "{ \"format\": \"lifestone-layout/1\", \"id\": \"" + did + "\", \"width\": 800, \"height\": 600, \"elements\": [ { \"id\": \"" + element + "\", \"type\": 3, \"x\": 0, \"y\": 0, \"width\": 10, \"height\": 10 } ] }";
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Two_embedded_files_with_one_DID_fail_loudly_naming_both_files_on_every_lookup()
     {
@@ -372,6 +380,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal([first.Message], logged);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void An_embedded_file_that_throws_or_does_not_read_fails_every_lookup_naming_the_cause()
     {
@@ -386,6 +395,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal(read.Message, Assert.Throws<InvalidDataException>(() => broken.TryGetLayout(0x7F000011u, out _)).Message);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Distinct_embedded_files_register_and_a_test_registered_layout_wins_over_an_embedded_one()
     {
@@ -395,6 +405,7 @@ public sealed class LifestoneLayoutTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal([0x7F0000A1u, 0x7F0000A2u], layouts.RegisteredLayoutIds);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Warming_the_embedded_layouts_registers_them_at_once_and_a_failure_is_logged_once_and_still_thrown_by_the_lookups()
     {

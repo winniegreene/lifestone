@@ -3,8 +3,8 @@ using Lifestone.Client.Tests.Repository;
 namespace Lifestone.Client.Tests.RetailUi.Panels;
 
 /// <summary>
-/// The Godot side of the combat windows' review frames, pinned in its source because Lifestone.Game has no test project: the <c>c1-powerbar</c> frame is taken during a real attack (M4 1.3 s1: the stand-in's tusker selected, the Medium
-/// button pressed and clicked through the UI's own element messages) and nothing begins or levels the power bar by hand any more (M3's 0.6 placeholder is gone); and the play-check's <c>c2-spellcasting</c> frame is staged through the
+/// The Godot side of the combat windows' review frames, pinned in its source because Lifestone.Game has no test project: the <c>c1-powerbar</c> frame needs a real attack on a creature, which only the live hunt leg makes (M4 4.1 t1, D26: the offline runs
+/// skip it with a log line naming <c>m4-powerbar-frame-live</c>); nothing begins or levels the power bar by hand (M3's 0.6 placeholder is gone); and the play-check's <c>c2-spellcasting</c> frame is staged through the
 /// combat window, whose notice drives the toolbar's magic button, as the panel shots stage it. What the pictures show (the meter part way up, the held items) is only seen in the frames themselves: <c>play-checks</c> with
 /// <c>--play-frames</c> and <c>--play-panel-shots</c>.
 /// </summary>
@@ -15,15 +15,16 @@ public sealed class WindowFramesScriptTests
     private const string PanelShotsFile = "src/Lifestone.Game/scripts/Session/PlayMode.PanelShots.cs";
 
     [Fact]
-    public void The_play_check_frame_is_taken_during_a_real_attack_and_nothing_drives_the_bar_by_hand()
+    public void The_play_checks_place_no_creature_for_the_power_frame_and_skip_it_naming_the_live_todo_M4_4_1_t1()
     {
+        // D26 (m4-standin-tusker-retire): the offline run has no stand-in creature, so the c1-powerbar frame (a real attack) is skipped with one log line and the live hunt takes it; nothing drives the bar by hand.
         var code = CheckoutFiles.ReadCSharpCodeAndStrings(PanelC1File);
-        var press = code.IndexOf("medium.BroadcastElementMessage(UiMessageIds.MouseDown);", StringComparison.Ordinal);
-        var click = code.IndexOf("medium.BroadcastElementMessage(UiMessageIds.ButtonClick);", StringComparison.Ordinal);
-        var shot = code.IndexOf("SaveCheckedFrame($\"{folder}/{PanelFramesPlan.FileName(frame)}\", frame.Name)", StringComparison.Ordinal);
-        Assert.True(press >= 0 && click > press && shot > click, "the Medium button is pressed and clicked, then the frame is taken while the power charges");
-        Assert.Contains("PanelFramesPlan.PlaceAttackFrameTusker(session, server);", code, StringComparison.Ordinal);
-        Assert.Contains("_mode.Selection.Select(PanelFramesPlan.AttackFrameTusker);", code, StringComparison.Ordinal);
+        Assert.Contains("TODO(m4-powerbar-frame-live)", code, StringComparison.Ordinal);
+        Assert.Contains("if (frame.ByAttack)", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("PlaceAttackFrameTusker", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("AttackFrameTusker", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("StandInTusker", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("medium.BroadcastElementMessage", code, StringComparison.Ordinal);
         Assert.DoesNotContain("bar.Begin(", code, StringComparison.Ordinal);
         Assert.DoesNotContain("bar.SetLevel(", code, StringComparison.Ordinal);
         Assert.DoesNotContain("PowerBarLevel", code, StringComparison.Ordinal);
@@ -31,15 +32,19 @@ public sealed class WindowFramesScriptTests
     }
 
     [Fact]
-    public void The_panel_shots_take_the_power_frame_during_a_real_attack_and_nothing_drives_the_bar_by_hand()
+    public void The_panel_shots_skip_the_power_frame_with_one_line_naming_the_live_todo_and_place_no_creature_M4_4_1_t1()
     {
         var code = CheckoutFiles.ReadCSharpCodeAndStrings(PanelShotsFile);
-        var select = code.IndexOf("Selection.Select(PanelFramesPlan.AttackFrameTusker);", StringComparison.Ordinal);
-        var press = code.IndexOf("medium?.BroadcastElementMessage(Lifestone.Client.RetailUi.Core.UiMessageIds.MouseDown);", StringComparison.Ordinal);
-        var click = code.IndexOf("medium?.BroadcastElementMessage(Lifestone.Client.RetailUi.Core.UiMessageIds.ButtonClick);", StringComparison.Ordinal);
-        Assert.True(select >= 0 && press > select && click > press, "the tusker is selected, then the Medium button pressed and clicked");
-        Assert.Contains("PanelShotPhase.AttackCharge", code, StringComparison.Ordinal);
-        Assert.Contains("TODO(m4-powerbar-frame-live)", code, StringComparison.Ordinal);
+        var skip = code.IndexOf("TODO(m4-powerbar-frame-live)", StringComparison.Ordinal);
+        var branch = code.IndexOf("if (frame.ByAttack)", StringComparison.Ordinal);
+        Assert.True(branch >= 0 && skip > branch, "the by-attack frame is skipped with a line naming the live TODO");
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(code, "TODO\\(m4-powerbar-frame-live\\)")); // one line, one place
+        Assert.DoesNotContain("AttackFrameTusker", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("PlaceAttackFrameTusker", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("StandInTusker", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("PanelShotPhase.AttackCharge", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("PanelShotPhase.AttackStow", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Actions.Attack(", code, StringComparison.Ordinal);
         Assert.DoesNotContain("bar.Begin(", code, StringComparison.Ordinal);
         Assert.DoesNotContain("bar.SetLevel(", code, StringComparison.Ordinal);
         Assert.DoesNotContain("PowerBarLevel", code, StringComparison.Ordinal);

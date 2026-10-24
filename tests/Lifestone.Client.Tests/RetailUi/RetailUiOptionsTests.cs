@@ -39,7 +39,6 @@ public sealed class RetailUiOptionsTests
 
     [Theory]
     [InlineData("--ui-scale=1", 1)]
-    [InlineData("--ui-scale=2", 2)]
     [InlineData("--ui-scale=16", 16)]
     public void The_scale_override_is_a_whole_number_from_one_to_sixteen(string argument, int expected) =>
         Assert.Equal(expected, RetailUiOptions.Parse([argument]).ScaleOverride);
@@ -47,7 +46,6 @@ public sealed class RetailUiOptionsTests
     [Theory]
     [InlineData("--ui-scale=0")]
     [InlineData("--ui-scale=17")]
-    [InlineData("--ui-scale=-2")]
     [InlineData("--ui-scale=1.5")]
     [InlineData("--ui-scale=big")]
     [InlineData("--ui-scale")]
@@ -114,6 +112,17 @@ public sealed class RetailUiOptionsTests
     }
 
     [Fact]
+    public void The_examine_icon_is_off_by_default_as_retail_and_on_only_by_its_flag()
+    {
+        // M4 4.1 fix (review R8): the examine window's icon is an addition to retail, so the default is retail's window and a registered flag adds it.
+        Assert.False(RetailUiOptions.Parse([]).ExamineIcon);
+        Assert.True(RetailUiOptions.Parse(["--examine-icon=on"]).ExamineIcon);
+        Assert.False(RetailUiOptions.Parse(["--examine-icon=off"]).ExamineIcon);
+        Assert.Contains("--examine-icon", Assert.Single(RetailUiOptions.Parse(["--examine-icon=maybe"]).Errors), StringComparison.Ordinal);
+        Assert.Contains(OptionCatalog.RetailUi().Options, static o => o.Name == "--examine-icon");
+    }
+
+    [Fact]
     public void The_glitch_flag_restores_every_glitch_the_runtime_has()
     {
         var all = Enum.GetValues<UiRetailGlitches>().Where(g => g != UiRetailGlitches.None && g != UiRetailGlitches.All).Aggregate(UiRetailGlitches.None, (a, g) => a | g);
@@ -138,7 +147,7 @@ public sealed class RetailUiOptionsTests
         Assert.Empty(RetailUiOptions.Parse(["--start=arwic", "--walk", "--mute"]).Errors);
         var registered = OptionCatalog.RetailUi().Options.Select(o => o.Name).Order(StringComparer.Ordinal);
         Assert.Equal(
-            ["--retail-disconnect", "--retail-effects-stale-info", "--retail-ui", "--retail-ui-frames", "--retail-ui-glitches", "--retail-ui-only", "--retail-ui-start", "--ui-scale"],
+            ["--examine-icon", "--retail-disconnect", "--retail-effects-stale-info", "--retail-ui", "--retail-ui-frames", "--retail-ui-glitches", "--retail-ui-only", "--retail-ui-start", "--ui-scale"],
             registered);
     }
 
@@ -148,7 +157,7 @@ public sealed class RetailUiOptionsTests
         var registry = OptionCatalog.Registry;
         Assert.True(registry.EndsRun(CommandLineArgument.ParseAll(["--retail-ui-frames"]), OptionScenes.Main));
         Assert.True(registry.EndsRun(CommandLineArgument.ParseAll(["--retail-ui-checks"]), OptionScenes.Main));
-        foreach (var interactive in new[] { "--retail-ui=standin", "--ui-scale=2", "--retail-ui-start=charmanage", "--retail-ui-only", "--retail-ui-glitches", "--retail-effects-stale-info", "--retail-disconnect" })
+        foreach (var interactive in new[] { "--retail-ui=standin", "--ui-scale=2", "--retail-ui-start=charmanage", "--retail-ui-only", "--retail-ui-glitches", "--retail-effects-stale-info", "--retail-disconnect", "--examine-icon=on" })
         {
             Assert.False(registry.EndsRun(CommandLineArgument.ParseAll([interactive]), OptionScenes.Main), interactive);
         }

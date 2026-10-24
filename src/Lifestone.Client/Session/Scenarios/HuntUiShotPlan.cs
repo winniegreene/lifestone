@@ -75,6 +75,29 @@ public sealed class HuntUiShotPlan
     /// </summary>
     public const float FramedScale = 1.8f;
 
+    /// <summary>
+    /// The heading offset, in degrees, the missile hunt's framed camera starts at (M4 polish pass P2, <c>m4-hunt-frame-camera</c>): the viewer turned this far about the player (negative: to the player's left, the side of the bow arm), so the bow is seen
+    /// from its side and not edge-on from straight behind (the lead's live missile frame showed it as a thin stick). The target, straight ahead of the player and some metres off, stays in the view: at 4.5 m and this turn its bearing from the
+    /// camera's axis is under 35 degrees, inside the half-width of retail's field of view (<see cref="Lifestone.Client.Camera.RetailLens"/>, 44 degrees at 4:3).
+    /// </summary>
+    public const float MissileSideDegrees = -40f;
+
+    /// <summary>
+    /// How far down the window the player's box may reach for the frame to count as showing the player and the held weapon above the combat window: the box's middle must be above the window's top edge and its top on screen
+    /// (the feet may be behind the window or the toolbar: the head, the shoulders and the hands are what the frame is for).
+    /// </summary>
+    /// <param name="player">The player's projected box.</param>
+    /// <param name="playerKnown">False when the player's box could not be projected: the answer is false.</param>
+    /// <param name="windowTop">The combat window's top edge, in the same pixels.</param>
+    public static bool PlayerFramed(in ScreenRect player, bool playerKnown, float windowTop) =>
+        playerKnown && player.Y >= 0f && player.Y + (player.Height * 0.5f) < windowTop;
+
+    /// <summary>
+    /// The scale of the default offset for the missile hunt's frames (M4 polish pass P2): 1.2, so the viewer is 3.1 m from the pivot (3 m behind and 0.9 m above) and the archer and his bow are half as large again as at <see cref="FramedScale"/>
+    /// while the target straight ahead stays in view. The offset's height is over 0.75, so the camera looks at the pivot (<c>CameraSet::SetTargetForOffset</c>) and the player's head and hands sit around the middle of the window, above the combat window.
+    /// </summary>
+    public const float MissileFramedScale = 1.2f;
+
     /// <summary>How far, in metres, the viewer's distance from the pivot may be from the framed one at a frame's moment (the camera's smoothing has settled).</summary>
     public const float SettledMetres = 0.3f;
 
@@ -97,7 +120,11 @@ public sealed class HuntUiShotPlan
     public const float MeterDrop = 0.005f;
 
     /// <summary>The framed camera's distance from the pivot: |(0, -2.5, 0.75)| times <see cref="FramedScale"/>.</summary>
-    public static readonly float FramedMetres = MathF.Sqrt((2.5f * 2.5f) + (0.75f * 0.75f)) * FramedScale;
+    public static readonly float FramedMetres = FramedMetresOf(FramedScale);
+
+    /// <summary>The distance from the pivot of a viewer at the default offset (0, -2.5, 0.75) times <paramref name="scale"/>.</summary>
+    /// <param name="scale">The camera model's scale.</param>
+    public static float FramedMetresOf(float scale) => MathF.Sqrt((2.5f * 2.5f) + (0.75f * 0.75f)) * scale;
 
     private enum SlotState
     {
@@ -348,7 +375,13 @@ public sealed class HuntUiShotPlan
     /// <summary>True when the viewer's distance from the pivot has settled on the framed camera (<see cref="FramedScale"/>) and the sweep did not shorten it.</summary>
     /// <param name="pivotDistance">The measured distance in metres.</param>
     /// <param name="blocked">The camera's sweep stopped it short.</param>
-    public static bool CameraFramed(float pivotDistance, bool blocked) => !blocked && Math.Abs(pivotDistance - FramedMetres) <= SettledMetres;
+    public static bool CameraFramed(float pivotDistance, bool blocked) => CameraFramed(pivotDistance, blocked, FramedScale);
+
+    /// <summary>True when the viewer's distance from the pivot has settled on the framed camera of <paramref name="scale"/> and the sweep did not shorten it.</summary>
+    /// <param name="pivotDistance">The measured distance in metres.</param>
+    /// <param name="blocked">The camera's sweep stopped it short.</param>
+    /// <param name="scale">The scale the camera was framed with (<see cref="FramedScale"/> or <see cref="MissileFramedScale"/>).</param>
+    public static bool CameraFramed(float pivotDistance, bool blocked, float scale) => !blocked && Math.Abs(pivotDistance - FramedMetresOf(scale)) <= SettledMetres;
 
     /// <summary>The phrase of one slot for the log (what <see cref="Note"/> prints for it).</summary>
     /// <param name="slot">The slot.</param>

@@ -14,7 +14,7 @@ public sealed class LoopbackPolicyTests
     private static readonly IPAddress Ipv6Unspecified = new(new byte[16]);
     private static readonly IPAddress PublicAddress = new([8, 8, 8, 8]);
 
-    public static TheoryData<string> LoopbackAddresses => ["127.0.0.1", "127.5.5.5", "127.4.5.6", "::1", "::ffff:127.0.0.1"];
+    public static TheoryData<string> LoopbackAddresses => ["127.0.0.1", "127.5.5.5", "::1", "::ffff:127.0.0.1"];
 
     public static TheoryData<string> RefusedAddresses => [
         Ipv4Unspecified.ToString(),

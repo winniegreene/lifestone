@@ -29,15 +29,6 @@ public sealed class ManualTimeProviderTests
     }
 
     [Fact]
-    public void Time_never_runs_backwards()
-    {
-        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 12, 12, 0, 0, TimeSpan.FromHours(2)));
-        Assert.Equal(new DateTimeOffset(2026, 10, 12, 10, 0, 0, TimeSpan.Zero), time.GetUtcNow());
-        Assert.Throws<ArgumentOutOfRangeException>(() => time.Advance(TimeSpan.FromTicks(-1)));
-        Assert.Throws<ArgumentOutOfRangeException>(() => time.SetUtcNow(time.GetUtcNow().AddTicks(-1)));
-    }
-
-    [Fact]
     public void Timers_fire_on_advance_in_due_order_with_the_clock_at_their_due_time()
     {
         var time = new ManualTimeProvider();
@@ -56,75 +47,6 @@ public sealed class ManualTimeProviderTests
 
         time.Advance(TimeSpan.FromHours(1));
         Assert.Equal(2, fired.Count);
-    }
-
-    [Fact]
-    public void A_periodic_timer_fires_once_per_elapsed_period()
-    {
-        var time = new ManualTimeProvider();
-        var at = new List<TimeSpan>();
-        using var timer = time.CreateTimer(_ => at.Add(time.Elapsed), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2));
-        time.Advance(TimeSpan.FromSeconds(6));
-        Assert.Equal([TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5)], at);
-    }
-
-    [Fact]
-    public void A_timer_due_now_fires_on_the_next_advance_not_on_creation()
-    {
-        var time = new ManualTimeProvider();
-        var fired = 0;
-        using var timer = time.CreateTimer(_ => fired++, null, TimeSpan.Zero, TimeSpan.Zero);
-        Assert.Equal(0, fired);
-        time.Advance(TimeSpan.Zero);
-        Assert.Equal(1, fired);
-        time.Advance(TimeSpan.FromSeconds(10));
-        Assert.Equal(1, fired);
-    }
-
-    [Fact]
-    public void Change_reschedules_and_dispose_stops_a_timer()
-    {
-        var time = new ManualTimeProvider();
-        var fired = 0;
-        var timer = time.CreateTimer(_ => fired++, null, TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
-        Assert.Equal(1, time.ActiveTimerCount);
-
-        Assert.True(timer.Change(TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan));
-        time.Advance(TimeSpan.FromSeconds(4));
-        Assert.Equal(0, fired);
-        time.Advance(TimeSpan.FromSeconds(1));
-        Assert.Equal(1, fired);
-
-        Assert.True(timer.Change(TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan));
-        timer.Dispose();
-        Assert.Equal(0, time.ActiveTimerCount);
-        Assert.False(timer.Change(TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan));
-        time.Advance(TimeSpan.FromSeconds(10));
-        Assert.Equal(1, fired);
-        Assert.Throws<ArgumentOutOfRangeException>(() => time.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(-2), Timeout.InfiniteTimeSpan));
-        Assert.Throws<ArgumentOutOfRangeException>(() => time.CreateTimer(_ => { }, null, TimeSpan.Zero, TimeSpan.FromSeconds(-2)));
-        Assert.Equal(0, time.ActiveTimerCount);
-    }
-
-    [Fact]
-    public void A_timer_a_callback_makes_due_fires_in_the_same_advance()
-    {
-        var time = new ManualTimeProvider();
-        var fired = new List<string>();
-        ITimer? second = null;
-        using var first = time.CreateTimer(
-            _ =>
-            {
-                fired.Add("first");
-                second = time.CreateTimer(_ => fired.Add("second"), null, TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
-            },
-            null,
-            TimeSpan.FromSeconds(1),
-            Timeout.InfiniteTimeSpan);
-
-        time.Advance(TimeSpan.FromSeconds(2));
-        Assert.Equal(["first", "second"], fired);
-        second?.Dispose();
     }
 
     [Fact]

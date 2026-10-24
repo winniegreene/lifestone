@@ -83,6 +83,13 @@ public sealed class CorpseLooterTests
             R.Server((p, s) => AceM3Writers.InventoryServerSaysFailed(p, s, item, 0));
         }
 
+        /// <summary>ACE's refusal of a pick-up into a full main pack: a 028B WeenieErrorWithString (error 0) "Unable to put X into container", then the 00A0 (<c>Container.cs</c> 527, P5a F-gate).</summary>
+        public void RefusePackFull(uint item, string name)
+        {
+            R.Raw(AceWireWriters.WeenieErrorWithString(Player, ++_event, 0, $"Unable to put {name} into container"));
+            R.Server((p, s) => AceM3Writers.InventoryServerSaysFailed(p, s, item, 0));
+        }
+
         public LootStatus Step(CorpseLooter looter) => looter.Step(R.H.State, R.Api, Now);
 
         /// <summary>Ticks the clock in 0.1 s steps, stepping the looter each time, until it is done or <paramref name="seconds"/> pass.</summary>
@@ -271,6 +278,54 @@ public sealed class CorpseLooterTests
         Assert.Equal(1, looter.Refused);
         Assert.Equal(1, looter.Looted);
         Assert.False(r.R.H.State.Self.Inventory.Find(A).Held);
+    }
+
+    [Fact]
+    public void Two_pack_full_refusals_in_a_row_end_the_loop_naming_the_rest_as_skipped_P5a_Fgate()
+    {
+        var r = new Rig();
+        const uint D = 0x80000214;
+        r.Open([Rig.Thing(A), Rig.Thing(B), Rig.Thing(C), Rig.Thing(D)]);
+        var looter = r.Looter();
+
+        r.Drive(looter, 0.3);
+        r.RefusePackFull(A, "Thing");
+        r.Drive(looter, Hold);
+        Assert.Equal([A, B], r.SentGuids); // one refusal: the loop goes on
+        r.RefusePackFull(B, "Thing");
+
+        Assert.Equal(LootStatus.Done, r.Drive(looter, 1.0));
+        Assert.Equal("pack-full", looter.StoppedBy);
+        Assert.Equal(2, looter.Refused);
+        Assert.Equal(2, looter.SkippedPackFull); // C and D were never sent
+        Assert.Equal(2, looter.Skipped);
+        r.R.Tick(Hold);
+        Assert.Equal([A, B], r.SentGuids);
+        Assert.Contains(r.Log.Lines, l => l.Contains("loot_skipped=2 why=pack-full", StringComparison.Ordinal) && l.Contains("TODO(m4-hunt-pack-full)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_pack_full_refusal_that_is_not_followed_by_another_does_not_stop_the_loop_P5a_Fgate()
+    {
+        var r = new Rig();
+        const uint D = 0x80000214;
+        r.Open([Rig.Thing(A), Rig.Thing(B), Rig.Thing(C), Rig.Thing(D)]);
+        var looter = r.Looter();
+
+        r.Drive(looter, 0.3);
+        r.RefusePackFull(A, "Thing");
+        r.Drive(looter, Hold);
+        r.Put(B); // a confirmation breaks the run
+        r.Drive(looter, Hold);
+        r.RefusePackFull(C, "Thing");
+        r.Drive(looter, Hold);
+        Assert.Equal([A, B, C, D], r.SentGuids);
+        r.Put(D);
+
+        Assert.Equal(LootStatus.Done, r.Drive(looter, Hold));
+        Assert.Equal("end", looter.StoppedBy);
+        Assert.Equal(2, looter.Looted);
+        Assert.Equal(0, looter.SkippedPackFull);
     }
 
     [Fact]

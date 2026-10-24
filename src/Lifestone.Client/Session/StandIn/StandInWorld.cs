@@ -243,26 +243,13 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
     internal const float PlaceholderHealth = 0.6f;
 
     /// <summary>
-    /// A QueryHealth: ACE answers (GameEvent 0x01C0 UpdateHealth) only for a creature, with <c>Health.Current / MaxValue</c> read when the query arrives (<c>WorldObject.cs</c> <c>QueryHealth</c>). The stand-in answers for a creature
-    /// it holds health for (<see cref="StandInObject.MaxHealth"/>, M3 3.1 fb) with its real fraction, and for any other object of the visit whose description carries the attackable bit (0x10) with <see cref="PlaceholderHealth"/>;
-    /// any other object, and object 0 (the cancel), is not answered.
+    /// A QueryHealth: ACE answers (GameEvent 0x01C0 UpdateHealth) only for a creature, with <c>Health.Current / MaxValue</c> read when the query arrives (<c>WorldObject.cs</c> <c>QueryHealth</c>). The stand-in holds no creature with health
+    /// (M4 4.1 t2, D23, D26: its health model, its heartbeat push and its kill are retired; the live legs and the scripted unit tests prove them); it answers an object of the visit whose description carries the attackable bit (0x10) with
+    /// <see cref="PlaceholderHealth"/>, a fixture of the selection unit tests (no play-check places one); any other object, and object 0 (the cancel), is not answered.
     /// </summary>
     internal OutboundTicket QueryHealth(uint guid)
     {
-        // ACE's "selection" is only the guid of the last QueryHealth; 0 or a non-creature clears it and gets no answer (W/Player.cs 393-437).
-        var selectable = TryCreature(guid, out var creature) ? _reducer.State.Objects.Contains(guid) : _visit.Objects.Any(o => o.Guid == guid && (o.DescriptionFlags & 0x10) != 0);
-        _healthSelection = selectable ? guid : 0;
-        _healthSelectionSerial++;
-        if (TryCreature(guid, out creature))
-        {
-            if (_reducer.State.Objects.Contains(guid))
-            {
-                var fraction = creature.Fraction;
-                Later(sink => sink.OnUpdateHealth(Context(sink), new GameEventHeader(_reducer.State.Self.Guid, 0, 0x01C0), new UpdateHealthEvent(guid, fraction)));
-                ScheduleHealthHeartbeat(guid, _healthSelectionSerial);
-            }
-        }
-        else if (selectable)
+        if (_visit.Objects.Any(o => o.Guid == guid && (o.DescriptionFlags & 0x10) != 0))
         {
             Placeholder("m4-standin-placeholder-health", "an attackable object with no health model answers QueryHealth with " + PlaceholderHealth + " and gets no heartbeat push");
             Later(sink => sink.OnUpdateHealth(Context(sink), new GameEventHeader(_reducer.State.Self.Guid, 0, 0x01C0), new UpdateHealthEvent(guid, PlaceholderHealth)));
@@ -270,31 +257,6 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
 
         return Ticket();
     }
-
-    /// <summary>The guid of the last QueryHealth that named a creature (or an attackable placeholder): ACE's "selection" for the health pushes; 0 when cleared.</summary>
-    internal uint HealthSelection => _healthSelection;
-
-    /// <summary>Seconds between the heartbeat pushes of the selected creature's health (ACE's Player_Tick.cs 112-118).</summary>
-    internal const double HealthHeartbeatSeconds = 5.0;
-
-    private uint _healthSelection;
-    private int _healthSelectionSerial;
-
-    /// <summary>
-    /// ACE pushes one 01C0 per 5 s for the selected creature while its health is above 0 (<c>W/Player_Tick.cs</c> 112-118). The chain stops when the selection changes (a newer QueryHealth) or the creature dies or goes.
-    /// </summary>
-    private void ScheduleHealthHeartbeat(uint guid, int serial) =>
-        _reducer.StandIn!.At(_reducer.Clock.Now + HealthHeartbeatSeconds, sink =>
-        {
-            if (serial != _healthSelectionSerial || _healthSelection != guid || !TryCreature(guid, out var creature) || creature.Dead || creature.Health == 0 || !_reducer.State.Objects.Contains(guid))
-            {
-                return;
-            }
-
-            AnswerLog.Add("01C0");
-            sink.OnUpdateHealth(Context(sink), new GameEventHeader(_reducer.State.Self.Guid, 0, 0x01C0), new UpdateHealthEvent(guid, creature.Fraction));
-            ScheduleHealthHeartbeat(guid, serial);
-        });
 
     /// <summary>A log off: the phases and the character list come back after the visit's log-off delay.</summary>
     internal void LogOff() => Later(sink => StandInSessions.BeginLogOff(sink, _visit.LogOffDelay, _reducer.StandIn!, _reducer, _purged));

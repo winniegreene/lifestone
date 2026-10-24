@@ -33,7 +33,7 @@ public sealed class RouteDriverTests(ITestOutputHelper output)
     [Fact]
     public void Two_laps_of_a_square_stop_at_the_corner_dwell_and_finish()
     {
-        var (controller, sink, _) = FlatController(x: 60f, y: 60f);
+        var (controller, sink, _) = FlatController(x: 60f, y: 60f, weenie: new TestPlayerWeenie { RunRate = 1.5f }); // RouteDriver, not the runner: this lap timing was tuned at run rate 1.5
         Run(controller, 0.5);
         var route = new ScriptedRoute(
             "square",
@@ -94,22 +94,34 @@ public sealed class RouteDriverTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void A_driver_that_holds_the_run_key_walks_a_player_who_runs_by_default()
+    public void A_driver_told_the_wrong_option_walks_a_player_who_runs_by_default_and_one_told_nothing_follows_the_controller()
     {
-        var (controller, _, _) = FlatController(x: 20f, y: 60f, options: new MovementOptions { RunByDefault = true });
-        Run(controller, 0.5);
-        var route = new ScriptedRoute("far-east", [new RouteGoal(At(Block, 170f, 60f, 0f), 0.5f, Stop: true, DwellSeconds: 0)]);
-        var driver = new RouteDriver(controller, route); // told nothing of the option
-        var now = controller.Now;
-        var started = now;
-        while (now - started < 3.0)
+        // The hazard P5a S4 settled: a driver told false against a rig that runs by default holds the run key and so walks (the XOR). Told nothing, it reads the controller's own option and runs.
+        var walkedForward = new Dictionary<string, uint>();
+        foreach (var (name, make) in new (string, Func<PlayerMovementController, ScriptedRoute, RouteDriver>)[]
         {
-            now += 1.0 / 60.0;
-            controller.Tick(now);
-            driver.Tick(now);
+            ("told false", (c, r) => new RouteDriver(c, r, false)),
+            ("told nothing", (c, r) => new RouteDriver(c, r)),
+        })
+        {
+            var (controller, _, _) = FlatController(x: 20f, y: 60f, options: new MovementOptions { RunByDefault = true });
+            Run(controller, 0.5);
+            var route = new ScriptedRoute("far-east", [new RouteGoal(At(Block, 170f, 60f, 0f), 0.5f, Stop: true, DwellSeconds: 0)]);
+            var driver = make(controller, route);
+            var now = controller.Now;
+            var started = now;
+            while (now - started < 3.0)
+            {
+                now += 1.0 / 60.0;
+                controller.Tick(now);
+                driver.Tick(now);
+            }
+
+            walkedForward[name] = controller.Motion.Interpreted.ForwardCommand;
         }
 
-        Assert.Equal(MotionCommands.WalkForward, controller.Motion.Interpreted.ForwardCommand);
+        Assert.Equal(MotionCommands.WalkForward, walkedForward["told false"]);
+        Assert.Equal(MotionCommands.RunForward, walkedForward["told nothing"]);
     }
 
     [Fact]

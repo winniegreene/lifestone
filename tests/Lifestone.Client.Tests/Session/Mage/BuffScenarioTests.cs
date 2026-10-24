@@ -12,8 +12,8 @@ namespace Lifestone.Client.Tests.Session.Mage;
 
 /// <summary>
 /// The buff scenario (M3 2.1 s1, <see cref="BuffScenario"/>) on <see cref="ScriptedCaster"/>, a scripted ACE that answers casts as the real one does, with the gear already on (a ready mage: the gear scenario inside sends no step):
-/// the whole run (mode, cycle with its upgrade pass, the forced pass that recasts one line, non-combat) ends with <c>buffs=24/24 rebuffed=yes forced=yes</c>; a second run on the same cycle casts nothing and a new cycle object recasts
-/// only the two armour lines (<c>TODO(m3-buff-armour-memory)</c>); a failure at any stage logs off before it is reported; the verdict line's field order; and the scenario allocates nothing while it waits.
+/// the whole run (mode, cycle with its upgrade pass, the forced pass that recasts one line, non-combat) ends with <c>buffs=24/24 rebuffed=yes forced=yes</c>; a second run casts nothing, on the same cycle or on a new cycle object on the same session (the session's
+/// <see cref="ArmourBuffLedger"/>, M4 4.1 lane b; closes <c>TODO(m3-buff-armour-memory)</c>); a failure at any stage logs off before it is reported; the verdict line's field order; and the scenario allocates nothing while it waits.
 /// </summary>
 public sealed class BuffScenarioTests
 {
@@ -65,8 +65,8 @@ public sealed class BuffScenarioTests
 
         public GearKit Kit { get; } = GearKit.Of([GearItemOf(GearKit.Wand.Wcid, GearKit.Wand.Name, GearKind.Wand, GearKit.Wand), .. GearKit.Armour.Select(a => GearItemOf(a.Wcid, a.Name, GearKind.Armour, a))]);
 
-        public BuffScenario Scenario(bool endSession = false, BuffCycle? cycle = null) =>
-            new(Kit, Caster.Table, Options, R.H.Log, endSession: endSession, cycle: cycle);
+        public BuffScenario Scenario(bool endSession = false, BuffCycle? cycle = null, IArmourLedgerStore? store = null) =>
+            new(Kit, Caster.Table, Options, R.H.Log, endSession: endSession, cycle: cycle, store: store);
 
         private static GearItem GearItemOf(uint wcid, string name, GearKind kind, GearWeenie w) =>
             new(wcid, name, kind, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.Burden);
@@ -108,6 +108,54 @@ public sealed class BuffScenarioTests
     }
 
     [Fact]
+    public void With_RequireCharacter_a_session_in_the_world_as_another_character_fails_at_the_gear_and_sends_nothing_and_as_BSD_Mage_runs()
+    {
+        var wrong = new Rig();
+        wrong.R.H.State.Self.Name = "Lifestone Throwaway";
+        var sends = wrong.R.H.Net.Sends.Count;
+        var scenario = new BuffScenario(wrong.Kit, wrong.Caster.Table, wrong.Options, wrong.R.H.Log, endSession: false) { RequireCharacter = true };
+        Assert.Equal(ScenarioStatus.Failed, wrong.Run(scenario, maxSeconds: 30));
+        Assert.Contains("not BSD Mage", scenario.Failure, StringComparison.Ordinal);
+        Assert.Equal(sends, wrong.R.H.Net.Sends.Count);
+
+        var right = new Rig();
+        right.R.H.State.Self.Name = "BSD Mage";
+        var ok = new BuffScenario(right.Kit, right.Caster.Table, right.Options, right.R.H.Log, endSession: false) { RequireCharacter = true };
+        Assert.True(right.Run(ok) == ScenarioStatus.Succeeded, ok.Failure);
+    }
+
+    [Fact]
+    public void With_the_driver_on_there_is_no_forced_pass_and_the_drivers_own_pass_recasts_from_the_margin_of_the_shortest_line()
+    {
+        var t = new Rig(options: new BuffOptions { Auto = true });
+        var notices = new List<string>();
+        var scenario = new BuffScenario(t.Kit, t.Caster.Table, t.Options, t.R.H.Log, endSession: false) { Notice = notices.Add };
+        var status = t.Run(scenario);
+        Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
+        Assert.Null(scenario.Failure);
+
+        Assert.True(scenario.DriverOn);
+        Assert.Null(scenario.ForcedResult); // no forced pass
+        var pass = scenario.DriverResult!;
+        Assert.False(pass.Forced);
+        Assert.True(pass.Rebuffed);
+        Assert.Equal(24, pass.Active);
+        Assert.True(pass.Cast >= 1);
+        Assert.Equal(pass.Cast, scenario.DriverLines);
+        Assert.InRange(scenario.DriverMarginSeconds, BuffScenario.DriverMinMarginSeconds, double.MaxValue);
+        Assert.InRange(scenario.DriverRebuffSeconds, BuffScenario.DriverLeadSeconds - 5, 300); // about 30 s after the cycle, plus the pass
+
+        var verdict = scenario.VerdictFields();
+        Assert.Contains(" rebuffed=yes forced=no ", verdict, StringComparison.Ordinal);
+        Assert.Matches(@" driver=on rebuff_lines=[1-9]\d* rebuff_s=\d+$", verdict);
+        Assert.Equal([CombatModes.Magic, CombatModes.NonCombat], t.Caster.ModesSent); // the driver found the mage in the magic mode and changed nothing
+
+        Assert.Equal(2, notices.Count);
+        Assert.StartsWith("[Lifestone] re-buffing ", notices[0], StringComparison.Ordinal);
+        Assert.Matches(@"^\[Lifestone\] re-buffed [1-9]\d* lines?$", notices[1]);
+    }
+
+    [Fact]
     public void The_whole_scenario_ends_with_every_buff_active_a_forced_recast_and_the_mage_back_in_non_combat()
     {
         var t = new Rig();
@@ -141,7 +189,7 @@ public sealed class BuffScenarioTests
     }
 
     [Fact]
-    public void A_second_run_casts_nothing_on_the_same_cycle_and_only_the_armour_lines_on_a_new_one()
+    public void A_second_run_casts_nothing_on_the_same_cycle_or_on_a_new_one_on_the_same_session()
     {
         var t = new Rig();
         var first = t.Scenario();
@@ -159,14 +207,46 @@ public sealed class BuffScenarioTests
         Assert.Contains(" forced=yes ", second.VerdictFields(), StringComparison.Ordinal);
         Assert.Matches(Verdict, second.VerdictFields());
 
-        // A new cycle object does not know an earlier object's armour casts (TODO(m3-buff-armour-memory)): it recasts the two armour lines, which the registry cannot show, and no self line.
+        // A new cycle object on the same session knows the earlier object's armour casts (M4 4.1 lane b, closes TODO(m3-buff-armour-memory)): the scenario hands every cycle it makes the session's ledger, so it casts
+        // neither a self line nor an armour line; only the forced pass casts, one line.
         answered = t.BuffCasts();
         var third = t.Scenario();
         Assert.Equal(ScenarioStatus.Succeeded, t.Run(third));
-        Assert.Equal(2, third.CycleCast);
-        Assert.Equal(2, third.CycleArmourCast);
-        Assert.Equal(answered + 3, t.BuffCasts()); // the two armour lines and the forced pass's one
+        Assert.NotSame(first.Cycle, third.Cycle);
+        Assert.Same(first.Cycle!.Ledger, third.Cycle!.Ledger);
+        Assert.Equal(0, third.CycleCast);
+        Assert.Equal(0, third.CycleArmourCast);
+        Assert.Equal(answered + 1, t.BuffCasts()); // the forced pass's one
         Assert.Contains(" buffs=24/24 ", third.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_scenario_keeps_the_ledgers_remaining_seconds_in_the_store_when_the_run_ends()
+    {
+        var t = new Rig();
+        var store = new MemoryLedgerStore();
+        var scenario = t.Scenario(store: store);
+        Assert.Equal(ScenarioStatus.Succeeded, t.Run(scenario));
+        var guid = t.R.H.State.Self.Guid;
+        var saved = ArmourBuffLedger.ReadSnapshot(store.Saved.GetValueOrDefault(guid), guid, out var why);
+        Assert.Null(why);
+        Assert.Equal(ScriptedCaster.PieceNames.Length * 2, saved.Count); // both armour lines on the five pieces, each with seconds left
+        Assert.All(saved, e => Assert.True(e.Remaining > 0));
+        Assert.Equal(scenario.Cycle!.Ledger.Count, saved.Count);
+        Assert.Contains(t.R.H.Log.Lines, l => l.Contains("the ledger's remaining seconds are kept for the next login", StringComparison.Ordinal));
+
+        // No store: nothing is kept and nothing fails (the conservative rule: nothing saved, nothing to restore).
+        var plain = new Rig();
+        Assert.Equal(ScenarioStatus.Succeeded, plain.Run(plain.Scenario()));
+    }
+
+    private sealed class MemoryLedgerStore : IArmourLedgerStore
+    {
+        public Dictionary<uint, string> Saved { get; } = [];
+
+        public string? Load(uint characterGuid) => Saved.GetValueOrDefault(characterGuid);
+
+        public void Save(uint characterGuid, string json) => Saved[characterGuid] = json;
     }
 
     [Fact]

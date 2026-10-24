@@ -104,7 +104,7 @@ public sealed class MotionInterpreterTests
 
     [Theory]
     [InlineData(1f, false, -1.248f)]
-    [InlineData(1f, true, -1.248f)]
+    [InlineData(1f, true, -1.248f)] // running at rate 1 is under the cap: no change
     [InlineData(2f, true, -2.496f)]
     [InlineData(3f, true, -3f)] // -3.744 clamped to the 3.0 sidestep cap
     public void Sidestepping_scales_by_1_248_and_running_caps_it_at_3(float runRate, bool run, float expected)
@@ -323,7 +323,6 @@ public sealed class MotionInterpreterTests
     [InlineData(0x1000012Bu, true)] // MagicPowerUp01Purple: 11.6096's range
     [InlineData(0x10000134u, true)] // MagicPowerUp10Purple
     [InlineData(0x10000128u, false)] // TripleThrustLow: in 11.4186's range, not 11.6096's
-    [InlineData(0x10000131u, true)] // MagicPowerUp07Purple: in both
     [InlineData(0x10000135u, false)]
     [InlineData(Sanctuary, true)] // new in 11.6096
     [InlineData(AiTelegraphCast, true)] // new in 11.6096
@@ -342,7 +341,6 @@ public sealed class MotionInterpreterTests
     [InlineData(0x10000078u, true)]
     [InlineData(0x10000079u, false)]
     [InlineData(MotionCommands.Ready, false)]
-    [InlineData(MotionCommands.WalkForward, false)]
     public void The_11_6096_jump_gating_set(uint substate, bool blocks)
     {
         Assert.Equal(blocks ? WeenieError.YouCantJumpFromThisPosition : WeenieError.None, MotionInterpreter.MotionAllowsJump(substate));

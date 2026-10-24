@@ -188,6 +188,32 @@ public sealed class GameDragTests(DatSetFixture fixture) : IClassFixture<DatSetF
     // ------------------------------------------------------------------ the state machine
 
     [RequiresLocalDatsFact]
+    public void The_drag_icon_is_the_pressed_cells_composed_icon_with_its_underlay_overlay_type_and_effects()
+    {
+        // M4 4.1 v4 (m4-drag-icon): the carried icon is a cell of the source list's template shown with the pressed cell's own fields, so it is composed by the same path (IconData::RenderIcons 0x0058DFB0) as the pack's.
+        using var g = Enter();
+        var sword = Cell(g.Page.PackList, Sword);
+        Assert.True(sword.TryGetIcon(out var pressed));
+        var from = Game.Center(sword);
+        g.MoveTo(from);
+        g.Down();
+        g.MoveTo((from.X + 40, from.Y + 30));
+        g.Frames(3);
+        var icon = Assert.IsType<UiItem>(g.Drag.Icon);
+        Assert.True(icon.TryGetIcon(out var carried));
+        Assert.Equal(pressed.IconId, carried.IconId);
+        Assert.Equal(pressed.UnderlayId, carried.UnderlayId);
+        Assert.Equal(pressed.OverlayId, carried.OverlayId);
+        Assert.Equal(pressed.ItemType, carried.ItemType);
+        Assert.Equal(pressed.UiEffects, carried.UiEffects);
+        Assert.False(icon.IconPending);
+        Assert.NotNull(icon.ComposedIcon);
+        Assert.NotNull(icon.IconElement!.GeneratedImage);
+        Assert.True(g.Input.KeyDown(DikScanCodes.Escape));
+        g.Up();
+    }
+
+    [RequiresLocalDatsFact]
     public void A_press_that_moves_a_few_pixels_carries_the_pressed_item_with_its_icon_at_the_pointer_and_escape_cancels_and_sends_nothing()
     {
         using var g = Enter();

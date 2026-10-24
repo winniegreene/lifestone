@@ -485,10 +485,9 @@ public sealed class FightLegRunnerTests
 
         var body = script[script.IndexOf("'login-bsd' {", StringComparison.Ordinal)..];
         body = body[..body.IndexOf("'login' {", StringComparison.Ordinal)];
-        Assert.Contains("--account=test --login-check=bsd-fight", body, StringComparison.Ordinal);
+        Assert.Contains("--account=$($stepAccounts[$step]) --login-check=bsd-fight", body, StringComparison.Ordinal);
         Assert.Contains("bsd-fight done ok=true", body, StringComparison.Ordinal);
         Assert.Contains("$verdict", body, StringComparison.Ordinal);
-        Assert.Contains("login-bsd ", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal); // its help line
     }
 
     [Fact]
@@ -508,7 +507,7 @@ public sealed class FightLegRunnerTests
         double Constant(string name) => double.Parse(Regex.Match(runner, @"public const double " + name + @" = (\d+(\.\d+)?);").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
         var whole = Constant("LoginSeconds") + Constant("GearSeconds") + Constant("TopUpSeconds") + Constant("PlaceSeconds") + FightOptions.DefaultSeconds;
         var recovery = Constant("RecoverySeconds");
-        var timeout = double.Parse(Regex.Match(Smoke, @"--login-check=bsd-fight' (\d+) ").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var timeout = double.Parse(Regex.Match(Smoke, @"--login-check=bsd-fight"" (\d+) ").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
 
         Assert.Equal(750.0, whole);
         Assert.Contains("WholeCheckSeconds = LoginSeconds + GearSeconds + TopUpSeconds + PlaceSeconds + FightOptions.DefaultSeconds", runner, StringComparison.Ordinal);

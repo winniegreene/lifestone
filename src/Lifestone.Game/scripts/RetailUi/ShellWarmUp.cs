@@ -50,6 +50,7 @@ internal sealed class ShellWarmUp
             Fonts = real.Fonts,
             Strings = real.Strings,
             RetailGlitches = real.RetailGlitches,
+            ExamineIcon = real.ExamineIcon,
             Images = real.Images,
             EnumMaps = real.EnumMaps,
             ViewportHost = new NoViewportHost(),

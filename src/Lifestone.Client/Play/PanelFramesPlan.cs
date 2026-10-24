@@ -42,7 +42,8 @@ public static class PanelFramesPlan
     /// <summary>
     /// The review frames of the floaty windows that are not host pages (M3 3.2 pa, M4 1.3 s1): the combat window and its power meter, each taken in melee mode, named <c>c1-combat</c> and <c>c1-powerbar</c> (the spellcasting
     /// window's <c>c2-...</c> frame is pb's, after these). <c>c1-combat</c> is taken through the UI's own mode notice (never a session action, so a live run's character is not touched). <c>c1-powerbar</c> is taken during a real attack
-    /// (<see cref="WindowFrame.ByAttack"/>): the stand-in's tusker selected, the Medium button clicked through the UI's own element message, the shot taken while the power charges. The basic combat UI shows the charge in the combat
+    /// (<see cref="WindowFrame.ByAttack"/>): a creature selected, the Medium button clicked through the UI's own element message, the shot taken while the power charges. Only the live hunt leg takes it (<c>HuntUiShotPlan</c>): the offline runs
+    /// have no stand-in creature (M4 4.1 t1, D26) and skip it with one log line naming <c>m4-powerbar-frame-live</c>. The basic combat UI shows the charge in the combat
     /// window's own meter (power bar mode 1); the bottom power bar window (mode 2) is drawn only under the AdvancedCombatUI option, which Lifestone does not honour, so it is not in the frame.
     /// </summary>
     public static IReadOnlyList<WindowFrame> WindowFrames { get; } =
@@ -50,29 +51,6 @@ public static class PanelFramesPlan
         new("c1-combat", 0x1000005C, 2),
         new("c1-powerbar", 0x1000005C, 2, ByAttack: true),
     ];
-
-    /// <summary>The stand-in tusker the attack frame fights, and the metres ahead of the player it stands.</summary>
-    public const uint AttackFrameTusker = 0x80000B07;
-
-    /// <summary>See <see cref="AttackFrameTusker"/>.</summary>
-    public const float AttackFrameMetres = 2f;
-
-    /// <summary>The slider position the attack frame asks for (a full bar takes one second to charge, so the shot finds the meter part way).</summary>
-    public const float AttackFramePower = 1f;
-
-    /// <summary>The level the meter must have reached before the attack frame is taken (the shot comes a few frames later).</summary>
-    public const float AttackFrameLevel = 0.3f;
-
-    /// <summary>Puts the attack frame's tusker <see cref="AttackFrameMetres"/> ahead of the player on the stand-in (health 60: the run outlasts the shot).</summary>
-    public static void PlaceAttackFrameTusker(IGameSessionView session, StandInServer server)
-    {
-        ArgumentNullException.ThrowIfNull(session);
-        ArgumentNullException.ThrowIfNull(server);
-        var heading = session.State.Self.Position is { } here ? System.Numerics.Vector3.Transform(System.Numerics.Vector3.UnitY, here.Orientation) : System.Numerics.Vector3.UnitY;
-        heading = new System.Numerics.Vector3(heading.X, heading.Y, 0f);
-        heading = heading.LengthSquared() > 1e-6f ? System.Numerics.Vector3.Normalize(heading) : System.Numerics.Vector3.UnitY;
-        server.PlaceNear(StandInTusker.Make(AttackFrameTusker, default, maxHealth: 60), heading * AttackFrameMetres);
-    }
 
     /// <summary>
     /// The review frame of the spellcasting window (M3 3.2 pb): <c>c2-spellcasting</c>, taken in Magic mode. It is not in <see cref="WindowFrames"/> because pa's play-check loop over that list drives the combat window and the
@@ -96,17 +74,10 @@ public static class PanelFramesPlan
     public const string InventorySidePackFrame = "inventory-sidepack";
 
     /// <summary>
-    /// The offline review frame of the container window over the world view (M4 2.2 s2): <c>container-window</c>, saved in the <c>extra</c> sub-folder by the play-checks' container rows, taken while the stand-in tusker's corpse
-    /// is open, in the stance the rows are in (melee; the combat floaty is hidden while the container window shows, M4 2.2 fix2). <b>Placeholder content:</b> the corpse holds the stand-in's Bowl and Smock (<c>TODO(m4-standin-corpse-contents)</c>) with the stand-in's placeholder icon. The live corpse frame of a real kill is 2.2 s4's.
+    /// The offline review frame of the container window over the world view (M4 2.2 s2): <c>container-window</c>, saved in the <c>extra</c> sub-folder by the play-checks' container rows, taken while the stand-in's chest
+    /// is open, in peace (M4 4.1 t1: no creature, no corpse). <b>Placeholder content:</b> the chest holds the stand-in's Bowl and Smock (<c>TODO(m4-standin-corpse-contents)</c>) with the stand-in's placeholder icon. The live corpse frame of a real kill is 2.2 s4's.
     /// </summary>
     public const string ContainerWindowFrame = "container-window";
-
-    /// <summary>
-    /// The offline stand-in of the hunt's <c>corpse</c> frame (M4 2.2 s4): <c>corpse</c>, saved in the <c>extra</c> sub-folder by the play-checks' container rows, taken like the hunt's own, in the combat stance with the stand-in
-    /// tusker's corpse open and the container window drawn over it (the combat window is hidden while it shows) (the live hunt's frame is <c>HuntUiShotPlan.Names[HuntUiShotPlan.Corpse]</c>, <c>&lt;stem&gt;-corpse.png</c>). <b>Placeholder content:</b> the corpse holds the stand-in's
-    /// Bowl and Smock (<c>TODO(m4-standin-corpse-contents)</c>) with the stand-in's placeholder icon.
-    /// </summary>
-    public const string CorpseFrame = "corpse";
 
     /// <summary>
     /// The offline review frame of the container window over a stand-in CHEST (M4 3.2 lane e, D23: no creature corpse): <c>container-chest</c>, saved in the <c>extra</c> sub-folder by the play-checks' loot-rule row, taken while the chest
@@ -126,8 +97,8 @@ public static class PanelFramesPlan
     /// <summary>The panel shots' file for the hotbar (<c>hotbar.png</c>); no page, window or extra frame has the name.</summary>
     public const string HotbarShotFile = HotbarFrame + ".png";
 
-    /// <summary>The offline frames of placeholder content that 2.2 s2 and s4 and 3.2 lane e add, in the order the play-checks take them (see <see cref="InventorySidePackFrame"/>, <see cref="CorpseFrame"/>, <see cref="ContainerWindowFrame"/> and <see cref="ContainerChestFrame"/>).</summary>
-    public static IReadOnlyList<string> OfflineContentFrames { get; } = [InventorySidePackFrame, CorpseFrame, ContainerWindowFrame, ContainerChestFrame];
+    /// <summary>The offline frames of placeholder content that 2.2 s2 and s4 and 3.2 lane e add, in the order the play-checks take them (see <see cref="InventorySidePackFrame"/>, <see cref="ContainerWindowFrame"/> and <see cref="ContainerChestFrame"/>; the offline <c>corpse</c> frame went with the stand-in tusker, M4 4.1 t1: the hunt leg's own <c>corpse</c> frame is the live one).</summary>
+    public static IReadOnlyList<string> OfflineContentFrames { get; } = [InventorySidePackFrame, ContainerWindowFrame, ContainerChestFrame];
 
     /// <summary>
     /// The offline review frame of the vendor window (M4 3.2 s4b): <c>vendor-buy-sell</c>, saved in the <c>extra</c> sub-folder by the play-checks' vendor rows, taken with the window open after a Handy Healing Kit was bought through its Buy
@@ -446,7 +417,7 @@ public sealed record PanelFrame(PanelPage Page, uint TabButton, char Letter, str
 /// <param name="Name">The file name without extension (<c>c1-combat</c>).</param>
 /// <param name="WindowId">The window's element id in the gameplay layout; the frame is taken when it shows.</param>
 /// <param name="CombatMode">The combat mode (<c>CombatModes</c>: 2 melee) the window is shown in.</param>
-/// <param name="ByAttack">True when the frame is taken during a real attack on the stand-in's tusker (M4 1.3 s1): the session is put in the mode, the tusker selected and the Medium button clicked, and the shot is taken while the power charges. Nothing is begun by hand.</param>
+/// <param name="ByAttack">True when the frame is taken during a real attack on a creature (M4 1.3 s1; only the live hunt leg takes it since M4 4.1 t1, the offline runs skip it): the session is put in the mode, the creature selected and the Medium button clicked, and the shot is taken while the power charges. Nothing is begun by hand.</param>
 public sealed record WindowFrame(string Name, uint WindowId, int CombatMode, bool ByAttack = false);
 
 /// <summary>The tab the spellcasting frame shows (<see cref="PanelFramesPlan.OpenSpellcastingFrameTab"/>).</summary>

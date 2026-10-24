@@ -188,6 +188,7 @@ public sealed class PartArrayAppearanceTests(DatSetFixture fixture) : IClassFixt
         Assert.NotSame(before, a.Parts[0]);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_CharGen_sex_Setup_applies_its_base_ObjDesc()
     {
@@ -210,6 +211,7 @@ public sealed class PartArrayAppearanceTests(DatSetFixture fixture) : IClassFixt
         Assert.Equal(26, applied);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void ACE_naked_human_ObjDesc_draws_the_Setup_parts_with_the_hair_style_head()
     {

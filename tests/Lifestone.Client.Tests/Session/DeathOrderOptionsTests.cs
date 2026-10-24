@@ -28,8 +28,6 @@ public sealed class DeathOrderOptionsTests
 
     [Theory]
     [InlineData("--death-rebuff=off", false)]
-    [InlineData("--death-rebuff=no", false)]
-    [InlineData("--death-rebuff=on", true)]
     [InlineData("--death-rebuff", true)]
     public void Death_rebuff_takes_on_and_off(string argument, bool expected)
     {
@@ -42,9 +40,6 @@ public sealed class DeathOrderOptionsTests
 
     [Theory]
     [InlineData("--death-fight=off", false)]
-    [InlineData("--death-fight=false", false)]
-    [InlineData("--death-fight=on", true)]
-    [InlineData("--death-fight", true)]
     public void Death_fight_takes_on_and_off(string argument, bool expected)
     {
         var o = Parse(argument);
@@ -56,7 +51,6 @@ public sealed class DeathOrderOptionsTests
 
     [Theory]
     [InlineData("1", 1)]
-    [InlineData("4", 4)]
     [InlineData("1000", 1000)]
     public void Death_fight_kills_takes_one_to_a_thousand(string value, int expected)
     {
@@ -68,7 +62,6 @@ public sealed class DeathOrderOptionsTests
 
     [Theory]
     [InlineData("0")]
-    [InlineData("-3")]
     [InlineData("1001")]
     [InlineData("many")]
     [InlineData("2.5")]
@@ -82,8 +75,6 @@ public sealed class DeathOrderOptionsTests
     }
 
     [Theory]
-    [InlineData("1", 1.0)]
-    [InlineData("180", 180.0)]
     [InlineData("0.5", 0.5)]
     [InlineData("3600", 3600.0)]
     public void Death_fight_seconds_takes_a_positive_number(string value, double expected)
@@ -96,7 +87,6 @@ public sealed class DeathOrderOptionsTests
 
     [Theory]
     [InlineData("0")]
-    [InlineData("-5")]
     [InlineData("soon")]
     public void A_bad_seconds_value_is_an_error_and_keeps_the_default(string value)
     {
@@ -110,11 +100,18 @@ public sealed class DeathOrderOptionsTests
     [Fact]
     public void A_bad_on_off_value_is_an_error_and_keeps_the_default()
     {
-        var o = Parse("--death-rebuff=maybe", "--death-fight=perhaps");
+        // The one on/off parser is shared by every death on/off option; each is wired by name here (the corpse and decoys facts folded in by the M4 polish fold).
+        var o = Parse("--death-rebuff=maybe", "--death-fight=perhaps", "--death-decoys=maybe", "--death-recover-corpse=maybe");
 
-        Assert.Equal(["--death-rebuff: 'maybe' is not on or off", "--death-fight: 'perhaps' is not on or off"], o.Errors);
+        Assert.Equal(4, o.Errors.Count);
+        Assert.Contains("--death-rebuff: 'maybe' is not on or off", o.Errors);
+        Assert.Contains("--death-fight: 'perhaps' is not on or off", o.Errors);
+        Assert.Contains("--death-decoys: 'maybe' is not on or off", o.Errors);
+        Assert.Contains("--death-recover-corpse: 'maybe' is not on or off", o.Errors);
         Assert.True(o.Rebuff);
         Assert.True(o.Fight);
+        Assert.True(o.Decoys);
+        Assert.True(o.RecoverCorpse);
     }
 
     [Fact]
@@ -136,28 +133,20 @@ public sealed class DeathOrderOptionsTests
     }
 
     [Fact]
-    public void The_four_options_are_registered_for_the_main_scene_and_the_headless_host_after_the_decoys_with_helps_that_name_the_order()
+    public void The_four_options_are_registered_for_the_main_scene_and_the_headless_host_after_the_decoys()
     {
         var group = OptionCatalog.Death();
 
         Assert.Equal(OptionScenes.Main | OptionScenes.Headless, group.Scenes);
         var rebuff = Assert.Single(group.Options, o => o.Name == "--death-rebuff");
         var fight = Assert.Single(group.Options, o => o.Name == "--death-fight");
-        var kills = Assert.Single(group.Options, o => o.Name == "--death-fight-kills");
-        var seconds = Assert.Single(group.Options, o => o.Name == "--death-fight-seconds");
+        Assert.Single(group.Options, o => o.Name == "--death-fight-kills");
+        Assert.Single(group.Options, o => o.Name == "--death-fight-seconds");
         Assert.Equal("on|off", rebuff.Value);
         Assert.Equal("on|off", fight.Value);
-        Assert.Contains("default on", rebuff.Help, StringComparison.Ordinal);
-        Assert.Contains("rebuffed=", rebuff.Help, StringComparison.Ordinal);
-        Assert.Contains("default on", fight.Help, StringComparison.Ordinal);
-        Assert.Contains("M4 2.2's order exactly", fight.Help, StringComparison.Ordinal);
-        Assert.Contains("den_kills=", fight.Help, StringComparison.Ordinal);
-        Assert.Contains("default 4", kills.Help, StringComparison.Ordinal);
-        Assert.Contains("default 180", seconds.Help, StringComparison.Ordinal);
         var names = group.Options.Select(o => o.Name).ToList();
         Assert.True(names.IndexOf("--death-decoys") < names.IndexOf("--death-rebuff"));
         Assert.Equal(["--death-rebuff", "--death-fight", "--death-fight-kills", "--death-fight-seconds"], names.Skip(names.IndexOf("--death-decoys") + 1));
-        Assert.Contains("rebuff, fight", group.Options.Single(o => o.Name == "--death-stages").Help, StringComparison.Ordinal);
     }
 
     [Fact]

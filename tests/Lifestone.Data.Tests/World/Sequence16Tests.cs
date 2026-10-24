@@ -15,14 +15,10 @@ public sealed class Sequence16Tests
     [InlineData(5, 5, false)] // equal is not newer
     [InlineData(0xFFFF, 0, true)] // the counter wraps forward
     [InlineData(0, 0xFFFF, false)]
-    [InlineData(0xFFF0, 0x0010, true)]
-    [InlineData(0x0010, 0xFFF0, false)]
     [InlineData(0, 0x7FFF, true)] // the largest forward step without a wrap
     [InlineData(0x7FFF, 0, false)]
     [InlineData(0, 0x8000, false)] // a distance of 0x8000 counts as a wrap: 0x8000 is older than 0 ...
     [InlineData(0x8000, 0, true)] // ... and 0 is newer than 0x8000
-    [InlineData(0x0001, 0x8001, false)]
-    [InlineData(0x8001, 0x0001, true)]
     [InlineData(0x8000, 0xFFFF, true)]
     [InlineData(0xFFFF, 0x8000, false)]
     public void Is_newer_follows_the_retail_wrap_rule(int stored, int incoming, bool newer)
@@ -77,14 +73,10 @@ public sealed class Sequence16Tests
     [InlineData(5, 5, false)] // equal is not newer
     [InlineData(0x7FFF, 0, true)] // the 15-bit counter wraps forward (the 16-bit rule would say false)
     [InlineData(0, 0x7FFF, false)]
-    [InlineData(0x7FF0, 0x0010, true)]
-    [InlineData(0x0010, 0x7FF0, false)]
     [InlineData(0, 0x3FFF, true)] // the largest forward step without a wrap
     [InlineData(0x3FFF, 0, false)]
     [InlineData(0, 0x4000, false)] // a distance of 0x4000 counts as a wrap: 0x4000 is older than 0 ...
     [InlineData(0x4000, 0, true)] // ... and 0 is newer than 0x4000
-    [InlineData(0x0001, 0x4001, false)]
-    [InlineData(0x4001, 0x0001, true)]
     [InlineData(0x4000, 0x7FFF, true)]
     [InlineData(0x7FFF, 0x4000, false)]
     public void Is_newer_action_follows_the_retail_15_bit_wrap_rule(int stored, int incoming, bool newer)

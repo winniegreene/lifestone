@@ -81,6 +81,7 @@ public sealed class PartShapesTests(ObjectsFixture fixture) : IClassFixture<Obje
         Assert.Same(mesh, PartShapes.Apply(mesh, Vector3.One));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Non_uniformly_scaled_parts_draw_shaped_meshes_with_a_uniform_instance_scale()
     {

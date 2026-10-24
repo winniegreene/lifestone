@@ -14,6 +14,7 @@ namespace Lifestone.Client.Tests.Effects;
 /// its particles batched (<see cref="ParticleDrawList"/>) from an orbiting viewer, exactly as the viewer does before
 /// uploading. Nothing may throw, and what comes out must be drawable.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class SpellShowcaseSmokeTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private const double Step = 1.0 / 30.0;

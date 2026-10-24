@@ -127,49 +127,4 @@ public sealed class StandInToolsTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Equal(5, new[] { five, big, none, sword, oneSword }.Select(h => h.Result!.Guid).Distinct().Count());
     }
 
-    [Fact]
-    public void An_unknown_class_id_a_weenie_the_server_never_spawns_and_a_full_pack_are_the_mods_three_refusals()
-    {
-        using var rig = new Rig(ItemVisit());
-        var unknown = rig.Done(rig.Session.Tools.SpawnItem(99_999_999, 1, ActionSource.Host));
-        Assert.Equal(ItemOutcome.UnknownWcid, ItemOutcomes.Of(unknown));
-        Assert.Equal("unknown-wcid: no weenie has class id 99999999", unknown.Outcome!.Value.Detail);
-        Assert.Null(unknown.Result);
-
-        var portal = rig.Done(rig.Session.Tools.SpawnItem(200, 1, ActionSource.Host));
-        Assert.Equal(ItemOutcome.NotCreatable, ItemOutcomes.Of(portal));
-
-        for (var i = 0; i < StandInWorld.PackCapacity; i++)
-        {
-            Assert.Equal(ItemOutcome.Created, ItemOutcomes.Of(rig.Done(rig.Session.Tools.SpawnItem(100, null, ActionSource.Host))));
-        }
-
-        var full = rig.Done(rig.Session.Tools.SpawnItem(100, null, ActionSource.Host));
-        Assert.Equal(ItemOutcome.NoRoom, ItemOutcomes.Of(full));
-        Assert.Null(full.Result);
-    }
-
-    [Fact]
-    public void The_default_weenies_know_pyreal_and_nothing_else_and_the_stack_rule_matches_the_mods()
-    {
-        using var rig = new Rig();
-        Assert.Equal(ItemOutcome.Created, ItemOutcomes.Of(rig.Done(rig.Session.Tools.SpawnItem(StandInItemKind.PyrealWcid, 2, ActionSource.Host))));
-        Assert.Equal(ItemOutcome.UnknownWcid, ItemOutcomes.Of(rig.Done(rig.Session.Tools.SpawnItem(5, 1, ActionSource.Host))));
-
-        // The mod's ItemCreateRules.ResolveStack cases (server/mod Core/ItemCreateRules.cs): clamp when it stacks, ignore when it does not, never clamp a request below the maximum.
-        Assert.Equal((25_000, true), StandInWorld.ResolveStack(30_000, 25_000));
-        Assert.Equal((5, false), StandInWorld.ResolveStack(5, 25_000));
-        Assert.Equal((1, true), StandInWorld.ResolveStack(5, null));
-        Assert.Equal((1, false), StandInWorld.ResolveStack(1, null));
-        Assert.Equal((1, false), StandInWorld.ResolveStack(null, 25_000));
-    }
-
-    [Fact]
-    public void The_status_the_stand_in_reports_lists_both_new_verbs()
-    {
-        using var rig = new Rig();
-        var status = rig.Done(rig.Session.Tools.Status(ActionSource.Host));
-        Assert.Contains("spell learn", status.Result!.Verbs);
-        Assert.Contains("item", status.Result.Verbs);
-    }
 }

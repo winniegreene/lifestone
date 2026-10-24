@@ -46,6 +46,7 @@ public sealed class SpellVisualTests(DatSetFixture fixture) : IClassFixture<DatS
         { 1635, "Lifestone Recall", 0x3300002B, 0, 0 },
     };
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [MemberData(nameof(Showcase))]
     public void Showcase_spells_resolve_to_the_documented_scripts(uint spellId, string name, uint casterScript, uint targetScript, uint launchScript)
@@ -74,6 +75,7 @@ public sealed class SpellVisualTests(DatSetFixture fixture) : IClassFixture<DatS
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Flame_Bolt_VI_plan_follows_ACE_casting()
     {
@@ -118,6 +120,7 @@ public sealed class SpellVisualTests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.All(cases, c => Assert.Equal(c.Level, SpellFormulaRules.AceSpellLevel(c.Power)));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Projectile_script_intensity_follows_ACE_power_based_level_not_the_scarab_heuristic()
     {
@@ -144,6 +147,7 @@ public sealed class SpellVisualTests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Equal(250, projectiles.Count(s => SpellFormulaRules.LevelByRoughHeuristic(s.Formula) != SpellFormulaRules.AceSpellLevel(s.Power)));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Ace_animation_length_uses_the_style_links_only_when_the_current_link_set_exists()
     {
@@ -165,6 +169,7 @@ public sealed class SpellVisualTests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Equal(0.0, CastGesturePlanner.AceAnimationLength(table, anims, style, motion, noSuchCurrent));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Fast_cast_spells_have_no_windup_and_Lead_scarab_windups_are_no_ops()
     {
@@ -179,6 +184,7 @@ public sealed class SpellVisualTests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Equal(MotionCommands.MagicSelfHeart, heal.Steps[1].Motion);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Component_gesture_time_is_the_ACE_length_of_its_links_except_three_components()
     {
@@ -206,6 +212,7 @@ public sealed class SpellVisualTests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Equal(new uint[] { 6, 59, 192 }, mismatches);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_spell_effect_resolves_through_the_human_and_drudge_tables()
@@ -245,6 +252,7 @@ public sealed class SpellVisualTests(DatSetFixture fixture) : IClassFixture<DatS
             unresolved);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Ace_world_extract_matches_the_dats()
     {
@@ -267,6 +275,7 @@ public sealed class SpellVisualTests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.NotNull(Resolver.Effects.GetScriptTable(drudge.PhysicsEffectTableId));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Viewer_loop_plays_Flame_Bolt_VI_from_windup_glow_to_projectile_explosion()
     {

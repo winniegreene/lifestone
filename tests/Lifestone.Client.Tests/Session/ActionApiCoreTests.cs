@@ -347,7 +347,7 @@ public sealed class ActionApiCoreTests
         Assert.Equal(4.0, ActionPolicy.UsePerSecond);
         Assert.Equal(2.0, ActionPolicy.ToolsPerSecond);
         Assert.Equal(
-            [30.0, 15, 10, 10, 30, 15, 20, 5, 5, 5, 30, 5],
+            [30.0, 15, 10, 10, 110, 15, 20, 5, 5, 5, 30, 5],
             [ActionPolicy.LoginSeconds, ActionPolicy.CreateSeconds, ActionPolicy.DeleteSeconds, ActionPolicy.RestoreSeconds,
              ActionPolicy.EnterWorldSeconds, ActionPolicy.LoginCompleteSeconds, ActionPolicy.UseSeconds, ActionPolicy.QueryHealthSeconds,
              ActionPolicy.TalkSeconds, ActionPolicy.TellSeconds, ActionPolicy.LogOffSeconds, ActionPolicy.ToolSeconds]);

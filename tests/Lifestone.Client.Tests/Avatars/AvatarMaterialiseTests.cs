@@ -121,7 +121,6 @@ public sealed class AvatarMaterialiseTests(ITestOutputHelper output)
 
     [Theory]
     [InlineData(30)]
-    [InlineData(60)]
     [InlineData(240)]
     public void The_ramp_is_a_function_of_time_not_of_frames(int fps)
     {

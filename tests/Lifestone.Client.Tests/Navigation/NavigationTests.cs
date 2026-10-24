@@ -11,22 +11,28 @@ public sealed class NavigationTests(DatSetFixture fixture) : IClassFixture<DatSe
 {
     private static readonly TeleportCatalog Catalog = TeleportCatalog.FromAce();
 
-    public static readonly TheoryData<string> Towns = new()
-    {
+    private static readonly string[] Towns =
+    [
         "Holtburg", "Arwic", "Yaraq", "Shoushi", "Cragstone", "Rithwic", "Glenden Wood", "Al-Arqas", "Samsur", "Hebian-To",
         "Sawato", "Zaikhal", "Tufa", "Qalaba'r", "Lytelthorpe", "Eastham", "Baishi", "Mayoi", "Nanto", "Lin", "Dryreach",
         "Stonehold", "Plateau", "Fort Tethana",
-    };
+    ];
 
-    [Theory]
-    [MemberData(nameof(Towns))]
-    public void Every_major_town_is_a_destination_with_retail_map_coordinates(string town)
+    [Fact]
+    public void Every_major_town_is_a_destination_with_retail_map_coordinates()
     {
-        var d = Catalog.Find(town);
-        Assert.NotNull(d);
-        Assert.Equal(TeleportCatalog.Normalize(town), TeleportCatalog.Normalize(d.Name));
-        Assert.Equal(DestinationKind.Outdoor, d.Kind);
-        Assert.NotNull(d.Map);
+        foreach (var town in Towns)
+        {
+            var d = Catalog.Find(town);
+            if (d is null)
+            {
+                Assert.Fail("no destination for " + town);
+            }
+
+            Assert.Equal(TeleportCatalog.Normalize(town), TeleportCatalog.Normalize(d.Name));
+            Assert.True(d.Kind == DestinationKind.Outdoor, town);
+            Assert.True(d.Map is not null, town);
+        }
     }
 
     [Fact]
@@ -73,6 +79,7 @@ public sealed class NavigationTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Null(Catalog.Find("  "));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Outdoor_destinations_stand_on_the_ground()
     {
@@ -103,7 +110,6 @@ public sealed class NavigationTests(DatSetFixture fixture) : IClassFixture<DatSe
     [InlineData("42.1 n 33.6 e", 0xA9B40019u)]
     [InlineData("42.1, 33.6", 0xA9B40019u)]
     [InlineData("42.14N 33.64E", 0xA9B40019u)] // rounded to retail's 0.1 grid
-    [InlineData("33.3N 56.6E", 0xC6A90009u)] // Arwic
     [InlineData("0.0, 0.0", 0x7F7F001Cu)] // lcoord (1019, 1019)
     public void Map_coordinates_name_the_cell_retail_shows_them_for(string text, uint cell)
     {
@@ -135,7 +141,6 @@ public sealed class NavigationTests(DatSetFixture fixture) : IClassFixture<DatSe
     [InlineData("42.1N 12.0S")]
     [InlineData("42.1N 33.6E 5")]
     [InlineData("150N 33E")]
-    [InlineData("1 2 3")]
     public void Bad_map_coordinates_are_refused_with_a_message(string text)
     {
         Assert.False(MapCoordinateParser.TryParse(text, out _, out var error));

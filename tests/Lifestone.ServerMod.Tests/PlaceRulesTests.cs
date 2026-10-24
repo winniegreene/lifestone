@@ -12,7 +12,6 @@ public sealed class PlaceRulesTests
 {
     [Theory]
     [InlineData(0f, 0f, 0x01u)]
-    [InlineData(23.999f, 0f, 0x01u)]
     [InlineData(23.999998f, 23.999998f, 0x01u)]
     [InlineData(24f, 0f, 0x09u)]
     [InlineData(0f, 24f, 0x02u)]

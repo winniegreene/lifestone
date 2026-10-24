@@ -12,6 +12,7 @@ public sealed class PhysicsScriptTests(DatSetFixture fixture) : IClassFixture<Da
 
     private DatEffectSource? _source;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_physics_script_decodes_exactly()
@@ -108,6 +109,7 @@ public sealed class PhysicsScriptTests(DatSetFixture fixture) : IClassFixture<Da
         Assert.Equal(166, tiesOver8Hooks);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_script_table_resolves_to_existing_scripts()
@@ -128,6 +130,7 @@ public sealed class PhysicsScriptTests(DatSetFixture fixture) : IClassFixture<Da
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_emitter_info_is_sane_and_uses_eleven_particle_types()
@@ -167,6 +170,7 @@ public sealed class PhysicsScriptTests(DatSetFixture fixture) : IClassFixture<Da
         Assert.True(lifespanAtLeastRand > ids.Count * 0.9);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Script_table_lookup_takes_the_first_threshold_at_or_above_the_intensity()
     {

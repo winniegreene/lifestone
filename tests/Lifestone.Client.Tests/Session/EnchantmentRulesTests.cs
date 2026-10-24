@@ -34,12 +34,6 @@ public sealed class EnchantmentRulesTests
     private static uint Max(ImmutableArray<EnchantmentDesc> enchantments, uint id, uint raw) => EnchantmentRules.EnchantSecondaryAttribute(enchantments, id, raw);
 
     [Fact]
-    public void A_vital_at_28_with_a_plus_22_buff_is_50()
-    {
-        Assert.Equal(50u, Max([Add(7, 100, AdditiveSecondary, 1, 22f)], 1, 28));
-    }
-
-    [Fact]
     public void An_enchantment_of_another_vital_or_another_kind_does_not_touch_the_vital()
     {
         ImmutableArray<EnchantmentDesc> enchantments =
@@ -64,11 +58,8 @@ public sealed class EnchantmentRulesTests
         ];
         Assert.Equal(48u, Max(enchantments, 1, 28));
         Assert.Equal(48u, Max([.. enchantments.Reverse()], 1, 28));
-    }
 
-    [Fact]
-    public void Identical_layered_duplicates_count_once()
-    {
+        // Identical layered duplicates count once (folded in by the M4 polish fold).
         var one = Add(7, 50, AdditiveSecondary, 1, 10f);
         Assert.Equal(38u, Max([one, one, one, one], 1, 28));
     }

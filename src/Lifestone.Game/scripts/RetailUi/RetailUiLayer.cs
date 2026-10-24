@@ -293,6 +293,7 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
             Images = layer.Images,
             EnumMaps = dats.EnumMaps,
             RetailGlitches = options.Glitches,
+            ExamineIcon = options.ExamineIcon,
             ViewportHost = layer.Viewports,
         };
         var scale = UiScalePolicy.Choose(Math.Max(1, windowSize.X), Math.Max(1, windowSize.Y), options.ScaleOverride);

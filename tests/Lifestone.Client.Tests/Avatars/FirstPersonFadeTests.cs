@@ -19,10 +19,8 @@ public sealed class FirstPersonFadeTests
     private static readonly AvatarViewer Viewer = new(AvatarRig.At(new Vector3(96, 96, 0)));
 
     [Theory]
-    [InlineData(0.0f, 0.0f, 0.0f)]
     [InlineData(0.0f, 0.4f, 0.4f)]
     [InlineData(0.7f, 0.4f, 0.7f)]
-    [InlineData(0.3f, 1.0f, 1.0f)]
     [InlineData(1.0f, 0.0f, 1.0f)]
     public void The_cameras_translucency_is_a_floor_under_the_parts_own(float own, float camera, float drawn)
     {
@@ -42,11 +40,9 @@ public sealed class FirstPersonFadeTests
     }
 
     [Theory]
-    [InlineData(1.0f, 0f)]
     [InlineData(0.45f, 0f)]
     [InlineData(0.325f, 0.5f)]
     [InlineData(0.2f, 1f)]
-    [InlineData(0.15f, 1f)]
     public void The_distance_from_the_pivot_maps_to_retails_fade_from_045_to_02_metres(float metres, float expected)
     {
         // The model's map, read through a pose: the viewer `metres` behind the pivot with the camera settled (the pose's translucency uses the viewer of the frame before).

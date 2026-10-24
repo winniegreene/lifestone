@@ -22,6 +22,7 @@ namespace Lifestone.Client.Tests.Movement;
 /// Holtburg's arrival point, and from the Training Academy's spawn through its rooms as <see cref="CellRoutePlanner"/>
 /// plans.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class OfflineRouteTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     /// <summary>The Training Academy's first starting location (CharGen 0x0E000002, StartingAreas[0].Locations[0]).</summary>

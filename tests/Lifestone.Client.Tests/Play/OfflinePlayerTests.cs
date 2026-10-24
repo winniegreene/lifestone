@@ -39,6 +39,7 @@ public sealed class OfflinePlayerTests(DatSetFixture fixture) : IClassFixture<Da
         Assert.Contains(OptionCatalog.Avatars().Options, o => o.Name == "--offline-player");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_stand_in_is_an_aluvian_on_the_human_setup_and_motion_table_with_every_appearance_change_applied()
     {
@@ -53,6 +54,7 @@ public sealed class OfflinePlayerTests(DatSetFixture fixture) : IClassFixture<Da
         Assert.NotEqual(GearChoice.None, look.Footwear);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_look_is_the_same_every_time()
     {
@@ -60,6 +62,7 @@ public sealed class OfflinePlayerTests(DatSetFixture fixture) : IClassFixture<Da
         Assert.Equal(first, OfflinePlayerLook.Create(data.Record, data.Dats));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_walker_is_hosted_on_the_avatars_part_array_and_the_avatar_draws_its_pose()
     {
@@ -118,6 +121,7 @@ public sealed class OfflinePlayerTests(DatSetFixture fixture) : IClassFixture<Da
         Assert.Equal(LogSeverity.Warning, Assert.Single(log.Entries, e => e.Severity >= LogSeverity.Warning).Severity); // the placeholder skills, loud once
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_player_in_a_dungeon_cell_draws_in_its_cell_and_streams_indoor()
     {

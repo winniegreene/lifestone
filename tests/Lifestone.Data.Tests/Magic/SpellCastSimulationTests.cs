@@ -7,6 +7,7 @@ using Lifestone.Data.Magic;
 namespace Lifestone.Data.Tests.Magic;
 
 /// <summary>End-to-end: <see cref="SpellCastSimulation"/> plays showcase spells between a human and a drudge.</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class SpellCastSimulationTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private static readonly AcFrame CasterFrame = new(new Vector3(90, 90, 30), Quaternion.Identity);

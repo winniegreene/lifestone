@@ -9,12 +9,14 @@ namespace Lifestone.Client.Tests.Session.Mage;
 public sealed class ArenaProfileTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     [Fact]
-    public void The_profile_has_31_lines_247_spells_and_every_id_once_and_the_build_learns_two_more()
+    public void The_profile_has_31_lines_247_spells_and_every_id_once_and_the_build_learns_twelve_more()
     {
         Assert.Equal(31, ArenaProfile.Lines.Count);
         Assert.Equal(247, ArenaProfile.Lines.Sum(l => l.Spells.Count));
-        Assert.Equal(249, ArenaProfile.SpellsToLearn.Count); // the lines and the fight tab's Fire Vulnerability Other VII and Heal Self VII (M3 4.2 p1)
-        Assert.Equal(249, ArenaProfile.SpellsToLearn.Distinct().Count());
+        // The lines, the fight tab's Fire Vulnerability Other VII and Heal Self VII (M3 4.2 p1), and (M4 P5a, D33 and D36) Harm Self I-VIII and the three travel spells: Lifestone Recall, Primary Portal Tie, Primary Portal Recall.
+        Assert.Equal(247 + 2 + 8 + 3, ArenaProfile.SpellsToLearn.Count);
+        Assert.Equal(ArenaProfile.SpellsToLearn.Count, ArenaProfile.SpellsToLearn.Distinct().Count());
+        Assert.Equal(ArenaProfile.SpellsToLearn, ArenaProfile.Buffs.SpellsToLearn);
         Assert.Equal(30, ArenaProfile.Lines.Count(l => l.Spells.Count == 8));
         Assert.Equal(7, ArenaProfile.LineNamed("Flame Blast")!.Spells.Count);
         Assert.Equal(ArenaProfile.Lines.SelectMany(l => l.Spells).Select(s => s.Id).Concat(ArenaProfile.FightExtras), ArenaProfile.SpellsToLearn);
@@ -66,6 +68,54 @@ public sealed class ArenaProfileTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Equal(400u, ArenaProfile.LineNamed("Strength Self")!.HighestAtMostPower(10_000)!.Power);
         Assert.Equal(2087u, ArenaProfile.LineNamed("Strength Self")!.HighestAtMostPower(300)!.Id);
         Assert.Null(ArenaProfile.LineNamed("Armor Self")!.HighestAtMostPower(0));
+    }
+
+    [Fact]
+    public void The_extras_are_Harm_Self_and_the_three_travel_spells_the_mage_learns_but_the_cycle_never_casts_M4_P5a()
+    {
+        Assert.Equal(["Harm Self", "Lifestone Recall", "Primary Portal Tie", "Primary Portal Recall"], ArenaProfile.Extras.Select(l => l.Name));
+        Assert.Equal([ProfileRole.HarmSelf, ProfileRole.Travel, ProfileRole.Travel, ProfileRole.Travel], ArenaProfile.Extras.Select(l => l.Role));
+        Assert.Equal([8u, 1167u, 1168u, 1169u, 1170u, 1171u, 2071u, 4309u], ArenaProfile.ExtraNamed("Harm Self")!.Spells.Select(s => s.Id));
+        Assert.Equal(2071u, ArenaProfile.ExtraNamed("Harm Self")!.Spells[6].Id); // VII, the level the mage casts at the 0.9 rule
+        Assert.Equal(1635u, ArenaProfile.ExtraNamed("Lifestone Recall")!.Spells.Single().Id);
+        Assert.Equal(47u, ArenaProfile.ExtraNamed("Primary Portal Tie")!.Spells.Single().Id);
+        Assert.Equal(48u, ArenaProfile.ExtraNamed("Primary Portal Recall")!.Spells.Single().Id);
+        Assert.All(ArenaProfile.Extras, l => Assert.False(l.IsBuff || l.IsManaLine));
+        Assert.All(ArenaProfile.Extras.SelectMany(l => l.Spells), s => Assert.Contains(s.Id, ArenaProfile.FightExtras));
+        Assert.DoesNotContain(ArenaProfile.Extras.SelectMany(l => l.Spells).Select(s => s.Id), id => ArenaProfile.Spell(id) is not null); // none is a line of Lines
+        Assert.Equal(ArenaProfile.Lines.Count, ArenaProfile.Buffs.Lines.Count);
+        Assert.Equal("BSD Mage", ArenaProfile.Buffs.CharacterName);
+    }
+
+    [RequiresDatsFact]
+    [Trait("Tier", "Exhaustive")]
+    public void The_extras_equal_the_spell_table_entries_in_name_power_school_and_type_M4_P5a()
+    {
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        foreach (var line in ArenaProfile.Extras)
+        {
+            foreach (var s in line.Spells)
+            {
+                Assert.True(spells.TryGetValue(s.Id, out var dat), $"{line.Name}: id {s.Id} is not in the SpellTable");
+                Assert.True(dat.Name == s.Name, $"{line.Name}: id {s.Id} is '{dat.Name}', profile '{s.Name}'");
+                Assert.True(dat.Power == s.Power, $"{s.Name} ({s.Id}): Power {dat.Power}, profile {s.Power}");
+                Assert.True(dat.School == line.School, $"{s.Name} ({s.Id}): school {dat.School}, line {line.School}");
+                Assert.Equal(0, dat.Duration);
+                var expectedType = line.Name switch
+                {
+                    "Harm Self" => SpellType.Boost,
+                    "Primary Portal Tie" => SpellType.PortalLink,
+                    _ => SpellType.PortalRecall,
+                };
+                Assert.True(dat.MetaSpellType == expectedType, $"{s.Name} ({s.Id}): type {dat.MetaSpellType}, line {expectedType}");
+            }
+        }
+
+        // The pinned numbers a reader needs: the recall and the tie are Item Enchantment, powers 100, 150 and 100; Harm Self VII is power 325.
+        Assert.Equal((MagicSchool.ItemEnchantment, 100u), (spells[1635].School, spells[1635].Power));
+        Assert.Equal((MagicSchool.ItemEnchantment, 150u), (spells[47].School, spells[47].Power));
+        Assert.Equal((MagicSchool.ItemEnchantment, 100u), (spells[48].School, spells[48].Power));
+        Assert.Equal(325u, spells[2071].Power);
     }
 
     [Fact]

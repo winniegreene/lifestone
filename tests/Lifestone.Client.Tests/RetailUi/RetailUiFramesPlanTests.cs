@@ -104,13 +104,13 @@ public sealed class RetailUiFramesPlanTests
     [Fact]
     public void The_offline_content_frames_of_the_inventory_and_the_container_window_are_extra_frames_with_unique_file_safe_names_that_clash_with_no_other_frame()
     {
-        // M4 2.2 s2 and s4: three review frames of PLACEHOLDER content (the stand-in's Pack with one Pyreal; the stand-in corpse's Bowl and Smock, in the combat stance as the hunt's corpse frame is, and in peace).
+        // M4 2.2 s2 and s4, 4.1 t1: review frames of PLACEHOLDER content (the stand-in's Pack with one Pyreal; the stand-in chest's Bowl and Smock; the loot chest's three items). The offline `corpse` frame went with the stand-in tusker (D26).
         var names = PanelFramesPlan.OfflineContentFrames;
-        Assert.Equal(["inventory-sidepack", "corpse", "container-window", "container-chest"], names); // M4 3.2 lane e added the chest frame (D23: a chest, no creature corpse)
+        Assert.Equal(["inventory-sidepack", "container-window", "container-chest"], names); // M4 3.2 lane e added the chest frame (D23: a chest, no creature corpse); 4.1 t1 removed the stand-in tusker's corpse frame
         Assert.Equal("container-chest", PanelFramesPlan.ContainerChestFrame);
         Assert.Equal("c2-spellcasting-empty", PanelFramesPlan.SpellcastingEmptyFrame.Name);
-        Assert.Equal("corpse", PanelFramesPlan.CorpseFrame);
-        Assert.Equal("corpse", Lifestone.Client.Session.Scenarios.HuntUiShotPlan.Names[Lifestone.Client.Session.Scenarios.HuntUiShotPlan.Corpse]); // the live hunt's frame is <stem>-corpse.png: the offline stand-in has its name
+        Assert.Equal("corpse", Lifestone.Client.Session.Scenarios.HuntUiShotPlan.Names[Lifestone.Client.Session.Scenarios.HuntUiShotPlan.Corpse]); // the live hunt's frame is <stem>-corpse.png: no offline frame takes its name since 4.1 t1
+        Assert.DoesNotContain("corpse", names); // no offline run draws a creature's corpse (D26)
         Assert.Equal(names.Count, names.Distinct(StringComparer.Ordinal).Count());
         Assert.All(names, name => Assert.Matches("^[a-z0-9]+(-[a-z0-9]+)*$", name));
         Assert.Equal("inventory-sidepack", PanelFramesPlan.InventorySidePackFrame);

@@ -9,6 +9,7 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Tools;
+using Lifestone.Data.Dat;
 using Lifestone.Data.World;
 using Lifestone.Game.Core;
 using Lifestone.Game.Diagnostics;
@@ -18,7 +19,7 @@ using Lifestone.Game.RetailUi;
 namespace Lifestone.Game.Sessions;
 
 /// <summary>
-/// <c>--login-check=hunt</c> (M4 1.2 s4b; docs/session.md section 35): the game enters Holtburg Hunter on the test account and runs <see cref="HuntScenario"/> in its own session (the bind at Holtburg's lifestone,
+/// <c>--login-check=hunt</c> (M4 1.2 s4b; docs/session.md section 35): the game enters the account's fighter (Holtburg Hunter on the test account; Holtburg Brawler on test-melee and Holtburg Archer on test-archer, M4 P4) and runs <see cref="HuntScenario"/> in its own session (the bind at Holtburg's lifestone,
 /// the belt, the weapon swap for <c>--hunt-weapon=missile</c>, the hunt on the grounds of <c>--hunt-ground</c> (<see cref="HuntOptions.GroundRow"/>: the belt, <see cref="HuntGround.LowB"/>, by default) until <c>--hunt-kills</c> kills or <c>--hunt-seconds</c>, the wind-down back to Holtburg), then logs
 /// off and quits. A kind of its own, never part of <c>--login-check=all</c> (hooked by one line in <see cref="LoginCheckRunner.Install"/>, as <see cref="FightLegRunner"/> is). The script is the scenario's; this node walks
 /// the character list and the arrival (the session host has already started the login), steps the scenario once per frame after the session host and play mode, and reads what only the engine can see: the review frame.
@@ -75,8 +76,10 @@ public sealed partial class HuntLegRunner : Node
     private SessionHost _host = null!;
     private PlayMode _mode = null!;
     private HuntOptions _options = new();
+    private FighterTemplate _template = FighterTemplate.Hunter;
     private double _wholeSeconds = WholeCheckSeconds;
     private Task<Dictionary<HuntCell, float?>>? _loading;
+    private DatSet? _dats;
     private HuntScenario? _scenario;
     private string? _optionError;
     private ActionHandle? _pending;
@@ -132,6 +135,15 @@ public sealed partial class HuntLegRunner : Node
         ArgumentNullException.ThrowIfNull(mode);
         var dats = services.Dats ?? throw new InvalidOperationException("the hunt leg needs the dats (Main checks for them first)");
         var options = HuntOptions.FromArguments(CommandLineArgument.ParseAll(OS.GetCmdlineUserArgs()));
+        // M4 P4 (D31): the fighter is the template of the account the leg runs with (--account; none is the test account's Holtburg Hunter); --hunt-weapon and --hunt-ground still override its defaults,
+        // and a weapon the template's kit has none of is an option error. An account with no template fails the leg at its first frame (the value is never shown).
+        var template = FighterTemplate.ForAccount(host.Options.Account);
+        options = options.ForTemplate(template ?? FighterTemplate.Hunter);
+        if (template is null)
+        {
+            options = options with { Errors = [.. options.Errors, "--account: the account has no fighter template (test, test-melee or test-archer)"] };
+        }
+
         // A bad --hunt-kills, --hunt-seconds, --hunt-weapon or --hunt-ground fails the leg at its first frame, as the headless host fails its run (no silent default).
         foreach (var error in options.Errors)
         {
@@ -146,10 +158,12 @@ public sealed partial class HuntLegRunner : Node
             _mode = mode,
             _ui = ui,
             _options = options,
+            _template = template ?? FighterTemplate.Hunter,
             _optionError = options.Errors.Count == 0 ? null : "bad hunt option: " + string.Join("; ", options.Errors),
             _wholeSeconds = WholeCheckSecondsFor(options.Seconds, options.Sell || options.BuyKits > 0),
             _shotPath = services.Options.Play.BuffShotPath,
             _plan = new HuntShotPlan(options.Weapon),
+            _dats = dats,
         };
 
         // The terrain height at every usable cell's centre of the chosen ground (--hunt-ground: the belt or the forest) is read on a worker (the dats' landblock terrain), so the game thread does not load it in the hunt's first frames.
@@ -303,25 +317,25 @@ public sealed partial class HuntLegRunner : Node
 
         foreach (var c in state.Characters.Entries)
         {
-            if (!HuntScenario.NameCheck(c.Name))
+            if (!HuntScenario.NameCheck(c.Name, _template))
             {
                 continue;
             }
 
             if (c.PendingDeletion)
             {
-                Fail(session, "choosing: " + FighterTemplate.CharacterName + " is pending deletion (restore it first)");
+                Fail(session, "choosing: " + _template.Name + " is pending deletion (restore it first)");
                 return;
             }
 
             session.Actions.SelectCharacter(c.Guid, ActionSource.Host);
             _pending = session.Actions.EnterWorld(c.Guid, ActionSource.Host);
-            Log.Info(LogCategory, "hunt: entering the existing character " + FighterTemplate.CharacterName);
+            Log.Info(LogCategory, "hunt: entering the existing character " + _template.Name);
             Go(Phase.Entering);
             return;
         }
 
-        Fail(session, "choosing: " + FighterTemplate.CharacterName + " is not in the character list (run --scenario=fighter-build first; the hunt leg creates nobody)");
+        Fail(session, "choosing: " + _template.Name + " is not in the character list (run --scenario=fighter-build first; the hunt leg creates nobody)");
     }
 
     private void Entering(IGameSessionView session)
@@ -384,7 +398,10 @@ public sealed partial class HuntLegRunner : Node
     {
         var heights = _loading!.Result;
         // endSession: false, the leg logs off itself (the scenario's run ends at the return to Holtburg).
-        _scenario = new HuntScenario(_options, GodotLogSink.Instance, cell => heights.TryGetValue(cell, out var h) ? h : null, ground: _options.GroundRow, endSession: false, follow: new PlayerBodyFollow(_mode));
+        _scenario = new HuntScenario(_options, GodotLogSink.Instance, cell => heights.TryGetValue(cell, out var h) ? h : null, ground: _options.GroundRow, endSession: false, follow: new PlayerBodyFollow(_mode), template: _template)
+        {
+            SeekHeight = (cellId, x, y) => HuntGround.SeekHeight(_dats!, cellId, x, y), // M4 P4 seek: the dry point at the weapon's distance from a creature the client knows
+        };
         _subscriptions.Add(session.Events.Subscribe<PlayerDied>(OnDied));
         _subscriptions.Add(session.Events.Subscribe<AttackRequested>(OnAttackRequested));
         _subscriptions.Add(_attackFrames.Attach(session.Events));
@@ -415,7 +432,7 @@ public sealed partial class HuntLegRunner : Node
             return;
         }
 
-        if (session.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == FighterKit.ArrowWcid && o.ContainerId is null or 0 && o.WielderId is null or 0)
+        if (session.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == _template.Kit.AmmoWcid && o.ContainerId is null or 0 && o.WielderId is null or 0)
         {
             _arrowGuid = e.Guid;
             _plan.Trigger(_runSeconds);
@@ -505,9 +522,26 @@ public sealed partial class HuntLegRunner : Node
 
         var distance = TargetDistance(session, scenario);
         var holds = _plan.Slot == 0 ? distance is { } d && d <= HuntShotPlan.SwingRangeMetres : session.State.Objects.TryGet(_arrowGuid, out _);
-        if (!holds)
+
+        // M4 polish pass P2: the missile frame is taken from the framed camera (settled, not pulled in by a tree), as the melee review frames are; the player's box above the combat window is reported (the bow is seen only when the player is).
+        var arrowPose = _mode.Rig?.Chase.Pose;
+        var arrowPivot = arrowPose is { } ap ? PivotDistance(ap) : float.NaN;
+        var arrowCameraFramed = _plan.Slot == 0 || (arrowPose is { } aq && HuntUiShotPlan.CameraFramed(arrowPivot, aq.Blocked, _mode.Rig!.Chase.Model.Scale));
+        var arrowPlayerKnown = false;
+        var arrowPlayerBox = default(Lifestone.Client.Play.ScreenRect);
+        var arrowWindowTop = float.NaN;
+        if (_plan.Slot != 0 && holds)
         {
-            Log.Info(LogCategory, "hunt: the " + _plan.Name + " frame's condition no longer held at its moment (" + (_plan.Slot == 0 ? "the target is out of 6 m" : "the arrow is gone") + "); waiting for the next trigger");
+            arrowPlayerKnown = _mode.Picking.TryProjectIncludingPlayer(session.State.Self.Guid, out arrowPlayerBox, out _);
+            if ((_ui?.Screens?.Flow.CurrentScreen as GamePlayScreen)?.Root?.GetChildRecursive(GameCombatPanel.WindowId) is GameCombatPanel arrowCombat)
+            {
+                arrowWindowTop = arrowCombat.ScreenBox.Y0;
+            }
+        }
+
+        if (!holds || !arrowCameraFramed)
+        {
+            Log.Info(LogCategory, "hunt: the " + _plan.Name + " frame's condition no longer held at its moment (" + (!holds ? (_plan.Slot == 0 ? "the target is out of 6 m" : "the arrow is gone") : "the framed camera has not settled or was pulled in") + "); waiting for the next trigger", ("camera_pivot_m", arrowPivot), ("camera_blocked", arrowPose?.Blocked));
             _plan.Drop();
             return;
         }
@@ -523,6 +557,12 @@ public sealed partial class HuntLegRunner : Node
             ("target", scenario.TargetName.Length == 0 ? "n/a" : scenario.TargetName),
             ("target_m", distance is { } m ? m.ToString("0.0", CultureInfo.InvariantCulture) : "n/a"),
             ("weapon_wcid", WieldedWeaponWcid(session)),
+            ("camera_scale", _mode.Rig?.Chase.Model.Scale),
+            ("camera_pivot_m", arrowPivot),
+            ("heading_offset", _sideDegrees),
+            ("player_box", arrowPlayerKnown ? arrowPlayerBox.ToString() : "n/a"),
+            ("player_above_window", _plan.Slot == 0 ? "n/a" : HuntUiShotPlan.PlayerFramed(in arrowPlayerBox, arrowPlayerKnown, arrowWindowTop).ToString()),
+            ("combat_window_top", arrowWindowTop),
             ("developer_hud", HudShowing() ? "VISIBLE" : "hidden"));
         Log.Info(LogCategory, (saved ? "hunt: review frame " : "hunt: the review frame could not be saved: ") + _plan.Name + " at its trigger (" + HuntShotPlan.Triggers[_plan.Slot] + ") + " + HuntShotPlan.DelaysSeconds[_plan.Slot].ToString("0.0", CultureInfo.InvariantCulture) + " s: " + path);
         _skipNextFrame = true;
@@ -648,6 +688,7 @@ public sealed partial class HuntLegRunner : Node
 
         if (_options.Weapon != HuntWeapon.Melee)
         {
+            FrameCamera(); // M4 polish pass P2: the missile hunt's frames are framed too (the bow seen from its side, the player above the combat window)
             StepVendorShotOnly(session, scenario); // the missile hunt takes no melee frame; the shop's frame is the same (M4 3.2 s4a)
             return;
         }
@@ -875,8 +916,19 @@ public sealed partial class HuntLegRunner : Node
         _cameraFramed = true;
         _cameraScaleBefore = rig.Chase.Model.Scale;
         rig.Chase.Model.Scale = HuntUiShotPlan.FramedScale;
-        rig.Chase.Model.SetDefaultOffsets();
-        Log.Info(LogCategory, "hunt: the review camera is framed for the frames", ("scale_before", _cameraScaleBefore), ("scale", HuntUiShotPlan.FramedScale), ("distance_m", HuntUiShotPlan.FramedMetres), ("settled_within_m", HuntUiShotPlan.SettledMetres));
+        if (_options.Weapon == HuntWeapon.Missile)
+        {
+            rig.Chase.Model.Scale = HuntUiShotPlan.MissileFramedScale; // closer than the melee frames: the archer and his bow larger in the window (P2)
+            _sideDegrees = HuntUiShotPlan.MissileSideDegrees; // the bow seen from its side (P2); the melee frames start straight behind and turn only when the target is hidden
+            _sideSetAt = _runSeconds;
+            rig.Chase.Model.SetHeadingOffset(_sideDegrees);
+        }
+        else
+        {
+            rig.Chase.Model.SetDefaultOffsets();
+        }
+
+        Log.Info(LogCategory, "hunt: the review camera is framed for the frames", ("scale_before", _cameraScaleBefore), ("scale", rig.Chase.Model.Scale), ("distance_m", HuntUiShotPlan.FramedMetresOf(rig.Chase.Model.Scale)), ("settled_within_m", HuntUiShotPlan.SettledMetres), ("heading_offset", _sideDegrees));
     }
 
     private void RestoreCamera()
@@ -1163,7 +1215,10 @@ public sealed partial class HuntLegRunner : Node
             _vendorFrames.VendorFrameMaxMs,
             scenario?.HealthStartShare,
             _options.Recovery.Enabled,
-            _options.Recovery.BelowPercent);
+            _options.Recovery.BelowPercent,
+            tally?.Blocked ?? 0,
+            tally?.Seeks ?? 0,
+            scenario?.OneBlowKills ?? 0);
         var outcome = HuntLegVerdict.Compose(_failure ?? why ?? scenario?.Failure ?? (_scenarioEnded ? null : "the hunt did not finish"), measures);
         if (!outcome.Ok)
         {

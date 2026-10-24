@@ -103,8 +103,47 @@ public sealed class MovementBindings : IInputActionSink
     /// <summary>True for the actions of the movement map this class handles.</summary>
     public static bool Handles(uint actionId) => actionId is >= MoveForward and <= RunKey || EmoteCommandOf(actionId) != 0;
 
+    /// <summary>
+    /// Raised when a person pressed a movement key this class handles (the argument is <see cref="NameOf"/> of its action; a
+    /// release does not raise it): the human's key wins over automation (R6), so a runner ends as Interrupted. Raised after the
+    /// key reached the intents. Automation never goes through here: it moves the player through <c>MoveIntents</c>.
+    /// </summary>
+    public event Action<string>? HumanKey;
+
+    /// <summary>The name of a movement action for <see cref="HumanKey"/> ("MoveForward", "Jump", "RunKey", "Emote_..."; the hex id otherwise).</summary>
+    public static string NameOf(uint actionId) => actionId switch
+    {
+        MoveForward => nameof(MoveForward),
+        MoveBackward => nameof(MoveBackward),
+        StopMoving => nameof(StopMoving),
+        StrafeRight => nameof(StrafeRight),
+        StrafeLeft => nameof(StrafeLeft),
+        TurnRight => nameof(TurnRight),
+        TurnLeft => nameof(TurnLeft),
+        AutoRun => nameof(AutoRun),
+        Jump => nameof(Jump),
+        RunKey => nameof(RunKey),
+        _ when EmoteCommandOf(actionId) != 0 => "Emote_0x" + actionId.ToString("X8", System.Globalization.CultureInfo.InvariantCulture),
+        _ => "0x" + actionId.ToString("X", System.Globalization.CultureInfo.InvariantCulture),
+    };
+
     /// <inheritdoc/>
     public bool OnInputAction(uint inputMapId, uint actionId, RetailActivation activation)
+    {
+        if (!Dispatch(inputMapId, actionId, activation))
+        {
+            return false;
+        }
+
+        if (activation.Start)
+        {
+            HumanKey?.Invoke(NameOf(actionId));
+        }
+
+        return true;
+    }
+
+    private bool Dispatch(uint inputMapId, uint actionId, RetailActivation activation)
     {
         if (inputMapId != UiInputRouter.MovementMap)
         {

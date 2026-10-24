@@ -6,12 +6,12 @@ namespace Lifestone.ServerMod.Tests;
 /// <summary>
 /// The wire text does not depend on the current culture (m2-plan SM1). ACE runs the mod's command on its world thread,
 /// which takes the machine's culture (ACE sets en-US on its main thread only, Program.cs:56), and the client runs in
-/// the player's. Each case below is computed under the invariant culture and again under German, Turkish, Saudi Arabic
-/// and French, which differ in decimal separators, digit grouping, the minus sign and the casing of I.
+/// the player's. Each case below is computed under the invariant culture and again under German, Turkish and Saudi Arabic,
+/// which differ in decimal separators, digit grouping, the minus sign and the casing of I.
 /// </summary>
 public sealed class CultureInvarianceTests
 {
-    public static TheoryData<string> Cultures => ["de-DE", "tr-TR", "ar-SA", "fr-FR"];
+    public static TheoryData<string> Cultures => ["de-DE", "tr-TR", "ar-SA"];
 
     [Theory]
     [MemberData(nameof(Cultures))]

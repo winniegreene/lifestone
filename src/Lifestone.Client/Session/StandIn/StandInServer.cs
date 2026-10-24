@@ -9,7 +9,7 @@ namespace Lifestone.Client.Session.StandIn;
 
 /// <summary>
 /// What the play-mode checks can make the offline stand-in server do from outside its script: boot the player, or go quiet (both end the session in failure,
-/// as the network session does, and the retail disconnected screen reports it: its button reconnects, D43), or place a creature in the world (M3 3.1 fb). Made by <see cref="StandInSessions.Server"/>.
+/// as the network session does, and the retail disconnected screen reports it: its button reconnects, D43), or place an object in the world (a chest, a lifestone; M4 4.1 t2: never a creature, D23). Made by <see cref="StandInSessions.Server"/>.
 /// </summary>
 public sealed class StandInServer
 {
@@ -31,22 +31,22 @@ public sealed class StandInServer
         StandInSessions.FailLater(_handler, after, new SessionFailure(SessionFailureKind.Silence, SessionPhase.InWorld, message));
 
     /// <summary>
-    /// Places <paramref name="creature"/> at <paramref name="at"/> the next time the stand-in's session ticks (a CreateObject, as the server sends one for a creature it spawns). A creature with
-    /// <see cref="StandInObject.MaxHealth"/> then has health: a spell that hits it takes some, QueryHealth answers the fraction, and at zero it dies (<c>StandInWorld.Combat.cs</c>). Game thread only; needs the world part of the
-    /// stand-in (<see cref="StandInSessions.AnswerWorld"/>). The guid is the caller's: placing a guid the world already holds replaces nothing and is refused by the reducer as any duplicate create is.
+    /// Places <paramref name="obj"/> at <paramref name="at"/> the next time the stand-in's session ticks (a CreateObject, as the server sends one for an object it spawns). Game thread only; needs the world part of the stand-in
+    /// (<see cref="StandInSessions.AnswerWorld"/>). The guid is the caller's: placing a guid the world already holds replaces nothing and is refused by the reducer as any duplicate create is. The stand-in holds no creature (M4 4.1 t2, D23, D26):
+    /// no check places a monster, and <c>NoStandInCreatureInDrawnRunsTests</c> pins it.
     /// </summary>
-    /// <param name="creature">The object (its <see cref="StandInObject.Offset"/> is ignored).</param>
+    /// <param name="obj">The object (its <see cref="StandInObject.Offset"/> is ignored).</param>
     /// <param name="at">Where it stands.</param>
-    public void Place(StandInObject creature, AcPosition at) => World().PlaceCreature(creature, at);
+    public void Place(StandInObject obj, AcPosition at) => World().PlaceObject(obj, at);
 
     /// <summary>
-    /// Places <paramref name="creature"/> <paramref name="offset"/> metres (AC axes: +X east, +Y north, +Z up) from the player's position now. In an outdoor cell the cell id follows the new position
+    /// Places <paramref name="obj"/> <paramref name="offset"/> metres (AC axes: +X east, +Y north, +Z up) from the player's position now. In an outdoor cell the cell id follows the new position
     /// (<see cref="AcCoordinates.AdjustToOutside"/>); in an EnvCell the cell is the player's own, so the offset must stay inside it (a dungeon caller places by <see cref="Place"/> with a position of the cell graph). Returns where it was placed, or null
     /// when the player has no position yet.
     /// </summary>
-    /// <param name="creature">The object (its <see cref="StandInObject.Offset"/> is ignored).</param>
+    /// <param name="obj">The object (its <see cref="StandInObject.Offset"/> is ignored).</param>
     /// <param name="offset">Metres from the player.</param>
-    public AcPosition? PlaceNear(StandInObject creature, Vector3 offset)
+    public AcPosition? PlaceNear(StandInObject obj, Vector3 offset)
     {
         if (_handler is not GameStateReducer { State.Self.Position: { } here })
         {
@@ -61,7 +61,7 @@ public sealed class StandInServer
         }
 
         var at = new AcPosition(cell, local, here.Orientation);
-        Place(creature, at);
+        Place(obj, at);
         return at;
     }
 
@@ -78,15 +78,12 @@ public sealed class StandInServer
         if (at is not null)
         {
             var world = World();
-            world.NotePlaceholder("m4-standin-chest", "the chest is a stand-in object (the human Setup, named as a placeholder, weenie 143), not ACE's chest weenie");
+            world.NotePlaceholder("m4-standin-chest", "the chest is a stand-in object (weenie 143's own Setup and icon, but a name that says placeholder, no ACE appearance flags beyond Openable and contents the host stocks), not ACE's chest weenie with its drops");
             world.StockChest(guid, items);
         }
 
         return at;
     }
-
-    /// <summary>The health fraction (0 to 1) the stand-in holds for the creature <paramref name="guid"/>, or null when it holds no health for it (not a creature with health, or not placed).</summary>
-    public float? HealthOf(uint guid) => World().HealthFraction(guid);
 
     /// <summary>Spell projectiles the stand-in has launched with ACE's model (M3 3.1 fb).</summary>
     public int BoltsLaunched => World().BoltsLaunched;
@@ -97,21 +94,9 @@ public sealed class StandInServer
     /// <summary>Projectiles that flew on past a missing or dead target, or had none.</summary>
     public int BoltsMissed => World().BoltsMissed;
 
-    /// <summary>Creatures the stand-in's spells have killed.</summary>
-    public int Kills => World().Kills;
-
-    /// <summary>Takes an object placed by <see cref="Place"/> out of the world (a creature stops attacking; M3 3.2 db).</summary>
+    /// <summary>Takes an object placed by <see cref="Place"/> out of the world (a check's clean-up).</summary>
     /// <param name="guid">The object's id.</param>
     public void Remove(uint guid) => World().RemoveObject(guid);
-
-    /// <summary>Blows a tusker that attacks (<see cref="StandInObject.Attacks"/>) has landed on the player (M3 3.2 db).</summary>
-    public int TuskerHits => World().TuskerHits;
-
-    /// <summary>Strikes the player evaded.</summary>
-    public int TuskerEvades => World().TuskerEvades;
-
-    /// <summary>Strikes the lifestone protection turned away.</summary>
-    public int ProtectedBlows => World().ProtectedBlows;
 
     /// <summary>Deaths of the player the stand-in has played (a suicide counts).</summary>
     public int PlayerDeaths => World().PlayerDeaths;
@@ -127,7 +112,7 @@ public sealed class StandInServer
 
     /// <summary>
     /// Dispels the lifestone protection as a teleport does (<c>Player_Location.cs</c> 702-703, <c>LifestoneProtectionDispel</c>: the 0x028A-less system line "Your actions have dispelled the Lifestone's magic!"). The live death
-    /// scenario's den teleport does this before the tuskers come; the offline whole-death check has no den teleport, so it calls this once before its scenario, with the protection of the check's own earlier death.
+    /// scenario's den teleport does this before the monsters come.
     /// </summary>
     public void DispelProtectionAsATeleportDoes() => World().DispelProtectionOnTeleport();
 
@@ -144,28 +129,7 @@ public sealed class StandInServer
         set => World().UnhideAfterTeleport = value;
     }
 
-    // --- M4 1.2 s3: the player's attacks, for the play-checks rows (PlayChecks.Attack.cs). The rows send through the Action API (IActionApi.Attack, MissileAttack: s2); these are the stand-in's counters. ---
-
-    /// <summary>The chance that the player's blow or arrow lands: the placeholder 0.85 unless a check sets it (1 makes a row deterministic).</summary>
-    public double PlayerHitRate
-    {
-        get => World().PlayerHitRate;
-        set => World().PlayerHitRate = value;
-    }
-
-    /// <summary>Melee swings the stand-in has played.</summary>
-    public int Swings => World().Swings;
-
-    /// <summary>Arrows the stand-in has launched.</summary>
-    public int ArrowsLaunched => World().ArrowsLaunched;
-
-    /// <summary>Blows and arrows that landed.</summary>
-    public int PlayerHits => World().PlayerHits;
-
-    /// <summary>Attack sequences that have ended (each sent one 01A7 {0x0036}).</summary>
-    public int AttackSequencesEnded => World().AttackSequencesEnded;
-
-    /// <summary>The WeenieError of the last 01A7 the stand-in sent (0 for a swing over, 0x0036 for the sequence over), or null when it has sent none.</summary>
+    /// <summary>The WeenieError of the last 01A7 the stand-in sent (always 0x0036: an attack on a guid the stand-in does not hold ends as ACE ends one at a missing target), or null when it has sent none.</summary>
     public uint? LastAttackDoneError => World().AttackDoneErrors.Count == 0 ? null : World().AttackDoneErrors[^1];
 
     private StandInResponder Responder() =>

@@ -4,8 +4,10 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Vitals;
 using Lifestone.Client.Tests;
 using Lifestone.Data.Dat;
+using Lifestone.Data.Magic;
 using Lifestone.Net.Session;
 using Lifestone.Tests.Shared.Loopback;
 using Xunit.Abstractions;
@@ -18,63 +20,20 @@ namespace Lifestone.Loopback.Tests.Session;
 /// LEAD: it needs the backend with the Lifestone server mod ready, Holtburg Hunter and BSD Mage built (<c>--scenario=fighter-build</c> and the mage's build), the hunter holding a Handy Healing Kit 628 with uses left and a stack of Potions
 /// of Healing 377 (the lead tops them up). Neither character is reset, purged or levelled by anything here except the hunt's own kills; the hunter ends changed only by kit uses, a potion and the health it lost.
 /// <para>Run it alone with <c>dotnet test tests/Lifestone.Loopback.Tests --filter "FullyQualifiedName~HealLiveTests" --logger "console;verbosity=detailed"</c>; each test records its session to <c>cache/m4/3-1/live</c> of the main checkout
-/// (derived data, gitignored). Test one takes about 5 to 9 minutes (the forest hunt of up to 150 s with its bind and wind-down), test two about 1 minute.</para>
+/// (derived data, gitignored). Test two takes about 1 minute; the harm-heal fact (M4 P5a C3: the Brawler's and the Archer's are in their own classes below) about 2 to 4 minutes. The Brawler's belt hunt of M4 P4 is gone: Harm Self gives the damage.</para>
 /// </summary>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[LoopbackCharacter("BSD Mage")]
+[LiveSharedSession]
 public sealed class HealLiveTests(ITestOutputHelper output)
 {
     private const uint KitWcid = 628;
     private const uint PotionWcid = 377;
     private const uint NotTrainedInHealing = 0x04FC;
-    private const int PotionBoost = 25;
-    private const string Item = "3-1";
 
-    /// <summary>
-    /// <b>Test one, Holtburg Hunter, one session, all through <see cref="IActionApi"/>.</b> (a) At the start, with the health full, a kit use at the full vital: the outcome is RECORDED (the capture did not reach it; expected a
-    /// <see cref="ActionOutcomeKind.ServerError"/> with 028B 0x04FF and its text, or the UseDone's code), printed as <c>heal_full=</c>, and not asserted; a health that is not full prints <c>heal_full=n/a</c>. (b) The hunt for damage
-    /// (the forest, <c>--hunt-ground forest</c>, up to 3 kills in 150 s, the recovery rule off, the retreat at 30% ends it): no creature found, or no damage taken, is recorded, (c) and (d) are skipped with the reason, and the test FAILS with a message starting <c>INCONCLUSIVE:</c> (review R18: a run that proved neither heal is not a pass). (c) Back at Holtburg,
-    /// <c>UseWithTarget(kit, self)</c> once, and again while the health is under 90%: each Confirmed with a <see cref="HealResult"/> of <see cref="HealResultKind.Healed"/> or <see cref="HealResultKind.FailedRoll"/>, the kit's Structure down by
-    /// one per Confirmed use, a Healed amount at most the health missing. (d) After the first kit use, while the health is under the maximum, <c>Drink(potion)</c>: Confirmed, a <see cref="HealResultKind.Drank"/> of 1 to 25, the stack down by one.
-    /// Prints <c>heal_live kit_uses= healed= failed_rolls= potion_points= wasted= health_before=&lt;%&gt; health_after=&lt;%&gt; heal_full='...'</c> (and <c>skipped='...'</c> when (c) and (d) did not run).
-    /// </summary>
-    [LoopbackFact]
-    public void Holtburg_Hunter_records_a_kit_at_a_full_vital_then_heals_after_the_forest_with_a_kit_and_a_potion()
-    {
-        using var dats = DatSet.Open();
-        var huntLog = new RecordingLogSink();
-        var leg = new HunterLeg(output.WriteLine, dats, huntLog);
-        var result = LiveRun.Run(output, dats, leg, "heal-hunter", HuntLiveRun.QuitAfterSeconds, item: Item);
-        foreach (var line in huntLog.Lines.Where(l => l.Contains("[hunt]", StringComparison.Ordinal) || l.Contains("WARN", StringComparison.Ordinal) || l.Contains("ERROR", StringComparison.Ordinal)))
-        {
-            output.WriteLine(line);
-        }
-
-        foreach (var round in leg.HuntLines)
-        {
-            output.WriteLine("heal_live hunt " + round);
-        }
-
-        var verdict = leg.VerdictLine();
-        output.WriteLine(verdict);
-        Assert.True(leg.Problems.Count == 0, "the checks that failed: " + string.Join("; ", leg.Problems) + " | " + verdict);
-        Assert.True(result.Ok, result.Failure + " | " + verdict);
-
-        // M4 3.1 fix, review R18: a run that proved neither heal live is not a pass. (a), the kit at a full vital, stays a recorded value; (c) and (d) are the proof DoD 9 names ("the fighter after hits, a kit use and a potion"), so a
-        // forest round that found no creature or dealt no damage, or a health that was full again before the potion, fails the test as INCONCLUSIVE with the reason (the lead reruns it).
-        if (leg.Skipped is not null)
-        {
-            Assert.Fail("INCONCLUSIVE: the kit heal (c) and the potion (d) were not exercised: " + leg.Skipped + " | " + verdict);
-        }
-
-        Assert.True(leg.Tally.KitUses >= 1, "INCONCLUSIVE: no kit use was Confirmed: " + verdict);
-        if (leg.PotionSkipped is not null)
-        {
-            Assert.Fail("INCONCLUSIVE: the potion (d) was not exercised: " + leg.PotionSkipped + " | " + verdict);
-        }
-
-        Assert.True(leg.Tally.Potions >= 1, "INCONCLUSIVE: no potion was Confirmed: " + verdict);
-    }
+    internal const string Item = "3-1";
 
     /// <summary>
     /// <b>Test two, BSD Mage</b> (Healing untrained, M3 D19; no other character): a Handy Healing Kit from the <c>item</c> verb, <c>UseWithTarget</c> on itself through <see cref="IActionApi"/>: a
@@ -86,7 +45,7 @@ public sealed class HealLiveTests(ITestOutputHelper output)
     {
         using var dats = DatSet.Open();
         var leg = new MageLeg(output.WriteLine, dats);
-        var result = LiveRun.Run(output, dats, leg, "heal-mage", 300, item: Item);
+        var result = LiveRun.Run(output, leg, "heal-mage", 300, item: Item, character: MageTemplate.CharacterName);
         var verdict = leg.VerdictLine();
         output.WriteLine(verdict);
         Assert.True(leg.Problems.Count == 0, "the checks that failed: " + string.Join("; ", leg.Problems) + " | " + verdict);
@@ -96,10 +55,28 @@ public sealed class HealLiveTests(ITestOutputHelper output)
         Assert.Equal(leg.HeldBefore, leg.HeldAfter);
     }
 
+    /// <summary>
+    /// <b>BSD Mage (test), the caster path of the harm-heal script, no swap.</b> The mage wields its wand, so the script harms it to about half with Harm Self (<see cref="HarmSelfPlan"/>), casts Heal Self (the highest known level at the chance, VII for the mage) and
+    /// lets the vitals keeper finish. Proves Harm Self and Heal Self VII on the mage (the build must have learned Harm Self: a rerun of the mage build does it), that no kit or potion is used (<c>kits=0 potions=0</c>, the mage's Healing is untrained), that no swap runs
+    /// (<c>swapped=no</c>). Printed, not asserted, in this first gate (P5a-R9): that the health went to about half and never to 0 (<c>health_min_pct</c>), the harms landed, and that it ends at or over the keeper's start share (<c>health_end_pct</c>).
+    /// </summary>
+    [LoopbackFact]
+    public void BSD_Mage_harms_itself_to_half_then_casts_Heal_Self_and_the_keeper_restores_it()
+    {
+        var leg = HarmHealFacts.Run(output, "harm-heal-mage", MageTemplate.CharacterName);
+        var s = leg.Harm!;
+        var verdict = leg.VerdictLine();
+        Assert.True(s.OwnHealCasts >= 1, "no Heal Self raised the health: " + verdict);
+        Assert.False(s.Swapped, "the mage swaps nothing: " + verdict);
+        Assert.Equal(0, s.Kits);
+        Assert.Equal(0, s.Potions);
+        HarmHealFacts.Report(output, s); // report-only in this gate (M4 P5a fix F-abil, P5a-R9): harms, health_min_pct, health_end_pct, transfers, resist
+    }
+
     // ------------------------------------------------------------------------------------------------ the legs
 
     /// <summary>What both legs share: the entry as a named character of the test account, the model reads and the end of the session.</summary>
-    private abstract class HealLeg(string name, Action<string> log, DatSet dats) : LiveLeg(name, [], log, dats)
+    internal abstract class HealLeg(string name, Action<string> log, DatSet dats) : LiveLeg(name, [], log, dats)
     {
         private const double ArrivalSeconds = 90;
 
@@ -110,6 +87,14 @@ public sealed class HealLiveTests(ITestOutputHelper output)
         /// <summary>Logs in, chooses the character by name (never creates, purges or resets one), enters the world and waits for the arrival with the qualities known.</summary>
         protected IEnumerable<ActionHandle?> EnterCharacter(string characterName)
         {
+            if (AlreadyInWorld)
+            {
+                Stage = "running";
+                Follow ??= new HuntFollow(Dats, new RecordingLogSink());
+                Log("already in the world: the shared session's entry logged the character in");
+                yield break;
+            }
+
             Stage = "login";
             var login = S.Actions.Login(ActionSource.Host);
             yield return login;
@@ -189,36 +174,28 @@ public sealed class HealLiveTests(ITestOutputHelper output)
         }
     }
 
-    /// <summary>Test one: the full-vital kit use, the forest hunt for damage, the kit and the potion at Holtburg.</summary>
-    private sealed class HunterLeg(Action<string> log, DatSet dats, RecordingLogSink huntLog) : HealLeg("heal-hunter", log, dats)
+    /// <summary>
+    /// The harm-heal leg (M4 P5a lane C3, design section 3.3): the station script P5b moves into the client as a <c>ScriptLeg</c>. It enters the character (a shared session's entry, no teleport: the leg runs wherever the character stands, in peace),
+    /// tops up what its means need with the <c>item</c> verb (a fighter's kit and potion, reported <c>granted=</c>; an item, D23), builds the keeper and the caster swap the character's name asks for and steps one
+    /// <see cref="HarmHealScript"/> until it ends: harm to half (<see cref="HarmSelfPlan"/>: never a cast that could reach 0; fizzles counted, a 60 s cap), a kit, harm, a potion, <see cref="VitalsKeeper"/> restoring the health, one swap in and one out for a
+    /// fighter; the mage (no swap) harms, casts Heal Self and lets the keeper finish. The engine is in <c>Lifestone.Client</c> so the default tier proves its order; this class only hosts it, so moving it is a rename.
+    /// </summary>
+    internal sealed class HarmHealLeg(Action<string> log, DatSet dats, string characterName, RecordingLogSink scriptLog) : HealLeg("harm-heal", log, dats)
     {
-        private readonly List<string> _huntLines = [];
-        private HuntScenario? _lastHunt;
-        private int _potionPoints;
-        private double? _before;
-        private double? _after;
-        private string _full = "n/a";
+        private HarmHealScript? _harm;
+        private int _granted;
 
-        /// <summary>The counters of the heals this leg Confirmed (<see cref="HealTally.Record"/>).</summary>
-        public HealTally Tally { get; } = new();
+        /// <summary>The script (null before the leg reached it).</summary>
+        public HarmHealScript? Harm => _harm;
 
-        /// <summary>The hunt round's verdict and detail fields, printed after the session.</summary>
-        public IReadOnlyList<string> HuntLines => _huntLines;
+        /// <summary>The items the leg granted with the item verb (a kit or a potion an earlier test used up).</summary>
+        public int Granted => _granted;
 
-        /// <summary>Why (c) and (d) did not run (no creature found, or no damage taken), or null when they ran.</summary>
-        public string? Skipped { get; private set; }
-
-        /// <summary>Why (d) did not run after (c) did (the health was full after the kit use), or null.</summary>
-        public string? PotionSkipped { get; private set; }
-
-        public string VerdictLine() =>
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"heal_live kit_uses={Tally.KitUses} healed={Tally.Heals} failed_rolls={Tally.FailedRolls} potion_points={_potionPoints} wasted={Tally.Wasted} health_before={Pct(_before)} health_after={Pct(_after)} heal_full='{_full}'{(Skipped is null ? string.Empty : $" skipped='{Skipped}'")}{(PotionSkipped is null ? string.Empty : $" potion_skipped='{PotionSkipped}'")}");
+        public string VerdictLine() => (_harm?.VerdictLine() ?? "harm-heal done ok=false why=not-started") + " granted=" + _granted.ToString(CultureInfo.InvariantCulture);
 
         protected override IEnumerable<ActionHandle?> Script()
         {
-            foreach (var h in EnterCharacter(FighterTemplate.CharacterName))
+            foreach (var h in EnterCharacter(characterName))
             {
                 yield return h;
             }
@@ -228,201 +205,41 @@ public sealed class HealLiveTests(ITestOutputHelper output)
                 yield return h;
             }
 
-            Log($"health {HealthText()}; kits {InPack(KitWcid).Count}; potion stack {PotionStack().Size}");
-
-            // (a) a kit use at the full vital: recorded, not asserted (the capture did not reach it).
-            if (HealthFull())
+            var swap = CasterSwap.ForCharacter(characterName, S.Actions, S.State, scriptLog);
+            if (swap is not null)
             {
-                var kit = PickKit();
-                if (Check(kit != 0, "no Handy Healing Kit 628 with uses left in the pack (the lead tops the hunter's kit up)"))
+                // The fighters' kit holds 2 Handy Healing Kits and 5 Potions of Healing; the hunts and heals of earlier tests use them, so the leg grants what it needs (an item, D23) and says so.
+                if (PickKit() == 0)
                 {
-                    var full = S.Actions.UseWithTarget(kit, SelfGuid, ActionSource.Host);
-                    yield return full;
-                    Tally.Record(full);
-                    _full = Outcome(full);
-                    Log($"(a) a kit use at the full vital {HealthText()}: {_full}; result {full.Result?.Kind.ToString() ?? "none"}; kit uses {Structure(kit)?.ToString(CultureInfo.InvariantCulture) ?? "?"}");
-                }
-            }
-            else
-            {
-                Log($"(a) skipped: the health is not full ({HealthText()}): heal_full=n/a");
-            }
-
-            // (b) the hunt for damage.
-            foreach (var h in HuntForDamage())
-            {
-                yield return h;
-            }
-
-            if (!InWorld || _lastHunt is not { Fighter: "ok" })
-            {
-                Check(false, $"the hunter is not in the world as the fighter after the hunt (phase {S.State.Phase}, fighter {_lastHunt?.Fighter ?? "?"}, failure {_lastHunt?.Failure ?? "none"})");
-                foreach (var h in EndSession())
-                {
-                    yield return h;
+                    _granted++;
                 }
 
-                yield break;
-            }
+                foreach (var h in GrantIfMissing(PickKit, KitWcid, "Handy Healing Kit 628 with uses left", _ => { })) { yield return h; }
 
-            foreach (var h in Pause(2)) // the return and the last vitals settle
-            {
-                yield return h;
-            }
-
-            var kills = _lastHunt.Tally.Kills;
-            var taken = _lastHunt.Tally.DamageTaken;
-            Log($"after the hunt: kills {kills}, damage taken {taken}, health {HealthText()}, returned {_lastHunt.Returned}, failure {_lastHunt.Failure ?? "none"}");
-            if (HealthFull())
-            {
-                Skipped = _lastHunt.Failure is not null && kills == 0 && taken == 0
-                    ? $"no creature was found or fought ({_lastHunt.Failure}); the health is full, so (c) and (d) are skipped"
-                    : $"no damage came (damage taken {taken}, kills {kills}); the health is full, so (c) and (d) are skipped";
-                Log("SKIPPED (c) and (d): " + Skipped);
-            }
-            else
-            {
-                foreach (var h in HealAtHoltburg())
+                if (PotionStack().Guid == 0)
                 {
-                    yield return h;
-                }
-            }
-
-            _after = HealthShare();
-            foreach (var h in EndSession())
-            {
-                yield return h;
-            }
-        }
-
-        /// <summary>One forest round for damage, as a step (the recovery rule off so nothing heals it, the corpses not opened), through the hunt's own wind-down back to Holtburg; the session stays open.</summary>
-        private IEnumerable<ActionHandle?> HuntForDamage()
-        {
-            var heights = new Dictionary<uint, float?>();
-            var options = new HuntOptions
-            {
-                Kills = 3,
-                Seconds = 150,
-                Weapon = HuntWeapon.Melee,
-                Ground = HuntGroundChoice.Forest,
-                OpenCorpse = false,
-                Recovery = new RecoveryOptions { Enabled = false },
-            };
-            Follow?.Dispose();
-            Follow = new HuntFollow(Dats, huntLog);
-            FollowIsTheHunts = true;
-            var hunt = new HuntScenario(
-                options,
-                huntLog,
-                cell =>
-                {
-                    if (!heights.TryGetValue(cell.CellId, out var height))
-                    {
-                        heights[cell.CellId] = height = HuntGround.TerrainHeight(Dats, cell);
-                    }
-
-                    return height;
-                },
-                options.GroundRow,
-                endSession: false,
-                follow: Follow);
-            _lastHunt = hunt;
-            Stage = "hunting";
-            Log($"(b) the hunt for damage: {options}");
-            for (;;)
-            {
-                if (hunt.Step(S, Now) != ScenarioStatus.Running)
-                {
-                    break;
+                    _granted++;
                 }
 
+                foreach (var h in GrantIfMissing(() => PotionStack().Guid, PotionWcid, "Potion of Healing 377", _ => { })) { yield return h; }
+            }
+
+            var spells = SpellTableData.Load(Dats).Spells;
+            var keeper = new VitalsKeeper(S, spells, swap is null ? VitalsOptions.Default : VitalsOptions.Default.ForFighter(), scriptLog); // M4 P5a C7: a caster swap is a fighter: its mana order is a Mana Potion, then a rest
+            _harm = new HarmHealScript(S, spells, keeper, swap, new HarmHealOptions(), scriptLog);
+            Stage = "harm-heal";
+            Log($"health {HealthText()}; kits {InPack(KitWcid).Count}; potion stack {PotionStack().Size}; {(swap is null ? "no swap (the caster wields its wand)" : "the caster swap runs once around the casts")}");
+            while (_harm.Step(Now) == HarmHealState.Running)
+            {
                 yield return null;
             }
 
             Stage = "running";
-            FollowIsTheHunts = false;
-            Follow = new HuntFollow(Dats, new RecordingLogSink()); // the hunt disposed its own; the leg keeps the client's body following ACE for the rest of the session
-            _huntLines.Add($"verdict {hunt.VerdictFields()} | detail {hunt.DetailFields()} | failure={hunt.Failure ?? "none"}");
-        }
-
-        /// <summary>(c) and (d): at Holtburg, the kit on the player once, the potion while the health is under the maximum, a second kit use while it is under 90%.</summary>
-        private IEnumerable<ActionHandle?> HealAtHoltburg()
-        {
-            _before = HealthShare();
-            Log($"(c) health before the heals: {HealthText()} ({Pct(_before)}%)");
-            for (var use = 1; use <= 2; use++)
+            Log(_harm.VerdictLine());
+            Check(_harm.State == HarmHealState.Done, "the harm-heal script ended " + _harm.State + " why=" + (_harm.Why ?? "none"));
+            foreach (var h in EndSession())
             {
-                var kit = PickKit();
-                if (!Check(kit != 0, $"kit use {use}: no Handy Healing Kit with uses left in the pack"))
-                {
-                    break;
-                }
-
-                Health(out var currentBefore, out var maxBefore);
-                var missing = maxBefore - currentBefore;
-                var usesBefore = Structure(kit);
-                var healthBefore = HealthText();
-                var heal = S.Actions.UseWithTarget(kit, SelfGuid, ActionSource.Host);
-                yield return heal;
-                Tally.Record(heal);
-                var result = heal.Result;
-                var usesAfter = S.State.Objects.TryGet(kit, out _) ? Structure(kit) : null;
-                Log($"kit use {use}: {Describe(heal)}; result {result?.Kind.ToString() ?? "none"} amount {result?.Amount.ToString(CultureInfo.InvariantCulture) ?? "-"}; health {healthBefore} -> {HealthText()}; uses {usesBefore?.ToString(CultureInfo.InvariantCulture) ?? "?"} -> {usesAfter?.ToString(CultureInfo.InvariantCulture) ?? "gone"}");
-                if (Confirmed(heal, $"kit use {use}"))
-                {
-                    Check(result is { Kind: HealResultKind.Healed or HealResultKind.FailedRoll }, $"kit use {use}: the result is {result?.Kind.ToString() ?? "none"}, not Healed or FailedRoll");
-                    Check(usesBefore is null || usesAfter == usesBefore - 1, $"kit use {use}: the kit's Structure went {usesBefore?.ToString(CultureInfo.InvariantCulture) ?? "?"} -> {usesAfter?.ToString(CultureInfo.InvariantCulture) ?? "gone"}, not down by one");
-                    if (result is { Kind: HealResultKind.Healed } healed)
-                    {
-                        Check(healed.Amount > 0 && healed.Amount <= missing, $"kit use {use}: healed {healed.Amount} of {missing} missing");
-                    }
-                }
-
-                if (use == 1)
-                {
-                    foreach (var h in DrinkWhileUnderTheMaximum())
-                    {
-                        yield return h;
-                    }
-                }
-
-                if (HealthShare() is not { } share || share >= 0.9)
-                {
-                    break;
-                }
-            }
-        }
-
-        private IEnumerable<ActionHandle?> DrinkWhileUnderTheMaximum()
-        {
-            if (HealthFull())
-            {
-                PotionSkipped = $"the health is full ({HealthText()}) after the kit use, so there is no drink while under the maximum";
-                Log("(d) skipped: " + PotionSkipped);
-                yield break;
-            }
-
-            var (potion, size) = PotionStack();
-            if (!Check(potion != 0, "(d) no Potion of Healing 377 in the pack (the lead tops the hunter's potions up)"))
-            {
-                yield break;
-            }
-
-            var healthBefore = HealthText();
-            var drink = S.Actions.Drink(potion, ActionSource.Host);
-            yield return drink;
-            Tally.Record(drink);
-            var result = drink.Result;
-            var stackAfter = S.State.Self.Inventory.Contains(potion) ? StackOf(potion) : 0;
-            Log($"(d) Drink: {Describe(drink)}; result {result?.Kind.ToString() ?? "none"} amount {result?.Amount.ToString(CultureInfo.InvariantCulture) ?? "-"}; health {healthBefore} -> {HealthText()}; stack {size} -> {stackAfter}");
-            if (Confirmed(drink, "Drink"))
-            {
-                Check(result is { Kind: HealResultKind.Drank, Amount: > 0 and <= PotionBoost }, $"Drink: the result is {result?.Kind.ToString() ?? "none"} {result?.Amount.ToString(CultureInfo.InvariantCulture) ?? "-"}, not a Drank of 1 to {PotionBoost}");
-                Check(stackAfter == size - 1, $"Drink: the stack went {size} -> {stackAfter}, not down by one");
-                if (result is { Kind: HealResultKind.Drank } drank)
-                {
-                    _potionPoints += drank.Amount;
-                }
+                yield return h;
             }
         }
     }
@@ -521,5 +338,95 @@ public sealed class HealLiveTests(ITestOutputHelper output)
                 yield return h;
             }
         }
+    }
+}
+
+/// <summary>What the harm-heal facts share (M4 P5a lane C3): runs the leg, prints the script's log and the verdict, and asserts the common facts.</summary>
+internal static class HarmHealFacts
+{
+    /// <summary>Runs <see cref="HealLiveTests.HarmHealLeg"/> for <paramref name="character"/>, prints the script's log lines and the verdict line, and asserts that the leg and the session ended well.</summary>
+    internal static HealLiveTests.HarmHealLeg Run(ITestOutputHelper output, string name, string character)
+    {
+        using var dats = DatSet.Open();
+        var scriptLog = new RecordingLogSink();
+        var leg = new HealLiveTests.HarmHealLeg(output.WriteLine, dats, character, scriptLog);
+        var result = LiveRun.Run(output, leg, name, 900, item: HealLiveTests.Item, character: character);
+        foreach (var line in scriptLog.Lines.Where(l => l.Contains("harm-heal", StringComparison.Ordinal) || l.Contains("vitals", StringComparison.Ordinal) || l.Contains("swap", StringComparison.Ordinal) || l.Contains("WARN", StringComparison.Ordinal) || l.Contains("ERROR", StringComparison.Ordinal)))
+        {
+            output.WriteLine(line);
+        }
+
+        var verdict = leg.VerdictLine();
+        output.WriteLine(verdict);
+        Assert.True(leg.Problems.Count == 0, "the checks that failed: " + string.Join("; ", leg.Problems) + " | " + verdict);
+        Assert.True(result.Ok, result.Failure + " | " + verdict);
+        Assert.NotNull(leg.Harm);
+        Assert.True(leg.Harm.State == HarmHealState.Done, "harm-heal did not end Done: " + verdict);
+        return leg;
+    }
+
+    /// <summary>
+    /// The facts a fighter's leg proves (M4 P5a fix F-abil): the slice table's <c>heals&gt;=1 potions&gt;=1 swapped=yes</c> and the heal checks the old Brawler fact had and the harm-heal leg lost (P5a-R6, D28), now made by <see cref="HarmHealScript"/> itself and read here as
+    /// <see cref="HarmHealScript.Anomalies"/> being empty: each kit use's Healed amount is over 0 and at most the health missing and its Structure goes down by one, the potion's Drank amount is 1 to 25 and its stack goes down by one. Everything else the verdict
+    /// says is printed by <see cref="Report"/> and not asserted in this first gate (P5a-R9).
+    /// </summary>
+    internal static void AssertFighter(ITestOutputHelper output, HealLiveTests.HarmHealLeg leg)
+    {
+        var s = leg.Harm!;
+        var verdict = leg.VerdictLine();
+        Assert.True(s.Heals >= 1, "heals>=1: " + verdict);
+        Assert.True(s.Potions >= 1, "potions>=1: no potion raised the health: " + verdict);
+        Assert.True(s.Swapped, "swapped=yes: the caster swap ran in and out: " + verdict);
+        Assert.True(s.Anomalies.Count == 0, "the heal checks that broke: " + string.Join("; ", s.Anomalies) + " | " + verdict);
+        Report(output, s);
+    }
+
+    /// <summary>Prints the script's fields that no fact asserts yet (report-only in their first gate): the harms, the health's lowest and last share, the kit uses, the transfers, the resisted harms, the fizzles and the heal amounts.</summary>
+    internal static void Report(ITestOutputHelper output, HarmHealScript s) =>
+        output.WriteLine($"report-only: harms={s.Harms} health_min_pct={s.HealthMinPercent:0.0} health_end_pct={s.HealthEndPercent:0.0} kits={s.Kits} fizzles={s.Fizzles} transfers={s.Transfers} resist={s.ResistExceeded} kit_points={s.KitPoints} potion_points={s.PotionPoints} potion_stack={s.PotionStackBefore}->{s.PotionStackAfter} checks={(s.Anomalies.Count == 0 ? "ok" : string.Join("; ", s.Anomalies))}");
+}
+
+/// <summary>
+/// The fighter's leg of the heal test (M4 P4; M4 P5a lane C3: the harm-heal script replaced the belt hunt). Holtburg Brawler, <c>test-melee</c>: the luck of the belt is gone, no hunt is needed for the kit-and-potion facts.
+/// </summary>
+[Trait("Category", LoopbackCollection.Category)]
+[Collection(LoopbackCollection.Name)]
+[Trait("Account", "test-melee")]
+[LoopbackCharacter("Holtburg Brawler")]
+[LiveSharedSession]
+public sealed class HealBrawlerLiveTests(ITestOutputHelper output)
+{
+    /// <summary>
+    /// <b>Holtburg Brawler (test-melee), one session, no hunt, no teleport.</b> In peace where it stands, the Brawler swaps its Mace for the caster once, lowers its own health to about half with Harm Self (levels chosen by <see cref="HarmSelfPlan"/>, a fizzle
+    /// retried and counted, a 60 s cap), uses a Handy Healing Kit and the health RISES (judged by the server's vital update, a lost roll counted and retried), harms again, drinks a Potion of Healing and the health rises, the vitals keeper restores the health to its
+    /// until share, and the caster swaps out once. Judges (the slice table's three): <c>heals&gt;=1 potions&gt;=1</c> and exactly one swap around all the casts (<c>swapped=yes</c>), and (P5a-R6, D28)
+    /// the heal checks the old Brawler fact made: each kit use's Healed amount at most the health missing and its Structure down by one, the potion's Drank amount 1 to 25 and its stack down by one. Printed, not asserted, in this first gate (P5a-R9): that Harm Self
+    /// took the health to about half and never to 0 (<c>health_min_pct</c>), the harms, the kit uses and the end health (<c>health_end_pct</c>). Prints <c>harm-heal done ok= heals= kits= potions= harms= fizzles= health_min_pct= swapped= ... s= granted=</c>.
+    /// </summary>
+    [LoopbackFact]
+    public void Holtburg_Brawler_harms_itself_to_half_then_heals_by_kit_and_by_potion_and_the_keeper_restores_it()
+    {
+        var leg = HarmHealFacts.Run(output, "heal-brawler", FighterTemplate.Melee.Name);
+        HarmHealFacts.AssertFighter(output, leg);
+    }
+}
+
+/// <summary>The Archer's harm-heal fact (M4 P5a lane C3): the same leg on Holtburg Archer, <c>test-archer</c> (its launcher and arrows swap out for the caster and back). The gate's fighter and actions areas should name this class.</summary>
+[Trait("Category", LoopbackCollection.Category)]
+[Collection(LoopbackCollection.Name)]
+[Trait("Account", "test-archer")]
+[LoopbackCharacter("Holtburg Archer")]
+[LiveSharedSession]
+public sealed class HealArcherLiveTests(ITestOutputHelper output)
+{
+    /// <summary>
+    /// <b>Holtburg Archer (test-archer), one session, no hunt, no teleport.</b> The same script as the Brawler's, with the Archer's Longbow and its Greater Frost Arrows unwielded for the caster and wielded again afterwards (<see cref="CasterSwap"/> Out restores what In recorded).
+    /// Proves the swap works for a launcher (the CheckWeaponCollision rule for a missile weapon), Harm Self and the heals on the Archer, and the same end facts as the Brawler's fact.
+    /// </summary>
+    [LoopbackFact]
+    public void Holtburg_Archer_harms_itself_to_half_then_heals_by_kit_and_by_potion_and_the_keeper_restores_it()
+    {
+        var leg = HarmHealFacts.Run(output, "heal-archer", FighterTemplate.Archer.Name);
+        HarmHealFacts.AssertFighter(output, leg);
     }
 }

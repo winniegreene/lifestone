@@ -469,8 +469,7 @@ far, the frames, and pings the owner; nothing is cut or started until the owner 
 -FullScan -Parallel 2`; the probe adds `-SoloFrames`. G-A is `slice-check -Smoke -MinTests <default baseline>`: it
 implies `-Exhaustive`, `-SoloFrames` and `-FullScan` and runs `dotnet test` once (smoke's test step is the run's
 test). The default filter is `Category!=Loopback&Tier!=Soak&Tier!=Exhaustive`; `tools\slice-check.ps1 -Stages
-exhaustive` (or `-Exhaustive`) runs `Tier=Exhaustive`. A `--play-frames` run is `--play-checks --play-skip-scenarios
---play-frames` in smoke. The frame judge of §5 is unchanged: over 75 ms fails, over 50 ms is flagged, and two of
+exhaustive` (or `-Exhaustive`) runs `Tier=Exhaustive`. A `--play-frames` run is `--play-checks --play-frames` in smoke. The frame judge of §5 is unchanged: over 75 ms fails, over 50 ms is flagged, and two of
 three runs over 50 ms fail the gate.
 
 ## 6. The rules and the process

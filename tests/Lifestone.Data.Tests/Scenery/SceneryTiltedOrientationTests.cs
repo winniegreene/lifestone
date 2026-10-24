@@ -21,6 +21,7 @@ namespace Lifestone.Data.Tests.Scenery;
 /// <item>without Align or MaxRotation the stored BaseLoc quaternion is used unchanged.</item>
 /// </list>
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class SceneryTiltedOrientationTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     /// <summary>Retail's double pi / 180.</summary>

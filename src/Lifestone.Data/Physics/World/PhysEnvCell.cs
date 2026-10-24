@@ -18,7 +18,9 @@ namespace Lifestone.Data.Physics.World;
 /// <param name="OtherPortalIndex">The matching portal's index in the neighbour (retail <c>other_portal_id</c>).</param>
 /// <param name="PortalSide">Retail <c>portal_side</c>: true when the cell lies on the negative side of <paramref name="Plane"/>.</param>
 /// <param name="Plane">The portal polygon's plane in the cell's frame (retail <c>CPolygon::make_plane</c>).</param>
-public readonly record struct PhysCellPortal(uint OtherCellId, int OtherPortalIndex, bool PortalSide, Plane Plane)
+/// <param name="Vertices">The portal polygon's corners in the cell's frame (read-only data for the wayfinder's doorway
+/// lanes; collision uses only the plane), or null for a synthetic cell that gives none.</param>
+public readonly record struct PhysCellPortal(uint OtherCellId, int OtherPortalIndex, bool PortalSide, Plane Plane, Vector3[]? Vertices = null)
 {
     /// <summary>True for a portal onto the landscape.</summary>
     public bool LeadsOutside => OtherCellId == CellIds.Outside;

@@ -7,6 +7,7 @@ namespace Lifestone.Data.Tests.Ui;
 /// Retail's default key map and action map (m2-plan.md R7): the KEYMAP chain, the binding census, and the movement, run,
 /// jump, chat-entry and escape bindings pinned by action.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class KeyMapTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     // DirectInput scan codes (DIK_*).

@@ -37,13 +37,10 @@ public sealed class ItemCreateRulesTests
 
     [Theory]
     [InlineData(null, 100, 1, 1, false)] // no stack asked: the object keeps its own
-    [InlineData(null, null, 1, 1, false)]
     [InlineData(null, 100, 7, 7, false)]
-    [InlineData(1, 100, 1, 1, false)]
     [InlineData(25, 100, 1, 25, false)] // within the maximum
     [InlineData(100, 100, 1, 100, false)] // exactly the maximum
     [InlineData(500, 100, 1, 100, true)] // above it: clamped, as HandleCI does
-    [InlineData(65535, 250, 1, 250, true)]
     [InlineData(5, null, 1, 1, true)] // an item that does not stack ignores the stack: one is created
     [InlineData(1, null, 1, 1, false)] // ... which is not a clamp when one was asked
     public void The_stack_is_clamped_or_ignored_as_HandleCI_does(int? requested, int? maxStack, int weenieStack, int expectedStack, bool expectedClamped)

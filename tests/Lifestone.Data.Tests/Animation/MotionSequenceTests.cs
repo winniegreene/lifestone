@@ -7,6 +7,7 @@ namespace Lifestone.Data.Tests.Animation;
 /// Motion-table resolution on the human MotionTable (0x09000001, from CharGen) against the ACE-ported oracle
 /// <see cref="AceMotionOracle"/>, plus retail-specific facts.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class MotionSequenceTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private const uint HumanMotionTable = 0x09000001;

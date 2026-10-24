@@ -43,6 +43,7 @@ public sealed class RenderSurfaceRecordTests(DatSetFixture fixture, ITestOutputH
         Assert.Throws<InvalidDataException>(() => RenderSurfaceRecord.Parse(1, Header(PixelFormat.PFID_P8, 8))); // no palette id
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_pooled_decode_returns_its_buffer_once()
     {
@@ -56,6 +57,7 @@ public sealed class RenderSurfaceRecordTests(DatSetFixture fixture, ITestOutputH
         Assert.Throws<ObjectDisposedException>(() => pooled.Data.Length);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_render_surface_reads_and_decodes_the_same_through_the_pooled_path()

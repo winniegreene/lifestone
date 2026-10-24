@@ -32,6 +32,7 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
 public sealed class FighterBuildLoopbackTests(ITestOutputHelper output)
 {
     /// <summary>ChatMessageType.Advancement, ACE <c>ChatMessageType.cs</c> 162.</summary>
@@ -86,6 +87,7 @@ public sealed class FighterBuildLoopbackTests(ITestOutputHelper output)
         var scenario = new FighterBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log);
 
         HeadlessRunResult result;
+        LiveCharacter.Release(output, BackendProbe.TestAccountKey);
         var secrets = File.ReadAllBytes(files.SecretsFile);
         HeadlessRunner runner;
         try

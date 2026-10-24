@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Numerics;
 using DatReaderWriter.Enums;
 using Lifestone.Client.Movement.Routes;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Bus;
@@ -879,7 +880,6 @@ public sealed class FightScenarioTests
 
     [Theory]
     [InlineData(20.0, 20f, 3.0)] // a close target: the floor
-    [InlineData(60.0, 20f, 5.0)] // the rig's bolt at 60 m: 3 s of flight plus the margin
     [InlineData(75.0, 15f, 7.0)] // the cast range's cap at a live Flame Bolt's speed
     [InlineData(75.0, 0.5f, 10.0)] // not a speed to divide by: the cap
     [InlineData(1000.0, 15f, 10.0)] // past the cap
@@ -1340,8 +1340,8 @@ public sealed class FightScenarioTests
 
 /// <summary>
 /// The den's floor from the dats (M3 3.1 lane fa): <see cref="BlackSpawnDen.FloorLowWords"/> is the arrival's connected floor (cells at z -1 to 0.5 a standing human walks to from the arrival through the doorways
-/// <see cref="DenPlanner.Passable"/> accepts, less the exit portal's room and the north wing), never a cell below z -1 nor an excluded one; every waypoint of the walk's tour is on it and reachable from the
-/// arrival; and why <see cref="DenPlanner"/> exists (the stock planner reaches one spawn cell of twelve). Skipped without the dats.
+/// <see cref="RoomGraph.IsPassable"/> accepts, less the exit portal's room and the north wing), never a cell below z -1 nor an excluded one; every waypoint of the walk's tour is on it and reachable from the
+/// arrival; and why the den needs a lean (<see cref="DenRooms.MaxLean"/>) (the stock planner reaches one spawn cell of twelve). Skipped without the dats.
 /// </summary>
 public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
@@ -1351,7 +1351,7 @@ public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutpu
     public void The_floor_set_is_the_arrivals_connected_floor_read_from_the_cell_graph()
     {
         var cells = All();
-        var planner = new DenPlanner(cells);
+        var planner = new RoomGraph(cells, DenRooms.MaxLean);
         var seen = new HashSet<uint> { Den() };
         var queue = new Queue<uint>([Den()]);
         while (queue.Count > 0)
@@ -1361,7 +1361,7 @@ public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutpu
             {
                 var other = cells.GetCell(portal.OtherCellId);
                 if (portal.LeadsOutside || other is null || seen.Contains(other.Id) || BlackSpawnDen.IsExcluded(other.Id & 0xFFFF)
-                    || other.Frame.Origin.Z < -1f || other.Frame.Origin.Z > 0.5f || !planner.Passable(cell, portal))
+                    || other.Frame.Origin.Z < -1f || other.Frame.Origin.Z > 0.5f || !planner.IsPassable(cell, portal))
                 {
                     continue;
                 }
@@ -1401,15 +1401,15 @@ public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutpu
     [RequiresDatsFact]
     public void Every_tour_waypoint_is_a_floor_cell_and_reachable_from_the_arrival_over_the_floor()
     {
-        var floor = DenPlanner.FloorOf(All());
+        var floor = DenRooms.FloorOf(All());
         Assert.Equal(BlackSpawnDen.FloorLowWords.Count, floor.Count);
-        var planner = new DenPlanner(floor);
+        var planner = new RoomGraph(floor, DenRooms.MaxLean);
         Assert.Equal(12, DenWalk.Tour.Count);
         Assert.Equal(DenWalk.Tour.Order(), BlackSpawnDen.FloorLowWords.Skip(1).Take(12).Order()); // the tour is the twelve spawn cells
         foreach (var low in DenWalk.Tour)
         {
             var cellId = 0x01050000u | low;
-            var route = planner.Plan("test", BlackSpawnDen.Arrival, cellId, DenWalk.StopWithinMetres);
+            var route = planner.PlanScripted("test", BlackSpawnDen.Arrival, cellId, DenWalk.StopWithinMetres, DenWalk.StopDwellSeconds);
             Assert.NotNull(route);
             Assert.True(route.Goals.Count >= 1);
             Assert.Equal(cellId, route.Goals[^1].Target.CellId);
@@ -1422,11 +1422,11 @@ public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutpu
     [RequiresDatsFact]
     public void The_stock_planner_reaches_one_spawn_cell_of_twelve_because_the_dens_doorways_lean()
     {
-        var floor = DenPlanner.FloorOf(All());
+        var floor = DenRooms.FloorOf(All());
         var stock = new CellRoutePlanner(floor);
         var reached = DenWalk.Tour.Count(low => stock.FindPath(BlackSpawnDen.Arrival.CellId, 0x01050000u | low) is not null);
-        output.WriteLine($"CellRoutePlanner reaches {reached} of 12 spawn cells; DenPlanner reaches 12 (the doorways' normals have a vertical part of 0.196, the stock rule wants under 0.1)");
-        Assert.Equal(1, reached); // 0x0383 only: TODO(m3-fight-planner-lean)
+        output.WriteLine($"CellRoutePlanner reaches {reached} of 12 spawn cells; the lean-0.3 RoomGraph reaches 12 (the doorways' normals have a vertical part of 0.196, the stock rule wants under 0.1)");
+        Assert.Equal(1, reached); // 0x0383 only: m3-fight-planner-lean: closed, the lean is the planner's parameter
     }
 
     [RequiresDatsFact]

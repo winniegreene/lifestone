@@ -82,13 +82,13 @@ internal sealed partial class StandInWorld
         var table = new Dictionary<uint, StandInKitWeenie>();
         foreach (var w in new[] { GearKit.Wand }.Concat(GearKit.Armour))
         {
-            var art = KitArt.TryGetValue(w.Wcid, out var a) ? a : (Setup: PlaceholderItemSetup, ClothingBase: 0u, Palette: (int?)null, Shade: (double?)null);
+            var art = KitArt.TryGetValue(w.Wcid, out var a) ? a : (Setup: StandInWeenieArt.SetupOr(w.Wcid, PlaceholderItemSetup), ClothingBase: 0u, Palette: (int?)null, Shade: (double?)null);
             table[w.Wcid] = new StandInKitWeenie(new StandInItemKind(w.Name, null), w.ItemType, (uint)w.ValidLocations, w.Burden, art.Setup, art.ClothingBase, art.Palette, art.Shade);
         }
 
         foreach (var c in ComponentWeenies.All)
         {
-            table[c.Wcid] = new StandInKitWeenie(new StandInItemKind(c.Name, c.MaxStack), GearKit.ItemTypeSpellComponents, 0, GearKit.ComponentBurden);
+            table[c.Wcid] = new StandInKitWeenie(new StandInItemKind(c.Name, c.MaxStack), GearKit.ItemTypeSpellComponents, 0, GearKit.ComponentBurden, StandInWeenieArt.SetupOr(c.Wcid, PlaceholderItemSetup));
         }
 
         return table.ToFrozenDictionary();
@@ -183,9 +183,10 @@ internal sealed partial class StandInWorld
         }
         else
         {
-            if ((kit?.SetupId ?? PlaceholderItemSetup) == PlaceholderItemSetup && _placeholderSetupLogged.Add(request.Wcid))
+            if (!StandInWeenieArt.TryGet(request.Wcid, out _) && _placeholderSetupLogged.Add(request.Wcid))
             {
-                Log?.Info(SessionLog.Category, "TODO(m3-standin-unknown-item-setup): weenie " + wcid + " (" + kind.Name + ") has no Setup in the stand-in; it wears the placeholder small item model 0x" + PlaceholderItemSetup.ToString("X8", CultureInfo.InvariantCulture));
+                // M4 4.1 v4: a weenie the art table does not hold wears the placeholder small item model (the icon's TODO is logged by StandInWeenieArt.Apply).
+                Log?.Info(SessionLog.Category, "TODO(m4-standin-art-missing): weenie " + wcid + " (" + kind.Name + ") has no row in StandInWeenieArt; it wears the placeholder small item model 0x" + PlaceholderItemSetup.ToString("X8", CultureInfo.InvariantCulture));
             }
 
             var (stack, clamped) = ResolveStack(request.Stack, kind.MaxStack);
@@ -195,7 +196,7 @@ internal sealed partial class StandInWorld
             _pack.Add(new StandInPackEntry(guid, request.Wcid, kind.Name, stack, worn));
             data = new ItemData(guid, request.Wcid, kind.Name, stack, request.Stack, kind.MaxStack, clamped);
             var owner = _reducer.State.Self.Guid;
-            var created = CreatedItem(guid, owner, request.Wcid, kind, stack, kit, worn is { } w && _visit.Dresser is { } dresser ? StandInHumanLook.FromObjDesc(dresser.Item(w)) : ModelData.Empty);
+            var created = CreatedItem(guid, owner, request.Wcid, kind, stack, kit, Log, worn is { } w && _visit.Dresser is { } dresser ? StandInHumanLook.FromObjDesc(dresser.Item(w)) : ModelData.Empty);
             // ACE's wire order (M3 1.2 live-gate fix): the UIQueue bundle (0022, the burden's 02CD, the mod's reply line) goes out first and the item's CreateObject (SmartboxQueue) in a later
             // bundle (NetworkSession.cs:192-250 sends the groups in enum order and waits 5 ms between bundles), so a client sees the item in its pack, and the reply, before its world object.
             Later(sink =>
@@ -222,15 +223,25 @@ internal sealed partial class StandInWorld
 
     /// <summary>
     /// The CreateObject ACE sends for a created pack item (<c>GameMessageCreateObject</c>): no position, the player as the container, the stack size and its maximum for an item that stacks. The
-    /// object's art, ItemType (Money for Pyreal, Misc otherwise), icon and value are placeholders (<c>TODO(m3-standin-weenies)</c>: the stand-in has no weenie database).
+    /// object's Setup and icons are its weenie's own (<see cref="StandInWeenieArt"/>, M4 4.1 v4); the ItemType (Money for Pyreal, Misc otherwise) and value are placeholders (<c>TODO(m3-standin-weenies)</c>: the stand-in has no weenie database).
     /// </summary>
-    /// <summary>The art every created item gets unless its kit weenie names one: the Pyreal coin's small Setup (0x02000B77, read from the dats; <c>TODO(m3-standin-unknown-item-setup)</c>, logged once per class id). Never a human Setup: a held item drawn with the player's showed a second body in the hand (M3 4.1 A2; again after D43 moved the caster to weenie 8552).</summary>
+    /// <summary>The Setup of an item whose class id <see cref="StandInWeenieArt"/> does not hold: the Pyreal coin's small Setup (0x02000B77, read from the dats; <c>TODO(m4-standin-art-missing)</c>, logged once per class id; it closes <c>TODO(m3-standin-unknown-item-setup)</c>, since every weenie the stand-in serves has its own Setup in the table). Never a human Setup: a held item drawn with the player's showed a second body in the hand (M3 4.1 A2; again after D43 moved the caster to weenie 8552).</summary>
     internal const uint PlaceholderItemSetup = 0x02000B77;
 
     /// <summary>The caster's own Setup: weenie 8552 "The Healer's Heart" (M3 4.2 P7, D43), <c>weenie_properties_d_i_d</c> type 1 (Setup) = 0x020009AD (ACE world database 0.9.296; the old wand 2472 was 0x020000FC).</summary>
     internal const uint WandSetup = 0x020009AD;
 
-    private static CreateObjectMsg CreatedItem(uint guid, uint owner, uint wcid, StandInItemKind kind, int stack, StandInKitWeenie? kit, ModelData model)
+    /// <summary>
+    /// The physics state bit a weenie's <c>LightsStatus</c> gives (ACE world database 0.9.296: <c>weenie_properties_bool</c> type 15 = 1 on weenie 8552 "The Healer's Heart"; ACE <c>WorldObject_Properties.cs</c> 1057-1060 maps
+    /// <c>LightsStatus</c> to <c>PhysicsState.LightingOn</c>, which retail's set_lights 0x005107C0 reads), so the held orb's Setup light can light (M4 4.1 fix2b). Only the Healer's Heart is listed:
+    /// <c>TODO(m4-standin-lights-status)</c> for any other weenie that has the property (4,050 do; the stand-in's art table has no lights flag).
+    /// </summary>
+    internal static PhysicsState LightingOf(uint wcid) => wcid == HealersHeartWcid ? PhysicsState.LightingOn : PhysicsState.None;
+
+    /// <summary>The weenie class id of The Healer's Heart (the caster the kit wields).</summary>
+    internal const uint HealersHeartWcid = 8552;
+
+    private static CreateObjectMsg CreatedItem(uint guid, uint owner, uint wcid, StandInItemKind kind, int stack, StandInKitWeenie? kit, ILogSink? log, ModelData model)
     {
         var header = WeenieHeaderFlags.Container;
         if (kit is not null)
@@ -256,8 +267,8 @@ internal sealed partial class StandInWorld
         var physics = new PhysicsDesc
         {
             Flags = PhysicsDescFlags.CSetup,
-            State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal,
-            SetupId = kit?.SetupId ?? PlaceholderItemSetup,
+            State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal | LightingOf(wcid),
+            SetupId = SetupFor(wcid, kit),
             Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1),
         };
         var weenie = new WeenieDesc
@@ -275,6 +286,10 @@ internal sealed partial class StandInWorld
             ValidLocations = kit is { ValidLocations: not 0 } ? kit.ValidLocations : null,
             Burden = kit is not null ? (ushort)Math.Min(kit.UnitBurden * stack, ushort.MaxValue) : null,
         };
-        return new CreateObjectMsg(guid, model, physics, weenie);
+        return new CreateObjectMsg(guid, model, physics, StandInWeenieArt.Apply(weenie, log));
     }
+
+    /// <summary>The Setup an item of weenie <paramref name="wcid"/> carries: the kit entry's own (a worn piece's, the wand's), else the art table's, else the placeholder small item model (<c>TODO(m4-standin-art-missing)</c>).</summary>
+    internal static uint SetupFor(uint wcid, StandInKitWeenie? kit) =>
+        kit is not null && kit.SetupId != PlaceholderItemSetup ? kit.SetupId : StandInWeenieArt.SetupOr(wcid, PlaceholderItemSetup);
 }

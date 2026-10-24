@@ -40,7 +40,7 @@ namespace Lifestone.Loopback.Tests.Session;
 /// is below 1e-3</b> (<see cref="GearCasts.NoBurnProbability"/>, ACE's <c>Spell.TryBurnComponents</c>, <c>Entity/Spell.cs</c> 157-189: each formula slot burns with <c>ComponentLoss x CDM x min(1, Power / skill)</c>); otherwise it is
 /// report-only and the line says so (the test never casts again until something burns). (f) The top-up after the burn (fix A: <c>SpawnGear</c> merges each top-up into the held stack): the gear scenario runs again with its cast off; the run must not fail (a merge failure fails the spawn), the main pack's slot
 /// count must equal the count before the casts, each component weenie must be one stack, and a rerun after that must send nothing (<c>topup=0</c>); <c>merges</c> is the number of component lines that run topped up (one merge
-/// each). The mage is put back in Non-combat before it and the run logs off at the end.</para>
+/// each). The mage is put back in Non-combat before it. Since M4 P4 the run is over the mage's shared session (one login per test process; the mage is put in peace mode first) and does not log off at the end; on another character it fails at once and sends nothing.</para>
 /// <para><b>The mana precondition</b> (fix B). Before the casts the test adds up the most they can cost (<see cref="GearCasts.ManaCeiling"/>: the SpellTable's base mana, which ACE's Mana Conversion only lowers,
 /// <c>Creature_Magic.cs</c> 14-92; plus <see cref="GearCasts.FizzleMana"/> for the fizzle, <c>Player_Magic.cs</c> 566-572) and compares it with the read model's current mana; when short it waits for regeneration, at most
 /// <see cref="CastLeg.ManaWaitSeconds"/> s, logging both numbers (a named precondition wait: nothing has been cast, so it is no retry) and fails with the numbers if the mana never comes. A cast that ends with UseDone 0x0401 is named
@@ -52,6 +52,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[LiveSharedSession]
 public sealed class CastLiveTests(ITestOutputHelper output)
 {
     [LoopbackFact]
@@ -59,48 +61,10 @@ public sealed class CastLiveTests(ITestOutputHelper output)
     {
         using var dats = DatSet.Open();
         var spells = SpellTableData.Load(dats).Spells;
-        var files = BackendProbe.MainCheckoutFiles;
         var log = new RecordingLogSink();
-        var secrets = File.ReadAllBytes(files.SecretsFile);
-        CastLeg leg;
-        HeadlessRunner runner;
-        try
-        {
-            string account;
-            using (var credentials = PlayAccounts.Parse(secrets, AccountChoice.FromOption(BackendProbe.TestAccountKey, AccountChoice.Default)))
-            {
-                account = credentials.Account;
-            }
+        var leg = new CastLeg(GearKit.Build(spells, LiveMage.KitAccount()), spells, LiveMage.KitAccount(), log, output.WriteLine);
+        var result = LiveMage.Run(output, leg, "cast", CastLeg.ManaWaitSeconds + 600).Result;
 
-            leg = new CastLeg(GearKit.Build(spells, account), spells, account, log, output.WriteLine);
-            runner = HeadlessRunner.Start(
-                new HeadlessRunOptions
-                {
-                    Session = new SessionOptions { Account = BackendProbe.TestAccountKey, Server = BackendProbe.Probe().AceEndPoint! },
-                    QuitAfterSeconds = 600,
-                },
-                leg,
-                secrets,
-                File.ReadAllBytes(files.PidsFile),
-                dats,
-                TimeProvider.System,
-                log,
-                recording: null);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(secrets);
-        }
-
-        HeadlessRunResult result;
-        var context = new GameThreadSynchronizationContext();
-        using (context.Install())
-        using (runner)
-        {
-            result = runner.Run(context, CancellationToken.None);
-        }
-
-        output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{result.SummaryLine("memory")}"));
         foreach (var line in log.Lines.Where(l => l.Contains("[gear]", StringComparison.Ordinal) || l.Contains("WARN", StringComparison.Ordinal) || l.Contains("ERROR", StringComparison.Ordinal)))
         {
             output.WriteLine(line);
@@ -123,8 +87,11 @@ public sealed class CastLiveTests(ITestOutputHelper output)
     {
         private const double BailSeconds = 30;
 
-        /// <summary>The most the leg waits for the mana the casts need to regenerate (a named precondition wait, not a retry).</summary>
-        internal const double ManaWaitSeconds = 180;
+        /// <summary>
+        /// The most the leg waits for the mana the casts need to regenerate (a named precondition wait, not a retry). 480 s, not 180: the shared mage's earlier tests leave it low, and the mage regenerates about 0.43 mana a second (the
+        /// proof run: 122 to 199 of the 200 needed in 180 s, under vitae), so the worst case, from empty to the 200, takes 467 s. The 200 the casts need is not lowered.
+        /// </summary>
+        internal const double ManaWaitSeconds = 480;
 
         private readonly GearKit _kit;
         private readonly IReadOnlyDictionary<uint, SpellInfo> _spells;
@@ -165,6 +132,15 @@ public sealed class CastLiveTests(ITestOutputHelper output)
         {
             ArgumentNullException.ThrowIfNull(session);
             _session = session;
+            if (Stage == "start" && GearScenario.WrongCharacter(session) is { } wrong)
+            {
+                // Nothing was sent (no gear, no log off: the shared session is the host's).
+                Failure = wrong;
+                _log("FAILED: " + wrong);
+                Stage = "failed";
+                return ScenarioStatus.Failed;
+            }
+
             switch (Stage)
             {
                 case "done":
@@ -353,7 +329,7 @@ public sealed class CastLiveTests(ITestOutputHelper output)
         private IEnumerable<ActionHandle?> RerunGear(string label, Action<GearScenario> done)
         {
             var s = _session!;
-            var gear = new GearScenario(_kit, _gearLog, endSession: false, cast: false);
+            var gear = new GearScenario(_kit, _gearLog, endSession: false, cast: false) { RequireCharacter = true };
             done(gear);
             while (true)
             {
@@ -374,7 +350,7 @@ public sealed class CastLiveTests(ITestOutputHelper output)
 
             // The gear first (login, BSD Mage, the kit, the wand wielded): ACE holds the magic mode only with a wielded caster (Player_Combat.cs 872-880). Its own cast is off.
             Stage = "gear";
-            var gear = new GearScenario(_kit, _gearLog, endSession: false, cast: false);
+            var gear = new GearScenario(_kit, _gearLog, endSession: false, cast: false) { RequireCharacter = true };
             while (true)
             {
                 var status = gear.Step(s, s.Clock.Now);
@@ -562,6 +538,12 @@ public sealed class CastLiveTests(ITestOutputHelper output)
             Summary = string.Create(
                 CultureInfo.InvariantCulture,
                 $"cast_live creature={creature} life={life} item={item} fizzle={(fizzlePick is null ? "n/a:buffed" : fizzlePick.Spell.Id.ToString(CultureInfo.InvariantCulture) + ":0x0402")} mana_needed={_manaNeeded} mana_before={manaBefore} mana_after={manaAfter} p_no_burn={noBurn:0.0000} burned={burned} burn_check={(asserted ? "asserted" : "report-only")} merges={merges} slots={slotsBefore}->{slotsAfter}");
+
+            if (LiveRun.KeepSession)
+            {
+                _log("the shared session stays logged in (no log off at the end of the leg)");
+                yield break;
+            }
 
             Stage = "logging-off";
             var off = s.Actions.LogOff(ActionSource.Host);

@@ -38,6 +38,7 @@ public sealed class InteriorLocationsTests(InteriorsFixture fixture) : IClassFix
         Assert.True(parsed.HasHeight);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [MemberData(nameof(Keys))]
     public void Every_location_stands_on_a_floor_inside_its_cell(string key)
@@ -59,6 +60,7 @@ public sealed class InteriorLocationsTests(InteriorsFixture fixture) : IClassFix
         Assert.InRange(floor.Value, feet.Z - 0.05f, feet.Z + 0.05f);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [MemberData(nameof(Keys))]
     public void Dungeons_are_dungeon_landblocks_and_interiors_are_building_cells(string key)
@@ -81,6 +83,7 @@ public sealed class InteriorLocationsTests(InteriorsFixture fixture) : IClassFix
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Dungeon_landblocks_have_an_entry_inside_and_towns_have_none()
     {
@@ -109,6 +112,7 @@ public sealed class InteriorLocationsTests(InteriorsFixture fixture) : IClassFix
         Assert.Equal(0x860201ADu, parsed.Position.CellId);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_training_academy_matches_the_portal_dats_first_holtburg_start_location()
     {
@@ -124,6 +128,7 @@ public sealed class InteriorLocationsTests(InteriorsFixture fixture) : IClassFix
         Assert.Contains(chargen.StartingAreas[0].Locations, l => l.CellId == 0x860301ADu);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Acviewers_hotel_swank_point_is_not_in_its_cell_which_is_why_it_is_not_curated()
     {

@@ -18,7 +18,7 @@ namespace Lifestone.Loopback.Tests.Session;
 /// M3 3.1 lane fa, the fight scenario against the bundled ACE (<c>--scenario=fight</c>). WRITTEN AND COMPILED BY THE SLICE, RUN BY THE LEAD (it needs the backend and the BSD Mage, built and buffed: run
 /// the mage build and the buff scenario first; a buff top-up is part of the run when a line has under 600 s left). On <c>BSD Mage</c> only (the test account) the headless runner enters the mage, has the
 /// gear on, tops the buffs up, sends the mage to the Aluvian Black Spawn Den (the Places row), enters the magic combat mode, casts Flame Bolt at the nearest Tusker Slave of the arrival's floor until one kill
-/// (walking the floor when none is in range or the casts miss), returns to non-combat and logs off. Time limit 3,600 s; the fight itself 300 s.
+/// (walking the floor when none is in range or the casts miss), returns to non-combat. Time limit 3,600 s; the fight itself 300 s. Since M4 P4 it runs over the mage's shared session (one login per test process; the mage is put in peace mode first) and does not log off at the end; a run on another character fails at once and sends nothing (<c>RequireCharacter</c>).
 /// </summary>
 /// <remarks>
 /// <para><b>What it proves</b> (each assertion names the ACE behaviour it relies on).
@@ -35,6 +35,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[LiveSharedSession]
 public sealed class FightLiveTests(ITestOutputHelper output)
 {
     /// <summary>The headless limit of the run, in seconds (the gear, a buff top-up of up to 1,300 s, the fight's 300 s and the log off).</summary>
@@ -45,49 +47,11 @@ public sealed class FightLiveTests(ITestOutputHelper output)
     {
         using var dats = DatSet.Open();
         var spells = SpellTableData.Load(dats).Spells;
-        var files = BackendProbe.MainCheckoutFiles;
         var log = new RecordingLogSink();
-        var secrets = File.ReadAllBytes(files.SecretsFile);
-        FightScenario scenario;
-        HeadlessRunner runner;
-        try
-        {
-            string account;
-            using (var credentials = PlayAccounts.Parse(secrets, AccountChoice.FromOption(BackendProbe.TestAccountKey, AccountChoice.Default)))
-            {
-                account = credentials.Account;
-            }
-
-            scenario = new FightScenario(spells, account, new BuffOptions(), new FightOptions { Kills = 1, Seconds = FightOptions.DefaultSeconds }, DenWalk.Create(dats, log), log);
-            runner = HeadlessRunner.Start(
-                new HeadlessRunOptions
-                {
-                    Session = new SessionOptions { Account = BackendProbe.TestAccountKey, Server = BackendProbe.Probe().AceEndPoint! },
-                    QuitAfterSeconds = QuitAfterSeconds,
-                },
-                scenario,
-                secrets,
-                File.ReadAllBytes(files.PidsFile),
-                dats,
-                TimeProvider.System,
-                log,
-                recording: null);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(secrets);
-        }
-
-        HeadlessRunResult result;
-        var context = new GameThreadSynchronizationContext();
-        using (context.Install())
-        using (runner)
-        {
-            result = runner.Run(context, CancellationToken.None);
-        }
+        var scenario = new FightScenario(spells, LiveMage.KitAccount(), new BuffOptions(), new FightOptions { Kills = 1, Seconds = FightOptions.DefaultSeconds }, DenWalk.Create(dats, log), log, endSession: false) { RequireCharacter = true };
+        var result = LiveMage.Run(output, scenario, "fight", QuitAfterSeconds).Result;
 
         var tally = scenario.Tally;
-        output.WriteLine(result.SummaryLine("memory"));
         output.WriteLine("fight " + scenario.VerdictFields());
         var lines = log.Lines.Where(l => l.Contains("[fight]", StringComparison.Ordinal) || l.Contains("[gear]", StringComparison.Ordinal) || l.Contains("[buff]", StringComparison.Ordinal) || l.Contains("WARN", StringComparison.Ordinal) || l.Contains("ERROR", StringComparison.Ordinal)).ToList();
         foreach (var line in lines)

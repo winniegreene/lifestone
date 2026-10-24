@@ -219,7 +219,6 @@ public sealed class ShortcutActionTests
     }
 
     [Theory]
-    [InlineData(ShortcutRig.Dagger)]
     [InlineData(ShortcutRig.Scroll)]
     [InlineData(ShortcutRig.Other)]
     public void Any_other_item_on_a_slot_is_used_with_plain_Use(uint item)

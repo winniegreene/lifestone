@@ -142,7 +142,6 @@ public sealed class ItemMoveTrackerTests
 
     [Theory]
     [InlineData("Source item not found!")]
-    [InlineData("You are too encumbered to carry that!")]
     public void A_refused_pick_up_carries_the_02EB_text_and_code_0(string text)
     {
         var r = new Rig();

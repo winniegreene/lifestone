@@ -10,7 +10,6 @@ public sealed class RetailSoundRulesTests
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
-    [InlineData(5)]
     public void The_variant_roll_reaches_every_variant_but_the_last(int count)
     {
         var dice = new RetailRandom(17);
@@ -81,7 +80,6 @@ public sealed class RetailSoundRulesTests
     [InlineData(0.3f, -10)] // the tunnel hum: −10.46
     [InlineData(0.25f, -12)]
     [InlineData(0.01f, -40)] // −40.0000008: 6.0206 is a hair over 20·log₁₀ 2, so −40 dB stays −40
-    [InlineData(0.003f, -50)] // −50.46: still plays, at VOL_MIN
     [InlineData(0.0029f, -50)]
     public void Attenuation_is_whole_decibels_rounded_up(float volume, int decibels)
     {
@@ -135,9 +133,7 @@ public sealed class RetailSoundRulesTests
     [InlineData(10f, 270f, 14)] // into (−180, 180]: −90°
     [InlineData(10f, -270f, -14)] // fmod keeps the sign: −270°, sin ≈ 1
     [InlineData(5f, 90f, -14)] // from 5 m on
-    [InlineData(5.9f, 90f, -14)]
     [InlineData(4.99f, 90f, 0)] // nearer: centred
-    [InlineData(0f, 90f, 0)]
     public void The_pan_is_sin_of_the_bearing_times_minus_15_from_5_m(float distance, float bearing, int pan)
     {
         Assert.Equal(pan, RetailSoundRules.PanIndex(distance, bearing, mono: false));

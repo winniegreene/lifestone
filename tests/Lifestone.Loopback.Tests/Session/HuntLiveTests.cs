@@ -1,3 +1,4 @@
+using Lifestone.Client.Session.Fighter;
 using System.Text.RegularExpressions;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Tests.Shared.Loopback;
@@ -18,14 +19,17 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test-melee")]
+[LoopbackCharacter("Holtburg Brawler")]
+[LiveSharedSession]
 public sealed class HuntLiveTests(ITestOutputHelper output)
 {
-    private static readonly Regex Verdict = new(@"^fighter=ok kills=\d+ swings=\d+ shots=\d+ hits=\d+ misses=\d+ damage_dealt=-?\d+ damage_taken=-?\d+ hits_taken=\d+ evades=\d+ xp_gained=-?\d+ returned=(yes|no)$", RegexOptions.CultureInvariant);
+    internal static readonly Regex Verdict = new(@"^fighter=ok kills=\d+ swings=\d+ shots=\d+ hits=\d+ misses=\d+ blocked=\d+ seeks=\d+ damage_dealt=-?\d+ damage_taken=-?\d+ hits_taken=\d+ evades=\d+ xp_gained=-?\d+ returned=(yes|no)$", RegexOptions.CultureInvariant);
 
     [LoopbackFact]
     public void The_fighter_binds_hunts_one_creature_on_the_belt_returns_to_Holtburg_and_logs_off()
     {
-        var run = HuntLiveRun.Run(output, "hunt", new HuntOptions());
+        var run = HuntLiveRun.Run(output, "hunt", new HuntOptions(), character: FighterTemplate.Melee.Name);
         var scenario = run.Scenario;
 
         Assert.True(run.Result.Ok, run.Result.Failure);
@@ -61,7 +65,7 @@ public sealed class HuntLiveTests(ITestOutputHelper output)
     [LoopbackFact]
     public void The_fighter_hunts_three_kills_on_the_belt_loots_heals_between_them_and_returns_to_Holtburg()
     {
-        var run = HuntLiveRun.Run(output, "hunt-loop", LoopQuitAfterSeconds, "--hunt-ground=belt", "--hunt-kills=3", "--hunt-seconds=300");
+        var run = HuntLiveRun.RunAs(FighterTemplate.Melee.Name, output, "hunt-loop", LoopQuitAfterSeconds, "--hunt-ground=belt", "--hunt-kills=3", "--hunt-seconds=300");
         var scenario = run.Scenario;
         var tally = scenario.Tally;
         var line = $"hunt_loop kills={tally.Kills} looted={scenario.Looted} loot_skipped={scenario.LootSkipped} heals={scenario.Heals} kit_uses={scenario.KitUses} potions={scenario.PotionsUsed} returned={(scenario.Returned ? "yes" : "no")}";
@@ -69,31 +73,8 @@ public sealed class HuntLiveTests(ITestOutputHelper output)
         output.WriteLine("hunt_loop detail " + scenario.DetailFields());
 
         // The verdict of the game's leg, composed from the scenario's own numbers (the headless run has no frames to sample).
-        var verdict = HuntLegVerdict.Compose(
-            scenario.Failure,
-            new HuntLegMeasures(
-                Kills: tally.Kills,
-                DamageDealt: tally.DamageDealt,
-                DamageTaken: tally.DamageTaken,
-                HitsTaken: tally.HitsTaken,
-                Evades: tally.Evades,
-                XpGained: tally.XpGained,
-                Fighter: scenario.Fighter,
-                Swings: tally.Swings,
-                Shots: tally.Shots,
-                Hits: tally.Hits,
-                Misses: tally.Misses,
-                Returned: scenario.Returned,
-                Weapon: HuntWeapon.Melee,
-                CorpsesOpened: scenario.CorpsesOpened,
-                CorpseItems: scenario.CorpseItems,
-                Looted: scenario.Looted,
-                LootSkipped: scenario.LootSkipped,
-                Heals: scenario.Heals,
-                KitUses: scenario.KitUses,
-                Potions: scenario.PotionsUsed,
-                LootEnabled: true,
-                Ground: HuntGroundChoice.Belt));
+        // M4 P5a fix r4: the measures come from the scenario in one place (round 4 left one_blow_kills at 0 here while the scenario counted 3).
+        var verdict = HuntLegVerdict.Compose(scenario.Failure, HuntLegVerdict.FromScenario(scenario, HuntWeapon.Melee, lootEnabled: true, HuntGroundChoice.Belt));
         output.WriteLine("hunt_loop verdict " + verdict.Line);
         foreach (var note in verdict.Notes ?? [])
         {

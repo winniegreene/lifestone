@@ -155,8 +155,6 @@ public sealed class PlayScriptTests
             Assert.DoesNotContain(result.GetProperty(name).GetProperty("Arguments").EnumerateArray().Select(e => e.GetString()!), a => a.StartsWith("--account=", StringComparison.Ordinal) && name != "play" && name != "other");
         }
 
-        // The refused automated accounts leave no --account at all: the game would fall back to the play account, so the script stops first.
-        Assert.Contains("test account", result.GetProperty("play").GetProperty("Problems")[0].GetString(), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -280,7 +278,6 @@ public sealed class PlayScriptTests
         var (code, text) = RunPlay("-PlanOnly", "-Offscreen", "-Account", "play");
         Assert.Equal(1, code);
         Assert.Contains("REFUSED", text, StringComparison.Ordinal);
-        Assert.Contains("test account", text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -468,6 +468,16 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         /// <summary>Sets the health to <paramref name="percent"/> of its maximum <paramref name="seconds"/> from now (the regeneration the pre-trip wait waits for).</summary>
         public void RegenerateTo(double seconds, uint percent) => At(seconds, () => Vital(2, Max(1) * percent / 100));
 
+        /// <summary>M4 P4 g3fix: sets the mana to <paramref name="percent"/> of its maximum now (a 0x02E7) and, when <paramref name="regenSeconds"/> is above 0, to <paramref name="regenPercent"/> that many seconds from now.</summary>
+        public void SetMana(uint percent, double regenSeconds = 0, uint regenPercent = 0)
+        {
+            Vital(6, Max(5) * percent / 100);
+            if (regenSeconds > 0)
+            {
+                At(regenSeconds, () => Vital(6, Max(5) * regenPercent / 100));
+            }
+        }
+
         /// <summary>One blow of the tuskers now, as <see cref="Damage"/> and <see cref="Lethal"/> say (M4 3.1 d1: what a scripted fight takes while it fights).</summary>
         public void Hit() => Blow();
 
@@ -1746,19 +1756,56 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void The_vitae_stage_refuses_a_grant_that_would_cross_the_next_level_and_fails_by_name_without_sending_it()
+    public void The_vitae_stage_grants_across_a_level_logs_the_crossing_and_never_grants_more_than_clears_D42()
     {
+        // Replaces M3 D37's refusal test (a grant that would cross level 127 failed by name without being sent): the owner's D42 allows the crossing, so the same rig now sends exactly the clearing amount and logs it.
         var rig = new Rig(buffed: false);
         rig.HoldVitae(0.60f, total: 5_000_000);
         var scenario = rig.Scenario(new FakeWalk(), DeathStages.Vitae);
         scenario.LevelXp = level => level == 127 ? 10_000_000UL : null; // 5,000,000 + 6,875,357 is past level 127's 10,000,000
 
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.Null(scenario.Failure);
+        Assert.Equal([6_875_357L], rig.XpAsked); // exactly what clears the 40%, not a point more
+        Assert.Contains(Lines(rig), l => l.Contains("vitae_level_crossed=yes level=126->127", StringComparison.Ordinal));
+        Assert.Contains(" vitae_paid=6875357 vitae_after=0", scenario.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_failed_run_still_pays_the_vitae_with_the_mages_live_numbers_and_ends_failed_with_its_own_reason_P5a_r3()
+    {
+        // Round 3: both death runs failed in the fight, the success-only vitae stage never ran and BSD Mage's vitae grew to 40% (level 126, 4,286,609,098 experience: the build's grant). The failure path now pays it too,
+        // across the level as D42 allows (level 127's threshold is set inside the grant here to prove the crossing is no refusal), and the run still ends Failed with the bind's reason.
+        var rig = new Rig(buffed: false);
+        rig.UseStaminaHalving = false;
+        rig.HoldVitae(0.60f, level: 126, total: 4_286_609_098);
+        var scenario = rig.Scenario(null, DeathStages.Bind | DeathStages.Vitae);
+        scenario.LevelXp = level => level == 127 ? 4_290_000_000UL : null;
+
         Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
 
-        Assert.Empty(rig.XpAsked);
-        Assert.Contains("vitae: clearing the 40% vitae needs 6,875,357 experience, which would cross level 127", scenario.Failure, StringComparison.Ordinal);
-        Assert.False(scenario.Outcome().Ok);
-        Assert.Contains(" vitae_paid=0 vitae_after=40", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.StartsWith("bind: ", scenario.Failure, StringComparison.Ordinal);
+        Assert.Equal([6_875_357L], rig.XpAsked); // exactly what clears the 40% at level 126
+        Assert.False(rig.R.H.State.Self.Qualities.TryGetVitae(out _));
+        var lines = Lines(rig);
+        Assert.Contains(lines, l => l.StartsWith("vitae after the failure:", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Contains("vitae_level_crossed=yes level=126->127", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.StartsWith("vitae: paid 6,875,357 experience, 0% left", StringComparison.Ordinal));
+        Assert.Contains(" vitae_paid=6875357 vitae_after=0", scenario.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_vitae_grant_that_stays_inside_the_level_logs_no_crossing_D42()
+    {
+        var rig = new Rig(buffed: false);
+        rig.HoldVitae(0.60f, total: 5_000_000);
+        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Vitae);
+        scenario.LevelXp = level => level == 127 ? 1_000_000_000_000UL : null;
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.DoesNotContain(Lines(rig), l => l.Contains("vitae_level_crossed", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -2104,10 +2151,11 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         Assert.NotNull(server.PlaceNear(StandInLifestone.Make(0x80000C01), new System.Numerics.Vector3(1f, 0f, 0f)));
         cast.Run(0.5);
         Assert.Equal(ActionOutcomeKind.Confirmed, Use(cast, 0x80000C01));
-        Assert.NotNull(server.PlaceNear(StandInTusker.Make(0x80000C02, default, attacks: true), new System.Numerics.Vector3(0f, 1f, 0f)));
         cast.Run(0.5);
         cast.Begin();
+        var suicide = cast.Session.Actions.Suicide(ActionSource.Host); // M4 4.1 t2: the stand-in holds no monster, so a suicide is the death
         cast.Run(40.0);
+        Assert.True(suicide.IsCompleted, suicide.Summary);
         cast.Run(8.0); // the arrival
         Assert.Equal(SelfTravel.TeleportArrived, cast.Session.State.Self.Travel);
         // The stand-in's teleport does not model Hidden; ACE's arrival ends with a state without it (as the scripted rig does). The host's portal space would also send LoginComplete.

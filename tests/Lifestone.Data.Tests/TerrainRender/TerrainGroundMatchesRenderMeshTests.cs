@@ -12,6 +12,7 @@ namespace Lifestone.Data.Tests.TerrainRender;
 /// ground-height service, and draws <see cref="TerrainRenderMesh"/>. Both must describe the same 128 triangles, so walk
 /// mode's eye height follows the drawn TexMerge surface (the shader's 0.01 m <c>zFightTerrainAdjust</c> lowering aside).
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class TerrainGroundMatchesRenderMeshTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     /// <summary>

@@ -48,6 +48,7 @@ public sealed class TerrainShaderModelTests(DatSetFixture fixture) : IClassFixtu
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Shader_model_matches_the_float_reference_on_real_cells_and_textures()
     {

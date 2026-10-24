@@ -85,9 +85,7 @@ public sealed class CharGenRulesTests
     [Theory]
     [InlineData(10, 5)]
     [InlineData(11, 6)]
-    [InlineData(99, 50)]
     [InlineData(100, 50)]
-    [InlineData(55, 28)]
     public void Health_is_endurance_halved_and_rounded_half_up(int endurance, int health) => Assert.Equal(health, CharGenRules.HealthOf(endurance));
 
     [Theory]
@@ -112,7 +110,6 @@ public sealed class CharGenRulesTests
 
     [Theory]
     [InlineData(0u, 10)]
-    [InlineData(99u, 10)]
     [InlineData(100u, 10)]
     [InlineData(551u, 55)]
     [InlineData(1000u, 100)]

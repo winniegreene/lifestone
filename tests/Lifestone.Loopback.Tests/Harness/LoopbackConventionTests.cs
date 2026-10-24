@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using Lifestone.Client.Session.Credentials;
 using Lifestone.Client.Tests;
 using Lifestone.Tests.Shared.Loopback;
 
@@ -19,6 +20,44 @@ public sealed partial class LoopbackConventionTests
 
     [GeneratedRegex(@"\[\s*Loopback(Fact|Theory)\b|Collection\(\s*""Loopback""\s*\)|Trait\(\s*""Category""\s*,\s*""Loopback""\s*\)")]
     private static partial Regex LoopbackMark();
+
+    [Fact]
+    public void P4_rfixb_R13_the_process_exit_log_off_line_names_the_character_and_the_seconds()
+    {
+        Assert.Equal("[live-session] logged Holtburg Brawler off at process exit (1.5 s)", Session.LiveCharacter.ProcessExitLine("Holtburg Brawler", 1.52));
+    }
+
+    [Fact]
+    public void P5a_C3_the_heal_legs_need_no_hunt_and_no_ground()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "Lifestone.slnx")))
+        {
+            root = root.Parent;
+        }
+
+        Assert.NotNull(root);
+        var code = File.ReadAllText(Path.Combine(root.FullName, "tests", "Lifestone.Loopback.Tests", "Session", "HealLiveTests.cs"));
+        Assert.DoesNotContain("HuntScenario", code, StringComparison.Ordinal); // C3: Harm Self gives the damage; the luck of the belt (and the archer lane's forest, D31) is gone from the heal facts
+        Assert.DoesNotContain("HuntGroundChoice", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void P5a_C3_the_fighters_heal_legs_run_the_harm_heal_script_with_the_caster_swap_and_the_potion_follows_the_kit()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "Lifestone.slnx")))
+        {
+            root = root.Parent;
+        }
+
+        Assert.NotNull(root);
+        var code = File.ReadAllText(Path.Combine(root.FullName, "tests", "Lifestone.Loopback.Tests", "Session", "HealLiveTests.cs"));
+        Assert.Contains("new HarmHealScript(S, spells, keeper, swap, new HarmHealOptions(), scriptLog)", code, StringComparison.Ordinal);
+        Assert.Contains("CasterSwap.ForCharacter(characterName", code, StringComparison.Ordinal);
+        Assert.Contains("[Trait(\"Account\", \"test-melee\")]", code, StringComparison.Ordinal);
+        Assert.Contains("[Trait(\"Account\", \"test-archer\")]", code, StringComparison.Ordinal);
+    }
 
     [Fact]
     public void Every_loopback_test_is_marked_and_serialised()
@@ -57,6 +96,77 @@ public sealed partial class LoopbackConventionTests
         Assert.True(loopbackTests > 0, "no [LoopbackFact] or [LoopbackTheory] test found: the scan would pass vacuously");
         Assert.True(problems.Count == 0, "Loopback convention broken:\n  " + string.Join("\n  ", problems));
     }
+
+    /// <summary>
+    /// M4 D31: every class in the Loopback collection carries exactly one <c>[Trait("Account", ...)]</c>, one of the three test accounts, and it is the account of
+    /// every character the class names with <see cref="LoopbackCharacterAttribute"/> (on the class or a method; a class that names none uses <c>test</c>). The lock per
+    /// account, and the gate's lanes, read that account. A <c>Lane</c> trait may only be <c>solo</c> (the gate runs those alone, after the parallel phase).
+    /// </summary>
+    [Fact]
+    public void Every_loopback_class_names_its_one_account_and_its_characters_live_on_it()
+    {
+        var checkedClasses = 0;
+        var problems = new List<string>();
+        foreach (var type in typeof(LoopbackConventionTests).Assembly.GetTypes().Where(t => !IsConventionSample(t) && IsInLoopbackCollection(t)))
+        {
+            checkedClasses++;
+            var accounts = TraitValues(type, "Account");
+            if (accounts.Count != 1)
+            {
+                problems.Add($"{type.FullName}: {accounts.Count} [Trait(\"Account\", ...)] attributes, exactly one is required (one of {string.Join(", ", TestAccounts.Keys)})");
+                continue;
+            }
+
+            var account = accounts[0];
+            if (!TestAccounts.Keys.Contains(account))
+            {
+                problems.Add($"{type.FullName}: Account '{account}' is not a test account ({string.Join(", ", TestAccounts.Keys)})");
+            }
+
+            var characters = CharacterNames(type).Concat(type.GetMethods(AllDeclared).SelectMany(CharacterNames)).Distinct().ToList();
+            foreach (var character in characters.Count == 0 ? [null] : characters.Cast<string?>())
+            {
+                var key = LoopbackAccounts.For(character);
+                if (key != account)
+                {
+                    problems.Add($"{type.FullName}: Account '{account}' but {character ?? "(no [LoopbackCharacter]: the test account)"} lives on '{key}'");
+                }
+            }
+
+            foreach (var lane in TraitValues(type, "Lane").Concat(type.GetMethods(AllDeclared).SelectMany(m => TraitValues(m, "Lane"))))
+            {
+                if (lane != "solo")
+                {
+                    problems.Add($"{type.FullName}: Lane '{lane}' is not 'solo'");
+                }
+            }
+        }
+
+        Assert.True(checkedClasses > 0, "no class in the Loopback collection found: the scan would pass vacuously");
+        Assert.True(problems.Count == 0, "Loopback account convention broken:\n  " + string.Join("\n  ", problems));
+    }
+
+    /// <summary>The convention above, on samples: a class with two accounts, a character on another account than the class's, and a class with none.</summary>
+    [Fact]
+    public void A_wrong_or_missing_account_trait_is_seen()
+    {
+        Assert.Equal(["test", "test-melee"], TraitValues(typeof(ConventionSamples.TwoAccounts), "Account"));
+        Assert.Equal(["Holtburg Brawler"], CharacterNames(typeof(ConventionSamples.BrawlerOnTest)));
+        Assert.Equal("test-melee", LoopbackAccounts.For("Holtburg Brawler"));
+        Assert.Empty(TraitValues(typeof(ConventionSamples.InTheCollection), "Account"));
+    }
+
+    private static List<string> TraitValues(MemberInfo member, string name) =>
+        member.GetCustomAttributesData()
+            .Where(a => a.AttributeType == typeof(TraitAttribute) && a.ConstructorArguments.Count == 2 && Equals(a.ConstructorArguments[0].Value, name))
+            .Select(a => (string)a.ConstructorArguments[1].Value!)
+            .ToList();
+
+    private static List<string> CharacterNames(MemberInfo member) =>
+        member.GetCustomAttributesData()
+            .Where(a => a.AttributeType == typeof(LoopbackCharacterAttribute))
+            .Select(a => (string)a.ConstructorArguments[0].Value!)
+            .ToList();
 
     /// <summary>
     /// The fixture rule catches a class fixture however the class is marked as a loopback class: by the collection, by
@@ -174,5 +284,15 @@ public sealed partial class LoopbackConventionTests
         }
 
         public sealed class NotLoopback : IClassFixture<SharedLogin>;
+
+        [Collection(LoopbackCollection.Name)]
+        [Trait("Account", "test")]
+        [Trait("Account", "test-melee")]
+        public sealed class TwoAccounts;
+
+        [Collection(LoopbackCollection.Name)]
+        [Trait("Account", "test")]
+        [LoopbackCharacter("Holtburg Brawler")]
+        public sealed class BrawlerOnTest;
     }
 }

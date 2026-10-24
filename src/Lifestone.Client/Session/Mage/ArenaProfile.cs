@@ -29,6 +29,15 @@ public enum ProfileRole
 
     /// <summary>A war line offered as an option (Flame Streak, Volley, Blast, Arc).</summary>
     WarOption,
+
+    /// <summary>Harm Self (M4 P5a): the Life Magic Boost spell that takes health away from the caster (the heal tests' way of getting hurt). Not a buff; never in the cycle.</summary>
+    HarmSelf,
+
+    /// <summary>Heal Self (M4 P5a): the Life Magic Boost spell that gives health back to the caster. Not a buff; never in the cycle.</summary>
+    HealSelf,
+
+    /// <summary>A travel spell (M4 P5a, plan D36): Lifestone Recall, Primary Portal Tie or Primary Portal Recall, Item Enchantment spells with no duration. Not buffs.</summary>
+    Travel,
 }
 
 /// <summary>
@@ -377,8 +386,41 @@ public static class ArenaProfile
             S(2745, "Flame Arc VII", 300, 0),
             S(4423, "Incantation of Flame Arc", 400, 0)),    ];
 
-    /// <summary>Fire Vulnerability Other VII ("Inferno's Gift") and Heal Self VII ("Adja's Intervention"): the fight tab's spells that are no profile line (M3 4.2 p1); the build learns them after the lines.</summary>
-    public static IReadOnlyList<uint> FightExtras { get; } = [2170, 2073];
+    /// <summary>
+    /// The mage's lines that are no buff and no fight line (M4 P5a, owner decisions D33 and D36): Harm Self I-VIII (Life Magic, the heal test's way of getting hurt; the mage's Life Magic casts the whole line at the 0.9 chance rule), and the three
+    /// travel spells Lifestone Recall (1635), Primary Portal Tie (47) and Primary Portal Recall (48), Item Enchantment, no duration. Ids, names, powers and schools are the SpellTable's (<c>ArenaProfileTests</c> pins them). They are not in <see cref="Lines"/>
+    /// (the buff cycle, the gear loops and the spell bars walk those); the build learns them through <see cref="FightExtras"/>.
+    /// </summary>
+    public static IReadOnlyList<ProfileLine> Extras { get; } =
+    [
+        L("Harm Self", "Harm Self", MagicSchool.LifeMagic, ProfileRole.HarmSelf,
+            S(8, "Harm Self I", 15, 0),
+            S(1167, "Harm Self II", 75, 0),
+            S(1168, "Harm Self III", 125, 0),
+            S(1169, "Harm Self IV", 175, 0),
+            S(1170, "Harm Self V", 225, 0),
+            S(1171, "Harm Self VI", 275, 0),
+            S(2071, "Harm Self VII", 325, 0),
+            S(4309, "Incantation of Harm Self", 400, 0)),
+        L("Lifestone Recall", "Lifestone Recall", MagicSchool.ItemEnchantment, ProfileRole.Travel,
+            S(1635, "Lifestone Recall", 100, 0)),
+        L("Primary Portal Tie", "Primary Portal Tie", MagicSchool.ItemEnchantment, ProfileRole.Travel,
+            S(47, "Primary Portal Tie", 150, 0)),
+        L("Primary Portal Recall", "Primary Portal Recall", MagicSchool.ItemEnchantment, ProfileRole.Travel,
+            S(48, "Primary Portal Recall", 100, 0)),
+    ];
+
+    /// <summary>
+    /// Fire Vulnerability Other VII ("Inferno's Gift") and Heal Self VII ("Adja's Intervention"): the fight tab's spells that are no profile line (M3 4.2 p1); then, from M4 P5a, every spell of <see cref="Extras"/> (Harm Self I-VII, Lifestone Recall,
+    /// Primary Portal Tie, Primary Portal Recall); the build learns them after the lines.
+    /// </summary>
+    public static IReadOnlyList<uint> FightExtras { get; } = [2170, 2073, .. Extras.SelectMany(l => l.Spells).Select(s => s.Id)];
+
+    /// <summary>The extra line named <paramref name="name"/> ("Harm Self", "Lifestone Recall", "Primary Portal Tie", "Primary Portal Recall"), or null.</summary>
+    public static ProfileLine? ExtraNamed(string name) => Extras.FirstOrDefault(l => l.Name == name);
+
+    /// <summary>The mage's buff profile (<see cref="IBuffProfile"/>): the lines, the cycle's casting order (Focus, Willpower and Creature Enchantment Mastery first) and the spells the build learns.</summary>
+    public static IBuffProfile Buffs { get; } = new BuffProfile(MageTemplate.CharacterName, Lines, ["Focus Self", "Willpower Self", "Creature Enchantment Mastery Self"], FightExtras);
 
     /// <summary>Every spell id of every line: what the mage learns (all levels, D10), in line order then list order.</summary>
     public static IReadOnlyList<uint> SpellsToLearn { get; } = [.. Lines.SelectMany(l => l.Spells).Select(s => s.Id), .. FightExtras];

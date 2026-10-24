@@ -1,4 +1,5 @@
 using System.Numerics;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.Animation;
@@ -53,14 +54,14 @@ public sealed class FightLineOfSightTests(DatSetFixture fixture, ITestOutputHelp
     public void The_tour_cells_see_each_other_as_the_table_says()
     {
         var world = Den();
-        var floor = DenPlanner.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(fixture.Dats), new LandblockCoord(1, 5)));
+        var floor = DenRooms.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(fixture.Dats), new LandblockCoord(1, 5)));
         var cells = new List<uint> { 0x01050375 };
         foreach (var low in DenWalk.Tour)
         {
             cells.Add(0x01050000u | low);
         }
 
-        var planner = new DenPlanner(floor);
+        var planner = new RoomGraph(floor, DenRooms.MaxLean);
         var lines = new List<string>();
         foreach (var a in cells)
         {
@@ -90,8 +91,8 @@ public sealed class FightLineOfSightTests(DatSetFixture fixture, ITestOutputHelp
     /// <summary>The tour's room frames, longest pairs first (the picks the loop sweeps are creature-to-player lines of this length).</summary>
     private List<(uint A, uint B, CellFrame From, CellFrame To, float Length)> TourPairs()
     {
-        var floor = DenPlanner.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(fixture.Dats), new LandblockCoord(1, 5)));
-        var planner = new DenPlanner(floor);
+        var floor = DenRooms.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(fixture.Dats), new LandblockCoord(1, 5)));
+        var planner = new RoomGraph(floor, DenRooms.MaxLean);
         var cells = new List<uint> { 0x01050375 };
         foreach (var low in DenWalk.Tour)
         {

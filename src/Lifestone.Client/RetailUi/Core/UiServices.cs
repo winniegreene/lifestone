@@ -166,6 +166,12 @@ public sealed class UiServices
     /// <summary>The retail glitches to restore (none by default: Lifestone's fixes; docs/retail-ui.md §14).</summary>
     public UiRetailGlitches RetailGlitches { get; init; }
 
+    /// <summary>
+    /// True to show the examine window's item icon (<c>--examine-icon on</c>, M4 4.1 fix, review R8): an addition to retail, whose merged floaty layout has no icon element (<c>ItemExamineUI::SetAppraiseInfo</c> 0x004B7ED0 skips it), so
+    /// the default is false and the panel is drawn as retail draws it.
+    /// </summary>
+    public bool ExamineIcon { get; init; }
+
     /// <summary>The clipboard for copy, cut and paste in text fields (D39); null disables them.</summary>
     public IUiClipboard? Clipboard { get; init; }
 

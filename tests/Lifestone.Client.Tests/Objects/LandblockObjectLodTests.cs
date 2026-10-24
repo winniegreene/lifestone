@@ -7,6 +7,7 @@ using Lifestone.Data.Tests;
 namespace Lifestone.Client.Tests.Objects;
 
 /// <summary>Retail per-frame LOD (CPhysicsObj/CPhysicsPart::UpdateViewerDistance + get_degrade) on real objects.</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class LandblockObjectLodTests(ObjectsFixture fixture) : IClassFixture<ObjectsFixture>
 {
     [RequiresDatsFact]

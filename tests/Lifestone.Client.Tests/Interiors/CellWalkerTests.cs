@@ -7,6 +7,7 @@ using Lifestone.Data.World.Cells;
 namespace Lifestone.Client.Tests.Interiors;
 
 /// <summary>Walk mode inside cells follows the floors from cell to cell, up and down ramps.</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class CellWalkerTests(InteriorsFixture fixture) : IClassFixture<InteriorsFixture>
 {
     [RequiresDatsTheory]

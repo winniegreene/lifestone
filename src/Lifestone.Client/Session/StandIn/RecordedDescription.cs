@@ -95,13 +95,13 @@ public sealed class RecordedDescription
         var pack = new CreateObjectMsg(
             PlaceholderPackGuid,
             ModelData.Empty,
-            new PhysicsDesc { Flags = PhysicsDescFlags.CSetup, State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal, SetupId = 0x02000B77, Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) },
-            new WeenieDesc { Header = WeenieHeaderFlags.Container | WeenieHeaderFlags.ItemsCapacity, Name = "Pack (stand-in placeholder)", WeenieClassId = PackWcid, IconId = 0x06000001, ItemType = 0x200, ObjectDescriptionFlags = 0, ContainerId = player, ItemsCapacity = 24 });
+            new PhysicsDesc { Flags = PhysicsDescFlags.CSetup, State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal, SetupId = StandInWeenieArt.SetupOr(PackWcid, 0x02000B77), Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) },
+            StandInWeenieArt.Apply(new WeenieDesc { Header = WeenieHeaderFlags.Container | WeenieHeaderFlags.ItemsCapacity, Name = "Pack (stand-in placeholder)", WeenieClassId = PackWcid, IconId = StandInWeenieArt.PlaceholderIcon, ItemType = 0x200, ObjectDescriptionFlags = 0, ContainerId = player, ItemsCapacity = 24 }, null));
         var item = new CreateObjectMsg(
             PlaceholderPackItemGuid,
             ModelData.Empty,
             new PhysicsDesc { Flags = PhysicsDescFlags.CSetup, State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal, SetupId = 0x02000B77, Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) },
-            new WeenieDesc { Header = WeenieHeaderFlags.Container | WeenieHeaderFlags.Value | WeenieHeaderFlags.StackSize | WeenieHeaderFlags.MaxStackSize, Name = "Pyreal", WeenieClassId = 273, IconId = 0x06000001, ItemType = 0x40, ObjectDescriptionFlags = 0, ContainerId = PlaceholderPackGuid, Value = 7, StackSize = 7, MaxStackSize = 25000 });
+            StandInWeenieArt.Apply(new WeenieDesc { Header = WeenieHeaderFlags.Container | WeenieHeaderFlags.Value | WeenieHeaderFlags.StackSize | WeenieHeaderFlags.MaxStackSize, Name = "Pyreal", WeenieClassId = 273, IconId = StandInWeenieArt.PlaceholderIcon, ItemType = 0x40, ObjectDescriptionFlags = 0, ContainerId = PlaceholderPackGuid, Value = 7, StackSize = 7, MaxStackSize = 25000 }, null));
         return new SidePackBurst([new ViewContentsEvent(PlaceholderPackGuid, [new ViewContentsEntry(PlaceholderPackItemGuid, 0)])], [pack], [item], [new ContentDesc(PlaceholderPackGuid, 1)], true);
     }
 

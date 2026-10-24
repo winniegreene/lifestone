@@ -23,11 +23,15 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </summary>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
 public sealed class HeadlessLoopbackTests(ITestOutputHelper output)
 {
     /// <summary>The character the loopback runs use, created on the test account when missing.</summary>
     private const string Character = "Lifestone Loopback";
 
+    // TODO(m4-headless-digest): this test failed on the digest in P4's round 1 (shared) and round 2 (per-test) and passed in the other two runs; the path it runs (HeadlessRunner.Start + LoginScenario, one login, no
+    // Arm, no keep-alive, no StayInWorld) is none of P4's changes, so the cause is outside P4 and timing-dependent (the live digest is taken in GameSession.Dispose after the quit; a message or event that
+    // reaches the state there and is not in the recording, or the reverse, would differ run to run). The failure carried no evidence, so it now carries the trailer and both digests; the next failure names the cause.
     [LoopbackFact]
     public void Headless_login_enters_and_leaves_the_world()
     {
@@ -37,7 +41,7 @@ public sealed class HeadlessLoopbackTests(ITestOutputHelper output)
         Assert.Equal(1, result.LoginCompletes);
         Assert.Contains(SessionPhase.InWorld, result.Phases);
         Assert.Equal(SessionPhase.CharacterSelect, result.Phases[^1]);
-        Assert.True(run.Replay.DigestMatches, "the recording does not replay to its own digest");
+        Assert.True(run.Replay.DigestMatches, "the recording does not replay to its own digest | " + run.Replay.DigestEvidence());
         Assert.Equal(0, run.Replay.Malformed);
     }
 
@@ -141,7 +145,8 @@ public sealed class HeadlessLoopbackTests(ITestOutputHelper output)
             using var dats = DatSet.Open();
             using var recording = new MemoryStream();
             HeadlessRunResult result;
-            var secrets = File.ReadAllBytes(files.SecretsFile);
+            LiveCharacter.Release(output, BackendProbe.TestAccountKey);
+        var secrets = File.ReadAllBytes(files.SecretsFile);
             HeadlessRunner runner;
             try
             {

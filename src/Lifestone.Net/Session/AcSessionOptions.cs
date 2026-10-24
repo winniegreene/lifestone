@@ -96,5 +96,10 @@ public sealed record AcSessionOptions
         {
             throw new ArgumentException("the retry policy needs at least one attempt, a delay of 0 or more and a list of codes", nameof(Retry));
         }
+
+        if (Retry.CharacterInWorldWait < TimeSpan.Zero || (Retry.CharacterInWorldWait > TimeSpan.Zero && Retry.CharacterInWorldDelay <= TimeSpan.Zero))
+        {
+            throw new ArgumentException("the retry policy's wait for a character the server still holds needs a wait of 0 or more and, when it is more than 0, a positive delay", nameof(Retry));
+        }
     }
 }

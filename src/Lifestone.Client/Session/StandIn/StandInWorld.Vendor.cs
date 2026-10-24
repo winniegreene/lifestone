@@ -3,6 +3,7 @@
 // Source/ACE.Server/WorldObjects/Player_Inventory.cs (TryConsumeFromInventoryWithNetworking 117-166) and Source/ACE.Server/Network/GameEvent/Events/GameEventApproachVendor.cs (AGPL-3.0)
 // [with changes: the order and the lengths are the ones the live capture records (cache/m4/3-2/capture.md C1 and C2, capture1.log); the stand-in keeps the stock, the coins and the sold items itself; there are no service rows,
 // no weights, no pack-space limits, no range check and no vendor emote].
+using Lifestone.Client.Diagnostics;
 using System.Collections.Immutable;
 using System.Numerics;
 using Lifestone.Client.Session.Contracts;
@@ -248,14 +249,14 @@ internal sealed partial class StandInWorld
         new(
             guid,
             ModelData.Empty,
-            new PhysicsDesc { Flags = PhysicsDescFlags.CSetup, State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal, SetupId = PlaceholderItemSetup, Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) },
+            new PhysicsDesc { Flags = PhysicsDescFlags.CSetup, State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal, SetupId = StandInWeenieArt.SetupOr(item.Wcid, PlaceholderItemSetup), Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) },
             ItemDesc(item, stack, player));
 
     /// <summary>
-    /// The WeenieDesc of an item of the catalogue as a stock row or a pack object shows it: name, class id, the placeholder icon, ItemType, the Value of the whole stack and the burden of it, the stack limit of a stacking item (and
+    /// The WeenieDesc of an item of the catalogue as a stock row or a pack object shows it: name, class id, the weenie's own icon (<see cref="StandInWeenieArt"/>), ItemType, the Value of the whole stack and the burden of it, the stack limit of a stacking item (and
     /// its size when <paramref name="stack"/> is above 0), a kit's uses; <paramref name="container"/> names where it lies (the player for a pack object, null for a row).
     /// </summary>
-    private static WeenieDesc ItemDesc(StandInVendorItem item, int stack, uint? container)
+    private static WeenieDesc ItemDesc(StandInVendorItem item, int stack, uint? container, ILogSink? log = null)
     {
         var header = WeenieHeaderFlags.Value | WeenieHeaderFlags.Burden;
         if (container is not null)
@@ -278,12 +279,12 @@ internal sealed partial class StandInWorld
         }
 
         var count = Math.Max(stack, 1);
-        return new WeenieDesc
+        return StandInWeenieArt.Apply(new WeenieDesc
         {
             Header = header,
             Name = item.Name,
             WeenieClassId = item.Wcid,
-            IconId = 0x06000001,
+            IconId = StandInWeenieArt.PlaceholderIcon,
             ItemType = item.ItemType,
             ObjectDescriptionFlags = 0,
             ContainerId = container,
@@ -293,7 +294,7 @@ internal sealed partial class StandInWorld
             MaxStackSize = item.MaxStack is { } max ? (ushort)Math.Min(max, ushort.MaxValue) : null,
             Structure = item.Uses is { } uses ? (ushort)uses : null,
             MaxStructure = item.Uses is { } maxUses ? (ushort)maxUses : null,
-        };
+        }, log);
     }
 
     // --- the player's purse -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -405,7 +406,7 @@ internal sealed partial class StandInWorld
         {
             if (vendor.Rows.TryGetValue(guid, out var item))
             {
-                rows.Add(new VendorEntry(VendorEntry.Unlimited, guid, ItemDesc(item, 0, null)));
+                rows.Add(new VendorEntry(VendorEntry.Unlimited, guid, ItemDesc(item, 0, null, Log)));
             }
             else if (vendor.Uniques.TryGetValue(guid, out var unique))
             {
@@ -505,7 +506,7 @@ internal sealed partial class StandInWorld
                 while (remaining > 0)
                 {
                     var stack = row.MaxStack is { } max ? Math.Min(remaining, max) : 1;
-                    var desc = ItemDesc(row, stack, null);
+                    var desc = ItemDesc(row, stack, null, Log);
                     created.Add(new Bought(_nextItemGuid++, row, stack, null, SellCost(desc.Value ?? 0, row.ItemType)));
                     remaining -= stack;
                 }
@@ -529,7 +530,7 @@ internal sealed partial class StandInWorld
         var objects = new List<CreateObjectMsg>();
         foreach (var bought in created)
         {
-            var shown = bought.Desc ?? ItemDesc(bought.Item, bought.Stack, null);
+            var shown = bought.Desc ?? ItemDesc(bought.Item, bought.Stack, null, Log);
             var desc = shown with { ContainerId = _reducer.State.Self.Guid, Header = shown.Header | WeenieHeaderFlags.Container };
             if (bought.Desc is not null)
             {
@@ -586,7 +587,7 @@ internal sealed partial class StandInWorld
         objects.Add(new CreateObjectMsg(
             guid,
             ModelData.Empty,
-            new PhysicsDesc { Flags = PhysicsDescFlags.CSetup, State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal, SetupId = PlaceholderItemSetup, Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) },
+            new PhysicsDesc { Flags = PhysicsDescFlags.CSetup, State = PhysicsState.IgnoreCollisions | PhysicsState.Ethereal, SetupId = StandInWeenieArt.SetupOr(item.Wcid, PlaceholderItemSetup), Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) },
             desc));
     }
 
@@ -727,7 +728,7 @@ internal sealed partial class StandInWorld
         foreach (var size in stacks)
         {
             var guid = _nextItemGuid++;
-            Receive(sink, guid, coin, size, ItemDesc(coin, size, _reducer.State.Self.Guid), objects);
+            Receive(sink, guid, coin, size, ItemDesc(coin, size, _reducer.State.Self.Guid, Log), objects);
         }
 
         UseDone(sink);

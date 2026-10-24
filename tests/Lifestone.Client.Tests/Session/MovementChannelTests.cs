@@ -121,7 +121,7 @@ public sealed class MovementChannelTests
     {
         var h = new ActionHarness(offline: true);
         var controller = new ControllerSpy();
-        h.Api.Move.Bind(controller);
+        h.Api.Move.Bind(controller, false);
         var walk = h.Api.Move.Command(MotionCommands.WalkForward, true, ActionSource.Automation, 0.5f);
         var charge = h.Api.Move.ChargeJump(ActionSource.Automation);
         Assert.Empty(controller.Calls);
@@ -152,7 +152,7 @@ public sealed class MovementChannelTests
     {
         var h = new ActionHarness(offline: true);
         var controller = new ControllerSpy();
-        h.Api.Move.Bind(controller);
+        h.Api.Move.Bind(controller, false);
         h.Api.Move.Command(MotionCommands.WalkForward, true, ActionSource.Automation);
         h.Api.Move.Command(MotionCommands.TurnRight, true, ActionSource.Automation);
         h.Api.Move.Command(MotionCommands.TurnRight, false, ActionSource.Automation);

@@ -22,6 +22,7 @@ namespace Lifestone.Client.Tests.Movement;
 /// The explore-mode player (PH6) on the real dats: the human Setup 0x02000001 and motion table 0x09000001 walking,
 /// running and jumping on Holtburg's terrain, stopping at a building wall, and teleported into the Training Academy.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class OfflineWalkerTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     /// <summary>The Training Academy's first starting location (CharGen 0x0E000002, StartingAreas[0].Locations[0]).</summary>

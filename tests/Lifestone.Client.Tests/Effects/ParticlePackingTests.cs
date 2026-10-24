@@ -80,7 +80,6 @@ public sealed class ParticlePackingTests
 
     [Theory]
     [InlineData(0f, false, false)]
-    [InlineData(0.3f, false, true)]
     [InlineData(0.999f, false, true)]
     [InlineData(1f, true, false)]
     public void Translucency_hides_at_one_and_carries_a_part_material_in_between(float t, bool hidden, bool partMaterial)

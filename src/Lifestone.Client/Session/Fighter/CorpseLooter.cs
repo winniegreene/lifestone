@@ -42,6 +42,14 @@ public sealed class CorpseLooter
     public const uint TooEncumberedCode = 0x002A;
 
     /// <summary>
+    /// ACE's text for a pick-up into a main pack with no free slot (<c>Player_Inventory.cs</c> 1320-1322, <c>Container.cs</c> 527 @95ef426d: ItemCapacity 102 in the main pack, WeenieError 0 with this text): <c>Unable to put X into container</c>.
+    /// </summary>
+    public const string PackFullText = "Unable to put";
+
+    /// <summary>How many pack-full refusals in a row end the loop (<c>why=pack-full</c>): the next item would be refused the same, at about 2 s each (round 2 of the P5a gate lost 4 items to it).</summary>
+    public const int PackFullRefusalsToStop = 2;
+
+    /// <summary>
     /// How long an owner steps a draining loop (<see cref="IsDraining"/>) before it gives up on the pick-up in flight: a little over the Action API's own 25 s pick-up timeout (<c>ActionPolicy.PickUpSeconds</c>), after which the handle
     /// ends <see cref="ActionOutcomeKind.TimedOut"/> by itself, so a drain always ends.
     /// </summary>
@@ -58,6 +66,7 @@ public sealed class CorpseLooter
     private readonly int[] _skipped = new int[ReasonSlots];
     private ActionHandle? _pending;
     private uint _pendingItem;
+    private int _packFullRun;
     private int _takenBurden;
     private int _burdenAtSend;
     private double _startedAt = double.NaN;
@@ -100,6 +109,9 @@ public sealed class CorpseLooter
 
     /// <summary>The moves the server refused (or that were never sent), the burden refusal included.</summary>
     public int Refused { get; private set; }
+
+    /// <summary>The corpse entries left unsent because the pack refused two pick-ups in a row (<c>why=pack-full</c>, <c>TODO(m4-hunt-pack-full)</c>); they are part of <see cref="Skipped"/> but of no <see cref="SkippedBy"/> reason.</summary>
+    public int SkippedPackFull { get; private set; }
 
     /// <summary>The moves that got no answer within their timeout.</summary>
     public int TimedOut { get; private set; }
@@ -253,6 +265,7 @@ public sealed class CorpseLooter
         {
             case ActionOutcomeKind.Confirmed:
                 Looted++;
+                _packFullRun = 0;
                 if (known)
                 {
                     _takenBurden = _burdenAtSend + (item!.Weenie.Burden ?? 0); // the burden the move started from plus the item's: the server's property may or may not show it yet
@@ -269,9 +282,14 @@ public sealed class CorpseLooter
                 Refused++;
                 var burden = !late && outcome.Kind == ActionOutcomeKind.ServerError && (outcome.Code == TooEncumberedCode || (outcome.Detail?.Contains("encumbered", StringComparison.OrdinalIgnoreCase) ?? false));
                 _log.Warn(_category, string.Create(CultureInfo.InvariantCulture, $"loot: the pick-up of '{name}' 0x{guid:X8} ended {outcome.Kind} ({outcome.Detail ?? "no detail"}); counted{(late ? " (after the loop was abandoned)" : burden ? ", the burden limit: stopping" : ", going on")}"));
+                _packFullRun = outcome.Kind == ActionOutcomeKind.ServerError && (outcome.Detail?.Contains(PackFullText, StringComparison.Ordinal) ?? false) ? _packFullRun + 1 : 0;
                 if (burden)
                 {
                     Finish("burden");
+                }
+                else if (!late && _packFullRun >= PackFullRefusalsToStop)
+                {
+                    StopPackFull(state);
                 }
 
                 break;
@@ -308,6 +326,31 @@ public sealed class CorpseLooter
         _skipped[(int)reason]++;
         Skipped++;
         _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: skipped {(item is null ? "an unresolved entry" : "'" + item.Name + "'")} 0x{guid:X8} ({LootRules.ReasonName(reason)}{(item is null ? string.Empty : ", type 0x" + item.ItemType.ToString("X", CultureInfo.InvariantCulture) + ", value " + (item.Weenie.Value ?? 0).ToString(CultureInfo.InvariantCulture))})"));
+    }
+
+    /// <summary>
+    /// <c>TODO(m4-hunt-pack-full)</c>: the pack refused two pick-ups in a row with ACE's "Unable to put X into container" (no free slot in the main pack): the rest of the corpse is left, named, instead of two seconds per refused item.
+    /// The entries still to judge are counted in <see cref="Skipped"/> and <see cref="SkippedPackFull"/>.
+    /// </summary>
+    private void StopPackFull(GameState state)
+    {
+        var left = 0;
+        if (state.Containers.Viewed is { } view && view.Guid == _container)
+        {
+            for (var i = 0; i < view.Entries.Count; i++)
+            {
+                if (!_handled.Contains(view.Entries[i].Guid))
+                {
+                    _handled.Add(view.Entries[i].Guid);
+                    left++;
+                }
+            }
+        }
+
+        SkippedPackFull = left;
+        Skipped += left;
+        _log.Warn(_category, string.Create(CultureInfo.InvariantCulture, $"loot: loot_skipped={left} why=pack-full ({_packFullRun} pick-ups in a row refused with '{PackFullText} ...': the main pack has no free slot; the rest of the corpse is left) TODO(m4-hunt-pack-full)"));
+        Finish("pack-full");
     }
 
     private void Finish(string why)

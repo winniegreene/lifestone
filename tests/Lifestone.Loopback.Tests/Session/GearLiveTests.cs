@@ -19,7 +19,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// grant the kit (the wand, the leather set and the profile's components as the account casts them), wields the wand and wears the five pieces through GameAction 0x001A, and logs off. It runs twice in a row.
 /// <b>What it proves:</b> the first run ends <c>gear=wielded worn=5</c> with every kit line held (<c>kit=n/n</c>): ACE accepted the grants and each wield, and the read model, fed only by GameEvent 0x0023 and 0x0022 (ACE's 0x02DA and 0x02CE
 /// zeros come before them), shows the wand at HeldCaster and the five pieces at their locations. The second run must end <c>gear=wielded worn=5</c> with <c>gear_steps=0</c>: nothing was granted and nothing wielded, which proves the scenario is
-/// idempotent, that the top-up counts what the pack holds (a merged stack included: SpawnGear merges each top-up into the held stack), and that the worn pieces survive a log off and a new login. The two judged runs pass
+/// idempotent and that the top-up counts what the pack holds (a merged stack included: SpawnGear merges each top-up into the held stack). (Before M4 P4 each run logged in and out, so the second run also showed the worn pieces surviving a relog; with one shared login it no longer does: a relog is now
+/// exercised by every process start, where the mage logs in wearing the earlier run's kit, and by the build tests.) The scenario runs with <c>RequireCharacter</c>: the shared session on another character fails the run at once, sending nothing. The two judged runs pass
 /// <c>cast: false</c> (M3 1.4 fix B, review 1.4-R1: a cast burns components at random, so a second run's top-up would depend on the first run's luck), so <c>gear_steps=0</c> judges the gear alone and <c>cast=n/a</c>; the component top-up is its own
 /// field (<c>topup=</c>, printed, not asserted). A third run with the cast on (M3 1.4 s2: the magic combat mode, one Creature Enchantment self buff, back to Non-combat) is report-only: its <c>cast=ok|fizzled|failed|n/a</c> is printed and
 /// nothing about it is asserted (the first casts are judged by <c>CastLiveTests</c>); it adds no flake of its own, since a cast never fails the run (a cast that cannot be made is <c>cast=failed</c> with a warning).
@@ -30,6 +31,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[LiveSharedSession]
 public sealed class GearLiveTests(ITestOutputHelper output)
 {
     private static readonly Regex Wielded = new(
@@ -41,12 +44,12 @@ public sealed class GearLiveTests(ITestOutputHelper output)
     {
         using var dats = DatSet.Open();
         var spells = SpellTableData.Load(dats).Spells;
-        var first = RunOnce(dats, spells, "first", cast: false, out var firstMissing);
+        var first = RunOnce(spells, "first", cast: false, out var firstMissing);
         var firstMatch = Wielded.Match(first);
         Assert.True(firstMatch.Success, first);
         Assert.True(firstMatch.Groups["lines"].Value == firstMatch.Groups["held"].Value, "every kit line is held; missing: " + MissingText(firstMissing) + " in " + first); // every kit line is held
 
-        var second = RunOnce(dats, spells, "second", cast: false, out var secondMissing);
+        var second = RunOnce(spells, "second", cast: false, out var secondMissing);
         var secondMatch = Wielded.Match(second);
         Assert.True(secondMatch.Success, second);
         Assert.Equal("0", secondMatch.Groups["steps"].Value); // the wand, the armour and the wields: none (the components are topup=, not asserted)
@@ -54,57 +57,18 @@ public sealed class GearLiveTests(ITestOutputHelper output)
         Assert.True(firstMatch.Groups["lines"].Value == secondMatch.Groups["held"].Value, "the second run holds every kit line; missing: " + MissingText(secondMissing) + " in " + second);
 
         // Report-only: the cast on (it burns components and mana; the top-up the next run needs is its own field).
-        var third = RunOnce(dats, spells, "third (cast on, report-only)", cast: true, out _);
+        var third = RunOnce(spells, "third (cast on, report-only)", cast: true, out _);
         Assert.True(Wielded.Match(third).Success, third);
     }
 
     private static string MissingText(IReadOnlyList<string> missing) => missing.Count == 0 ? "none" : string.Join("; ", missing);
 
-    private string RunOnce(DatSet dats, IReadOnlyDictionary<uint, SpellInfo> spells, string label, bool cast, out IReadOnlyList<string> missing)
+    private string RunOnce(IReadOnlyDictionary<uint, SpellInfo> spells, string label, bool cast, out IReadOnlyList<string> missing)
     {
-        var files = BackendProbe.MainCheckoutFiles;
         var log = new RecordingLogSink();
-        using var recording = new MemoryStream();
-        var secrets = File.ReadAllBytes(files.SecretsFile);
-        GearScenario scenario;
-        HeadlessRunner runner;
-        try
-        {
-            string account;
-            using (var credentials = PlayAccounts.Parse(secrets, AccountChoice.FromOption(BackendProbe.TestAccountKey, AccountChoice.Default)))
-            {
-                account = credentials.Account;
-            }
+        var scenario = new GearScenario(spells, LiveMage.KitAccount(), log, endSession: false, cast: cast) { RequireCharacter = true };
+        var result = LiveMage.Run(output, scenario, "gear-" + label.Split(' ')[0], 300).Result;
 
-            scenario = new GearScenario(spells, account, log, cast: cast);
-            runner = HeadlessRunner.Start(
-                new HeadlessRunOptions
-                {
-                    Session = new SessionOptions { Account = BackendProbe.TestAccountKey, Server = BackendProbe.Probe().AceEndPoint! },
-                    QuitAfterSeconds = 300,
-                },
-                scenario,
-                secrets,
-                File.ReadAllBytes(files.PidsFile),
-                dats,
-                TimeProvider.System,
-                log,
-                recording);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(secrets);
-        }
-
-        HeadlessRunResult result;
-        var context = new GameThreadSynchronizationContext();
-        using (context.Install())
-        using (runner)
-        {
-            result = runner.Run(context, CancellationToken.None);
-        }
-
-        output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"[{label}] {result.SummaryLine("memory")}"));
         output.WriteLine($"[{label}] {scenario.VerdictFields()}"); // includes cast=..., report-only
         output.WriteLine($"[{label}] cast={scenario.Cast} spell={scenario.CastSpell ?? "(none)"}");
         foreach (var wield in scenario.SentWields)

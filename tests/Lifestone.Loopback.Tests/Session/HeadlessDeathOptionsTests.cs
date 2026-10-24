@@ -52,7 +52,6 @@ public sealed class HeadlessDeathOptionsTests
     [Theory]
     [InlineData("--death-seconds=0", "--death-seconds: '0' is not 1 to 3600 seconds")]
     [InlineData("--death-seconds=3601", "--death-seconds: '3601' is not 1 to 3600 seconds")]
-    [InlineData("--death-seconds=-5", "--death-seconds: '-5' is not 1 to 3600 seconds")]
     public void A_bad_death_option_is_reported_and_keeps_its_default(string argument, string expected)
     {
         var o = HeadlessOptions.Parse(["--scenario=death-and-regear", argument]);
@@ -66,14 +65,6 @@ public sealed class HeadlessDeathOptionsTests
     public void The_ends_of_the_range_are_accepted(string value)
     {
         Assert.Empty(HeadlessOptions.Parse(["--scenario=death-and-regear", "--death-seconds=" + value]).Errors);
-    }
-
-    [Fact]
-    public void Death_and_regear_runs_on_the_default_test_account_only()
-    {
-        var error = Assert.Single(HeadlessOptions.Parse(["--scenario=death-and-regear", "--account=somebody"]).Errors);
-        Assert.Equal("--account: --scenario=death-and-regear runs on the default test account 'test' only; the value is not shown", error);
-        Assert.Empty(HeadlessOptions.Parse(["--scenario=death-and-regear", "--account=test"]).Errors);
     }
 
     [Fact]

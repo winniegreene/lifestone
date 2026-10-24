@@ -24,6 +24,7 @@ public sealed class MotionCommandTests(DatSetFixture fixture) : IClassFixture<Da
         Assert.Equal(0x4300011Bu, (uint)DrwMotionCommand.AFKState); // the exe value docs/protocol.md §7 lists for 11.6096
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_magic_gesture_has_a_Magic_stance_link_from_Ready_in_the_human_table()
     {

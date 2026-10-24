@@ -107,6 +107,15 @@ public sealed record PlayOptions
     /// </summary>
     public string? PanelShotsDirectory { get; init; }
 
+    /// <summary>
+    /// The folder <c>--play-look-shots=DIR</c> saves the look capture's frames to (M4 4.1 lane v0, D27; <see cref="LookShotsPlan"/>), or null: in a play run, once the arrival has settled, each held-item kind the character carries
+    /// is wielded in turn and framed close in peace, in its stance and after it is stowed, one look line per frame. Relative paths are taken from the repository root.
+    /// </summary>
+    public string? LookShotsDirectory { get; init; }
+
+    /// <summary>The view <c>--play-look-shots</c> takes its frames from (<c>--play-look-view=close|hunt</c>, M4 polish pass P2/P3): the close view by default.</summary>
+    public LookView LookShotsView { get; init; } = LookView.Close;
+
     /// <summary>True for <c>--retail-picking</c>: retail's picking rules where Lifestone fixes them (<see cref="RayPicking.Pick"/>; docs/avatars.md §18). Default false.</summary>
     public bool RetailPicking { get; init; }
 
@@ -115,9 +124,6 @@ public sealed record PlayOptions
 
     /// <summary>True for <c>--retail-cast-any-mode</c>: a cast is sent outside the magic combat mode (<c>GameSession.RetailCastAnyMode</c>, per session). Default false: refused at once on the client.</summary>
     public bool RetailCastAnyMode { get; init; }
-
-    /// <summary>True for <c>--play-skip-scenarios</c> (M3 4.2 p5a C4): <c>--play-checks</c> leaves out the stand-in's fight and death scenarios (the smoke's shell-frames run; the play-checks step judges them in the same smoke).</summary>
-    public bool SkipScenarios { get; init; }
 
     /// <summary>True for <c>--retail-camera-still</c>: retail's fixed per-frame stall step of the chase camera (CameraManager::UpdateCamera, 11.6096 0x00456780). Default false: the step is scaled by the frame time.</summary>
     public bool RetailCameraStill { get; init; }
@@ -171,6 +177,34 @@ public sealed record PlayOptions
                 continue;
             }
 
+            if (argument.Name == "--play-look-shots")
+            {
+                if (argument.Value.Length == 0)
+                {
+                    errors.Add("--play-look-shots: needs a folder (--name=VALUE)");
+                }
+                else
+                {
+                    options = options with { LookShotsDirectory = argument.Value };
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--play-look-view")
+            {
+                if (LookShotsPlan.ParseView(argument.Value) is { } view)
+                {
+                    options = options with { LookShotsView = view };
+                }
+                else
+                {
+                    errors.Add("--play-look-view: expected close or hunt (--name=VALUE)");
+                }
+
+                continue;
+            }
+
             if (argument.Name == "--play-screenshot")
             {
                 if (argument.Value.Length == 0)
@@ -216,12 +250,6 @@ public sealed record PlayOptions
             if (argument.Name == "--retail-sphereless-missile")
             {
                 options = options with { RetailSphereless = true };
-                continue;
-            }
-
-            if (argument.Name == "--play-skip-scenarios")
-            {
-                options = options with { SkipScenarios = true };
                 continue;
             }
 

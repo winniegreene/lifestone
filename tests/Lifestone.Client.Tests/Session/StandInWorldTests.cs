@@ -145,53 +145,6 @@ public sealed class StandInWorldTests
     }
 
     [Fact]
-    public void A_purge_of_a_pending_deletion_character_is_confirmed_and_the_character_is_gone_from_the_list_and_after_a_log_off()
-    {
-        using var rig = new Rig();
-        rig.EnterWorld();
-        var before = rig.Session.State.Characters.Entries.Select(c => c.Name).ToArray();
-        Assert.Equal(["Stand-in Alpha", "Stand-in Beta", "Stand-in Gamma"], before);
-
-        var purge = rig.Session.Tools.PurgeCharacter("stand-in gamma", ActionSource.Host);
-        rig.Run(1.0);
-
-        Assert.True(purge.IsCompleted);
-        Assert.Equal(ActionOutcomeKind.Confirmed, purge.Outcome!.Value.Kind);
-        Assert.Equal(new CharPurgeResult("Stand-in Gamma", 1, 1, 0), purge.Result);
-        Assert.Equal(["Stand-in Alpha", "Stand-in Beta"], rig.Session.State.Characters.Entries.Select(c => c.Name).ToArray());
-        Assert.Contains(Lines(rig.Session), l => l.Kind == ChatKind.ToolReply && l.Text.StartsWith("Lifestone: purged Stand-in Gamma", StringComparison.Ordinal));
-
-        // A second purge of the same name finds nothing; the log off lists the others only.
-        var again = rig.Session.Tools.PurgeCharacter("Stand-in Gamma", ActionSource.Host);
-        rig.Run(1.0);
-        Assert.Equal("unknown-character: no character named \"Stand-in Gamma\" is on your account", again.Outcome!.Value.Detail);
-
-        rig.Session.Actions.LogOff(ActionSource.Host);
-        rig.Run(3.0);
-        Assert.Equal(SessionPhase.CharacterSelect, rig.Session.State.Phase);
-        Assert.Equal(["Stand-in Alpha", "Stand-in Beta"], rig.Session.State.Characters.Entries.Select(c => c.Name).ToArray());
-    }
-
-    [Theory]
-    [InlineData("Lifestone Smoke", "graduated: Lifestone Smoke is a graduated test character and stays as it is")]
-    [InlineData("LIFESTONE LOOPBACK", "graduated: Lifestone Loopback is a graduated test character and stays as it is")]
-    [InlineData("Stand-in Alpha", "own-character: you are playing Stand-in Alpha; log in as another character to purge it")]
-    [InlineData("Nobody", "unknown-character: no character named \"Nobody\" is on your account")]
-    [InlineData("Stand-in Beta", "not-pending-deletion: Stand-in Beta is not marked for deletion; delete it on the character screen first")]
-    public void A_purge_the_mod_s_rules_refuse_is_refused_with_the_same_code_and_words(string name, string detail)
-    {
-        using var rig = new Rig();
-        rig.EnterWorld();
-
-        var purge = rig.Session.Tools.PurgeCharacter(name, ActionSource.Host);
-        rig.Run(1.0);
-
-        Assert.Equal(new ActionOutcome(ActionOutcomeKind.ServerError, 0, detail), purge.Outcome);
-        Assert.Null(purge.Result);
-        Assert.Equal(["Stand-in Alpha", "Stand-in Beta", "Stand-in Gamma"], rig.Session.State.Characters.Entries.Select(c => c.Name).ToArray());
-    }
-
-    [Fact]
     public void A_use_of_a_portal_object_is_confirmed_and_teleports_the_player()
     {
         using var rig = new Rig();
@@ -238,21 +191,6 @@ public sealed class StandInWorldTests
         Assert.Contains(Lines(rig.Session), l => l.Text.StartsWith("Logging off", StringComparison.Ordinal));
         Assert.DoesNotContain(log.Entries, e => e.Message.Contains("TODO(g6-logoff-confirm)", StringComparison.Ordinal)); // retail-exact: the key never asks
         Assert.Contains(log.Entries, e => e.Message.Contains("without asking", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void The_key_does_nothing_out_of_the_world_and_ignores_other_actions_and_the_release()
-    {
-        using var rig = new Rig();
-        var key = new EndSessionKey(rig.Session, new RecordingLogSink());
-        var down = new RetailActivation(true, 1f, RetailToggleType.Impulse, 1, 0x80000000);
-
-        Assert.False(key.OnInputAction(EndSessionKey.InputMap, EndSessionKey.Action, down)); // at the character list
-        rig.EnterWorld();
-        Assert.False(key.OnInputAction(EndSessionKey.InputMap, 0x27, down)); // Escape's own action
-        Assert.False(key.OnInputAction(UiInputRouter.MovementMap, EndSessionKey.Action, down)); // another map
-        Assert.True(key.OnInputAction(EndSessionKey.InputMap, EndSessionKey.Action, down with { Start = false })); // the release
-        Assert.Equal(0, key.Requests);
     }
 
     [Fact]

@@ -33,7 +33,7 @@ public sealed class FighterTemplateDatTests(DatSetFixture fixture, ITestOutputHe
         var charGen = CharGenData.Load(fixture.Dats);
         var skills = SkillTableData.Load(fixture.Dats);
         var heritage = charGen.GetHeritage(Aluvian);
-        var intent = FighterTemplate.CreationIntent(FighterTemplate.CharacterName, HeadlessCharacter.RetailSkillClasses(fixture.Dats));
+        var intent = FighterTemplate.Hunter.CreationIntent(FighterTemplate.HunterName, HeadlessCharacter.RetailSkillClasses(fixture.Dats));
         Assert.True(intent.TryValidate(out var problem), problem);
         Assert.Equal(heritage.AttributeCredits, intent.Strength + intent.Endurance + intent.Coordination + intent.Quickness + intent.Focus + intent.Self);
 
@@ -49,11 +49,11 @@ public sealed class FighterTemplateDatTests(DatSetFixture fixture, ITestOutputHe
         }
 
         output.WriteLine($"creation: heritage credits {heritage.SkillCredits}, spent {credits}");
-        Assert.Equal(FighterTemplate.CreationSkillCredits, credits);
+        Assert.Equal(FighterTemplate.Hunter.CreationSkillCredits, credits);
         Assert.Equal(52u, heritage.SkillCredits);
         Assert.True(credits <= heritage.SkillCredits);
         Assert.Equal(HeadlessCharacter.SpecializedSkill, intent.SkillAdvancementClasses[(int)FighterTemplate.HeavyWeapons]);
-        Assert.Empty(FighterTemplate.TrainedLater);
+        Assert.Empty(FighterTemplate.Hunter.TrainedLater);
     }
 
     [RequiresDatsFact]
@@ -95,25 +95,25 @@ public sealed class FighterTemplateDatTests(DatSetFixture fixture, ITestOutputHe
 
         output.WriteLine($"plan: spent {plan.Spent:N0}, remainder {plan.Remainder:N0} of {plan.TotalXp:N0}");
         Assert.Equal(FighterTemplate.Level40Xp, plan.TotalXp);
-        Assert.Equal(FighterTemplate.Targets, plan.Targets);
-        Assert.Equal(FighterTemplate.XpSpent, plan.Spent);
-        Assert.Equal(FighterTemplate.XpRemainder, plan.Remainder);
-        Assert.Equal(FighterTemplate.XpSpent, FighterTemplate.TotalXp(xp));
-        Assert.All(FighterTemplate.Targets, t => Assert.True(t.Ranks > 0 && t.Ranks <= t.MaxRanks(xp), $"{t.Name} ranks {t.Ranks}"));
+        Assert.Equal(FighterTemplate.Hunter.Targets, plan.Targets);
+        Assert.Equal(FighterTemplate.Hunter.XpSpent, plan.Spent);
+        Assert.Equal(FighterTemplate.Hunter.XpRemainder, plan.Remainder);
+        Assert.Equal(FighterTemplate.Hunter.XpSpent, FighterTemplate.Hunter.TotalXp(xp));
+        Assert.All(FighterTemplate.Hunter.Targets, t => Assert.True(t.Ranks > 0 && t.Ranks <= t.MaxRanks(xp), $"{t.Name} ranks {t.Ranks}"));
         Assert.Equal(plan.Spent + plan.Remainder, plan.TotalXp);
     }
 
     [RequiresDatsFact]
     public void The_finished_fighter_is_printed_and_its_burden_capacity_carries_the_kit()
     {
-        foreach (var t in FighterTemplate.Targets)
+        foreach (var t in FighterTemplate.Hunter.Targets)
         {
-            var start = t.Kind == MageStatKind.Attribute ? FighterTemplate.CreationValue(t.Id) : 0;
+            var start = t.Kind == MageStatKind.Attribute ? FighterTemplate.Hunter.CreationValue(t.Id) : 0;
             output.WriteLine($"{t.Kind} {t.Id} {t.Name}: creation {start} + {t.Ranks} = {start + t.Ranks}");
         }
 
-        var capacity = Lifestone.Data.Motion.EncumbranceSystem.EncumbranceCapacity((int)FighterTemplate.AttributeAtTarget(FighterTemplate.Strength), 0);
+        var capacity = Lifestone.Data.Motion.EncumbranceSystem.EncumbranceCapacity((int)FighterTemplate.Hunter.AttributeAtTarget(FighterTemplate.Strength), 0);
         output.WriteLine($"burden capacity {capacity}");
-        Assert.True(capacity >= FighterKit.TotalBurden, $"the finished fighter carries {capacity} burden units; its kit weighs {FighterKit.TotalBurden}");
+        Assert.True(capacity >= FighterKit.Hunter.TotalBurden, $"the finished fighter carries {capacity} burden units; its kit weighs {FighterKit.Hunter.TotalBurden}");
     }
 }

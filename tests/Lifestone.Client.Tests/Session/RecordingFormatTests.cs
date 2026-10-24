@@ -291,6 +291,11 @@ public sealed class RecordingFormatTests
         Assert.Equal("20261012T142233Z-headless.lsrec", RecordingFormat.FileName(Created, "headless"));
         Assert.Equal("20261012T142233Z-godot.lsrec", RecordingFormat.FileName(Created.ToOffset(TimeSpan.FromHours(-7)), "godot"));
         Assert.Throws<ArgumentException>(() => RecordingFormat.FileName(Created, "../x"));
+
+        // Two processes started in the same second get different names (the log's and the recording's).
+        Assert.Equal("20261012T142233Z-headless-4711.lsrec", RecordingFormat.FileName(Created, "headless", 4711));
+        Assert.NotEqual(RecordingFormat.FileName(Created, "headless", 4711), RecordingFormat.FileName(Created, "headless", 4712));
+        Assert.Throws<ArgumentException>(() => RecordingFormat.FileName(Created, "../x", 1));
     }
 
     /// <summary>Records a session touching every frame kind; returns its bytes, the frames as written and the digest.</summary>

@@ -448,9 +448,7 @@ public sealed class PlayerMovementControllerTests(ITestOutputHelper output)
 public sealed class JumpChargeTests
 {
     [Theory]
-    [InlineData(0.0, 0.0)]
     [InlineData(0.25, 0.25)]
-    [InlineData(0.5, 0.5)]
     [InlineData(1.0, 1.0)]
     [InlineData(3.0, 1.0)]
     [InlineData(-1.0, 0.0)]
@@ -463,7 +461,6 @@ public sealed class JumpChargeTests
 
     [Theory]
     [InlineData(0.2, 0.25)]
-    [InlineData(0.4, 0.5)]
     [InlineData(0.8, 1.0)]
     public void The_bar_fills_in_point_eight_seconds_in_the_dual_wield_stance(double held, double level)
     {

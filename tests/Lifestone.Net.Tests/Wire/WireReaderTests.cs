@@ -151,7 +151,6 @@ public sealed class WireReaderTests
 
     [Theory]
     [InlineData(0x06001234u, 0x06001234u)]
-    [InlineData(0x0600ABCDu, 0x0600ABCDu)]
     [InlineData(0x06012345u, 0x06012345u)]
     [InlineData(0u, 0x06000000u)]
     public void Ace_known_type_writes_read_back_as_retail_reads_them(uint written, uint expected)

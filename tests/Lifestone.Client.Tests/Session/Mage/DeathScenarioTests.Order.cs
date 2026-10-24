@@ -230,6 +230,63 @@ public sealed partial class DeathScenarioTests
         Assert.Contains(lines, l => l.StartsWith("the stages after the respawn: rebuff, fight, corpse (", StringComparison.Ordinal));
     }
 
+    /// <summary>M4 P4 g3fix: the rebuff leaves the mage at 10% mana; the scripted fight reports the clock of its first fight step.</summary>
+    private (Rig Rig, double? FirstFightStepAt, double RegenAt, DeathScenario Scenario) AfterARebuffAtTenPercentMana(DeathOptions options)
+    {
+        var rig = TripRig(1);
+        double? firstFight = null;
+        var regenAt = 0.0;
+        var host = new ScriptedHost
+        {
+            OnBuff = (_, step) =>
+            {
+                if (step == 1)
+                {
+                    regenAt = rig.Now + 40;
+                    rig.SetMana(10, regenSeconds: 40, regenPercent: 90);
+                }
+            },
+        };
+        host.OnFight = (_, step) => firstFight ??= rig.Now;
+        var scenario = Ordered(rig, host, Whole, options);
+        rig.Run(scenario);
+        Dump(rig, scenario);
+        return (rig, firstFight, regenAt, scenario);
+    }
+
+    [Fact]
+    public void With_a_mana_wait_the_fight_starts_only_after_the_mana_reaches_the_floor_and_logs_both_numbers_P4_g3fix()
+    {
+        var (rig, firstFight, regenAt, scenario) = AfterARebuffAtTenPercentMana(new DeathOptions { FightManaWaitSeconds = 120 });
+
+        Assert.Null(scenario.Failure);
+        Assert.NotNull(firstFight);
+        Assert.True(firstFight >= regenAt, $"the first fight step came at {firstFight} s, before the mana regenerated at {regenAt} s");
+        var lines = Lines(rig).ToList();
+        Assert.Contains(lines, l => l.StartsWith("fight: mana ", StringComparison.Ordinal) && l.Contains("waiting for regeneration before the den, at most 120 s", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.StartsWith("fight: mana ", StringComparison.Ordinal) && l.Contains(" floor after ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_mana_wait_that_runs_out_lets_the_fight_go_on_and_warns_with_the_numbers_P4_g3fix()
+    {
+        var (rig, firstFight, regenAt, scenario) = AfterARebuffAtTenPercentMana(new DeathOptions { FightManaWaitSeconds = 10 });
+
+        Assert.Null(scenario.Failure);
+        Assert.True(firstFight < regenAt, $"the fight started at {firstFight} s: the 10 s bound should have ended the wait before the regeneration");
+        Assert.Contains(Lines(rig), l => l.Contains("did not reach the", StringComparison.Ordinal) && l.Contains("within 10 s; the fight goes on", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Without_a_mana_wait_the_default_the_fight_starts_at_once_and_nothing_is_logged_P4_g3fix()
+    {
+        var (rig, firstFight, regenAt, scenario) = AfterARebuffAtTenPercentMana(new DeathOptions());
+
+        Assert.Null(scenario.Failure);
+        Assert.True(firstFight < regenAt);
+        Assert.DoesNotContain(Lines(rig), l => l.StartsWith("fight: mana ", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void The_inner_scenario_is_made_once_with_the_buff_stage_and_the_den_stages_the_death_loops_options_and_the_shared_walk()
     {

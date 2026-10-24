@@ -10,6 +10,7 @@ namespace Lifestone.Data.Tests.Models;
 /// </summary>
 public sealed class DegradeTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_building_chain_and_switch_distances()
     {
@@ -52,6 +53,7 @@ public sealed class DegradeTests(DatSetFixture fixture) : IClassFixture<DatSetFi
         Assert.Equal(1, chain.Select(levels[0].Max, degradeDistance: 0f).Level);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Tree_canopy_chain_has_three_levels_then_nothing()
     {
@@ -64,6 +66,7 @@ public sealed class DegradeTests(DatSetFixture fixture) : IClassFixture<DatSetFi
         Assert.Equal(0x01003AF0u, chain.Select(lastReal + DegradeSelector.DefaultDegradeDistance - 1f).GfxObjId);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Anchor_gfxobj_is_hidden_by_its_degrade_table()
     {
@@ -81,6 +84,7 @@ public sealed class DegradeTests(DatSetFixture fixture) : IClassFixture<DatSetFi
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Human_head_draws_a_more_detailed_gfxobj_up_close_and_a_z_billboard_far_away()
     {
@@ -95,6 +99,7 @@ public sealed class DegradeTests(DatSetFixture fixture) : IClassFixture<DatSetFi
         Assert.Equal((4, 0x010001F1u, DegradeMode.AxisAlignedZ), chain.Select(levels[3].Max + DegradeSelector.DefaultDegradeDistance));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Gfxobj_without_degrade_or_missing_gfxobj()
     {

@@ -54,6 +54,8 @@ public static partial class OptionCatalog
         Death(), // the death loop's one option (M3 3.2 lane da; OptionCatalog.Death.cs)
         Hunt(), // the hunt loop's three options (M4 1.2 s4a; OptionCatalog.Hunt.cs)
         Lights(), // the viewer light (M3 4.1 s0; OptionCatalog.Lights.cs)
+        Vitals(), // the vitals keeper's eight options (M4 P5a lane C2; OptionCatalog.Vitals.cs)
+        Wayfind(), // the wayfind scenario's three options (M4 P5a S6; OptionCatalog.Wayfind.cs)
     ]);
 
     /// <summary>The first lines of <c>--help</c>.</summary>
@@ -157,7 +159,7 @@ public static partial class OptionCatalog
     [
         new("--blend-space", "byte|linear", "Blend in retail's byte space (default) or Godot's linear light (render-contract.md §2.3)."),
         new("--detail", "on|off", "Retail's building and environment detail textures (default on; render-contract.md §2.4)."),
-        new("--fov", "DEG", "The world camera's vertical field of view, 1 to 179 (default 60; the spell viewer's 55; the terrain preview's, default 60). The portal zoom is a frustum and ignores it.", AlsoIn: OptionScenes.TerrainPreview),
+        new("--fov", "DEG", "The world camera's vertical field of view, 1 to 179 (default 60 in explore mode; in play mode retail's: the preference's 90 degrees divided by the window's aspect less 0.1, SmartBox::RenderNormalMode, 73 degrees at 800x600, so --fov=60 gives the old play view; the spell viewer's 55; the terrain preview's, default 60). The portal zoom is a frustum and ignores it.", AlsoIn: OptionScenes.TerrainPreview),
         new("--retail-normals", null, "Retail's per-block terrain normals, with the light step at landblock edges (default: seamless normals; also the terrain preview's).", AlsoIn: OptionScenes.TerrainPreview),
         new("--seamless-normals", null, "Seamless terrain normals, now the default (kept for old command lines; also the terrain preview's).", AlsoIn: OptionScenes.TerrainPreview),
     ], OptionScenes.Main | OptionScenes.SpellViewer);

@@ -18,6 +18,7 @@ public sealed class PhysicsGeometryLibraryTests(DatSetFixture fixture) : IClassF
 
     private DatSet Dats => fixture.Dats;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_GfxObj_has_a_shape_only_with_the_physics_flag_and_shapes_are_shared()
     {
@@ -36,6 +37,7 @@ public sealed class PhysicsGeometryLibraryTests(DatSetFixture fixture) : IClassF
         Assert.Null(library.GetGfxObj(0x0100FFFF));   // not in the dat
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_academy_spawn_cell_has_a_walkable_floor_in_its_physics_BSP()
     {

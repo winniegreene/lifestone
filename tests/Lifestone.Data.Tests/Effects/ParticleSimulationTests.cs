@@ -62,6 +62,7 @@ public sealed class ParticleSimulationTests(DatSetFixture fixture) : IClassFixtu
         return all;
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Windup_glow_is_deterministic_for_a_seed()
     {

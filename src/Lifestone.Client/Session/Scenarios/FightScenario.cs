@@ -289,6 +289,19 @@ public sealed class FightScenario : IScenario, IDisposable
     /// <summary>The inner gear scenario (null when <see cref="FightStages.Gear"/> is off).</summary>
     public GearScenario? Gear => _gear;
 
+    /// <summary>True (a shared session, M4 P4): a player already in the world must be BSD Mage, else the run fails at once and sends nothing (<see cref="GearScenario.RequireCharacter"/>; no effect without the gear stage).</summary>
+    public bool RequireCharacter
+    {
+        get => _gear?.RequireCharacter ?? false;
+        init
+        {
+            if (_gear is not null)
+            {
+                _gear.RequireCharacter = value;
+            }
+        }
+    }
+
     /// <summary>The cycle of the buff top-up (null until the top-up needed one).</summary>
     public BuffCycle? Cycle => _cycle;
 
@@ -563,7 +576,7 @@ public sealed class FightScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
-        _cycle ??= new BuffCycle(session, _spells, _buffOptions, _log);
+        _cycle ??= new BuffCycle(session, _spells, _buffOptions, _log, ArmourBuffLedger.For(session.State)); // the session's armour memory (M4 4.1 lane c): a top-up after a login seeds it by appraisal
         var due = _cycle.RebuffDue(clock, TopUpSeconds);
         if (due.Count == 0)
         {

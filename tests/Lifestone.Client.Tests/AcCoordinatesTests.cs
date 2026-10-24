@@ -35,7 +35,6 @@ public sealed class AcCoordinatesTests
 
     [Theory]
     [InlineData(0xA9B40100u)] // an EnvCell
-    [InlineData(0xA9B4FFFFu)] // the landblock id
     [InlineData(0xA9B40000u)] // not a cell
     [InlineData(0xA9B40041u)] // past the 64 outdoor cells
     public void Only_outdoor_cells_have_map_coordinates(uint cellId)

@@ -72,6 +72,8 @@ public sealed partial class PlayMode : Node, IPlayWorld
     private PortalSpaceHandles? _portal;
     private AvatarSources? _sources;
     private PlayerRig? _rig;
+    private MoveIntents? _boundMove;
+    private Action<string>? _humanKey;
     private uint _destinationCell;
     private bool _loginCompleteFallback;
     private AvatarSet? _avatars;
@@ -256,6 +258,12 @@ public sealed partial class PlayMode : Node, IPlayWorld
             ui.Manager.Input.RegisterInputMap(EndSessionKey.InputMap, mode._endKey, EndKeyPriority);
             Log.Info(LogCategory, "the log-off key is Shift+Escape (retail's End Character Session, gmDefaultMap)");
         }
+
+        if (autoEnter)
+        {
+            RebuffDriverHost.Install(main, services, host, ui); // M4 4.1 lane c: the auto-buff driver (--buff-auto, the Pause key); a login-check leg runs its own
+        }
+
         return mode;
     }
 
@@ -668,6 +676,11 @@ public sealed partial class PlayMode : Node, IPlayWorld
             StepPanelShots(delta, panelShotsDirectory);
         }
 
+        if (!_lookShotsDone && _services.Options.Play.LookShotsDirectory is { } lookShotsDirectory)
+        {
+            StepLookShots(delta, lookShotsDirectory); // M4 4.1 lane v0: the look capture (PlayMode.LookShots.cs)
+        }
+
         // Once the physics body is placed, the destination is the player's own cell (it follows portals and landblock crossings).
         if (_rig is { } rig && !rig.Controller.Placing && rig.Controller.Position.CellId != 0)
         {
@@ -844,6 +857,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
         rig.Controller.Picking = _picking;
         rig.Controller.Selection = Selection;
         rig.Controller.Actions = _host.Session!.Actions;
+        BindMoveIntents(rig, _host.Session.Actions.Move);
         if (_layer is not null)
         {
             _layer.Avatars = avatars;
@@ -893,6 +907,31 @@ public sealed partial class PlayMode : Node, IPlayWorld
 
     private bool IsPlayerPresent() => _host.Session?.State.Self.Travel == SelfTravel.Present;
 
+    /// <summary>
+    /// Scripted movement goes through <c>IActionApi.Move</c> in this host: the rig's controller is bound with the character's run-by-default
+    /// option (the one the rig was built with, so the run key means run or walk whatever the option), and a movement key a person presses is
+    /// reported to it (<see cref="MoveIntents.HumanKey"/>, R6: the human's key wins).
+    /// </summary>
+    private void BindMoveIntents(PlayerRig rig, MoveIntents move)
+    {
+        move.Bind(rig.Controller.Walker.Controller, rig.Controller.Walker.Controller.Options.RunByDefault);
+        _humanKey = move.ReportHumanKey;
+        rig.Controller.HumanKey += _humanKey;
+        _boundMove = move;
+    }
+
+    private void UnbindMoveIntents(PlayerRig rig)
+    {
+        if (_humanKey is not null)
+        {
+            rig.Controller.HumanKey -= _humanKey;
+            _humanKey = null;
+        }
+
+        _boundMove?.Unbind(rig.Controller.Walker.Controller);
+        _boundMove = null;
+    }
+
     private void TearDown(PlayLeaveReason reason)
     {
         if (_portal is not null)
@@ -908,6 +947,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
 
         if (_rig is { } rig)
         {
+            UnbindMoveIntents(rig);
             rig.Free();
             _rig = null;
             MovementGate = null;

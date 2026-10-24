@@ -135,6 +135,13 @@ public sealed class OfflineWalker
     }
 
     /// <summary>
+    /// A walker over a physics object already made (tests without the dats: a synthetic human Setup and motion table, made the
+    /// world's player by the caller). Internal: the hosts use <see cref="Create"/>.
+    /// </summary>
+    internal static OfflineWalker FromPhysics(PhysicsWorld world, PhysicsObj physics, IPhysicsWeenie weenie, ILogSink log, IMovementSink? sink = null, MovementOptions? options = null) =>
+        new(world, physics, weenie, sink ?? new NullMovementSink(), options ?? MovementOptions.Default, log);
+
+    /// <summary>
     /// Puts the walker at <paramref name="at"/> (retail <c>CPhysicsObj::enter_world</c>: a sliding placement that sets it
     /// down within its step-down height). When <paramref name="at"/>'s landblock is not attached yet, the walker waits
     /// (<see cref="PhysicsObj.PlacementPending"/>) and is placed when it is.

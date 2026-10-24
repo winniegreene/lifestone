@@ -34,6 +34,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </summary>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[LiveSharedSession]
 public sealed class ContainerLiveTests(ITestOutputHelper output)
 {
     private const uint HoltburgChestCell = 0xA9B4016A;
@@ -46,14 +48,12 @@ public sealed class ContainerLiveTests(ITestOutputHelper output)
         using var dats = DatSet.Open();
         var classes = HeadlessCharacter.RetailSkillClasses(dats);
         var a = new EnsurePackLeg(classes, output.WriteLine, dats);
-        LiveRun.Run(output, dats, a, "containers-pack-a", 300);
+        LiveRun.Run(output, a, "containers-pack-a", 300, ownLogin: true); // a relog is the point: session A makes the pack, session B logs in and reads it
         output.WriteLine("containers pack ensured=" + a.Ensured.ToString().ToLowerInvariant());
         Assert.True(a.Problems.Count == 0, "session A (the pack and its item): " + string.Join("; ", a.Problems));
-        LiveRun.Pause();
-
         var b = new LoginLeg(classes, output.WriteLine, dats);
         var logLines = new List<string>();
-        LiveRun.Run(output, dats, b, "containers-pack-b", 300, logLines);
+        LiveRun.Run(output, b, "containers-pack-b", 300, logLines, ownLogin: true);
         var tolerated = logLines.Count(l => l.Contains("a side-pack item joined the inventory model from its own CreateObject", StringComparison.Ordinal));
         output.WriteLine("containers pack adoption_tolerance_lines=" + tolerated.ToString(CultureInfo.InvariantCulture));
         Assert.True(tolerated == 0, "a side-pack item was adopted from its own CreateObject (the tolerance), so the contents did not come from the 0196 alone");
@@ -65,26 +65,12 @@ public sealed class ContainerLiveTests(ITestOutputHelper output)
     }
 
     [LoopbackFact]
-    public void The_hunters_own_kill_corpse_opens_and_closes()
-    {
-        using var dats = DatSet.Open();
-        var leg = new CorpseLeg(output.WriteLine, dats);
-        LiveRun.Run(output, dats, leg, "containers-corpse", HuntLiveRun.QuitAfterSeconds);
-        var line = $"containers corpse_opened={leg.Opened.ToString().ToLowerInvariant()} corpse_items={leg.Items} closed={leg.Closed.ToString().ToLowerInvariant()} restored={leg.Restored.ToString().ToLowerInvariant()}";
-        output.WriteLine(line);
-        Assert.True(leg.Problems.Count == 0, "the checks that failed: " + string.Join("; ", leg.Problems) + " | " + line);
-        Assert.True(leg.Opened, line);
-        Assert.True(leg.Closed, line);
-        Assert.True(leg.Restored, line);
-    }
-
-    [LoopbackFact]
     public void A_chest_opens_and_closes_and_a_locked_chest_refuses()
     {
         using var dats = DatSet.Open();
         var classes = HeadlessCharacter.RetailSkillClasses(dats);
         var leg = new ChestLeg(classes, output.WriteLine, dats);
-        LiveRun.Run(output, dats, leg, "containers-chest", 300);
+        LiveRun.Run(output, leg, "containers-chest", 300);
         var line = $"containers chest_opened={leg.Opened.ToString().ToLowerInvariant()} closed={leg.Closed.ToString().ToLowerInvariant()} locked={leg.Locked}";
         output.WriteLine(line);
         Assert.True(leg.Problems.Count == 0, "the checks that failed: " + string.Join("; ", leg.Problems) + " | " + line);
@@ -229,7 +215,7 @@ public sealed class ContainerLiveTests(ITestOutputHelper output)
         }
     }
 
-    private sealed class CorpseLeg(Action<string> log, DatSet dats) : LiveLeg("containers-corpse", [], log, dats)
+    internal sealed class CorpseLeg(Action<string> log, DatSet dats) : LiveLeg("containers-corpse", [], log, dats)
     {
         private readonly RecordingLogSink _huntLog = new();
         private HuntScenario? _hunt;
@@ -261,7 +247,9 @@ public sealed class ContainerLiveTests(ITestOutputHelper output)
 
                     return height;
                 },
-                follow: Follow);
+                endSession: LiveCharacter.PerTest, // M4 P4: a shared session stays logged in
+                follow: Follow,
+                template: FighterTemplate.Melee);
             FollowIsTheHunts = true;
             for (;;)
             {
@@ -399,7 +387,7 @@ public sealed class ContainerLiveTests(ITestOutputHelper output)
                     yield return h;
                 }
 
-                Log("wield the Mace again: " + Describe(wield));
+                Log("wield the kit weapon again: " + Describe(wield));
             }
 
             var home = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
@@ -419,16 +407,22 @@ public sealed class ContainerLiveTests(ITestOutputHelper output)
             }
 
             // The fighter check's own count (FighterBuildScenario's worn=): the kit's leather armour lines, through the one shared helper (2.1-R1).
-            var worn = FighterKit.CountWornArmour(wornWcids);
+            var worn = FighterTemplate.Melee.Kit.CountWornArmour(wornWcids); // P5a r3: the Brawler's own kit (D41's gear), not the Hunter's leather
 
-            Restored = maceWielded && worn == 5;
-            Log($"end state: wielded={(maceWielded ? FighterKit.MaceWcid : 0)} worn={worn} (the template reads wielded={FighterKit.MaceWcid.ToString(CultureInfo.InvariantCulture)} worn=5)");
-            Check(Restored, $"the hunter is not restored: wielded={(maceWielded ? FighterKit.MaceWcid : 0)} worn={worn}");
+            Restored = maceWielded && worn == WornExpected;
+            Log($"end state: wielded={(maceWielded ? Weapon : 0)} worn={worn} (the template reads wielded={Weapon.ToString(CultureInfo.InvariantCulture)} worn={WornExpected})");
+            Check(Restored, $"the hunter is not restored: wielded={(maceWielded ? Weapon : 0)} worn={worn}");
             foreach (var h in LogOffAndQuit())
             {
                 yield return h;
             }
         }
+
+        /// <summary>The Brawler's kit weapon (P5a r3: read from the template, D41's Staff of All Aspects, never a hard-coded Mace).</summary>
+        private static uint Weapon => FighterTemplate.Melee.WieldedWeaponWcid;
+
+        /// <summary>The armour lines the Brawler's kit wears (the fighter check's own count).</summary>
+        private static int WornExpected => FighterTemplate.Melee.Kit.Worn.Count(i => i.Role == FighterRole.Armour);
 
         private bool MaceWielded(out uint mace)
         {
@@ -436,7 +430,7 @@ public sealed class ContainerLiveTests(ITestOutputHelper output)
             var inventory = S.State.Self.Inventory;
             foreach (var e in inventory.Equipped)
             {
-                if (S.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == FighterKit.MaceWcid)
+                if (S.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == Weapon)
                 {
                     mace = e.Guid;
                     return true;
@@ -445,7 +439,7 @@ public sealed class ContainerLiveTests(ITestOutputHelper output)
 
             foreach (var e in inventory.Pack)
             {
-                if (S.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == FighterKit.MaceWcid)
+                if (S.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == Weapon)
                 {
                     mace = e.Guid;
                     return false;
@@ -535,5 +529,31 @@ public sealed class ContainerLiveTests(ITestOutputHelper output)
                 yield return h;
             }
         }
+    }
+}
+
+/// <summary>
+/// The corpse test of the container model (M4 P4: split out of <see cref="ContainerLiveTests"/>, which is on <c>test</c>): Holtburg Brawler (<c>test-melee</c>) makes the hunt's first kill, opens and closes its corpse through the
+/// Action API and is put back (the Mace wielded). Levels the Brawler by one kill (owner decision D1). The leg is <see cref="ContainerLiveTests.CorpseLeg"/>.
+/// </summary>
+[Trait("Category", LoopbackCollection.Category)]
+[Collection(LoopbackCollection.Name)]
+[Trait("Account", "test-melee")]
+[LoopbackCharacter("Holtburg Brawler")]
+[LiveSharedSession]
+public sealed class ContainerCorpseLiveTests(ITestOutputHelper output)
+{
+    [LoopbackFact]
+    public void The_brawlers_own_kill_corpse_opens_and_closes()
+    {
+        using var dats = DatSet.Open();
+        var leg = new ContainerLiveTests.CorpseLeg(output.WriteLine, dats);
+        LiveRun.Run(output, leg, "containers-corpse", HuntLiveRun.QuitAfterSeconds, character: FighterTemplate.Melee.Name);
+        var line = $"containers corpse_opened={leg.Opened.ToString().ToLowerInvariant()} corpse_items={leg.Items} closed={leg.Closed.ToString().ToLowerInvariant()} restored={leg.Restored.ToString().ToLowerInvariant()}";
+        output.WriteLine(line);
+        Assert.True(leg.Problems.Count == 0, "the checks that failed: " + string.Join("; ", leg.Problems) + " | " + line);
+        Assert.True(leg.Opened, line);
+        Assert.True(leg.Closed, line);
+        Assert.True(leg.Restored, line);
     }
 }

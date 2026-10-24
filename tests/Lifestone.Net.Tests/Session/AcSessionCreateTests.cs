@@ -17,13 +17,8 @@ public sealed class AcSessionCreateTests
 {
     private static readonly DddIterations EndOfRetail = new(2072, 982, 994, 497);
 
-    public static TheoryData<string> NonLoopbackServers => [
-        "10.0.0.5",
-        "192.168.1.2",
-        new IPAddress([8, 8, 8, 8]).ToString(),
-        new IPAddress(0).ToString(),
-        new IPAddress(new byte[16]).ToString(),
-    ];
+    /// <summary>One address stands for all: the gate runs before the factory whatever the address; which addresses it refuses is LoopbackPolicyTests'.</summary>
+    public static TheoryData<string> NonLoopbackServers => ["10.0.0.5"];
 
     [Theory]
     [MemberData(nameof(NonLoopbackServers))]
@@ -84,7 +79,7 @@ public sealed class AcSessionCreateTests
         Assert.Equal(new IPEndPoint(IPAddress.Loopback, 9000), ((SessionMachine)session).Options.Server);
     }
 
-    public static TheoryData<string> BadOptions => ["port 0", "port 65535", "portal 0", "language 0", "cell -1", "high-res 0", "version empty", "version non-ascii", "silence 0", "attempts 0", "delay negative"];
+    public static TheoryData<string> BadOptions => ["port 0", "port 65535", "portal 0", "language 0", "cell -1", "high-res 0", "version empty", "version non-ascii", "silence 0", "attempts 0", "delay negative", "in-world wait with no delay", "in-world wait negative"];
 
     [Theory]
     [MemberData(nameof(BadOptions))]
@@ -104,6 +99,8 @@ public sealed class AcSessionCreateTests
             "silence 0" => options with { Timeouts = SessionTimeouts.Default with { Silence = TimeSpan.Zero } },
             "attempts 0" => options with { Retry = LoginRetryPolicy.Default with { Attempts = 0 } },
             "delay negative" => options with { Retry = LoginRetryPolicy.Default with { Delay = TimeSpan.FromSeconds(-1) } },
+            "in-world wait with no delay" => options with { Retry = LoginRetryPolicy.Default with { CharacterInWorldDelay = TimeSpan.Zero } },
+            "in-world wait negative" => options with { Retry = LoginRetryPolicy.Default with { CharacterInWorldWait = TimeSpan.FromSeconds(-1) } },
             _ => throw new ArgumentOutOfRangeException(nameof(which), which, null),
         };
 

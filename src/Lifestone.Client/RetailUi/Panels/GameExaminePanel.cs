@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.RetailUi.Core;
+using Lifestone.Client.RetailUi.Rendering;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Text;
 using Lifestone.Client.RetailUi.Widgets;
@@ -39,7 +40,7 @@ public enum ExamineKind
 /// </para>
 /// <para>
 /// <b>Not built, named.</b> Each part retail shows that the model or the layout cannot yet draw answers with a named <c>TODO</c> in the log and a line saying so where the part would be: the creature's 3D view
-/// (<c>TODO(m4-examine-creature-view)</c>), the item icon (<c>TODO(m4-examine-icon)</c>: the floaty's layout has no icon element), the creature's player-killer, allegiance and rating lines and its attribute list (<c>TODO(m4-examine-creature-lines)</c>), the inscription (<c>TODO(m4-examine-inscription)</c>), the spells
+/// (<c>TODO(m4-examine-creature-view)</c>), the creature's player-killer, allegiance and rating lines and its attribute list (<c>TODO(m4-examine-creature-lines)</c>), the inscription (<c>TODO(m4-examine-inscription)</c>), the spells
 /// and enchantments (<c>TODO(m4-examine-spells)</c>), the ratings and sets (<c>TODO(m4-examine-ratings)</c>), the workmanship and speed words (<c>TODO(m4-examine-words)</c>), a requirement of a kind other than a skill, a level or a
 /// training (<c>TODO(m4-examine-requirement)</c>), the toolbar's Examine button (still the NotInM3 message), and the poll that re-asks while the window stays open outside peace (<c>gmExaminationUI::UseTime</c> 0x004AB8B0,
 /// <c>TODO(m3-examine-poll-mode)</c>). A failed creature roll shows what ACE sends (the tables, no profile) and a line naming <c>TODO(m4-examine-failed-roll-text)</c>: the docs do not give retail's text for it.
@@ -71,8 +72,15 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
     /// <summary>The item window's second title line.</summary>
     public const uint ItemSubNameId = 0x10000139;
 
-    /// <summary>The item window's icon: the standalone layout 0x2100001C has it (244,12, 32 by 32), but the floaty's merged layout the gameplay layout uses has none (retail's <c>m_itemIcon</c> is then null: <c>ItemExamineUI::SetAppraiseInfo</c> 0x004B7ED0 skips it), so nothing draws it (<c>TODO(m4-examine-icon)</c>); <see cref="IconId"/> still names the icon.</summary>
+    /// <summary>
+    /// The item window's icon: the standalone layout 0x2100001C has it (244,12, 32 by 32), but the floaty's merged layout the gameplay layout uses has none (retail's <c>m_itemIcon</c> is then null: <c>ItemExamineUI::SetAppraiseInfo</c> 0x004B7ED0
+    /// skips it). Lifestone makes that element from the standalone layout as a child of the item field (M4 4.1 v4; closes <c>TODO(m4-examine-icon)</c>, a deliberate addition: the owner wants the item's art on the panel; per the fidelity rule it is behind <c>--examine-icon on</c> (<see cref="UiServices.ExamineIcon"/>, default off = retail's window), review R8) and draws the object's composed icon
+    /// in it (<c>IconData::RenderIcons</c> 0x0058DFB0: the type background, the underlay, the icon and its overlay, the glow), the same picture as the pack's cell; <see cref="IconId"/> names the icon.
+    /// </summary>
     public const uint ItemIconId = 0x1000013B;
+
+    /// <summary>The standalone examine layout (class 0x1000001C), which holds the icon element the floaty's merged layout lacks.</summary>
+    public const uint StandaloneLayoutId = 0x2100001C;
 
     /// <summary>The item window's text of lines (<c>m_itemDisplayText</c>, with its scroll bar 0x1000013D).</summary>
     public const uint ItemTextId = 0x1000013C;
@@ -106,6 +114,8 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
     private readonly UiTextElement? _itemName;
     private readonly UiTextElement? _itemSubName;
     private readonly UiElement? _itemIcon;
+    private readonly IconRetry _retry;
+    private bool _retryRegistered;
     private readonly UiTextElement? _itemText;
     private readonly UiTextElement? _level;
     private readonly UiTextElement?[] _vitals = new UiTextElement?[3];
@@ -124,7 +134,8 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
         _title = window.GetChildRecursive(TitleId) as UiTextElement;
         _itemName = window.GetChildRecursive(ItemNameId) as UiTextElement;
         _itemSubName = window.GetChildRecursive(ItemSubNameId) as UiTextElement;
-        _itemIcon = window.GetChildRecursive(ItemIconId);
+        _retry = new IconRetry(this);
+        _itemIcon = window.GetChildRecursive(ItemIconId) ?? (context.Manager.Services.ExamineIcon ? MakeIconElement(_itemField) : null); // the icon is an addition to retail: only with --examine-icon on
         _itemText = window.GetChildRecursive(ItemTextId) as UiTextElement;
         _level = window.GetChildRecursive(LevelTextId) as UiTextElement;
         for (var i = 0; i < _vitals.Length; i++)
@@ -204,6 +215,18 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
     /// <summary>The icon the item window shows (0 for none).</summary>
     public uint IconId { get; private set; }
 
+    /// <summary>The fields the icon was composed from (the object's icon, underlay, overlay, item type and effects).</summary>
+    public UiItemIcon Icon { get; private set; }
+
+    /// <summary>The element the icon is drawn in (made from the standalone layout), or null when the layout could not give it.</summary>
+    public UiElement? IconElement => _itemIcon;
+
+    /// <summary>True while an image of the icon is still decoding (the composition is retried each frame).</summary>
+    public bool IconPending { get; private set; }
+
+    /// <summary>How many times the icon was composed.</summary>
+    public int IconCompositions { get; private set; }
+
     /// <summary>The last Identify <see cref="Open"/> sent, or null.</summary>
     public IdentifyHandle? LastIdentify { get; private set; }
 
@@ -229,11 +252,12 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
         Pending = true;
         Kind = obj is not null && (obj.ItemType & CreatureItemType) != 0 ? ExamineKind.Creature : ExamineKind.Item;
         SetTitle(obj?.Name is { Length: > 0 } name ? name : "???");
-        IconId = obj?.ItemFields().IconId ?? 0;
+        var objectIcon = obj is not null ? GameInventoryPage.IconOf(obj) : default;
+        IconId = objectIcon.IconId;
         ShowKind(Kind);
         if (Kind == ExamineKind.Item)
         {
-            SetItem(IconId, ["Value: ???", "Burden: ???"]);
+            SetItem(objectIcon, ["Value: ???", "Burden: ???"]);
         }
         else
         {
@@ -253,6 +277,7 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
         _window.SetVisible(false);
         _subscription?.Dispose();
         _subscription = null;
+        StopRetry();
         ShownGuid = 0;
         Kind = ExamineKind.None;
         Pending = false;
@@ -317,8 +342,9 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
         }
         else
         {
-            IconId = obj?.ItemFields().IconId is { } icon and not 0 ? icon : appraisal.DataId(8) ?? 0;
-            SetItem(IconId, ItemLines(appraisal, log));
+            // The object's composed icon; the Appraisal's own icon (property data 8) only when the world table has none for it.
+            var icon = obj is not null && obj.ItemFields().IconId != 0 ? GameInventoryPage.IconOf(obj) : new UiItemIcon(appraisal.DataId(8) ?? 0, 0, 0, obj?.ItemType ?? 0, 0);
+            SetItem(icon, ItemLines(appraisal, log));
         }
     }
 
@@ -560,20 +586,86 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
         _itemSubName?.SetText(string.Empty);
     }
 
-    private void SetItem(uint icon, IReadOnlyList<string> lines)
+    private void SetItem(in UiItemIcon icon, IReadOnlyList<string> lines)
     {
         Lines = lines;
-        IconId = icon;
+        IconId = icon.IconId;
+        Icon = icon;
         _itemText?.SetText(string.Join('\n', lines));
-        if (_itemIcon is not null)
+        ComposeIcon();
+    }
+
+    private void ComposeIcon()
+    {
+        if (_itemIcon is null)
         {
-            if (icon != 0)
+            return;
+        }
+
+        if (Icon.IconId == 0)
+        {
+            IconPending = false;
+            StopRetry();
+            _itemIcon.ClearImage();
+            return;
+        }
+
+        var image = UiItemIcons.Compose(_context.Manager, Icon, out var pending);
+        if (pending)
+        {
+            IconPending = true;
+            if (!_retryRegistered)
             {
-                _itemIcon.SetImageByDid(icon, UiDrawMode.AlphaBlend);
+                _retryRegistered = true;
+                _context.Manager.RegisterForGlobalMessage(_retry, UiGlobalMessageIds.Frame);
             }
-            else
+
+            return;
+        }
+
+        IconPending = false;
+        StopRetry();
+        IconCompositions++;
+        _itemIcon.SetBlitMode(UiBlitMode.SrcCopy);
+        _itemIcon.SetGeneratedImage(image);
+    }
+
+    private void StopRetry()
+    {
+        if (_retryRegistered)
+        {
+            _retryRegistered = false;
+            _context.Manager.UnregisterForGlobalMessage(_retry, UiGlobalMessageIds.Frame);
+        }
+    }
+
+    /// <summary>Makes the icon element the floaty's merged layout lacks, from the standalone layout 0x2100001C, as a child of the item field; null (logged) when the layout or its element is missing.</summary>
+    private UiElement? MakeIconElement(UiElement? field)
+    {
+        if (field is null)
+        {
+            return null;
+        }
+
+        var manager = _context.Manager;
+        var desc = manager.Services.Descs.TryGetLayout(StandaloneLayoutId, out var layout) ? layout.AllElements().FirstOrDefault(static e => e.ElementId == ItemIconId) : null;
+        var made = desc is not null ? manager.CreateChildElement(field, layout!, desc) : null;
+        if (made is null)
+        {
+            manager.Services.Log.Warn("retailui", "gmExaminationUI: the standalone layout 0x2100001C gives no icon element 0x1000013B; the item window shows no icon (TODO(m4-examine-icon))");
+        }
+
+        return made;
+    }
+
+    /// <summary>Retries a composition that found an image still decoding, each frame.</summary>
+    private sealed class IconRetry(GameExaminePanel panel) : IUiGlobalListener
+    {
+        public void ListenToGlobalMessage(uint messageId, int data)
+        {
+            if (messageId == UiGlobalMessageIds.Frame && panel.IconPending)
             {
-                _itemIcon.ClearImage();
+                panel.ComposeIcon();
             }
         }
     }

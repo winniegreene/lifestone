@@ -104,6 +104,30 @@ public sealed class StandInKitLookTests
     }
 
     [Fact]
+    public void A_held_caster_put_in_the_pack_sends_the_ObjDescEvent_of_every_dequip_as_ACE_does_though_it_sent_none_on_the_wield()
+    {
+        // M4 4.1 fix3 (review R24): ACE's TryDequipObjectWithBroadcasting sends the holder's ObjDescEvent for every dequip, unconditionally (Creature_Equipment.cs 438).
+        var dresser = new FakeDresser();
+        using var rig = new CastRig(new StandInVisit { EnterAfter = 0.2, UnhideAfter = 1.0, Dresser = dresser });
+        rig.Begin();
+        rig.Run(2.0);
+        var wand = rig.Session.Tools.SpawnItem(GearKit.Wand.Wcid, null, ActionSource.Host);
+        rig.Run(2.0);
+        var guid = wand.Result!.Guid;
+        rig.Session.Actions.Wield(guid, GearKit.Wand.ValidLocations, ActionSource.Host);
+        rig.Run(2.0);
+        Assert.Empty(dresser.Players);
+        var descs = new List<ObjectDescChanged>();
+        using var watch = rig.Session.Events.Subscribe((in ObjectDescChanged e) => descs.Add(e));
+
+        rig.Session.Actions.MoveToPack(guid, rig.Session.State.Self.Guid, 0);
+        rig.Run(2.0);
+
+        Assert.Empty(Assert.Single(dresser.Players)); // the same look the dresser rebuilds: nothing worn on the body
+        Assert.Equal(rig.Session.State.Self.Guid, Assert.Single(descs).Guid);
+    }
+
+    [Fact]
     public void No_created_item_wears_a_human_or_creature_Setup()
     {
         Assert.NotEqual(StandInVisit.HumanSetup, StandInWorld.PlaceholderItemSetup);

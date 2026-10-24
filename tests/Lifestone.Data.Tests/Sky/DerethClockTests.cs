@@ -43,6 +43,7 @@ public sealed class DerethClockTests(SkyFixture fixture) : IClassFixture<SkyFixt
         Assert.Equal(t0 + 7620 - 1234.5, clock.Now, 6);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Calendar_on_the_ACE_clock_today_is_in_the_120s_P_Y()
     {

@@ -14,16 +14,23 @@ public sealed class FightLegVerdictTests
     private static FightLegMeasures Good() => new(Kills: 3, DamageDealt: 912, SpellsCast: 14, Misses: 2, XpGained: 90_000, DamageTaken: 140, HitsTaken: 4, Evades: 1, Projectiles: 14, CastFrameMaxMs: 31.25, FightFrameMaxMs: 40.04, BsdMinFps: 58.5, FightSeconds: 123.9);
 
     [Fact]
-    public void A_fight_with_a_kill_and_damage_is_ok_and_the_line_has_every_field_in_order()
+    public void A_fight_with_a_kill_and_damage_is_ok_and_the_golden_line_has_every_field_in_order()
     {
-        var outcome = FightLegVerdict.Compose(null, Good());
+        // The golden line (P1b lane B): every field set, the light fields and the counters included, a frame over 50 ms, so the whole line is compared once.
+        var full = Good() with { BlockedPicks = 2, WallHits = 1, BoltLight = true, DynamicLightsMax = 3, ViewerLight = true, FightFrameMaxMs = 52.04 };
+
+        var outcome = FightLegVerdict.Compose(null, full);
 
         Assert.True(outcome.Ok);
         Assert.Empty(outcome.Problems);
-        Assert.Matches(Shape, outcome.Line);
+        Assert.Equal(
+            "bsd-fight done ok=true kills=3 damage_dealt=912 spells_cast=14 misses=2 blocked_picks=2 wall_hits=1 xp_gained=90000 damage_taken=140 hits_taken=4 evades=1 projectiles=14 cast_frame_max_ms=31.3 fight_frame_max_ms=52.0 bsd_min_fps=58.5 fight_s=123 bolt_light=yes dyn_lights_max=3 viewer_light=on frame_over_50=yes",
+            outcome.Line);
+
+        // and the plain run: no light fields
         Assert.Equal(
             "bsd-fight done ok=true kills=3 damage_dealt=912 spells_cast=14 misses=2 blocked_picks=0 wall_hits=0 xp_gained=90000 damage_taken=140 hits_taken=4 evades=1 projectiles=14 cast_frame_max_ms=31.3 fight_frame_max_ms=40.0 bsd_min_fps=58.5 fight_s=123",
-            outcome.Line);
+            FightLegVerdict.Compose(null, Good()).Line);
     }
 
     [Fact]
@@ -76,15 +83,6 @@ public sealed class FightLegVerdictTests
     }
 
     [Fact]
-    public void An_unmeasured_frame_is_not_judged_and_not_flagged()
-    {
-        var outcome = FightLegVerdict.Compose(null, Good() with { CastFrameMaxMs = null, FightFrameMaxMs = double.NaN });
-
-        Assert.True(outcome.Ok);
-        Assert.DoesNotContain("frame_over_50", outcome.Line, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void An_unmeasured_field_reads_n_a_and_does_not_fail()
     {
         var m = Good() with { Projectiles = null, CastFrameMaxMs = null, FightFrameMaxMs = double.NaN, BsdMinFps = null, FightSeconds = null };
@@ -124,12 +122,5 @@ public sealed class FightLegVerdictTests
         var none = FightLegVerdict.Compose(null, Good() with { BoltLight = null, ViewerLight = true, DynamicLightsMax = 1 });
         Assert.True(none.Ok);
         Assert.Contains(" bolt_light=n/a ", none.Line, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_new_counters_print_in_the_line()
-    {
-        var line = FightLegVerdict.Compose(null, Good() with { BlockedPicks = 2, WallHits = 1 }).Line;
-        Assert.Contains(" blocked_picks=2 wall_hits=1 ", line, StringComparison.Ordinal);
     }
 }

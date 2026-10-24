@@ -16,8 +16,9 @@ $script:AccountPattern = '^[A-Za-z0-9][A-Za-z0-9_.-]{0,49}$'
 $script:CharacterPattern = "^[A-Za-z][A-Za-z' -]{0,63}$"
 # The game options play.ps1 owns: -GameArgs may not carry them (an --account there would get round the rule for automated runs).
 $script:OwnedOptions = @('--play', '--account', '--character', '--server')
-# Automated runs (-Offscreen) use only this account (the owner's play account is never used by an agent or a test).
-$script:AutomatedAccount = 'test'
+# Automated runs (-Offscreen) use only these three test accounts (M4 D31; the owner's play account is never used by an agent or a test).
+# The same list is Lifestone.Client.Session.Credentials.TestAccounts.Keys (a test pins that they agree).
+$script:AutomatedAccounts = @('test', 'test-melee', 'test-archer')
 
 function Get-PlayBackendPlan {
     <#
@@ -98,15 +99,20 @@ function Get-PlayGameOptions {
     .DESCRIPTION
         The rules:
           - -Account names an entry of secrets.json's accounts; its value is never echoed back in a problem.
-          - With -Offscreen (an automated run) the account is `test` and nothing else: the play account is the owner's.
+          - With -Offscreen (an automated run) the account is one of the three test accounts (test, test-melee, test-archer): the play account is the owner's.
           - -Character is a character name; a name with spaces is quoted so godot.ps1's argument splitting keeps it whole.
           - -Server (127.0.0.1:<acePort> from server\versions.json, Get-PlayServerEndpoint) becomes --server=; empty leaves the game's compiled default.
+          - -Audio is refused with -Offscreen (an automated run is silent, M2 D8).
           - -GameArgs may not carry --play, --account, --character or --server (play.ps1 owns them) or anything named for a password.
     .OUTPUTS
         @{ Problems = @(...); Account = <effective account or ''>; Arguments = @('--play', ...); GameArgs = <string for godot.ps1> }.
     #>
-    param([string] $Account = '', [string] $Character = '', [switch] $Offscreen, [string] $GameArgs = '', [string] $Server = '')
+    param([string] $Account = '', [string] $Character = '', [switch] $Offscreen, [string] $GameArgs = '', [string] $Server = '', [switch] $Audio)
     $problems = New-Object System.Collections.Generic.List[string]
+    # M4 P4 gate (D31, M2 D8): an automated run is silent. -Audio keeps Godot's real audio driver, which an off-screen run must never have: refused, loudly (the owner's own play, without -Offscreen, may have sound).
+    if ($Offscreen -and $Audio) {
+        $problems.Add('-Audio cannot be combined with -Offscreen: an automated run is silent (M2 D8; the game mutes it and godot.ps1 gives it the Dummy audio driver). Drop -Audio, or drop -Offscreen for a run you want to hear.')
+    }
     $arguments = New-Object System.Collections.Generic.List[string]
     $arguments.Add('--play')
 
@@ -116,9 +122,9 @@ function Get-PlayGameOptions {
         $effective = ''
     }
     elseif ($Offscreen) {
-        if (-not $Account) { $effective = $script:AutomatedAccount }
-        elseif ($Account -ne $script:AutomatedAccount) {
-            $problems.Add("an automated run (-Offscreen) uses only the test account: leave -Account out or give -Account $script:AutomatedAccount. The play account is the owner's.")
+        if (-not $Account) { $effective = $script:AutomatedAccounts[0] }
+        elseif ($script:AutomatedAccounts -cnotcontains $Account) {
+            $problems.Add("an automated run (-Offscreen) uses only the test accounts ($($script:AutomatedAccounts -join ', ')): leave -Account out or give -Account $($script:AutomatedAccounts -join ', -Account '). The play account is the owner's.")
             $effective = ''
         }
     }
@@ -176,4 +182,19 @@ function Get-PlayServerEndpoint {
     return "127.0.0.1:$port"
 }
 
-Export-ModuleMember -Function Get-PlayServerEndpoint, Get-PlayBackendPlan, Get-PlayStopPlan, Get-PlayStartedByUs, Test-PlayAccountName, Test-PlayCharacterName, Get-PlayGameOptions, Assert-PlayLoopback
+function Get-PlayAudioVerdict {
+    <#
+      P4-R15 (M2 D8): an automated play run (-Offscreen) is silent. The game logs `audio service installed ... muted=<bool>`; none, or muted=false, is a failure with a named reason.
+      The same rule as tools\smoke.ps1's Get-AudioMuteVerdict, applied by play.ps1 to its own output so the capture runs (--play-look-shots, --play-panel-shots, --play-screenshot) are held to it too.
+      Returns @{ Ok; Reason }.
+    #>
+    param([string] $Text)
+    $found = [regex]::Matches($Text, 'audio service installed[^\r\n]*?\bmuted=(?<m>true|false)\b', 'IgnoreCase')
+    if ($found.Count -eq 0) { return @{ Ok = $false; Reason = 'the game output has no "audio service installed ... muted=true" line, so the run cannot be shown silent (M2 D8)' } }
+    foreach ($m in $found) {
+        if ($m.Groups['m'].Value -ne 'true') { return @{ Ok = $false; Reason = 'the game logged "audio service installed ... muted=false": an automated run must be muted (M2 D8)' } }
+    }
+    return @{ Ok = $true; Reason = '' }
+}
+
+Export-ModuleMember -Function Get-PlayAudioVerdict, Get-PlayServerEndpoint, Get-PlayBackendPlan, Get-PlayStopPlan, Get-PlayStartedByUs, Test-PlayAccountName, Test-PlayCharacterName, Get-PlayGameOptions, Assert-PlayLoopback

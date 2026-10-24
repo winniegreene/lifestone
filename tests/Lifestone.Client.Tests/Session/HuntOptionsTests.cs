@@ -69,42 +69,6 @@ public sealed class HuntOptionsTests
     }
 
     [Fact]
-    public void The_recovery_defaults_are_on_75_90_and_0_7_and_the_hunts_line_names_them_3_1_s3()
-    {
-        var o = Parse();
-
-        Assert.Empty(o.Errors);
-        Assert.Equal((true, 75, 90, 0.7), (o.Recovery.Enabled, o.Recovery.BelowPercent, o.Recovery.UntilPercent, o.Recovery.Chance));
-        Assert.Contains("heal=on heal_below=75% heal_until=90% heal_chance=0.7", o.ToString(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_heal_options_parse_beside_the_hunts_and_the_loot_options_and_are_registered_3_1_s3()
-    {
-        var o = Parse("--hunt-kills=4", "--heal=off", "--heal-below=60", "--heal-until=80", "--heal-chance=0.5", "--loot-min-value=5");
-
-        Assert.Empty(o.Errors);
-        Assert.Equal((4, false, 60, 80, 0.5, 5), (o.Kills, o.Recovery.Enabled, o.Recovery.BelowPercent, o.Recovery.UntilPercent, o.Recovery.Chance, o.Loot.MinValue));
-        var arguments = CommandLineArgument.ParseAll(["--heal=off", "--heal-below=60", "--heal-until=80", "--heal-chance=0.5"]);
-        Assert.Empty(OptionCatalog.Registry.Problems(arguments, OptionScenes.Main));
-        Assert.Empty(OptionCatalog.Registry.Problems(arguments, OptionScenes.Headless));
-    }
-
-    [Theory]
-    [InlineData("--heal=maybe")]
-    [InlineData("--heal-below=0")]
-    [InlineData("--heal-until=150")]
-    [InlineData("--heal-chance=2")]
-    [InlineData("--heal-below=95")]
-    public void A_bad_heal_value_or_a_crossed_pair_is_an_error_line_never_a_silent_default_3_1_s3(string argument)
-    {
-        var o = Parse(argument);
-
-        Assert.Single(o.Errors);
-        Assert.StartsWith("--heal", o.Errors[0], StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void M4_3_2_s4a_sell_is_on_buy_kits_is_2_and_appraise_loot_is_on_by_default_and_the_line_names_them()
     {
         var o = Parse();

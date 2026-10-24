@@ -7,6 +7,7 @@ using Lifestone.Data.Tests;
 namespace Lifestone.Client.Tests.Objects;
 
 /// <summary>The one static posing rule (docs/objects.md §1.3), shared by landscape objects, EnvCell statics and the viewer.</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class ObjectPlacementTests(ObjectsFixture fixture) : IClassFixture<ObjectsFixture>
 {
     [RequiresDatsFact]

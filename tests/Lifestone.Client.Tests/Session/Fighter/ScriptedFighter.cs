@@ -27,7 +27,7 @@ internal sealed class ScriptedFighter
     private const uint LevelKey = 25;
 
     /// <summary>ACE's trained costs for the template's skills (Aluvian SkillTable), independent of the scenario's copy.</summary>
-    internal static readonly IReadOnlyDictionary<uint, int> AceTrainedCost = new Dictionary<uint, int> { [6] = 10, [21] = 6, [47] = 6 };
+    internal static readonly IReadOnlyDictionary<uint, int> AceTrainedCost = new Dictionary<uint, int> { [6] = 10, [21] = 6, [47] = 6, [31] = 8, [32] = 8, [33] = 12, [16] = 6 };
 
     internal const uint FirstItemGuid = 0x80020000;
 
@@ -40,6 +40,8 @@ internal sealed class ScriptedFighter
     private readonly SortedDictionary<uint, SkillState> _skills = [];
     private readonly List<PackItem> _items = [];
     private readonly TeleportDestination _holtburg = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
+    private FighterCreation _creation;
+    private uint _oldGuid;
     private byte _sequence;
     private uint _eventSequence = 1000;
     private uint _nextGuid = FirstItemGuid;
@@ -51,6 +53,9 @@ internal sealed class ScriptedFighter
 
     private ScriptedFighter(XpTableData table, ScriptedAceSession server, string name)
     {
+        Template = FighterTemplate.ForName(name) ?? FighterTemplate.Hunter; // M4 P4 arch: the Archer's kit is the Longbow and the Greater Frost Arrows, so the scripted fighter follows its name's template
+        Gear = Template.Kit;
+        _creation = Template.Creation;
         _table = table;
         _server = server;
         Name = name;
@@ -59,9 +64,57 @@ internal sealed class ScriptedFighter
     private sealed record SkillState(ushort Ranks, uint Class, uint Experience);
 
     /// <summary>An item the character holds: where it is is its equip location (0: in the pack).</summary>
-    internal sealed record PackItem(uint Guid, GearItem Kind, int Stack, uint Location);
+    internal sealed record PackItem(uint Guid, GearItem Kind, int Stack, uint Location, uint Container = 0);
 
     public string Name { get; }
+
+    /// <summary>The template of the character's name (the Hunter's for any other name): its kit and targets are what the fighter holds and what the item tool knows.</summary>
+    public FighterTemplate Template { get; }
+
+    /// <summary>The kit the item tool knows: the template's, or (after <see cref="WithComponents"/>) the template's with the spell components of an account (M4 P5a fix F-abil).</summary>
+    public FighterKit Gear { get; private set; } = null!;
+
+    /// <summary>
+    /// The server grants the spell components of <paramref name="components"/> too (the item tool knows their weenies); with <paramref name="held"/> the fighter holds them in the pack already, one stack of the kit's count each (a built fighter).
+    /// </summary>
+    public ScriptedFighter WithComponents(IReadOnlyList<FighterItem> components, bool held)
+    {
+        Gear = Template.Kit.WithComponents(components);
+        // M4 P5a fix r4: a built fighter holds the packs its kit carries (sized from the component lines: FighterKit.SidePacksFor).
+        var pack = Gear.Items.Single(i => i.Role == FighterRole.SidePack);
+        for (var have = _items.Count(i => i.Kind.Wcid == FighterKit.SidePackWcid); have < Gear.SidePacks; have++)
+        {
+            _items.Add(new PackItem(_nextGuid++, pack.Item with { Stack = 1 }, 1, 0));
+        }
+
+        if (held)
+        {
+            foreach (var line in components)
+            {
+                _items.Add(new PackItem(_nextGuid++, line.Item, line.Item.Stack, 0));
+            }
+        }
+
+        return this;
+    }
+
+    /// <summary>A cast burned <paramref name="count"/> of the component stack: the held stack of <paramref name="wcid"/> goes down by that many (gone at 0).</summary>
+    public void Burn(uint wcid, int count)
+    {
+        var index = _items.FindIndex(i => i.Kind.Wcid == wcid);
+        var left = _items[index].Stack - count;
+        if (left <= 0)
+        {
+            _items.RemoveAt(index);
+        }
+        else
+        {
+            _items[index] = _items[index] with { Stack = left };
+        }
+    }
+
+    /// <summary>The count held of the weenie across its stacks.</summary>
+    public int HeldCount(uint wcid) => _items.Where(i => i.Kind.Wcid == wcid).Sum(i => i.Stack);
 
     public long Total { get; set; }
 
@@ -81,32 +134,174 @@ internal sealed class ScriptedFighter
 
     public IReadOnlyList<PackItem> Items => _items;
 
+    /// <summary>The spell ids the character knows (its spellbook; the description lists them at a login).</summary>
+    public HashSet<uint> Known { get; } = [];
+
+    /// <summary>The number of ids in each <c>spell learn</c> request (M4 P5a).</summary>
+    public List<int> LearnSizes { get; } = [];
+
     /// <summary>Wcids the mod refuses as unknown (a test's fault injection).</summary>
     public HashSet<uint> UnknownWcids { get; } = [];
+
+    /// <summary>The StackableMerges the rig applied (M4 P5a fix r4).</summary>
+    public int MergesSeen { get; private set; }
+
+    private readonly Dictionary<uint, byte> _stackSequences = [];
+
+    private bool _viewContentsDue;
+
+    private byte NextStackSequence(uint guid)
+    {
+        var next = (byte)(_stackSequences.GetValueOrDefault(guid) + 1);
+        _stackSequences[guid] = next;
+        return next;
+    }
+
+    /// <summary>
+    /// M4 P5a fix r4: <paramref name="count"/> stacks of <paramref name="size"/> of <paramref name="line"/> in the side pack at <paramref name="pack"/> (0-based among the held packs), as reruns' unmerged top-ups left them in round 4.
+    /// </summary>
+    public void AddInSidePack(GearItem line, int size, int pack, int count = 1)
+    {
+        var packs = _items.Where(i => i.Kind.Wcid == FighterKit.SidePackWcid).ToArray();
+        for (var i = 0; i < count; i++)
+        {
+            _items.Add(new PackItem(_nextGuid++, line with { Stack = size }, size, 0, packs[pack].Guid));
+        }
+    }
 
     public static ScriptedFighter Fresh(XpTableData table, ScriptedAceSession server, string name)
     {
         var fighter = new ScriptedFighter(table, server, name);
-        foreach (var t in FighterTemplate.Targets.Where(t => t.Kind == MageStatKind.Skill))
-        {
-            // ACE's PlayerFactory gives a creation-trained skill 5 ranks and 526 XP (Player_Skills.cs:182-186).
-            fighter._skills[t.Id] = new SkillState(ScriptedMage.CreationBonusRanks, t.Specialized ? HeadlessCharacter.SpecializedSkill : HeadlessCharacter.TrainedSkill, ScriptedMage.CreationBonusXp);
-        }
-
+        fighter.InitSkills();
         return fighter;
     }
 
-    /// <summary>A built fighter: level 40, the plan spent, the kit held, the Mace wielded, the leather worn, standing in Holtburg.</summary>
-    public static ScriptedFighter Ready(XpTableData table, ScriptedAceSession server, string name)
+    private void InitSkills()
+    {
+        foreach (var t in Template.Targets.Where(t => t.Kind == MageStatKind.Skill))
+        {
+            if (Template.TrainedLater.Contains(t.Id))
+            {
+                _skills[t.Id] = new SkillState(0, HeadlessCharacter.UntrainedSkill, 0); // trained after creation (M4 P5a): untrained until the build trains it
+                continue;
+            }
+
+            // ACE's PlayerFactory gives a creation-trained skill 5 ranks and 526 XP (Player_Skills.cs:182-186).
+            _skills[t.Id] = new SkillState(ScriptedMage.CreationBonusRanks, t.Specialized ? HeadlessCharacter.SpecializedSkill : HeadlessCharacter.TrainedSkill, ScriptedMage.CreationBonusXp);
+        }
+    }
+
+    /// <summary>
+    /// A fighter that a character-creation of the OLD templates made (M4 P5a C5): the legacy level-40 state, created with the Hunter's split (Strength, Endurance and Coordination 100), which for the Brawler and the Archer is not their template's. When the server lists a new live character of its
+    /// name (the re-creation after a retail delete), it becomes a fresh character with the template's creation attributes.
+    /// </summary>
+    public static ScriptedFighter OldSplit(XpTableData table, ScriptedAceSession server, string name)
+    {
+        var fighter = Built(table, server, name, BuildState.Legacy);
+        fighter._creation = FighterTemplate.Hunter.Creation;
+        fighter._oldGuid = server.Characters.First(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase) && c.DeleteField == 0).Guid;
+        return fighter;
+    }
+
+    private void BecomeFresh()
+    {
+        Array.Clear(_attributeRanks);
+        Array.Clear(_attributeExperience);
+        Array.Clear(_vitalRanks);
+        Array.Clear(_vitalExperience);
+        _skills.Clear();
+        _items.Clear();
+        Known.Clear();
+        Total = 0;
+        Available = 0;
+        Level = 1;
+        Credits = 18;
+        InHoltburg = false;
+        _creation = Template.Creation;
+        _oldGuid = 0;
+        _wieldsSeen = 0;
+        _itemsAnnounced = 0;
+        InitSkills();
+    }
+
+    /// <summary>A built fighter: the template's level (40 for the Hunter, 55 for the Brawler and the Archer), the plan spent (the three magic schools trained and raised), its profile's spells known, the kit held, the Mace wielded, the leather worn, standing in Holtburg.</summary>
+    public static ScriptedFighter Ready(XpTableData table, ScriptedAceSession server, string name) => Built(table, server, name, BuildState.Ready);
+
+    /// <summary>A fighter as it was built before M4 P5a (owner decision D33): level 40, the base plan spent, the magic schools untrained, no spell known, the kit held and worn. The Hunter is the same either way.</summary>
+    public static ScriptedFighter Legacy(XpTableData table, ScriptedAceSession server, string name) => Built(table, server, name, BuildState.Legacy);
+
+    /// <summary>A fighter as lane C1 built it (M4 P5a, D33 alone): level 48, the base plan spent plus Focus, Self, Creature Enchantment and Life Magic at C1's ranks (CE 127, LM 126 or 127: above this plan's 125), those two schools trained, Item Enchantment untrained, every spell but Lifestone Recall known; the experience spent is exactly the plan's, the rest unspent (M4 P5a C1c).</summary>
+    public static ScriptedFighter C1Level48(XpTableData table, ScriptedAceSession server, string name) => Built(table, server, name, BuildState.C1);
+
+    /// <summary>The level-40 plan as the fighters were first built (the targets of the base shares, before any D33 or D38 extension).</summary>
+    private static List<StatTarget> OldBasePlan(FighterTemplate template)
+    {
+        StatTarget Skill(uint id, bool specialized, int ranks) => new(MageStatKind.Skill, id, FighterTemplate.SkillName(id), specialized, ranks);
+        StatTarget Attribute(uint id, string name, int ranks) => new(MageStatKind.Attribute, id, name, false, ranks);
+        StatTarget Vital(uint id, string name, int ranks) => new(MageStatKind.Vital, id, name, false, ranks);
+        return template.Key switch
+        {
+            "melee" =>
+            [
+                Skill(FighterTemplate.HeavyWeapons, true, 145), Skill(FighterTemplate.MeleeDefense, false, 112), Skill(FighterTemplate.Healing, false, 98),
+                Attribute(FighterTemplate.Strength, "Strength", 99), Attribute(FighterTemplate.Endurance, "Endurance", 94), Attribute(FighterTemplate.Coordination, "Coordination", 99),
+                Vital(FighterTemplate.MaxHealth, "Max Health", 91), Vital(FighterTemplate.MaxStamina, "Max Stamina", 90),
+            ],
+            "archer" =>
+            [
+                Skill(FighterTemplate.MissileWeapons, true, 145), Skill(FighterTemplate.MeleeDefense, false, 112), Skill(FighterTemplate.Healing, false, 98),
+                Attribute(FighterTemplate.Endurance, "Endurance", 99), Attribute(FighterTemplate.Coordination, "Coordination", 103),
+                Vital(FighterTemplate.MaxHealth, "Max Health", 99), Vital(FighterTemplate.MaxStamina, "Max Stamina", 91),
+            ],
+            _ => [.. template.Targets],
+        };
+    }
+
+    private enum BuildState
+    {
+        Ready,
+        Legacy,
+        C1,
+    }
+
+    private static ScriptedFighter Built(XpTableData table, ScriptedAceSession server, string name, BuildState state)
     {
         var fighter = Fresh(table, server, name);
-        fighter.Total = (long)table.XpForLevel(FighterTemplate.TargetLevel);
-        fighter.Level = FighterTemplate.TargetLevel;
+        var template = fighter.Template;
+        var level = state switch { BuildState.Ready => template.Level, BuildState.C1 when template.HasMagic => 48, _ => FighterTemplate.TargetLevel };
+        fighter.Total = (long)table.XpForLevel(level);
+        fighter.Level = level;
         fighter.Available = 1_000;
         fighter.Credits = 30;
-        foreach (var t in FighterTemplate.Targets)
+        if (state == BuildState.Ready && FighterProfile.For(template) is { } profile)
+        {
+            fighter.Known.UnionWith(profile.SpellsToLearn);
+        }
+
+        IEnumerable<StatTarget> targets = template.Targets;
+        if (state != BuildState.Ready)
+        {
+            // The plans the characters were first built to, hard-coded (the stand-in XpTable is not the retail one, so the rule is not re-run): the base plan (level 40) and, for C1's build, its four stats on top.
+            var basePlan = OldBasePlan(template);
+            if (state == BuildState.C1 && template.HasMagic)
+            {
+                var lm = template.Key == "melee" ? 126 : 127;
+                basePlan.Add(new StatTarget(MageStatKind.Attribute, FighterTemplate.Focus, "Focus", false, 96));
+                basePlan.Add(new StatTarget(MageStatKind.Attribute, FighterTemplate.Self, "Self", false, 106));
+                basePlan.Add(new StatTarget(MageStatKind.Skill, FighterTemplate.CreatureEnchantment, "Creature Enchantment", false, 127));
+                basePlan.Add(new StatTarget(MageStatKind.Skill, FighterTemplate.LifeMagic, "Life Magic", false, lm));
+                fighter.Known.UnionWith(FighterProfile.For(template)!.SpellsToLearn.Where(id => id != 1635));
+                fighter.Credits = 30 - 20;
+            }
+
+            targets = basePlan;
+        }
+
+        ulong spent = 0;
+        foreach (var t in targets)
         {
             var experience = t.XpList(table)[t.Ranks];
+            spent += experience;
             switch (t.Kind)
             {
                 case MageStatKind.Attribute:
@@ -123,17 +318,27 @@ internal sealed class ScriptedFighter
             }
         }
 
-        foreach (var line in FighterKit.Items)
+        if (state == BuildState.C1 && template.HasMagic)
+        {
+            fighter.Available = (long)((ulong)fighter.Total - spent);
+        }
+
+        foreach (var line in fighter.Template.Kit.Items)
         {
             for (var i = 0; i < (line.Item.MaxStack is null ? line.Item.Stack : 1); i++)
             {
-                fighter._items.Add(new PackItem(fighter._nextGuid++, line.Item, line.Item.MaxStack is null ? 1 : line.Item.Stack, line.Wield ? (uint)line.Item.ValidLocations : 0));
+                // M4 P5a C7: the Mana and Stamina Potions live in a side pack, as the build leaves them.
+                var container = line.Role == FighterRole.VitalPotion ? fighter._items.First(x => x.Kind.Wcid == FighterKit.SidePackWcid).Guid : 0u;
+                fighter._items.Add(new PackItem(fighter._nextGuid++, line.Item, line.Item.MaxStack is null ? 1 : line.Item.Stack, line.Wield ? (uint)line.Item.ValidLocations : 0, container));
             }
         }
 
         fighter.InHoltburg = true;
         return fighter;
     }
+
+    /// <summary>Trains Arcane Lore (M4 P5a C6) with <paramref name="ranks"/> ranks, so the magic gear's difficulties are met.</summary>
+    public void TrainArcaneLore(ushort ranks) => _skills[14] = new SkillState(ranks, HeadlessCharacter.TrainedSkill, 0);
 
     public void Untrain(uint skill) => _skills[skill] = new SkillState(0, HeadlessCharacter.UntrainedSkill, 0);
 
@@ -145,7 +350,7 @@ internal sealed class ScriptedFighter
     /// <summary>A second item of a kit class in the pack, as the hunt's loot adds one (M4 3.1 fix2); the guid.</summary>
     public uint AddCopy(uint wcid)
     {
-        var kind = FighterKit.ItemOf(wcid)!.Item;
+        var kind = Template.Kit.ItemOf(wcid)!.Item;
         var guid = _nextGuid++;
         _items.Add(new PackItem(guid, kind, kind.MaxStack is null ? 1 : kind.Stack, 0));
         return guid;
@@ -157,6 +362,14 @@ internal sealed class ScriptedFighter
         var index = _items.FindIndex(i => i.Kind.Wcid == wcid && i.Location == 0);
         _items[index] = _items[index] with { Location = (uint)location };
         return _items[index].Guid;
+    }
+
+    /// <summary>An item of any kind in the pack (a leftover of an older build, as the Archer's Shortbow and Arrows beside its Longbow and Greater Frost Arrows); the guid.</summary>
+    public uint AddOther(GearItem kind)
+    {
+        var guid = _nextGuid++;
+        _items.Add(new PackItem(guid, kind, kind.MaxStack is null ? 1 : kind.Stack, 0));
+        return guid;
     }
 
     /// <summary>Puts the first wielded item of the class back in the pack without a message; the guid.</summary>
@@ -193,13 +406,19 @@ internal sealed class ScriptedFighter
     private AcePlayerDescription Describe()
     {
         // The login's objects first (the pack and the equipment, then where the character stands); the description lists them.
-        var player = _server.Characters.First(c => string.Equals(c.Name, Name, StringComparison.OrdinalIgnoreCase)).Guid;
+        if (_oldGuid != 0 && _server.Characters.Any(c => string.Equals(c.Name, Name, StringComparison.OrdinalIgnoreCase) && c.DeleteField == 0 && c.Guid != _oldGuid))
+        {
+            BecomeFresh(); // the old character was deleted and a new one of the name created
+        }
+
+        var player = _server.Characters.First(c => string.Equals(c.Name, Name, StringComparison.OrdinalIgnoreCase) && c.DeleteField == 0).Guid;
         foreach (var item in _items)
         {
             Send(AceWireWriters.ObjectCreate(Created(item, player)));
         }
 
         _itemsAnnounced = _items.Count;
+        _viewContentsDue = true; // the side packs' contents follow the description (ACE's 0196 per pack), at the next Pump
         if (InHoltburg)
         {
             var p = _holtburg.Location.Position;
@@ -211,10 +430,11 @@ internal sealed class ScriptedFighter
         {
             Ints = [.. baseline.Ints.Where(p => p.Key is not (CreditsKey or LevelKey)), (CreditsKey, Credits), (LevelKey, Level)],
             Int64s = [(TotalExperienceKey, Total), (AvailableExperienceKey, Available)],
-            Attributes = [.. Enumerable.Range(0, 6).Select(i => (_attributeRanks[i], FighterTemplate.CreationValue((uint)i + 1), _attributeExperience[i]))],
+            Attributes = [.. Enumerable.Range(0, 6).Select(i => (_attributeRanks[i], _creation[(uint)i + 1], _attributeExperience[i]))],
             Vitals = [.. Enumerable.Range(0, 3).Select(i => (_vitalRanks[i], 0u, _vitalExperience[i], 10u))],
             Skills = [.. _skills.Select(s => new AceSkill(s.Key, s.Value.Ranks, s.Value.Class, s.Value.Experience, 0))],
-            Inventory = [.. _items.Where(i => i.Location == 0).Select(i => (i.Guid, 0u))],
+            Spells = [.. Known.Select(id => (int)id)],
+            Inventory = [.. _items.Where(i => i.Location == 0 && i.Container == 0).Select(i => (i.Guid, i.Kind.ItemType == FighterKit.ItemTypeContainer ? 1u : 0u))],
             Equipped = [.. _items.Where(i => i.Location != 0).Select(i => (i.Guid, i.Location, 0u))],
         };
     }
@@ -229,7 +449,7 @@ internal sealed class ScriptedFighter
         WeenieClassId = item.Kind.Wcid,
         Icon = 0x06001036,
         ItemType = item.Kind.ItemType,
-        Container = item.Location == 0 ? owner : null,
+        Container = item.Location == 0 ? (item.Container != 0 ? item.Container : owner) : null,
         Wielder = item.Location != 0 ? owner : null,
         ValidLocations = item.Kind.ValidLocations == EquipMask.None ? null : (uint)item.Kind.ValidLocations,
         CurrentlyWieldedLocation = item.Location == 0 ? null : item.Location,
@@ -275,7 +495,7 @@ internal sealed class ScriptedFighter
                 _attributeRanks[a] = (uint)RankFor(_table.AttributeXpList, _attributeExperience[a]);
                 Available -= amount;
                 Send(AceWireWriters.PrivateUpdatePropertyInt64(++_sequence, AvailableExperienceKey, Available));
-                Send(AceWireWriters.PrivateUpdateAttribute(++_sequence, id, _attributeRanks[a], FighterTemplate.CreationValue(id), _attributeExperience[a]));
+                Send(AceWireWriters.PrivateUpdateAttribute(++_sequence, id, _attributeRanks[a], _creation[id], _attributeExperience[a]));
                 break;
             case GameActionTypes.RaiseVital when id is FighterTemplate.MaxHealth or FighterTemplate.MaxStamina or 5:
                 if (amount == 0 || amount > Available)
@@ -354,6 +574,22 @@ internal sealed class ScriptedFighter
                 Send(AceWireWriters.PrivateUpdatePropertyInt(++_sequence, CreditsKey, Credits));
                 var data = new XpData(xp.Amount, xp.Amount, Total, Available, Level);
                 return ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Xp, data), data.Describe());
+            case SpellLearnRequest learn:
+                LearnSizes.Add(learn.SpellIds.Count);
+                var outcomes = new List<SpellOutcome>();
+                foreach (var id in learn.SpellIds)
+                {
+                    var inTable = SpellTable.Contains(id);
+                    var known = Known.Contains(id);
+                    outcomes.Add(new SpellOutcome(id, SpellOutcomes.Classify(inTable, known), inTable ? "spell " + id : null));
+                    if (inTable)
+                    {
+                        Known.Add(id);
+                    }
+                }
+
+                var spells = SpellLearnData.Of(outcomes);
+                return ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Spell, spells), spells.Describe());
             case ItemRequest item:
                 return Item(item);
             case PlacePoiRequest poi when string.Equals(poi.Name, _holtburg.Name, StringComparison.OrdinalIgnoreCase) || poi.Name.Contains("Holtburg", StringComparison.OrdinalIgnoreCase):
@@ -367,10 +603,13 @@ internal sealed class ScriptedFighter
         }
     }
 
+    /// <summary>The spell ids the model's SpellTable holds (what the mage's and the fighters' profiles teach, and the profile of the Archer and the Brawler).</summary>
+    private static readonly HashSet<uint> SpellTable = [.. ArenaProfile.SpellsToLearn, .. FighterProfile.Brawler.SpellsToLearn, .. FighterProfile.Archer.SpellsToLearn];
+
     private string Item(ItemRequest request)
     {
         ItemWcidsAsked.Add(request.Wcid);
-        var line = FighterKit.ItemOf(request.Wcid);
+        var line = Gear.ItemOf(request.Wcid);
         if (line is null || UnknownWcids.Contains(request.Wcid))
         {
             var error = new ToolError(ToolErrors.UnknownWcid, "no weenie has class id " + request.Wcid.ToString(CultureInfo.InvariantCulture));
@@ -385,7 +624,7 @@ internal sealed class ScriptedFighter
         var guid = _nextGuid++;
         _items.Add(new PackItem(guid, kind, stack, 0));
         var data = new ItemData(guid, kind.Wcid, kind.Name, stack, request.Stack, max, clamped);
-        Send(Lifestone.Tests.Shared.Net.AceM3Writers.PutObjInContainer(Player, ++_eventSequence, guid, Player, (uint)_items.Count - 1, 0));
+        Send(Lifestone.Tests.Shared.Net.AceM3Writers.PutObjInContainer(Player, ++_eventSequence, guid, Player, (uint)_items.Count - 1, kind.ItemType == FighterKit.ItemTypeContainer ? 1u : 0u));
         _itemsAnnounced = _items.Count - 1; // its CreateObject follows the reply, at the next Pump
         return ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Item, data), data.Describe());
     }
@@ -399,6 +638,15 @@ internal sealed class ScriptedFighter
         while (_itemsAnnounced < _items.Count)
         {
             Send(AceWireWriters.ObjectCreate(Created(_items[_itemsAnnounced++], Player)));
+        }
+
+        if (_viewContentsDue && _server.PlayerGuid is { } owner)
+        {
+            _viewContentsDue = false;
+            foreach (var pack in _items.Where(i => i.Kind.Wcid == FighterKit.SidePackWcid && _items.Any(c => c.Container == i.Guid)).ToArray())
+            {
+                Send(AceM3Writers.ViewContents(owner, ++_eventSequence, pack.Guid, [.. _items.Where(c => c.Container == pack.Guid).Select(c => (c.Guid, 0u))]));
+            }
         }
 
         if (_teleportDue)
@@ -434,9 +682,35 @@ internal sealed class ScriptedFighter
                 _items[index] = _items[index] with { Location = second };
                 Send(AceM3Writers.WieldObject(Player, ++_eventSequence, first, unchecked((int)second)));
             }
+            else if (type == GameActionTypes.StackableMerge && _items.FindIndex(i => i.Guid == second) is var to and >= 0)
+            {
+                // M4 P5a fix r4: ACE's whole-stack merge: the source leaves (0024) before the target's new size (0197); a part merge shrinks the source first.
+                var moved = Math.Min((int)third, _items[index].Stack);
+                var left = _items[index].Stack - moved;
+                var target = _items[to] with { Stack = _items[to].Stack + moved };
+                _items[to] = target;
+                if (left <= 0)
+                {
+                    _items.RemoveAt(index);
+                    if (index < _itemsAnnounced)
+                    {
+                        _itemsAnnounced--;
+                    }
+
+                    Send(AceM3Writers.InventoryRemoveObject(first));
+                }
+                else
+                {
+                    _items[index] = _items[index] with { Stack = left };
+                    Send(AceM3Writers.SetStackSize(NextStackSequence(first), first, (uint)left, 0));
+                }
+
+                MergesSeen++;
+                Send(AceM3Writers.SetStackSize(NextStackSequence(second), second, (uint)target.Stack, 0));
+            }
             else if (type == GameActionTypes.PutItemInContainer)
             {
-                _items[index] = _items[index] with { Location = 0 };
+                _items[index] = _items[index] with { Location = 0, Container = second == Player ? 0 : second };
                 Send(AceM3Writers.PutObjInContainer(Player, ++_eventSequence, first, second, third, 0));
             }
         }

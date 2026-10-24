@@ -18,6 +18,7 @@ public sealed class CharGenAppearanceTests(DatSetFixture fixture) : IClassFixtur
 {
     private DatSet Dats => fixture.Dats;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void An_Aluvian_male_composes_in_retail_order_with_skin_hair_and_eye_palettes()
     {
@@ -49,6 +50,7 @@ public sealed class CharGenAppearanceTests(DatSetFixture fixture) : IClassFixtur
         Assert.Contains(ObjDesc.FromDat(sex.MouthStrips[0].ObjDesc).TextureChanges[0], c.ObjDesc.TextureChanges);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_bald_hair_style_takes_the_eye_strips_bald_ObjDesc()
     {
@@ -65,6 +67,7 @@ public sealed class CharGenAppearanceTests(DatSetFixture fixture) : IClassFixtur
         Assert.All(ObjDesc.FromDat(sex.EyeStrips[eyes].BaldObjDesc).TextureChanges, t => Assert.Contains(t, c.ObjDesc.TextureChanges));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_hair_style_with_an_alternate_Setup_changes_the_body()
     {
@@ -106,6 +109,7 @@ public sealed class CharGenAppearanceTests(DatSetFixture fixture) : IClassFixtur
         Assert.Equal(0x02000001u, CharGenAppearance.HumanSetupId);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Invalid_choices_throw()
     {
@@ -118,6 +122,7 @@ public sealed class CharGenAppearanceTests(DatSetFixture fixture) : IClassFixtur
         Assert.Throws<ArgumentOutOfRangeException>(() => CharGenAppearance.Compose(cg, look with { Shirt = look.Shirt with { Index = 999 } }, dats));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_heritage_and_sex_composes_every_choice_and_applies_to_its_Setup()
@@ -152,6 +157,7 @@ public sealed class CharGenAppearanceTests(DatSetFixture fixture) : IClassFixtur
         Assert.True(PinnedProblems == report, "problems per heritage changed:\n" + report);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_world_look_ACE_sends_matches_the_CharGen_preview_except_the_listed_differences()
     {

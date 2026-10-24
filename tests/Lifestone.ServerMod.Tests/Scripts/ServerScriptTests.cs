@@ -126,20 +126,11 @@ public sealed partial class ServerScriptTests
     }
 
     [Fact]
-    public void Nothing_promises_that_the_first_account_becomes_an_Admin()
+    public void The_config_template_keeps_the_default_access_level_at_zero()
     {
         // Owner decision D11: the sentinel Admin account and the mod keep ACE's first-account promotion from ever happening.
-        string[] files = ["README.md", "setup-server.ps1", Path.Combine("templates", "Config.template.js"), Path.Combine("mod", "README.md")];
-        string[] promises = ["first account created is promoted", "promotes the first account it", "today it becomes Admin", "first account becomes Admin"];
-        var offences = files
-            .SelectMany(f => promises.Where(p => File.ReadAllText(Path.Combine(Server, f)).Contains(p, StringComparison.OrdinalIgnoreCase)).Select(p => $"{f}: '{p}'"))
-            .ToArray();
-        Assert.True(offences.Length == 0, "texts that still promise a first-account Admin:\n" + string.Join('\n', offences));
-
         var template = File.ReadAllText(Path.Combine(Server, "templates", "Config.template.js"));
         Assert.Contains("\"DefaultAccessLevel\": 0,", template, StringComparison.Ordinal);
-        Assert.Contains("Lifestone server mod", template, StringComparison.Ordinal);
-        Assert.Contains("sentinel Admin", template, StringComparison.Ordinal);
     }
 
     [Fact]

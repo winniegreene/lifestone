@@ -2,6 +2,7 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Net.Dispatch;
 using Lifestone.Net.Messages;
+using Lifestone.Net.Session;
 
 namespace Lifestone.Client.Session.State;
 
@@ -263,6 +264,30 @@ internal sealed partial class GameStateReducer
     /// <summary>One <see cref="CharacterErrorReceived"/> per F659, paired with net's session event as <see cref="ReportBoot"/> is.</summary>
     private void ReportCharacterError(uint code, bool fromMessage)
     {
+        // A retryable refusal while entering the world (0x0D: ACE still holds the character online, 0x01, 0x15) is the network session's to retry (LoginRetryPolicy, 75 s for 0x0D): it must not reach the action
+        // tracker as an error before the session gives up, or the first 0x0D ends EnterWorld and the retry wait never helps (M4 P5a F-gate; since 4.1). The message arrives before the session's queued events, so it is held until
+        // they say which it was: RetryScheduled (counted and logged as login_retries=n, nothing published) or CharacterErrorReceived (the session gave up: published once).
+        if (fromMessage && _state.Phase == SessionPhase.EnteringWorld && LoginRetryPolicy.Default.RetryableCharacterErrors.Contains(code))
+        {
+            if (_enterWorldRetryAhead > 0)
+            {
+                _enterWorldRetryAhead--;
+                CountLoginRetry(code);
+                return;
+            }
+
+            _deferredEnterWorldError = code;
+            return;
+        }
+
+        if (!fromMessage && _deferredEnterWorldError is { } held)
+        {
+            _deferredEnterWorldError = null;
+            _log.Info(SessionLog.Category, "the server sent a character error", new LogField("code", held));
+            Publish(new CharacterErrorReceived(held));
+            return;
+        }
+
         if (Absorb(ref _characterErrorBalance, fromMessage))
         {
             return;
@@ -270,6 +295,25 @@ internal sealed partial class GameStateReducer
 
         _log.Info(SessionLog.Category, "the server sent a character error", new LogField("code", code));
         Publish(new CharacterErrorReceived(code));
+    }
+
+    /// <summary>The session scheduled another enter-world attempt (<see cref="SessionEventKind.RetryScheduled"/> while entering the world): the held refusal was a retry, not an error.</summary>
+    private void NoteEnterWorldRetry(uint code)
+    {
+        if (_deferredEnterWorldError == code)
+        {
+            _deferredEnterWorldError = null;
+            CountLoginRetry(code);
+            return;
+        }
+
+        _enterWorldRetryAhead++;
+    }
+
+    private void CountLoginRetry(uint code)
+    {
+        _loginRetries++;
+        _log.Info(SessionLog.Category, string.Create(System.Globalization.CultureInfo.InvariantCulture, $"enter world: the server refused with CharacterError 0x{code:X2}; the session retries it (login_retries={_loginRetries})"), new LogField("login_retries", _loginRetries), new LogField("code", code));
     }
 
     /// <summary>

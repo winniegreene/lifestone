@@ -8,6 +8,7 @@ namespace Lifestone.Data.Tests.TerrainRender;
 /// <summary>The opt-in, non-retail across-blocks normals (<see cref="TerrainSeamlessNormals"/>).</summary>
 public sealed class TerrainSeamlessNormalsTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Interior_vertices_keep_the_retail_normals_and_shared_edge_vertices_agree_across_blocks()
     {

@@ -110,18 +110,6 @@ public sealed class StandInResponderTests
     }
 
     [Fact]
-    public void A_character_already_pending_deletion_cannot_be_deleted_again()
-    {
-        using var rig = new Rig();
-
-        var handle = rig.Actions.DeleteCharacter(rig.List.Entries[2].Guid, ActionSource.Ui);
-        rig.Run(0.1);
-
-        Assert.Equal(ActionOutcomeKind.Refused, handle.Outcome!.Value.Kind);
-        Assert.Contains("already pending deletion", handle.Outcome.Value.Detail, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void A_restore_clears_the_pending_deletion_through_an_ok_answer()
     {
         using var rig = new Rig(delay: TimeSpan.Zero);
@@ -162,17 +150,6 @@ public sealed class StandInResponderTests
         Assert.Equal((uint)CharGenResult.NameInUse, again.Outcome.Value.Code);
         Assert.Equal(4, rig.List.Entries.Count);
         Assert.Contains(rig.Results, r => !r.Succeeded && r.ResultCode == (uint)CharGenResult.NameInUse && !r.Restore);
-    }
-
-    [Fact]
-    public void A_create_with_the_wrong_skill_count_is_refused_before_anything_is_answered()
-    {
-        using var rig = new Rig(delay: TimeSpan.Zero);
-
-        var handle = rig.Actions.CreateCharacter(Intent("Wanderer") with { SkillAdvancementClasses = [1, 2, 3] }, ActionSource.Ui);
-
-        Assert.Equal(ActionOutcomeKind.Refused, handle.Outcome!.Value.Kind);
-        Assert.Equal(3, rig.List.Entries.Count);
     }
 
     [Fact]

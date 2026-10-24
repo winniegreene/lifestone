@@ -12,6 +12,7 @@ public sealed class EnumIdMapsTests(DatSetFixture fixture) : IClassFixture<DatSe
 {
     private EnumIdMaps Maps => fixture.Dats.EnumMaps;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_master_map_id_is_the_portal_headers()
     {
@@ -19,6 +20,7 @@ public sealed class EnumIdMapsTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Same(Maps, fixture.Dats.EnumMaps);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Each_group_constant_is_pinned_to_its_master_map_name_and_map()
     {
@@ -40,6 +42,7 @@ public sealed class EnumIdMapsTests(DatSetFixture fixture) : IClassFixture<DatSe
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_key_map_group_is_the_one_the_master_map_names_KEYMAP()
     {
@@ -49,6 +52,7 @@ public sealed class EnumIdMapsTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal(EnumGroup.KeyMap.Value, keyMap.Key);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [InlineData(0x10000001u, 0x02000306u, "portalspace_background")] // the tunnel Setup
     [InlineData(0x10000002u, 0x030005ACu, "portalspace_animation")] // its spin
@@ -70,6 +74,7 @@ public sealed class EnumIdMapsTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal(did, Maps.Entries(EnumGroup.UiAsset)[enumValue]);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [InlineData("patch", 0x21000000u)]
     [InlineData("disconnected", 0x21000002u)]
@@ -83,6 +88,7 @@ public sealed class EnumIdMapsTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal(name, Maps.NameOf(EnumGroup.UiLayout, enumValue));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void The_layout_group_names_81_layouts_all_in_the_language_dat()
     {
@@ -95,6 +101,7 @@ public sealed class EnumIdMapsTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal("Undef", Maps.NameOf(EnumGroup.UiLayout, 0));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Cursors_fonts_string_tables_and_key_maps_resolve()
     {
@@ -127,6 +134,7 @@ public sealed class EnumIdMapsTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal("gmDefault", Maps.NameOf(EnumGroup.KeyMap, 0x10000001u));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_dats_use_the_internal_fallback()
     {
@@ -142,6 +150,7 @@ public sealed class EnumIdMapsTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.False(fixture.Dats.TryGetPortal<DatReaderWriter.DBObjs.Font>(0x40000033u, out _));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void An_unknown_enum_throws_naming_the_enum_and_the_group()
     {

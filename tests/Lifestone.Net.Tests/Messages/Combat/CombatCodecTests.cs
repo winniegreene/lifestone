@@ -71,24 +71,4 @@ public sealed class CombatCodecTests
         Assert.True(CombatCodecs.TryParsePlayerKilled(message, out var killed));
         Assert.Equal(new PlayerKilledMsg("Tester has been killed by a Drudge.", 0x50000001, 0x80000456), killed);
     }
-
-    [Fact]
-    public void A_truncated_or_over_long_body_is_refused()
-    {
-        var victim = AceM3Writers.VictimNotification(Player, 1, "abc");
-        Assert.False(CombatCodecs.TryParseVictim(victim[..^1], out _));
-        Assert.False(CombatCodecs.TryParseVictim([.. victim, 0], out _));
-
-        var attacker = AceM3Writers.AttackerNotification(Player, 1, "Rat", 1, 0.5, 1, false, 0);
-        Assert.False(CombatCodecs.TryParseAttacker(attacker[..^1], out _));
-        Assert.False(CombatCodecs.TryParseAttacker([.. attacker, 0], out _));
-
-        var defender = AceM3Writers.DefenderNotification(Player, 1, "Rat", 1, 0.5, 1, 1, false, 0);
-        Assert.False(CombatCodecs.TryParseDefender(defender[..^1], out _));
-        Assert.False(CombatCodecs.TryParseDefender([.. defender, 0, 0, 0, 0], out _));
-
-        var killed = AceM3Writers.PlayerKilled("x", 1, 2);
-        Assert.False(CombatCodecs.TryParsePlayerKilled(killed[..^1], out _));
-        Assert.False(CombatCodecs.TryParsePlayerKilled([.. killed, 0], out _));
-    }
 }

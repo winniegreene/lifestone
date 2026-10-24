@@ -14,7 +14,7 @@ namespace Lifestone.Loopback.Tests.Session;
 
 /// <summary>
 /// M4 3.2 s4c: the vendor, live, through <see cref="IActionApi"/> only (the capture test that recorded ACE's raw order, <c>VendorCaptureLiveTests</c>, is removed: its findings are cache/m4/3-2/capture.md). WRITTEN AND COMPILED BY THE
-/// SLICE, RUN BY THE LEAD: it needs the backend with the Lifestone server mod ready and Holtburg Hunter built (<c>--scenario=fighter-build</c>); the character is neither created, levelled, reset nor purged here, and its pack is as it was
+/// SLICE, RUN BY THE LEAD: it needs the backend with the Lifestone server mod ready and Holtburg Brawler built (<c>--scenario=fighter-build --account=test-melee</c>); the character is neither created, levelled, reset nor purged here, and its pack is as it was
 /// at the end (a kit bought is sold back; the two items the test grants itself are sold to Renald, so nothing is left over). The test does not depend on what the hunter carries (the hunt loop sells its spare loot, which is what failed the
 /// first gate): after the log in it grants one Shirt (wcid 130, Clothing, inside Renald's mask) and one Leather Bracers (wcid 25637, Armor, outside Thelnoth's mask) with the mod's <c>item</c> verb (<see cref="PlayerTools.SpawnItem"/>: items
 /// only, never a creature, D23) and waits for each item's F745 in the pack. One session, about 3 minutes (the log in, the two grants, two <c>place loc</c> into the shops with their settles, two vendor opens of about 2 s each, the
@@ -33,16 +33,19 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </summary>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test-melee")]
+[LoopbackCharacter("Holtburg Brawler")]
+[LiveSharedSession]
 public sealed class VendorLiveTests(ITestOutputHelper output)
 {
     private const string Item = "3-2";
 
     [LoopbackFact]
-    public void Holtburg_Hunter_buys_one_kit_at_the_predicted_price_sells_it_back_is_refused_an_unsellable_item_and_sells_one_looted_item()
+    public void Holtburg_Brawler_buys_one_kit_at_the_predicted_price_sells_it_back_is_refused_an_unsellable_item_and_sells_one_looted_item()
     {
         using var dats = DatSet.Open();
         var leg = new VendorLeg(output.WriteLine, dats);
-        var result = LiveRun.Run(output, dats, leg, "vendor-hunter", 360, item: Item);
+        var result = LiveRun.Run(output, leg, "vendor-brawler", 360, item: Item, character: FighterTemplate.Melee.Name);
         foreach (var line in leg.Verdicts)
         {
             output.WriteLine(line);
@@ -53,8 +56,11 @@ public sealed class VendorLiveTests(ITestOutputHelper output)
         Assert.Equal(4, leg.Verdicts.Count);
     }
 
-    private sealed class VendorLeg(Action<string> log, DatSet dats) : HunterShopLeg("vendor-hunter", log, dats)
+    private sealed class VendorLeg(Action<string> log, DatSet dats) : HunterShopLeg("vendor-brawler", FighterTemplate.Melee.Name, log, dats)
     {
+        private const uint PyrealWcid = 273;
+        private const int PyrealGrant = 100;
+        private const long PyrealFloor = 50;
         private const uint ShirtWcid = 130;
         private const uint BracersWcid = 25637;
         private readonly List<string> _verdicts = [];
@@ -67,6 +73,17 @@ public sealed class VendorLiveTests(ITestOutputHelper output)
         protected override IEnumerable<ActionHandle?> Script()
         {
             foreach (var h in EnterHunter()) { yield return h; }
+
+            // ---- M4 P4: Holtburg Brawler has no pyreals (the Hunter's came from its loot sales): the buy needs some, so the test grants a stack of Pyreals (wcid 273, the mod's item verb: an item, never a creature, D23) when the pack holds fewer than the floor ----
+            if (Coins() < PyrealFloor)
+            {
+                Log($"the pack holds {Coins()} pyreals, below {PyrealFloor}: granting a stack of {PyrealGrant}");
+                foreach (var h in Grant(PyrealWcid, "Pyreals", PyrealGrant)) { yield return h; }
+
+                foreach (var h in Pause(1)) { yield return h; }
+
+                Check(Coins() >= PyrealFloor, $"the Pyreal grant did not raise the CoinValue to {PyrealFloor} (it is {Coins()})");
+            }
 
             // ---- the test's own sale items: an ITEM each (D23), never loot the hunt loop may already have sold ----
             foreach (var h in Grant(ShirtWcid, "Shirt")) { yield return h; }
@@ -185,10 +202,10 @@ public sealed class VendorLiveTests(ITestOutputHelper output)
         }
 
         /// <summary>Asks the mod's item verb for one <paramref name="wcid"/> (an item, never a creature), waits for its F745 in the pack and leaves its guid in <see cref="_granted"/> (0 when it never arrived).</summary>
-        private IEnumerable<ActionHandle?> Grant(uint wcid, string what)
+        private IEnumerable<ActionHandle?> Grant(uint wcid, string what, int? stack = null)
         {
             _granted = 0;
-            var spawn = S.Tools.SpawnItem(wcid, null, ActionSource.Host);
+            var spawn = S.Tools.SpawnItem(wcid, stack, ActionSource.Host);
             yield return spawn;
             if (!Check(spawn.Result is not null, $"the {what} grant (wcid {wcid}) failed: " + Describe(spawn)))
             {
@@ -268,12 +285,14 @@ public sealed class VendorLiveTests(ITestOutputHelper output)
 }
 
 /// <summary>
-/// What the vendor and appraisal live legs share (M4 3.2 s4c): the entry as Holtburg Hunter (never created, reset or purged here), the walk into a shop (<c>place loc</c> into the NPC's cell beside him, the opposite side when the first does not land
+/// What the vendor and appraisal live legs share (M4 3.2 s4c): the entry as the fighter it is given (never created, reset or purged here), the walk into a shop (<c>place loc</c> into the NPC's cell beside him, the opposite side when the first does not land
 /// inside the cell and the radius: <c>TODO(m4-vendor-approach)</c>), and the pack reads. Not a test itself.
 /// </summary>
-internal abstract class HunterShopLeg(string name, Action<string> log, DatSet dats) : LiveLeg(name, [], log, dats)
+internal abstract class HunterShopLeg(string name, string characterName, Action<string> log, DatSet dats) : LiveLeg(name, [], log, dats)
 {
-    internal const string CharacterName = "Holtburg Hunter";
+    /// <summary>The fighter the leg runs as (M4 P4: Holtburg Brawler for the vendor, Holtburg Archer for the appraisal; was the Hunter's).</summary>
+    internal string CharacterName => characterName;
+
     internal const uint KitWcid = 628;
     internal const uint MaceWcid = 331;
     internal const uint CoinProperty = 20;
@@ -295,9 +314,18 @@ internal abstract class HunterShopLeg(string name, Action<string> log, DatSet da
 
     protected long Coins() => S.State.Self.Qualities.TryGetInt(CoinProperty, out var value) ? value : -1;
 
-    /// <summary>Logs in, chooses Holtburg Hunter by name, enters the world and waits for the arrival with the qualities known.</summary>
+    /// <summary>Logs in, chooses the leg's fighter by name, enters the world and waits for the arrival with the qualities known.</summary>
     protected IEnumerable<ActionHandle?> EnterHunter()
     {
+        if (AlreadyInWorld)
+        {
+            Stage = "running";
+            Follow ??= new HuntFollow(Dats, new RecordingLogSink());
+            Log("already in the world: the shared session's entry logged the character in");
+            SelfGuid = S.State.Self.Guid;
+            yield break;
+        }
+
         Stage = "login";
         var login = S.Actions.Login(ActionSource.Host);
         yield return login;

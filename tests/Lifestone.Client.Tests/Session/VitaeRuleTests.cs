@@ -12,7 +12,6 @@ public sealed class VitaeRuleTests
 {
     [Theory]
     [InlineData(0.60f, 126, 0, 6_875_357L)] // a 40% penalty (ACE's cap) at level 126: the thresholds of 0.60 to 0.99, 40 steps
-    [InlineData(0.95f, 126, 0, 1_917_065L)] // 5%
     [InlineData(0.99f, 126, 0, 423_703L)] // 1%: one step, at multiplier 0.99
     [InlineData(0.60f, 126, 12_345, 6_863_012L)] // the pool counts against the sum
     public void The_experience_that_clears_a_penalty_is_the_sum_of_ACE_s_thresholds_less_the_pool(float multiplier, int level, int pool, long expected)

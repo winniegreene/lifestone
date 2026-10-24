@@ -69,6 +69,7 @@ public sealed class StringTests(DatSetFixture fixture) : IClassFixture<DatSetFix
         Assert.Throws<ArgumentException>(() => StringHash.Compute("Ā".AsSpan()));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void The_language_dat_holds_15_tables_and_6899_strings_and_0x2300000F_is_absent()
     {
@@ -89,6 +90,7 @@ public sealed class StringTests(DatSetFixture fixture) : IClassFixture<DatSetFix
         Assert.All(entries, e => Assert.Equal(e.Variables.Count + 1, e.Parts.Count)); // variable i goes after part i
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void STRINGTABLE_enums_resolve_through_group_4_and_only_StringTables_count()
     {
@@ -111,6 +113,7 @@ public sealed class StringTests(DatSetFixture fixture) : IClassFixture<DatSetFix
         Assert.Equal(new UiStringRef(0x0DBA315Eu, 0x23000002u), tables.Reference(UiStringTables.UiPregameEnum, "ID_CHAR_ERROR_LOGON"));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Every_character_error_and_M2_screen_token_renders_with_the_subset()
     {
@@ -135,6 +138,7 @@ public sealed class StringTests(DatSetFixture fixture) : IClassFixture<DatSetFix
         Assert.Empty(todo);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Two_tokens_retail_asks_for_are_missing_and_show_retails_error_text()
     {
@@ -149,6 +153,7 @@ public sealed class StringTests(DatSetFixture fixture) : IClassFixture<DatSetFix
         Assert.Equal(UiStringStatus.StringNotFound, rate.Status);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Escapes_and_variables_render_as_retail_shows_them()
     {
@@ -178,6 +183,7 @@ public sealed class StringTests(DatSetFixture fixture) : IClassFixture<DatSetFix
         Assert.StartsWith("42% of 12,345K", progress, StringComparison.Ordinal);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Integers_format_with_the_languages_grouping()
     {
@@ -193,6 +199,7 @@ public sealed class StringTests(DatSetFixture fixture) : IClassFixture<DatSetFix
         Assert.Equal("-12,000", language.FormatInteger(-12000));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Every_StringInfo_in_the_101_layouts_renders_without_error()
     {
@@ -218,6 +225,7 @@ public sealed class StringTests(DatSetFixture fixture) : IClassFixture<DatSetFix
         Assert.Equal(465, count);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void Meta_construct_census_over_every_table()
     {
@@ -260,6 +268,7 @@ public sealed class StringTests(DatSetFixture fixture) : IClassFixture<DatSetFix
         Assert.Equal(24, todo.Count);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresLocalDatsFact]
     public void The_tables_hold_no_literal_tab_CR_or_LF_so_the_whitespace_set_is_not_exercised()
     {

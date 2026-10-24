@@ -42,11 +42,38 @@ public sealed record HuntOptions
     /// <summary>The most session-clock seconds from the first teleport to the grounds to the last kill.</summary>
     public double Seconds { get; init; } = DefaultSeconds;
 
-    /// <summary>The weapon.</summary>
+    /// <summary>The weapon (<c>--hunt-weapon</c>; when not given, <see cref="FighterTemplate.DefaultWeapon"/> through <see cref="ForTemplate"/>, melee for a bare record).</summary>
     public HuntWeapon Weapon { get; init; } = HuntWeapon.Melee;
 
     /// <summary>The ground the hunt goes to (<c>--hunt-ground belt|forest</c>, M4 3.1 s0; default the belt, so every earlier command line hunts as it did).</summary>
     public HuntGroundChoice Ground { get; init; } = HuntGroundChoice.Belt;
+
+    /// <summary>True when <c>--hunt-weapon</c> was given (otherwise <see cref="ForTemplate"/> uses the template's default weapon).</summary>
+    public bool WeaponGiven { get; init; }
+
+    /// <summary>True when <c>--hunt-ground</c> was given (otherwise <see cref="ForTemplate"/> uses the template's default ground).</summary>
+    public bool GroundGiven { get; init; }
+
+    /// <summary>
+    /// The options with the template's defaults where the command line gave none (M4 P4, D31): the Hunter and the Brawler hunt the belt with the Mace, the Archer the forest with the Shortbow;
+    /// <c>--hunt-weapon</c> and <c>--hunt-ground</c> still override. A weapon the template cannot use (a missile hunt with no bow in its kit, a melee hunt with no melee weapon) is an error line
+    /// (<c>--hunt-weapon</c>, naming the template's key, never the value given).
+    /// </summary>
+    public HuntOptions ForTemplate(FighterTemplate template)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+        var o = this with
+        {
+            Weapon = WeaponGiven ? Weapon : template.DefaultWeapon,
+            Ground = GroundGiven ? Ground : template.DefaultGround,
+        };
+        if (!template.CanHuntWith(o.Weapon))
+        {
+            o = o with { Errors = [.. o.Errors, $"--hunt-weapon: the {template.Key} fighter ({template.Name}) has no {(o.Weapon == HuntWeapon.Missile ? "bow" : "melee weapon")} in its kit, so it cannot hunt with the {o.Weapon.ToString().ToLowerInvariant()} weapon"] };
+        }
+
+        return o;
+    }
 
     /// <summary>The chosen ground's row (<see cref="Ground"/>): what the scenario hunts and the leg reads the terrain heights of.</summary>
     public HuntGroundRow GroundRow => Ground == HuntGroundChoice.Forest ? HuntGround.LowNorthForestMix : HuntGround.LowB;
@@ -120,10 +147,10 @@ public sealed record HuntOptions
 
                     break;
                 case "--hunt-weapon":
-                    o = o with { Weapon = OptionValues.Choice(argument, errors, o.Weapon, ("melee", HuntWeapon.Melee), ("missile", HuntWeapon.Missile)) };
+                    o = o with { WeaponGiven = true, Weapon = OptionValues.Choice(argument, errors, o.Weapon, ("melee", HuntWeapon.Melee), ("missile", HuntWeapon.Missile)) };
                     break;
                 case "--hunt-ground":
-                    o = o with { Ground = OptionValues.Choice(argument, errors, o.Ground, ("belt", HuntGroundChoice.Belt), ("forest", HuntGroundChoice.Forest)) };
+                    o = o with { GroundGiven = true, Ground = OptionValues.Choice(argument, errors, o.Ground, ("belt", HuntGroundChoice.Belt), ("forest", HuntGroundChoice.Forest)) };
                     break;
                 case "--hunt-open-corpse":
                     o = o with { OpenCorpse = OptionValues.Switch(argument, errors, o.OpenCorpse) };

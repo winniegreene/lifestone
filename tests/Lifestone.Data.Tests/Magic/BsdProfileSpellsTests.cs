@@ -20,6 +20,7 @@ namespace Lifestone.Data.Tests.Magic;
 /// those two lines hold 8 and 7 spells whose level numerals do not run I-VI (TODO(m3-volley-blast-levels), reported to
 /// the lead).
 /// </remarks>
+[Trait("Tier", "Exhaustive")]
 public sealed class BsdProfileSpellsTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     /// <summary>One spell line: the spec's name, the dat's name root, school and type, and each spell's pinned id, name, power and duration (seconds).</summary>

@@ -10,6 +10,7 @@ using Lifestone.Client.Movement.Routes;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.World;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Tools;
 using Lifestone.Data.Physics;
@@ -269,7 +270,7 @@ public sealed partial class LoginCheckRunner : Node
             }
         }
 
-        var scenario = new LoginCheckScenario(HeadlessCharacter.RetailSkillClasses(dats), host.Options.Character, requestLogOff: logOffKey, legs: legs);
+        var scenario = new LoginCheckScenario(HeadlessCharacter.RetailSkillClasses(dats), host.Options.Character, requestLogOff: logOffKey, legs: legs) { FighterTemplate = FighterTemplate.ForAccount(host.Options.Account) ?? FighterTemplate.Hunter };
         var runner = new LoginCheckRunner
         {
             Name = "LoginCheckRunner",

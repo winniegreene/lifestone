@@ -8,6 +8,7 @@ namespace Lifestone.Data.Tests.Magic;
 /// <summary>The SpellTable (0x0E00000E) and SpellComponentTable (0x0E00000F), decoded from the user's portal.</summary>
 public sealed class SpellTableTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_spell_decodes_and_its_formula_uses_known_components()
@@ -45,6 +46,7 @@ public sealed class SpellTableTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal(new SortedDictionary<uint, int> { [1] = 5888, [2] = 163, [3] = 215 }, versions);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Account_customisation_rewrites_only_the_taper_slots()
@@ -102,6 +104,7 @@ public sealed class SpellTableTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal(AceComputeHash("été"), SpellFormulaRules.ComputeHash(new byte[] { 0xE9, 0x74, 0xE9 }));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Components_have_retail_gestures_words_and_types()
     {

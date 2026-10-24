@@ -32,9 +32,12 @@ internal static class DeathLive
     /// </summary>
     internal const double NewStagesSeconds = 630;
 
+    /// <summary>M4 P4 g3fix: the most the fight stage waits for mana before the den (<see cref="DeathOptions.FightManaWaitSeconds"/>).</summary>
+    internal const double FightManaWaitSeconds = 600;
+
     /// <summary>The headless run's limit for these options: the older overhead, the new stages, the fight's seconds and the wait among the tuskers (a ceiling: the real run takes about a third of it).</summary>
     /// <param name="options">The death loop's options.</param>
-    internal static double QuitAfterSecondsFor(DeathOptions options) => OverheadSeconds + NewStagesSeconds + options.FightSeconds + options.Seconds;
+    internal static double QuitAfterSecondsFor(DeathOptions options) => OverheadSeconds + NewStagesSeconds + options.FightSeconds + options.Seconds + options.FightManaWaitSeconds;
 
     internal static DeathLiveRun Run(ITestOutputHelper output, DeathOptions options, DeathStages stages)
     {
@@ -42,6 +45,7 @@ internal static class DeathLive
         var spells = SpellTableData.Load(dats).Spells;
         var files = BackendProbe.MainCheckoutFiles;
         var log = new RecordingLogSink();
+        LiveCharacter.Release(output, BackendProbe.TestAccountKey);
         var secrets = File.ReadAllBytes(files.SecretsFile);
         DeathScenario scenario;
         HeadlessRunner runner;
@@ -131,6 +135,7 @@ internal static class DeathLive
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
 public sealed class DeathLiveTests(ITestOutputHelper output)
 {
     private static string FieldOf(string fields, string name)
@@ -150,7 +155,8 @@ public sealed class DeathLiveTests(ITestOutputHelper output)
     [LoopbackFact]
     public void The_mage_dies_to_the_tuskers_respawns_at_Holtburgs_lifestone_with_vitae_and_is_regeared_and_the_decoys_take_the_death_and_come_back()
     {
-        var run = DeathLive.Run(output, new DeathOptions(), DeathStages.All);
+        // M4 P4 g3fix: g3 started the fight at 23 mana (the rebuff's 27 casts) and the 0.43 a second regeneration left it waiting for mana (kills=3 of 4, phase=Mana): the fight stage first waits, at Holtburg, up to 600 s for 70% of the maximum mana (empty to 70% of about 300 is 490 s).
+        var run = DeathLive.Run(output, new DeathOptions { FightManaWaitSeconds = DeathLive.FightManaWaitSeconds }, DeathStages.All);
         var scenario = run.Scenario;
         var tally = scenario.Tally;
         output.WriteLine("death_live " + scenario.VerdictFields());

@@ -8,20 +8,49 @@ namespace Lifestone.Client.Tests.Session;
 public sealed class HuntLegVerdictTests
 {
     private static readonly Regex Shape = new(
-        @"^hunt done ok=(true|false) kills=-?\d+ damage_dealt=-?\d+ damage_taken=-?\d+ hits_taken=-?\d+ evades=-?\d+ xp_gained=-?\d+ fighter=\S+ swings=\d+ shots=\d+ hits=\d+ misses=\d+ returned=(yes|no) attack_frame_max_ms=(\d+\.\d|n/a) corpses_opened=\d+ corpse_items=\d+ looted=\d+ loot_frame_max_ms=(\d+\.\d|n/a) loot_skipped=\d+ heals=\d+ kit_uses=\d+ potions=\d+ ground=(belt|forest) mode_mismatch=\d+ sold=\d+ bought=\d+ pyreals=-?\d+ appraised=\d+ vendor_frame_max_ms=(\d+\.\d|n/a)( loot_frame_over_50=yes)?( frame_over_50=yes)?$",
+        @"^hunt done ok=(true|false) kills=-?\d+ damage_dealt=-?\d+ damage_taken=-?\d+ hits_taken=-?\d+ evades=-?\d+ xp_gained=-?\d+ fighter=\S+ swings=\d+ shots=\d+ hits=\d+ misses=\d+ blocked=\d+ seeks=\d+ returned=(yes|no) attack_frame_max_ms=(\d+\.\d|n/a) corpses_opened=\d+ corpse_items=\d+ looted=\d+ loot_frame_max_ms=(\d+\.\d|n/a) loot_skipped=\d+ heals=\d+ kit_uses=\d+ potions=\d+ ground=(belt|forest) mode_mismatch=\d+ sold=\d+ bought=\d+ pyreals=-?\d+ appraised=\d+ vendor_frame_max_ms=(\d+\.\d|n/a) one_blow_kills=\d+( loot_frame_over_50=yes)?( frame_over_50=yes)?$",
         RegexOptions.CultureInvariant);
 
     private static HuntLegMeasures Good() => new(Kills: 1, DamageDealt: 12, DamageTaken: 0, HitsTaken: 0, Evades: 0, XpGained: 30, Fighter: "ok", Swings: 3, Shots: 0, Hits: 2, Misses: 1, Returned: true);
 
     [Fact]
-    public void A_clean_run_with_a_kill_and_damage_holds_and_the_line_has_the_documented_shape()
+    public void A_kill_by_one_lethal_blow_stands_for_the_damage_line_ACE_never_writes_and_none_fails_by_name_P5a_r3()
     {
-        var outcome = HuntLegVerdict.Compose(null, Good());
+        // P5a round 3: the level-55 Brawler killed every belt creature with one blow; ACE writes the attacker's damage notice only while the target lives (Player_Combat.cs 157 @95ef426d), so damage_dealt and hits stayed 0.
+        var melee = HuntLegVerdict.Compose(null, new HuntLegMeasures(3, 0, 0, 0, 0, 900, "ok", 3, 0, 0, 0, true, LootEnabled: false, OneBlowKills: 3));
+        Assert.True(melee.Ok, string.Join("; ", melee.Problems));
+        Assert.EndsWith(" one_blow_kills=3", melee.Line, StringComparison.Ordinal);
+        var missile = HuntLegVerdict.Compose(null, new HuntLegMeasures(1, 0, 0, 0, 0, 300, "ok", 0, 1, 0, 0, true, Weapon: HuntWeapon.Missile, OneBlowKills: 1));
+        Assert.True(missile.Ok, string.Join("; ", missile.Problems));
 
-        Assert.True(outcome.Ok);
+        var none = HuntLegVerdict.Compose(null, new HuntLegMeasures(1, 0, 0, 0, 0, 300, "ok", 2, 0, 0, 0, true));
+        Assert.False(none.Ok);
+        Assert.Contains(none.Problems, p => p.StartsWith("damage_dealt=0 (> 0 expected, or one_blow_kills >= 1; one_blow_kills=0)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_clean_run_with_a_kill_and_damage_holds_and_the_golden_line_has_every_field_in_order()
+    {
+        // The golden line (P1b lane B): every field set, both frame windows over 50 ms, so the whole line (the rounding, the signed pyreals, the flags last) is compared once.
+        var full = Good() with
+        {
+            Kills = 3, DamageDealt = 412, DamageTaken = 57, HitsTaken = 6, Evades = 2, XpGained = 1250, Swings = 19, Hits = 11, Misses = 8, Blocked = 5, Seeks = 2,
+            AttackFrameMaxMs = 61.04, CorpsesOpened = 3, CorpseItems = 7, Looted = 5, LootFrameMaxMs = 52.26, LootSkipped = 2,
+            Heals = 3, KitUses = 4, Potions = 1, Ground = HuntGroundChoice.Forest, ModeMismatch = 1,
+            Sold = 7, Bought = 2, Pyreals = -14, Appraised = 5, VendorFrameMaxMs = 41.26,
+        };
+
+        var outcome = HuntLegVerdict.Compose(null, full);
+
+        Assert.True(outcome.Ok, string.Join("; ", outcome.Problems));
         Assert.Empty(outcome.Problems);
         Assert.Matches(Shape, outcome.Line);
-        Assert.Equal("hunt done ok=true kills=1 damage_dealt=12 damage_taken=0 hits_taken=0 evades=0 xp_gained=30 fighter=ok swings=3 shots=0 hits=2 misses=1 returned=yes attack_frame_max_ms=n/a corpses_opened=0 corpse_items=0 looted=0 loot_frame_max_ms=n/a loot_skipped=0 heals=0 kit_uses=0 potions=0 ground=belt mode_mismatch=0 sold=0 bought=0 pyreals=0 appraised=0 vendor_frame_max_ms=n/a", outcome.Line);
+        Assert.Equal("hunt done ok=true kills=3 damage_dealt=412 damage_taken=57 hits_taken=6 evades=2 xp_gained=1250 fighter=ok swings=19 shots=0 hits=11 misses=8 blocked=5 seeks=2 returned=yes attack_frame_max_ms=61.0 corpses_opened=3 corpse_items=7 looted=5 loot_frame_max_ms=52.3 loot_skipped=2 heals=3 kit_uses=4 potions=1 ground=forest mode_mismatch=1 sold=7 bought=2 pyreals=-14 appraised=5 vendor_frame_max_ms=41.3 one_blow_kills=0 loot_frame_over_50=yes frame_over_50=yes", outcome.Line);
+
+        // and the plain run: the n/a branches of the unmeasured windows
+        var plain = HuntLegVerdict.Compose(null, Good());
+        Assert.True(plain.Ok);
+        Assert.Equal("hunt done ok=true kills=1 damage_dealt=12 damage_taken=0 hits_taken=0 evades=0 xp_gained=30 fighter=ok swings=3 shots=0 hits=2 misses=1 blocked=0 seeks=0 returned=yes attack_frame_max_ms=n/a corpses_opened=0 corpse_items=0 looted=0 loot_frame_max_ms=n/a loot_skipped=0 heals=0 kit_uses=0 potions=0 ground=belt mode_mismatch=0 sold=0 bought=0 pyreals=0 appraised=0 vendor_frame_max_ms=n/a one_blow_kills=0", plain.Line);
     }
 
     [Fact]
@@ -43,7 +72,6 @@ public sealed class HuntLegVerdictTests
         var outcome = HuntLegVerdict.Compose(null, reported);
 
         Assert.True(outcome.Ok);
-        Assert.Contains("returned=no", outcome.Line, StringComparison.Ordinal);
         Assert.Matches(Shape, outcome.Line);
     }
 
@@ -82,13 +110,6 @@ public sealed class HuntLegVerdictTests
         Assert.Matches(Shape, noHits.Line);
     }
 
-    [Fact]
-    public void The_misses_the_return_and_the_fighter_are_not_judged_beyond_the_failure()
-    {
-        Assert.True(HuntLegVerdict.Compose(null, Good() with { Misses = 40, Returned = false, Fighter = "wrong" }).Ok);
-        Assert.False(HuntLegVerdict.Compose("the character is not the fighter", Good() with { Fighter = "wrong" }).Ok);
-    }
-
     [Theory]
     [InlineData(49.9, true, false)]
     [InlineData(50.0, true, false)]
@@ -101,7 +122,6 @@ public sealed class HuntLegVerdictTests
 
         Assert.Equal(ok, outcome.Ok);
         Assert.Equal(flagged, outcome.Line.EndsWith(" frame_over_50=yes", StringComparison.Ordinal));
-        Assert.Contains(" attack_frame_max_ms=" + ms.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " ", outcome.Line, StringComparison.Ordinal);
         Assert.Matches(Shape, outcome.Line);
         Assert.Equal(ok, outcome.Problems.Count == 0);
         if (!ok)
@@ -123,24 +143,12 @@ public sealed class HuntLegVerdictTests
     }
 
     [Fact]
-    public void The_corpse_fields_are_reported_and_not_judged()
-    {
-        var opened = HuntLegVerdict.Compose(null, Good() with { CorpsesOpened = 1, CorpseItems = 2 });
-        Assert.True(opened.Ok);
-        Assert.Contains(" corpses_opened=1 corpse_items=2", opened.Line, StringComparison.Ordinal);
-        Assert.Matches(Shape, opened.Line);
-        Assert.True(HuntLegVerdict.Compose(null, Good() with { CorpsesOpened = 0, CorpseItems = 0 }).Ok);
-    }
-
-    [Fact]
-    public void The_loot_fields_follow_the_corpse_fields_and_a_one_kill_leg_with_nothing_looted_still_holds_3_1_s3()
+    public void A_one_kill_leg_with_nothing_looted_still_holds_and_an_unmeasured_loot_window_reads_n_a_3_1_s3()
     {
         var looted = HuntLegVerdict.Compose(null, Good() with { CorpsesOpened = 1, CorpseItems = 2, Looted = 2, LootFrameMaxMs = 31.46, LootSkipped = 1 });
 
         Assert.True(looted.Ok);
         Assert.Empty(looted.Problems);
-        Assert.Contains(" corpses_opened=1 corpse_items=2 looted=2 loot_frame_max_ms=31.5 loot_skipped=1 heals=0", looted.Line, StringComparison.Ordinal);
-        Assert.Matches(Shape, looted.Line);
         Assert.DoesNotContain("frame_over_50", looted.Line, StringComparison.Ordinal);
 
         // one kill: its corpse may hold only what the rule leaves (2.2's gate: one run in four), so looted=0 is never judged there
@@ -164,7 +172,6 @@ public sealed class HuntLegVerdictTests
 
         Assert.Equal(ok, outcome.Ok);
         Assert.Equal(ok, outcome.Problems.Count == 0);
-        Assert.Contains($" looted={looted} ", outcome.Line, StringComparison.Ordinal);
         if (!ok)
         {
             var problem = Assert.Single(outcome.Problems);
@@ -180,7 +187,6 @@ public sealed class HuntLegVerdictTests
         var off = HuntLegVerdict.Compose(null, Good() with { Kills = 3, Looted = 0, LootEnabled = false });
 
         Assert.True(off.Ok, string.Join("; ", off.Problems));
-        Assert.Contains(" looted=0 ", off.Line, StringComparison.Ordinal);
         Assert.False(HuntLegVerdict.Compose(null, Good() with { Kills = 3, Looted = 0, LootEnabled = true }).Ok);
     }
 
@@ -197,7 +203,6 @@ public sealed class HuntLegVerdictTests
         Assert.Equal(ok, outcome.Ok);
         Assert.Equal(flagged, outcome.Line.EndsWith(" frame_over_50=yes", StringComparison.Ordinal)); // the flag the attack frames use
         Assert.Equal(flagged, outcome.Line.Contains(" loot_frame_over_50=yes", StringComparison.Ordinal));
-        Assert.Contains(" loot_frame_max_ms=" + ms.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " ", outcome.Line, StringComparison.Ordinal);
         Assert.Matches(Shape, outcome.Line);
         Assert.Equal(ok, outcome.Problems.Count == 0);
         if (!ok)
@@ -228,34 +233,14 @@ public sealed class HuntLegVerdictTests
     }
 
     [Fact]
-    public void M4_3_1_s4_mode_mismatch_follows_ground_before_the_flags_and_never_fails_the_leg()
+    public void M4_3_1_s4_mode_mismatch_never_fails_the_leg()
     {
-        var clean = HuntLegVerdict.Compose(null, Good() with { Ground = HuntGroundChoice.Forest });
         var mismatched = HuntLegVerdict.Compose(null, Good() with { Ground = HuntGroundChoice.Forest, ModeMismatch = 4, AttackFrameMaxMs = 61.0, LootFrameMaxMs = 55.5 });
 
-        Assert.Contains(" ground=forest mode_mismatch=0 sold=0", clean.Line, StringComparison.Ordinal);
         Assert.True(mismatched.Ok, "a new judge is report-only in its first gate: mode_mismatch fails nothing");
         Assert.Empty(mismatched.Problems);
-        Assert.Contains(" ground=forest mode_mismatch=4 sold=0 bought=0 pyreals=0 appraised=0 vendor_frame_max_ms=n/a loot_frame_over_50=yes frame_over_50=yes", mismatched.Line, StringComparison.Ordinal);
-        Assert.EndsWith(" vendor_frame_max_ms=n/a loot_frame_over_50=yes frame_over_50=yes", mismatched.Line, StringComparison.Ordinal);
         Assert.Matches(Shape, mismatched.Line);
         Assert.Equal(CombatModeWatch.FieldName + "=4", "mode_mismatch=4"); // the field's name is the watch's own
-    }
-
-    [Fact]
-    public void The_heal_fields_follow_the_loot_fields_and_are_report_only_3_1_s3()
-    {
-        var healed = HuntLegVerdict.Compose(null, Good() with { Heals = 3, KitUses = 4, Potions = 1, Ground = HuntGroundChoice.Forest });
-
-        Assert.True(healed.Ok);
-        Assert.Contains(" loot_skipped=0 heals=3 kit_uses=4 potions=1 ground=forest", healed.Line, StringComparison.Ordinal);
-        Assert.Matches(Shape, healed.Line);
-
-        // heals >= 1 is judged at 3.2's gate: a leg that healed nothing holds here, with the field printed
-        var none = HuntLegVerdict.Compose(null, Good() with { Kills = 4, Looted = 2, Heals = 0, KitUses = 0, Potions = 0 });
-        Assert.True(none.Ok, string.Join("; ", none.Problems));
-        Assert.Contains(" heals=0 kit_uses=0 potions=0 ground=belt", none.Line, StringComparison.Ordinal);
-        Assert.DoesNotContain(none.Problems, p => p.Contains("heals", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -269,7 +254,6 @@ public sealed class HuntLegVerdictTests
         var hurt = HuntLegVerdict.Compose(null, Good() with { HealthStartShare = 0.5, Heals = 0 });
         Assert.False(hurt.Ok);
         Assert.Contains(hurt.Problems, p => p.Contains("no heal although the hunt started at 50% under the 75% trigger", StringComparison.Ordinal));
-        Assert.Contains(" heals=0 kit_uses=0 potions=0 ground=belt", hurt.Line, StringComparison.Ordinal);
         Assert.Matches(Shape, hurt.Line);
 
         // the trigger is the option's: 60% started under --heal-below 70, but not under 50
@@ -384,25 +368,18 @@ public sealed class HuntLegVerdictTests
     }
 
     [Fact]
-    public void M4_3_2_s4a_the_sale_the_buy_and_the_vendor_frame_follow_mode_mismatch_before_the_flags_and_judge_nothing()
+    public void M4_3_2_s4a_the_sale_the_buy_and_the_vendor_frame_judge_nothing()
     {
         var shopped = HuntLegVerdict.Compose(null, Good() with { Sold = 7, Bought = 2, Pyreals = 123, Appraised = 5, VendorFrameMaxMs = 41.26 });
 
         Assert.True(shopped.Ok, "report-only in the first gate: sold>=1 and vendor_frame_max_ms are judged at 4.2");
         Assert.Empty(shopped.Problems);
-        Assert.EndsWith(" mode_mismatch=0 sold=7 bought=2 pyreals=123 appraised=5 vendor_frame_max_ms=41.3", shopped.Line, StringComparison.Ordinal);
-        Assert.Matches(Shape, shopped.Line);
 
         // nothing sold, a negative delta (the purchase's price outweighs a small sale is not the sale's delta, but the field is a signed number), a slow vendor frame: still passes, the flag is the attack and loot windows' only
         var odd = HuntLegVerdict.Compose(null, Good() with { Sold = 0, Bought = 0, Pyreals = -14, Appraised = 0, VendorFrameMaxMs = 180.0 });
         Assert.True(odd.Ok);
         Assert.Empty(odd.Problems);
-        Assert.Contains(" sold=0 bought=0 pyreals=-14 appraised=0 vendor_frame_max_ms=180.0", odd.Line, StringComparison.Ordinal);
         Assert.DoesNotContain("frame_over_50=yes", odd.Line, StringComparison.Ordinal);
         Assert.Matches(Shape, odd.Line);
-
-        // the flags stay last when the attack window is slow
-        var flagged = HuntLegVerdict.Compose(null, Good() with { Sold = 1, AttackFrameMaxMs = 60.0 });
-        Assert.EndsWith(" appraised=0 vendor_frame_max_ms=n/a frame_over_50=yes", flagged.Line, StringComparison.Ordinal);
     }
 }

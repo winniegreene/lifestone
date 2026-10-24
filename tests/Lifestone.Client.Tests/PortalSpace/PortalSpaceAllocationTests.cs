@@ -156,6 +156,7 @@ public sealed class PortalSpaceAllocationTests
 /// have grown.
 /// </summary>
 [Collection(AllocationMeasurementCollection.Name)]
+[Trait("Tier", "Exhaustive")]
 public sealed class TunnelObjectAllocationTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     [RequiresDatsFact]

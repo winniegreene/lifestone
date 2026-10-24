@@ -102,21 +102,6 @@ public sealed class StandInHumanLookTests(DatSetFixture fixture, ITestOutputHelp
         tally.Dispose();
     }
 
-    [Fact]
-    public void A_corpse_made_by_a_tusker_kill_wears_the_look_too()
-    {
-        using var rig = new CastRig(new StandInVisit { EnterAfter = 0.2, UnhideAfter = 1.0, HumanModel = PlayerLook, Stats = new StandInPlayerStats { Health = 5, Level = 30 } });
-        var tally = new DeathTally();
-        tally.Start(rig.Session);
-        var server = StandInSessions.Server(rig.Session.Reducer);
-        rig.Begin();
-        Assert.NotNull(server.PlaceNear(StandInTusker.Make(0x80000C02, default, attacks: true), new System.Numerics.Vector3(0f, 1f, 0f)));
-        rig.Run(40.0);
-        Assert.Equal(1, tally.CorpsesSeen);
-        Assert.Equal(PlayerLook, ModelOf(rig.Session.State.Objects, tally.LastCorpseGuid));
-        tally.Dispose();
-    }
-
     [RequiresDatsFact]
     public void The_composed_stand_in_look_round_trips_and_dresses_an_avatar_part_by_part()
     {

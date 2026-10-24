@@ -8,6 +8,7 @@ public sealed class CellVisibilityTests(CellsFixture fixture) : IClassFixture<Ce
 {
     private const uint InnEntry = 0xA9B40100u;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Inside_the_Holtburg_inn_the_walk_stays_in_the_PVS_and_sees_outside()
     {
@@ -36,6 +37,7 @@ public sealed class CellVisibilityTests(CellsFixture fixture) : IClassFixture<Ce
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_frustum_looking_at_a_wall_sees_only_the_viewer_cell()
     {
@@ -55,6 +57,7 @@ public sealed class CellVisibilityTests(CellsFixture fixture) : IClassFixture<Ce
         Assert.Equal(cell.Id, looking.Cells[0].Cell.Id);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Looking_into_the_inn_from_outside_enters_through_a_doorway()
     {
@@ -92,6 +95,7 @@ public sealed class CellVisibilityTests(CellsFixture fixture) : IClassFixture<Ce
     /// that tiny edge cut the next portal away, and every cell behind it was dropped (e.g. 0x5E440318 lost 0x5E4402FB
     /// behind 0x5E440313 portal 1 and 0x5E440314 portal 0). The ray oracle must find nothing the walk misses.
     /// </summary>
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [InlineData(0x5E440318u, false)]
     [InlineData(0x800301CCu, false)]
@@ -114,6 +118,7 @@ public sealed class CellVisibilityTests(CellsFixture fixture) : IClassFixture<Ce
         Assert.False(result.MissedOutside);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Walk_from_0x5E440318_reaches_0x5E4402FB()
     {

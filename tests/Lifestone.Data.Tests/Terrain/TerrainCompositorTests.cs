@@ -169,6 +169,7 @@ public sealed class TerrainCompositorTests(DatSetFixture fixture, ITestOutputHel
             .Where(w => w != (TerrainAlphaKind.Side, TerrainRotation.Rot0) && w != (TerrainAlphaKind.Side, TerrainRotation.Rot1))
             .ToArray();
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Real_cells_match_the_ImgTex_pointer_walk_for_every_map_kind_and_rotation()
     {
@@ -372,6 +373,7 @@ public sealed class TerrainCompositorTests(DatSetFixture fixture, ITestOutputHel
         Assert.NotEqual(reversed, half);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Real_alpha_maps_cover_the_corners_and_sides_their_codes_name()
     {
@@ -398,6 +400,7 @@ public sealed class TerrainCompositorTests(DatSetFixture fixture, ITestOutputHel
             "road 10 (SE+NW) should run along the NW-SE diagonal");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_cells_compose_identically_both_ways_with_real_textures()
     {
@@ -442,6 +445,7 @@ public sealed class TerrainCompositorTests(DatSetFixture fixture, ITestOutputHel
         Assert.True(maxFloatDiff <= 6, $"float path deviates by {maxFloatDiff} levels");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Vertex_light_interpolation_follows_the_mesh_triangles()
     {

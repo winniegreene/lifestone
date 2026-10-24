@@ -1,6 +1,7 @@
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session;
+using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 
@@ -38,6 +39,9 @@ internal enum HeadlessScenario
 
     /// <summary>The fighter binds at Holtburg's lifestone, goes to the Low B belt, fights until <c>--hunt-kills</c> kills with the Mace or the Shortbow and comes back (M4 1.2 s4a, <c>HuntScenario</c>); changes the character (experience, health potions).</summary>
     Hunt,
+
+    /// <summary>Log in as the account's fighter, run to <c>--to</c> with the wayfinder and the human's keys over the collision and tiles the headless streamer builds ahead (and with <c>--wayfind-back</c> back), print the wayfind lines (P5a S6, <c>WayfindScenario</c>); moves the character.</summary>
+    Wayfind,
 }
 
 /// <summary>
@@ -93,6 +97,18 @@ internal sealed record HeadlessOptions
     /// <summary>The hunt loop's options (<c>--hunt-*</c>), used by <c>--scenario=hunt</c>.</summary>
     internal HuntOptions Hunt { get; init; } = new();
 
+    /// <summary>The wayfind scenario's options (<c>--to</c>, <c>--from</c>, <c>--wayfind-back</c>), used by <c>--scenario=wayfind</c>.</summary>
+    internal WayfindOptions Wayfind { get; init; } = new();
+
+    /// <summary>
+    /// The fighter template of <c>--scenario=fighter-build</c>, <c>--scenario=hunt</c> and <c>--scenario=wayfind</c> (M4 P4, D31): <c>--fighter</c> when given, else the template of <c>--account</c> (test is the Hunter, test-melee the Brawler,
+    /// test-archer the Archer); null for every other scenario. An explicit <c>--fighter</c> that does not match <c>--account</c> is an error.
+    /// </summary>
+    internal FighterTemplate? Fighter { get; init; }
+
+    /// <summary><c>--fighter-recreate</c> (M4 P5a C5, D40): <c>--scenario=fighter-build</c> on the Brawler or the Archer deletes (pending deletion) and re-creates a character whose creation attributes differ from the template's.</summary>
+    internal bool FighterRecreate { get; init; }
+
     /// <summary>The Session group's values.</summary>
     internal SessionOptions Session { get; init; } = new();
 
@@ -115,7 +131,10 @@ internal sealed record HeadlessOptions
         errors.AddRange(death.Errors);
         var hunt = HuntOptions.FromArguments(arguments);
         errors.AddRange(hunt.Errors);
+        var wayfind = WayfindOptions.FromArguments(arguments);
+        errors.AddRange(wayfind.Errors);
         var o = new HeadlessOptions();
+        FighterTemplate? requestedFighter = null;
         foreach (var argument in arguments)
         {
             switch (argument.Name)
@@ -139,8 +158,17 @@ internal sealed record HeadlessOptions
                             ("buff", HeadlessScenario.Buff),
                             ("fight", HeadlessScenario.Fight),
                             ("death-and-regear", HeadlessScenario.DeathAndRegear),
-                            ("hunt", HeadlessScenario.Hunt)),
+                            ("hunt", HeadlessScenario.Hunt),
+                            ("wayfind", HeadlessScenario.Wayfind)),
                     };
+                    break;
+                case "--fighter":
+                    requestedFighter = FighterTemplate.ForKey(argument.Value);
+                    if (requestedFighter is null)
+                    {
+                        errors.Add($"{argument.Name}: '{argument.Value}' is not one of {string.Join(", ", FighterTemplate.All.Select(t => t.Key))}");
+                    }
+
                     break;
                 case "--laps":
                     var known = errors.Count;
@@ -215,13 +243,77 @@ internal sealed record HeadlessOptions
             }
         }
 
-        if (o.Scenario is HeadlessScenario.MageBuild or HeadlessScenario.FighterBuild or HeadlessScenario.Gear or HeadlessScenario.Buff or HeadlessScenario.Fight or HeadlessScenario.DeathAndRegear or HeadlessScenario.Hunt && session.Account is { } account && !string.Equals(account, Program.DefaultAccount, StringComparison.OrdinalIgnoreCase))
+        var fighterScenario = o.Scenario is HeadlessScenario.FighterBuild or HeadlessScenario.Hunt or HeadlessScenario.Wayfind;
+        var buffScenario = o.Scenario == HeadlessScenario.Buff;
+        if (o.Scenario is HeadlessScenario.MageBuild or HeadlessScenario.FighterBuild or HeadlessScenario.Gear or HeadlessScenario.Buff or HeadlessScenario.Fight or HeadlessScenario.DeathAndRegear or HeadlessScenario.Hunt or HeadlessScenario.Wayfind && session.Account is { } account && !string.Equals(account, Program.DefaultAccount, StringComparison.OrdinalIgnoreCase) && !(fighterScenario && FighterTemplate.ForAccount(account) is not null) && !(buffScenario && FighterTemplate.ForAccount(account) is { Kit.HasCaster: true }))
         {
             // M3 1.1-R5: the build creates and levels a permanent character, so it runs on the default test account only (automation uses accounts.test only).
-            errors.Add($"--account: --scenario={(o.Scenario switch { HeadlessScenario.Gear => "gear", HeadlessScenario.Buff => "buff", HeadlessScenario.Fight => "fight", HeadlessScenario.DeathAndRegear => "death-and-regear", HeadlessScenario.Hunt => "hunt", HeadlessScenario.FighterBuild => "fighter-build", _ => "mage-build" })} runs on the default test account '{Program.DefaultAccount}' only; the value is not shown");
+            // M4 P4 (D31): the fighter-build and hunt scenarios also run on the account of a fighter template (test-melee, test-archer); every other scenario stays on test.
+            // M4 P5a C4: so does the buff scenario, on the account of a fighter with a caster (the Brawler's and the Archer's; the Hunter has none and buffs nobody).
+            errors.Add($"--account: --scenario={(o.Scenario switch { HeadlessScenario.Gear => "gear", HeadlessScenario.Buff => "buff", HeadlessScenario.Fight => "fight", HeadlessScenario.DeathAndRegear => "death-and-regear", HeadlessScenario.Hunt => "hunt", HeadlessScenario.Wayfind => "wayfind", HeadlessScenario.FighterBuild => "fighter-build", _ => "mage-build" })} runs on {(fighterScenario ? "the account of a fighter template (" + string.Join(", ", FighterTemplate.All.Select(t => t.AccountKey)) + ")" : buffScenario ? "the default test account '" + Program.DefaultAccount + "' or the account of a fighter with a caster (" + string.Join(", ", FighterTemplate.All.Where(t => t.Kit.HasCaster).Select(t => t.AccountKey)) + ")" : "the default test account '" + Program.DefaultAccount + "'")} only; the value is not shown");
         }
 
-        return o with { Session = session, Buff = buff, Fight = fight, Death = death, Hunt = hunt, Errors = errors };
+        FighterTemplate? fighter = null;
+        if (fighterScenario || buffScenario)
+        {
+            fighter = FighterTemplate.ForAccount(session.Account);
+            if (requestedFighter is not null && fighter is not null && fighter != requestedFighter)
+            {
+                errors.Add($"--fighter: the {requestedFighter.Key} fighter lives on account '{requestedFighter.AccountKey}', which is not the account of this run (the value of --account is not shown)");
+            }
+
+            fighter = fighter is null ? null : requestedFighter ?? fighter;
+            if (buffScenario && fighter is { Kit.HasCaster: false })
+            {
+                // The buff scenario is the mage's on the default account (the Hunter's account) and the fighter's only for a fighter with a caster.
+                if (requestedFighter is not null)
+                {
+                    errors.Add($"--fighter: the {requestedFighter.Key} fighter has no caster and no buff profile; --scenario=buff takes {string.Join(", ", FighterTemplate.All.Where(t => t.Kit.HasCaster).Select(t => t.Key))}");
+                }
+
+                fighter = null;
+            }
+
+            if (o.Scenario == HeadlessScenario.Hunt && fighter is not null)
+            {
+                var resolved = hunt.ForTemplate(fighter);
+                errors.AddRange(resolved.Errors.Skip(hunt.Errors.Count));
+                hunt = resolved;
+            }
+        }
+        else if (requestedFighter is not null)
+        {
+            errors.Add("--fighter: only --scenario=fighter-build, --scenario=hunt, --scenario=wayfind and --scenario=buff take a fighter template");
+        }
+
+        if (o.Scenario == HeadlessScenario.Wayfind)
+        {
+            if (wayfind.To is null && !wayfind.Errors.Any(e => e.StartsWith("--to:", StringComparison.Ordinal)))
+            {
+                errors.Add("--to: --scenario=wayfind needs a destination (--to=0xA5B00032 or --to=CELL@x,y,z)");
+            }
+        }
+        else if (arguments.Any(a => a.Name is "--to" or "--from" or "--wayfind-back"))
+        {
+            errors.Add("--to, --from and --wayfind-back: only --scenario=wayfind takes them");
+        }
+
+        var recreate = false;
+        foreach (var argument in arguments)
+        {
+            if (argument.Name == "--fighter-recreate")
+            {
+                recreate = OptionValues.Switch(argument, errors, false);
+            }
+        }
+
+        if (recreate && !(o.Scenario == HeadlessScenario.FighterBuild && fighter is not null && fighter.Key != FighterTemplate.Hunter.Key))
+        {
+            errors.Add("--fighter-recreate: only --scenario=fighter-build on the Brawler (test-melee) or the Archer (test-archer) takes it; the Hunter, any other account and every other scenario refuse it");
+            recreate = false;
+        }
+
+        return o with { Session = session, Buff = buff, Fight = fight, Death = death, Hunt = hunt, Wayfind = wayfind, Fighter = fighter, FighterRecreate = recreate, Errors = errors };
     }
 
     private static string? Required(CommandLineArgument argument, List<string> errors, string what)

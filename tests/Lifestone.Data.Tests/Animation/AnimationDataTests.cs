@@ -5,6 +5,7 @@ using DatAnimation = DatReaderWriter.DBObjs.Animation;
 namespace Lifestone.Data.Tests.Animation;
 
 /// <summary>Decodes every Animation (0x03) and MotionTable (0x09) in the user's portal.</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class AnimationDataTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     [RequiresDatsFact]

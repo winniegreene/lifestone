@@ -2,6 +2,7 @@ using System.Numerics;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement;
 using Lifestone.Client.Movement.Routes;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.Animation;
 using Lifestone.Data.Dat;
@@ -113,21 +114,6 @@ public sealed class HoltburgLapsScenario : IScenario
     /// A physics world with the collision of <paramref name="centre"/> and the eight landblocks around it attached, built
     /// from the dats (the cost is the builds', a few seconds).
     /// </summary>
-    internal static PhysicsWorld AttachAround(DatSet dats, PhysicsGeometryLibrary geometry, LandblockCoord centre)
-    {
-        var builder = new LandblockCollisionBuilder(dats, geometry);
-        var world = new PhysicsWorld();
-        for (var dx = -1; dx <= 1; dx++)
-        {
-            for (var dy = -1; dy <= 1; dy++)
-            {
-                if (centre.Offset(dx, dy) is { } coord)
-                {
-                    world.Attach(builder.Build(coord));
-                }
-            }
-        }
-
-        return world;
-    }
+    internal static PhysicsWorld AttachAround(DatSet dats, PhysicsGeometryLibrary geometry, LandblockCoord centre) =>
+        HeadlessStreamer.AttachAround(dats, geometry, centre); // P5a S6: the headless streamer (the collision streamer over two workers) builds the nine in parallel
 }

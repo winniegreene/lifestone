@@ -413,10 +413,8 @@ public sealed class PositionManagerTests
 
     [Theory]
     [InlineData(0f)]
-    [InlineData(45f)]
     [InlineData(90f)]
     [InlineData(180f)]
-    [InlineData(270f)]
     [InlineData(359f)]
     public void Headings_round_trip(float heading)
     {

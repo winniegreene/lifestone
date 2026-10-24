@@ -138,6 +138,33 @@ public sealed class ActionTrackersTests
     }
 
     [Fact]
+    public void Enter_world_survives_a_0x0D_the_session_retries_and_ends_with_the_error_only_when_the_session_gives_up_P5a_Fgate()
+    {
+        var h = new ActionHarness();
+        h.AtCharacterSelect();
+        var enter = h.Api.EnterWorld(ActionHarness.Amy, ActionSource.Ui);
+        h.Tick();
+        h.Phase(SessionPhase.CharacterSelect, SessionPhase.EnteringWorld);
+
+        // ACE still holds the character: the session retries (LoginRetryPolicy's 75 s wait). The first 0x0D must not end the action.
+        for (var i = 0; i < 3; i++)
+        {
+            h.R.Reducer.OnCharacterError(h.R.Context, new CharacterErrorMsg(0x0D));
+            h.R.Reducer.OnSessionEvent(SessionEvent.RetryScheduled(h.R.Time.GetTimestamp(), SessionPhase.EnteringWorld, i + 2, TimeSpan.FromSeconds(5), 0x0D, "refused"));
+            h.Tick();
+            Assert.False(enter.IsCompleted);
+        }
+
+        // The wait is spent: the session gives up and the action ends with the server error.
+        h.R.Reducer.OnCharacterError(h.R.Context, new CharacterErrorMsg(0x0D));
+        h.Phase(SessionPhase.EnteringWorld, SessionPhase.CharacterSelect);
+        h.R.Reducer.OnSessionEvent(SessionEvent.CharacterErrorReceived(h.R.Time.GetTimestamp(), SessionPhase.CharacterSelect, 0x0D));
+        h.Tick();
+        Assert.Equal(ActionOutcomeKind.ServerError, enter.Outcome!.Value.Kind);
+        Assert.Equal(0x0Du, enter.Outcome.Value.Code);
+    }
+
+    [Fact]
     public void Enter_refuses_pending_slot()
     {
         var h = new ActionHarness();

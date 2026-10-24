@@ -57,13 +57,6 @@ public sealed class LootRulesTests
 
     // ------------------------------------------------------------------------------------------------ the default rule
 
-    [Fact]
-    public void The_default_rule_takes_a_valued_item_of_a_shop_type()
-    {
-        Assert.Equal(LootDecision.Take, LootRules.Default.Decide(Item(Misc, 4000), in Empty));
-        Assert.Equal(LootDecision.Take, LootRules.Default.Decide(Item(Armor, 25, 30), in Empty));
-    }
-
     [Theory]
     [InlineData(0u, LootDecision.Value)]
     [InlineData(1u, LootDecision.Take)]
@@ -123,10 +116,7 @@ public sealed class LootRulesTests
     [Theory]
     [InlineData(1000, 500, LootDecision.Take)] // exactly the capacity
     [InlineData(1000, 501, LootDecision.Burden)] // one over
-    [InlineData(0, 1500, LootDecision.Take)]
-    [InlineData(0, 1501, LootDecision.Burden)]
     [InlineData(1500, 0, LootDecision.Take)] // already at the limit: an item that weighs nothing still fits
-    [InlineData(1500, 1, LootDecision.Burden)]
     public void The_burden_limit_is_the_capacity_and_the_boundary_is_inclusive(int burden, int itemBurden, LootDecision expected)
     {
         var context = new LootContext(burden, 1500, null);

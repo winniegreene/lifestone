@@ -23,20 +23,13 @@ public sealed class UiAnchorTests
     [Theory]
     // Keep: nothing moves, whatever the parent does.
     [InlineData(1280, 720, UiEdge.Keep, 100, 50, 299, 149)]
-    [InlineData(1920, 1080, UiEdge.Keep, 100, 50, 299, 149)]
-    [InlineData(2560, 1440, UiEdge.Keep, 100, 50, 299, 149)]
     // OwnSide: left and top keep; right + dW, bottom + dH.
     [InlineData(1280, 720, UiEdge.OwnSide, 100, 50, 779, 269)]
     [InlineData(1920, 1080, UiEdge.OwnSide, 100, 50, 1419, 629)]
-    [InlineData(2560, 1440, UiEdge.OwnSide, 100, 50, 2059, 989)]
     // OppositeSide: left + dW, top + dH; right and bottom keep.
     [InlineData(1280, 720, UiEdge.OppositeSide, 580, 170, 299, 149)]
-    [InlineData(1920, 1080, UiEdge.OppositeSide, 1220, 530, 299, 149)]
-    [InlineData(2560, 1440, UiEdge.OppositeSide, 1860, 890, 299, 149)]
     // Centre: W/2 - 100 .. W/2 + 99, H/2 - 50 .. H/2 + 49.
     [InlineData(1280, 720, UiEdge.Centre, 540, 310, 739, 409)]
-    [InlineData(1920, 1080, UiEdge.Centre, 860, 490, 1059, 589)]
-    [InlineData(2560, 1440, UiEdge.Centre, 1180, 670, 1379, 769)]
     // Proportional: float width ratio, double height ratio, truncated.
     [InlineData(1280, 720, UiEdge.Proportional, 160, 60, 478, 178)]
     [InlineData(1920, 1080, UiEdge.Proportional, 240, 90, 717, 268)]

@@ -20,6 +20,7 @@ public sealed class ModelAssemblyTests(DatSetFixture fixture, ITestOutputHelper 
 {
     private const float Tolerance = 1e-5f;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Humanoid_setup_0x02000001_matches_independent_decode()
     {
@@ -69,6 +70,7 @@ public sealed class ModelAssemblyTests(DatSetFixture fixture, ITestOutputHelper 
         AssertVector(Vector3.UnitZ, Vector3.Transform(Vector3.UnitZ, pose[0].Orientation));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Flat_part_frames_stand_the_humanoid_and_the_tree_on_the_ground_at_their_setup_height()
     {
@@ -90,6 +92,7 @@ public sealed class ModelAssemblyTests(DatSetFixture fixture, ITestOutputHelper 
         Assert.InRange(treeMax, treeHeight - 2f, treeHeight + 0.5f);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Tree_setup_0x02000258_matches_independent_decode()
     {
@@ -103,6 +106,7 @@ public sealed class ModelAssemblyTests(DatSetFixture fixture, ITestOutputHelper 
         Assert.All(assembly.ComputeRestPose(), p => Assert.Equal(new PartPose(Vector3.Zero, Quaternion.Identity, Vector3.One), p));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Lit_setups_read_48_byte_lights_and_the_trailing_default_ids()
     {
@@ -154,6 +158,7 @@ public sealed class ModelAssemblyTests(DatSetFixture fixture, ITestOutputHelper 
     // DoD 14 / spec 5.6: which projectile Setups of the spell-visuals extract carry a light. The extract names 9 distinct
     // Setups (11 projectile weenies), not the 10 the spec says; every one carries exactly one light (a point light).
     // Light values are not pinned here (the decoded numbers are re-read from the dats by the other tests).
+    [Trait("Tier", "Exhaustive")]
     [ProjectileLightsFact]
     public void Every_projectile_setup_of_the_spell_visuals_extract_carries_one_point_light()
     {
@@ -175,6 +180,7 @@ public sealed class ModelAssemblyTests(DatSetFixture fixture, ITestOutputHelper 
         // The Flame Bolt / Streak / Arc family shares 0x0200040D, so Flame Bolt's projectile is lit.
         Assert.Contains(extract.Projectiles, p => p.SpellName == "Flame Bolt I" && p.SetupId == 0x0200040D);
     }
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Bare_gfxobj_becomes_a_simple_setup()
     {
@@ -193,6 +199,7 @@ public sealed class ModelAssemblyTests(DatSetFixture fixture, ITestOutputHelper 
         Assert.Empty(assembly.FindUnloadableParts(fixture.Dats));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Setup_with_a_missing_part_cannot_be_created()
     {

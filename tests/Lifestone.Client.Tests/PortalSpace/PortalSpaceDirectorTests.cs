@@ -475,6 +475,7 @@ public sealed class PortalSpaceDirectorTests(DatSetFixture fixture) : IClassFixt
         Assert.Equal(Run(), Run());
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void On_the_real_dats_the_tunnel_hum_is_routed_from_the_tunnel_camera_while_the_tunnel_shows()
     {

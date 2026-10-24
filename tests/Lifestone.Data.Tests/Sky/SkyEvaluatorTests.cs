@@ -255,6 +255,7 @@ public sealed class SkyEvaluatorTests(SkyFixture fixture) : IClassFixture<SkyFix
 
     // ---- The user's Region ----
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Region_keyframe_values_come_back_exactly_at_each_keyframe_begin()
     {
@@ -276,6 +277,7 @@ public sealed class SkyEvaluatorTests(SkyFixture fixture) : IClassFixture<SkyFix
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Region_noon_flip_lerps_heading_linearly_through_south()
     {
@@ -289,6 +291,7 @@ public sealed class SkyEvaluatorTests(SkyFixture fixture) : IClassFixture<SkyFix
         Assert.Equal(0.8f, l.SunVector.Z, 5);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Region_sun_object_rises_east_culminates_and_sets_west_near_the_light_direction()
     {
@@ -312,6 +315,7 @@ public sealed class SkyEvaluatorTests(SkyFixture fixture) : IClassFixture<SkyFix
         Assert.True(SkyEvaluator.GetSky(g, 0.17f)[5].IsDrawn);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Region_stars_fade_out_at_dawn()
     {
@@ -323,6 +327,7 @@ public sealed class SkyEvaluatorTests(SkyFixture fixture) : IClassFixture<SkyFix
         Assert.Equal(270f, SkyEvaluator.GetSky(g, 0.5f)[0].Heading);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_day_group_evaluates_cleanly_every_game_second_of_a_day()

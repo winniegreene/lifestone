@@ -239,6 +239,7 @@ public sealed class CollisionStreamerTests(DatSetFixture fixture, ITestOutputHel
         Assert.Equal(4, world.AttachedCount);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void An_EnvCell_that_sees_outside_gets_the_3x3_and_a_dungeon_cell_only_its_landblock()
     {

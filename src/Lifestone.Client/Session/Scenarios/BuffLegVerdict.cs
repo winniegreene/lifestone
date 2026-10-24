@@ -21,14 +21,20 @@ public readonly record struct BuffLegMeasures(long CastScripts, long CastSounds,
 /// <param name="Failure">The scenario's failure (its stage names it), or null.</param>
 /// <param name="GearFields">The gear scenario's verdict fields (<c>gear=wielded worn=n ...</c>; <c>GearScenario.VerdictFields</c>).</param>
 /// <param name="Cycle">What the ordered pass left (<c>BuffScenario.CycleResult</c>), or null when it never ended.</param>
-/// <param name="Forced">What the forced re-buff pass left (<c>BuffScenario.ForcedResult</c>), or null.</param>
-public sealed record BuffLegScenarioResult(bool ScenarioSucceeded, string? Failure, string GearFields, BuffResult? Cycle, BuffResult? Forced);
+/// <param name="Forced">What the forced re-buff pass left (<c>BuffScenario.ForcedResult</c>), or null (always null with the driver on: there is no forced pass).</param>
+/// <param name="DriverOn">True when the run used the re-buff driver (<c>--buff-auto on</c>, M4 4.1 lane c): <paramref name="Driver"/> then takes the forced pass's place.</param>
+/// <param name="Driver">What the driver's pass left (<c>BuffScenario.DriverResult</c>), or null when it never ended.</param>
+/// <param name="RebuffSeconds">The session seconds from the cycle's end to the driver pass's end (<c>BuffScenario.DriverRebuffSeconds</c>), NaN when the pass never ended.</param>
+public sealed record BuffLegScenarioResult(bool ScenarioSucceeded, string? Failure, string GearFields, BuffResult? Cycle, BuffResult? Forced, bool DriverOn = false, BuffResult? Driver = null, double RebuffSeconds = double.NaN);
 
 /// <summary>
 /// The buff leg's verdict (<c>--login-check=buff</c>, M3 2.1 s3; docs/session.md section 30): composed from the scenario's result and the game's measures, so it is built and tested without Godot. The line is
 /// <c>buff done ok=&lt;true|false&gt; gear= worn= cast=ok|fizzled|failed|n/a buffs=&lt;active&gt;/&lt;wanted&gt; rebuffed= forced= min_remaining_s= levels= cycle_s= cast_scripts= cast_sounds= cast_windows=
-/// cast_frame_max_ms= sounds_server= fizzles= misses= surpassed= cast_scripts_expected=[ frame_over_50=yes]</c> (no name, no account). <c>cast_scripts_expected</c> is the casts the passes made
-/// (cycle plus forced), to read against <c>cast_scripts</c> (the effects the cast windows saw: cluster-k3 gap 1); <c>frame_over_50=yes</c> is <c>cast_frame_max_ms</c> over <see cref="FrameWarnMs"/>.
+/// cast_frame_max_ms= sounds_server= fizzles= misses= surpassed= cast_scripts_expected=[ frame_over_50=yes][ driver=on rebuff_lines= rebuff_s=]</c> (no name, no account). <c>cast_scripts_expected</c> is the casts the passes made
+/// (cycle plus forced, or plus the driver's), to read against <c>cast_scripts</c> (the effects the cast windows saw: cluster-k3 gap 1); <c>frame_over_50=yes</c> is <c>cast_frame_max_ms</c> over <see cref="FrameWarnMs"/>.
+/// <b>With the driver</b> (<c>--buff-auto on</c>, M4 4.1 lane c; DoD 14) there is no forced pass: <c>rebuffed=</c>, <c>buffs=</c>, <c>min_remaining_s=</c> and the rest of the pass fields are the <b>driver's pass</b>,
+/// <c>forced=no</c> is printed (judged at 4.2), and the line ends with <c>driver=on rebuff_lines=&lt;lines the pass cast&gt; rebuff_s=&lt;session seconds from the cycle's end to the pass's end&gt;</c>, both report-only.
+/// The judgement of the driver run is <c>rebuffed=yes</c> from the driver's pass, as the forced run's is from the forced pass.
 /// </summary>
 /// <remarks>
 /// <para><b>Judged</b> (<c>ok=</c>): what the loopback test asserts (<c>gear=wielded</c>, every wanted line active, <c>rebuffed=yes</c>, with the scenario ended without a failure) and <c>sounds_server&gt;=1</c> (D27, the owner's:
@@ -105,7 +111,7 @@ public static class BuffLegVerdict
     public static BuffLegOutcome Compose(BuffLegScenarioResult scenario, in BuffLegMeasures measures)
     {
         ArgumentNullException.ThrowIfNull(scenario);
-        var best = scenario.Forced ?? scenario.Cycle;
+        var best = scenario.DriverOn ? scenario.Driver : scenario.Forced ?? scenario.Cycle;
         var problems = new List<string>();
         var gear = Token(scenario.GearFields, "gear");
         var worn = Token(scenario.GearFields, "worn");
@@ -128,7 +134,7 @@ public static class BuffLegVerdict
 
         if (best?.Rebuffed != true)
         {
-            problems.Add("rebuffed=no (a recast while still active expected)");
+            problems.Add(scenario.DriverOn ? "rebuffed=no (the driver's pass was to recast a line while it was still active)" : "rebuffed=no (a recast while still active expected)");
         }
 
         if (measures.SoundsServer is not { } server)
@@ -140,7 +146,8 @@ public static class BuffLegVerdict
             problems.Add("sounds_server=0: no server sound (F750) sounded in the leg (D27 judges >= 1)");
         }
 
-        var cast = CastOf(scenario.Cycle, scenario.Forced);
+        var cast = CastOf(scenario.Cycle, scenario.DriverOn ? scenario.Driver : scenario.Forced);
+        var later = scenario.DriverOn ? scenario.Driver : scenario.Forced;
         var forcedLanded = scenario.Forced is { Forced: true, Cast: >= 1, RecastWhileActive: >= 1 };
         var misses = new List<string>();
         if (scenario.Cycle is not null)
@@ -148,9 +155,9 @@ public static class BuffLegVerdict
             misses.AddRange(scenario.Cycle.Misses);
         }
 
-        if (scenario.Forced is not null)
+        if (later is not null)
         {
-            foreach (var miss in scenario.Forced.Misses)
+            foreach (var miss in later.Misses)
             {
                 if (!misses.Contains(miss))
                 {
@@ -164,8 +171,20 @@ public static class BuffLegVerdict
         var ok = problems.Count == 0;
         var line = string.Create(
             inv,
-            $"buff done ok={(ok ? "true" : "false")} gear={gear} worn={worn} cast={cast} buffs={active}/{wanted} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(forcedLanded ? "yes" : "no")} min_remaining_s={min} levels={(best is null ? "n/a" : best.Levels)} cycle_s={Math.Floor(scenario.Cycle?.CycleSeconds ?? 0).ToString("0", inv)} cast_scripts={measures.CastScripts} cast_sounds={measures.CastSounds} cast_windows={measures.CastWindows} cast_frame_max_ms={(measures.CastFrameMaxMs is { } ms ? ms.ToString("0.0", inv) : "n/a")} sounds_server={(measures.SoundsServer is { } s ? s.ToString(inv) : "n/a")} fizzles={best?.Fizzles ?? 0} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={(scenario.Cycle?.Surpassed ?? 0) + (scenario.Forced?.Surpassed ?? 0)} cast_scripts_expected={(scenario.Cycle?.Cast ?? 0) + (scenario.Forced?.Cast ?? 0)}{(measures.CastFrameMaxMs is { } castMs && !double.IsNaN(castMs) && castMs > FrameWarnMs ? " frame_over_50=yes" : string.Empty)}");
+            $"buff done ok={(ok ? "true" : "false")} gear={gear} worn={worn} cast={cast} buffs={active}/{wanted} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(forcedLanded ? "yes" : "no")} min_remaining_s={min} levels={(best is null ? "n/a" : best.Levels)} cycle_s={Math.Floor(scenario.Cycle?.CycleSeconds ?? 0).ToString("0", inv)} cast_scripts={measures.CastScripts} cast_sounds={measures.CastSounds} cast_windows={measures.CastWindows} cast_frame_max_ms={(measures.CastFrameMaxMs is { } ms ? ms.ToString("0.0", inv) : "n/a")} sounds_server={(measures.SoundsServer is { } s ? s.ToString(inv) : "n/a")} fizzles={best?.Fizzles ?? 0} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={(scenario.Cycle?.Surpassed ?? 0) + (later?.Surpassed ?? 0)} cast_scripts_expected={(scenario.Cycle?.Cast ?? 0) + (later?.Cast ?? 0)}{(measures.CastFrameMaxMs is { } castMs && !double.IsNaN(castMs) && castMs > FrameWarnMs ? " frame_over_50=yes" : string.Empty)}{DriverFields(scenario)}");
         return new BuffLegOutcome(ok, cast, line, problems);
+    }
+
+    /// <summary>The trailing <c>driver=on rebuff_lines= rebuff_s=</c> fields of a driver run, or nothing.</summary>
+    private static string DriverFields(BuffLegScenarioResult scenario)
+    {
+        if (!scenario.DriverOn)
+        {
+            return string.Empty;
+        }
+
+        var seconds = double.IsNaN(scenario.RebuffSeconds) ? "n/a" : Math.Floor(scenario.RebuffSeconds).ToString("0", CultureInfo.InvariantCulture);
+        return string.Create(CultureInfo.InvariantCulture, $" driver=on rebuff_lines={scenario.Driver?.Cast ?? 0} rebuff_s={seconds}");
     }
 
     /// <summary>The <c>name=value</c> value of a fields string (the gear scenario's), or <c>?</c>.</summary>

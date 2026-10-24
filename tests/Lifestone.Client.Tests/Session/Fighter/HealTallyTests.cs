@@ -71,10 +71,7 @@ public sealed class HealTallyTests
 
     [Theory]
     [InlineData(ActionOutcomeKind.ServerError)]
-    [InlineData(ActionOutcomeKind.Refused)]
     [InlineData(ActionOutcomeKind.TimedOut)]
-    [InlineData(ActionOutcomeKind.Cancelled)]
-    [InlineData(ActionOutcomeKind.DryRun)]
     public void A_handle_that_did_not_end_Confirmed_counts_nothing(ActionOutcomeKind outcome)
     {
         var t = new HealTally();

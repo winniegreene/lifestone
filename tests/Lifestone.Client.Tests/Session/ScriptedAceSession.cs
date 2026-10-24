@@ -330,8 +330,20 @@ internal sealed class ScriptedAceSession : IAcSession
     public OutboundTicket DeleteCharacter(int listIndex)
     {
         Check();
-        return Outbound(MessageOpcodes.CharacterDelete, 0, w => w.Write(listIndex));
+        var ticket = Outbound(MessageOpcodes.CharacterDelete, 0, w => w.Write(listIndex));
+        if (AnswerDeletes && listIndex >= 0 && listIndex < Characters.Count)
+        {
+            // ACE's retail delete: the character stays in the list pending deletion (the word 1), the name is free, and the F655 acknowledgement and a new F658 list follow (M4 P5a C5).
+            Characters[listIndex] = Characters[listIndex] with { DeleteField = 1 };
+            Message(AceWireWriters.CharacterDeleteAck());
+            Message(AceWireWriters.CharacterList(Characters, AccountString));
+        }
+
+        return ticket;
     }
+
+    /// <summary>When true (default false) a character delete is answered as ACE does: the entry goes pending deletion, then the acknowledgement and the character list.</summary>
+    public bool AnswerDeletes { get; set; }
 
     /// <inheritdoc/>
     public OutboundTicket RestoreCharacter(uint guid)
@@ -461,6 +473,11 @@ internal sealed class ScriptedAceSession : IAcSession
     public OutboundTicket SendUse(uint guid)
     {
         var ticket = Action(GameActionTypes.Use, w => w.Write(guid));
+        if (UseHook is { } hook && hook(guid))
+        {
+            return ticket; // M4 4.1 fix2a: the hunt script answers this Use itself (a corpse's open, a potion), so no UseDone goes first
+        }
+
         if (guid == PortalGuid && ExitPortalAt is { } portal && AcceptsMovement)
         {
             PortalUses++;
@@ -500,6 +517,9 @@ internal sealed class ScriptedAceSession : IAcSession
         Message(AceWireWriters.UpdateHealth(PlayerGuid!.Value, ++_serverEventSequence, guid, 0.5f));
         return ticket;
     }
+
+    /// <summary>M4 4.1 fix2a: a hook that answers a Use itself (it returns true: the session then sends nothing); null (the default) leaves the plain UseDone. Used by <c>HuntScriptRig</c>.</summary>
+    public Func<uint, bool>? UseHook { get; set; }
 
     /// <summary>The stat actions sent, as (GameAction type, id, amount); the scripted server does not answer them (the stat trackers are tested with <see cref="FakeAcSession"/> and the stand-in).</summary>
     public List<(uint Type, uint Id, uint Amount)> StatSends { get; } = [];
@@ -566,10 +586,21 @@ internal sealed class ScriptedAceSession : IAcSession
         WorldAction(GameActionTypes.GiveObjectRequest, target, item, unchecked((uint)amount), 3);
 
     /// <inheritdoc/>
-    public OutboundTicket SendBuy(uint vendor, IReadOnlyList<(uint item, uint amount)> items) => WorldAction(GameActionTypes.BuyItems, vendor, (uint)items.Count, 0, 2);
+    public OutboundTicket SendBuy(uint vendor, IReadOnlyList<(uint item, uint amount)> items)
+    {
+        TradeSends.Add((GameActionTypes.BuyItems, vendor, [.. items]));
+        return WorldAction(GameActionTypes.BuyItems, vendor, (uint)items.Count, 0, 2);
+    }
 
     /// <inheritdoc/>
-    public OutboundTicket SendSell(uint vendor, IReadOnlyList<(uint item, uint amount)> items) => WorldAction(GameActionTypes.SellItems, vendor, (uint)items.Count, 0, 2);
+    public OutboundTicket SendSell(uint vendor, IReadOnlyList<(uint item, uint amount)> items)
+    {
+        TradeSends.Add((GameActionTypes.SellItems, vendor, [.. items]));
+        return WorldAction(GameActionTypes.SellItems, vendor, (uint)items.Count, 0, 2);
+    }
+
+    /// <summary>M4 4.1 fix2c: the items of each Buy and Sell sent, in order (the <see cref="WorldActionSends"/> row keeps only the vendor and the count). Used by <c>HuntScriptRig</c>'s scripted vendors; nothing else reads it.</summary>
+    public List<(uint Type, uint Vendor, IReadOnlyList<(uint Item, uint Amount)> Items)> TradeSends { get; } = [];
 
     /// <inheritdoc/>
     public OutboundTicket SendIdentify(uint guid) => WorldAction(GameActionTypes.IdentifyObject, guid, 0, 0, 1);

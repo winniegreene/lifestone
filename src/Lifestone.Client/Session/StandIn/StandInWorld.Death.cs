@@ -1,7 +1,7 @@
 // Re-expresses ACEmulator/ACE@95ef426d Source/ACE.Server/WorldObjects/Player_Death.cs (OnDeath, InflictVitaePenalty, Die, ThreadSafeTeleportOnDeath, HandleActionDie, HandleSuicide, CalculateDeathItems, GetNumItemsDropped, DropMessage,
-// SetLifestoneProtection, HandleLifestoneProtection, LifestoneProtectionTick), Creature_Death.cs (CreateCorpse, GetDeathMessage), Monster_Melee.cs (MeleeAttack, GetCombatManeuver, DoSwingMotion), Monster_Combat.cs (DoAttackStance),
-// Player_Combat.cs (TakeDamage, OnEvade), Entity/DamageEvent.cs (the lifestone protection), Entity/Strings.cs (the victim sentences), WorldObjects/Lifestone.cs (ActOnUse), WorldObjects/Managers/EnchantmentManager.cs (UpdateVitae, GetMinVitae),
-// Player_Character.cs and ACE.Database CharacterExtensions.cs (AddSpellToBar) (AGPL-3.0) [with changes: the stand-in's tusker is the only monster and attacks in a placeholder rhythm, with placeholder damage and reach; the stand-in
+// SetLifestoneProtection, HandleLifestoneProtection, LifestoneProtectionTick), Creature_Death.cs (CreateCorpse),
+// WorldObjects/Lifestone.cs (ActOnUse), WorldObjects/Managers/EnchantmentManager.cs (UpdateVitae, GetMinVitae),
+// Player_Character.cs and ACE.Database CharacterExtensions.cs (AddSpellToBar) (AGPL-3.0) [with changes: the stand-in holds no monster (M4 4.1 t2, D23, D26), so only a suicide kills the player; the stand-in
 // has no weenie database, so the corpse, the lifestone and the lost items are named placeholders; the stand-in's own pack is the only pack that can lose items].
 using System.Collections.Immutable;
 using System.Globalization;
@@ -16,80 +16,21 @@ using Lifestone.Net.Types;
 
 namespace Lifestone.Client.Session.StandIn;
 
-/// <summary>Where a stand-in tusker is in its attack (<c>Monster_Melee.cs</c> <c>MeleeAttack</c>: the stance, the swing, the strike at the attack frame).</summary>
-internal enum AttackPhase
-{
-    /// <summary>Waiting for the next attack time and a player in reach.</summary>
-    Idle,
-
-    /// <summary>The attack stance is being taken (<c>DoAttackStance</c>); the swing follows at <c>PhaseAt</c>.</summary>
-    Stance,
-
-    /// <summary>The swing is playing; the strike lands at <c>PhaseAt</c>.</summary>
-    Swing,
-}
-
 /// <summary>
-/// The stand-in's death (M3 3.2 db): the tusker that attacks, the player's death in ACE's order, the corpse, the teleport to the lifestone and the protection there, the suicide, the lifestone's Use and the spell bars. Every number ACE keeps in
+/// The stand-in's death (M3 3.2 db; M4 4.1 t2: the tusker that attacked is retired): the player's death in ACE's order, the corpse, the teleport to the lifestone and the protection there, the suicide, the lifestone's Use and the spell bars. Every number ACE keeps in
 /// its world database or its physics, which the stand-in has not, is a named, logged placeholder.
 /// </summary>
 /// <remarks>
-/// <para><b>The tusker's attack</b> (<c>TODO(m3-standin-tusker-attack)</c>): a placed creature with <see cref="StandInObject.Attacks"/> looks at the player every <see cref="AttackPollSeconds"/>; within <see cref="AttackReachMetres"/> and
-/// past its next attack time it takes the attack stance (an UpdateMotion of the creature, as <c>DoAttackStance</c> does), swings (an UpdateMotion with an attack action: high, medium or low at random, <c>GetCombatManeuver</c>) and
-/// <see cref="StrikeSeconds"/> later strikes; the next attack is 2 to 3 s after the swing began (<c>MeleeAttack</c> sets <c>NextAttackTime</c> from the swing's start plus the animation plus a random delay). A strike is a hit with the chance
-/// <see cref="HitChance"/> and <see cref="DamageMin"/> to <see cref="DamageMax"/> piercing damage, or an evade. The poll allocates nothing: the creatures are a list read by index, and the one delegate is made once.</para>
-/// <para><b>A hit</b> (<c>Player_Combat.cs</c> <c>TakeDamage</c> 478-560): the health update 0x02E9, the stamina's when the player is in a combat mode, then (the player lives) the DefenderNotification 0x01B2, the hit sound F750 and the splatter F755,
-/// and the wound sound at a tenth of the health or more. A death by a hit sends the 0x01AC victim notice and the 0x019E broadcast after those updates (<c>OnDeath</c>), then <c>Die</c>. A blow while the lifestone protection holds is the 0x028A
-/// 0x0502 with the ShieldUpBlue script (<c>DamageEvent.cs</c> 184-187) and nothing else.</para>
 /// <para><b>Die</b> (<c>Player_Death.cs</c> 150-242): the health to 0 (0x02E9 when it changed), NumDeaths up, the Dead motion F74C, 0x02E9 health 0, 0x02CD NumDeaths, for a suicide the WeenieError YouKilledYourself, DeathLevel and VitaeCpPool (0x02CD),
-/// the vitae 0x02C2 (spell 666, 0.95 and 5% lower per death, never below the floor of the level), the purge 0x02C6; then the Dead animation plus 1 s later (<see cref="DeathAnimationSeconds"/> is the Dead animation's placeholder length) the
+/// the vitae 0x02C2 (spell 666, 0.95 and 5% lower per death, never below the floor of the level), the purge 0x02C6; then the Dead animation plus 1 s later (<see cref="PlayerDeathAnimationSeconds"/> is the Dead animation's placeholder length) the
 /// lost items, the corpse and the teleport; on arrival the stance NonCombat, the protection (60 s), and 3 s later the three vitals at 75% of their maximum.</para>
 /// </remarks>
 internal sealed partial class StandInWorld
 {
-    /// <summary>The seconds between the stand-in's looks at its attackers (a stand-in for ACE's monster tick; allocation-free).</summary>
-    internal const double AttackPollSeconds = 0.1;
-
-    /// <summary>The distance within which a tusker attacks (a placeholder: ACE's is the monster's melee range from its weenie and the bodies' radii; <c>TODO(m3-standin-tusker-attack)</c>).</summary>
-    internal const float AttackReachMetres = 2f;
-
-    /// <summary>The shortest and the longest wait from a swing's start to the next attack (a placeholder rhythm; ACE's is the animation plus up to <c>PowerupTime</c>).</summary>
-    internal const double AttackIntervalMin = 2.0;
-
-    /// <summary>See <see cref="AttackIntervalMin"/>.</summary>
-    internal const double AttackIntervalMax = 3.0;
-
-    /// <summary>How long taking the attack stance takes (placeholder: ACE's is the motion table's).</summary>
-    internal const double StanceSeconds = 0.5;
-
-    /// <summary>From the swing's start to the strike (placeholder: ACE reads the attack frame from the motion table).</summary>
-    internal const double StrikeSeconds = 0.5;
-
-    /// <summary>The chance that a strike hits (placeholder: ACE rolls the creature's attack skill against the player's defence).</summary>
-    internal const double HitChance = 0.7;
-
-    /// <summary>The smallest and largest damage of a hit (a placeholder range: ACE's is the weenie's body part, <c>GetBaseDamage</c>).</summary>
-    internal const int DamageMin = 8;
-
-    /// <summary>See <see cref="DamageMin"/>.</summary>
-    internal const int DamageMax = 16;
-
-    /// <summary>The seed of the attacks' rolls.</summary>
-    internal const int AttackSeed = 0x5EED_A77C;
-
     /// <summary>The seed of the death's rolls (the sentence, the lost items).</summary>
     internal const int PlayerDeathSeed = 0x5EED_D1ED;
 
-    /// <summary>ACE's <c>DamageType.Pierce</c>: the damage type the tusker's tusks deal here (a placeholder; the weenie's is the database's).</summary>
-    internal const uint PierceDamage = 0x2;
-
-    /// <summary>ACE's <c>DamageLocation.Chest</c> (<c>Network/Enum/DamageLocation.cs</c>): the body part every hit is told to land on (the stand-in has no body part rolls).</summary>
-    internal const uint ChestLocation = 0x1;
-
-    // Low words of ACE's MotionCommand.AttackHigh1, AttackMed1 and AttackLow1 (MotionCommand.cs 105-107) and Sanctuary (94).
-    private const uint AttackHigh1 = 0x10000062;
-    private const uint AttackMed1 = 0x10000063;
-    private const uint AttackLow1 = 0x10000064;
+    // Low word of ACE's MotionCommand.Sanctuary (MotionCommand.cs 94).
     private const uint SanctuaryMotion = 0x10000057;
 
     /// <summary>ACE's <c>WeenieError.YoureTooBusy</c> (0x001D), the answer to a suicide while dead or teleporting.</summary>
@@ -97,9 +38,6 @@ internal sealed partial class StandInWorld
 
     /// <summary>ACE's <c>WeenieError.YouKilledYourself</c> (0x004A).</summary>
     internal const uint YouKilledYourself = 0x004A;
-
-    /// <summary>ACE's <c>WeenieError.LifestoneMagicProtectsYou</c> (0x0502).</summary>
-    internal const uint LifestoneProtectsYou = 0x0502;
 
     /// <summary>ACE's <c>WeenieError.YouHaveMovedTooFar</c> (0x0498): a Use of a lifestone from too far away.</summary>
     internal const uint YouHaveMovedTooFar = 0x0498;
@@ -143,38 +81,14 @@ internal sealed partial class StandInWorld
     private const uint PropertyDeathLevel = 139;
     private const uint PropertyVitaeCpPool = 129;
     private const uint SoundLifestoneOn = 0x51;
-    private const uint SoundHitFlesh1 = 0x30;
-    private const uint SoundWound3 = 0x0E; // Wound3 (Ooh!): slashing, piercing and undefined attacks above a tenth of the health (Player_Combat.cs 538-553)
     private const uint SoundUnwieldObject = 0x8D;
-    private const uint ScriptShieldUpBlue = 0x33;
-    private const uint ScriptSplatterFirst = 0x5B; // SplatterLowLeftBack; the twelve follow in ACE's order: height (Low, Mid, Up), side (Left, Right), facing (Back, Front)
     private const uint CorpseWeenieClass = 21; // TODO(m3-standin-corpse-weenie): the corpse weenie's class id is the world database's
     private const uint CorpseItemType = 0x200; // Container
     private const uint FirstCorpseGuid = 0x80030000;
     private const int LevelDropsWielded = 35;
 
-    private static readonly string[] PierceVictimLines =
-    [
-        "{1} runs you through!",
-        "You are fatally punctured by {1}!",
-        "Your perforated corpse falls before {1}!",
-        "Your death is preceded by a sharp, stabbing pain, courtesy of {1}!",
-    ];
-
-    private static readonly string[] PierceBroadcastLines =
-    [
-        "{1} runs {0} through!",
-        "{0} is fatally punctured by {1}!",
-        "{0}'s perforated corpse falls before {1}!",
-        "{0}'s death is preceded by a sharp, stabbing pain, courtesy of {1}!",
-    ];
-
-    private readonly Random _attackRandom = new(AttackSeed);
     private readonly Random _playerDeathRandom = new(PlayerDeathSeed);
-    private readonly List<StandInCreature> _attackers = [];
     private readonly Dictionary<uint, StandInObject> _placed = [];
-    private Action<IAcSessionSink>? _attackPoll;
-    private bool _pollScheduled;
     private uint _nextCorpseGuid = FirstCorpseGuid;
     private bool _dying;
     private bool _suicideInProgress;
@@ -182,15 +96,6 @@ internal sealed partial class StandInWorld
     private int _protectionSerial;
     private (uint Cell, Vector3 Origin)? _sanctuary;
     private List<List<uint>>? _bars;
-
-    /// <summary>Blows the tuskers have landed on the player.</summary>
-    internal int TuskerHits { get; private set; }
-
-    /// <summary>Strikes the player evaded.</summary>
-    internal int TuskerEvades { get; private set; }
-
-    /// <summary>Strikes the lifestone protection turned away.</summary>
-    internal int ProtectedBlows { get; private set; }
 
     /// <summary>Deaths of the player the stand-in has played (a suicide counts).</summary>
     internal int PlayerDeaths { get; private set; }
@@ -210,216 +115,15 @@ internal sealed partial class StandInWorld
     /// <summary>The items that left the stand-in's pack for the last corpse, by name and count (the tests read it).</summary>
     internal List<(string Name, int Count)> LastDrops { get; } = [];
 
-    // --- the tusker's attack ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-    private void StartAttacker(StandInCreature creature)
-    {
-        Placeholder("m3-standin-tusker-attack", "a placed tusker attacks a player within " + AttackReachMetres + " m every " + AttackIntervalMin + " to " + AttackIntervalMax + " s, hitting " + (int)(HitChance * 100) + "% of the time for " + DamageMin + " to " + DamageMax
-            + " piercing damage: ACE's monster rolls its skill against the player's defence, takes its damage from the weenie's body part and times the attack by its motion table");
-        _attackers.Add(creature);
-        if (_pollScheduled)
-        {
-            return;
-        }
-
-        _pollScheduled = true;
-        _attackPoll ??= PollAttackers;
-        _reducer.StandIn!.At(_reducer.Clock.Now + AttackPollSeconds, _attackPoll);
-    }
-
-    private void PollAttackers(IAcSessionSink sink)
-    {
-        var now = _reducer.Clock.Now;
-        var live = false;
-        for (var i = _attackers.Count - 1; i >= 0; i--)
-        {
-            var creature = _attackers[i];
-            if (creature.Dead)
-            {
-                _attackers.RemoveAt(i);
-                continue;
-            }
-
-            live = true;
-            Step(sink, creature, now);
-        }
-
-        if (live)
-        {
-            _reducer.StandIn!.At(now + AttackPollSeconds, _attackPoll!);
-        }
-        else
-        {
-            _pollScheduled = false;
-        }
-    }
-
-    private void Step(IAcSessionSink sink, StandInCreature creature, double now)
-    {
-        switch (creature.Phase)
-        {
-            case AttackPhase.Idle:
-                if (now >= creature.NextAttackAt && PlayerCanBeAttacked && InReach(creature))
-                {
-                    if (!creature.InStance)
-                    {
-                        // DoAttackStance: the stance motion first; the swing waits for it.
-                        creature.InStance = true;
-                        creature.Phase = AttackPhase.Stance;
-                        creature.PhaseAt = now + StanceSeconds;
-                        SendCreatureStance(sink, creature.Guid);
-                    }
-                    else
-                    {
-                        Swing(sink, creature, now);
-                    }
-                }
-
-                break;
-            case AttackPhase.Stance:
-                if (now >= creature.PhaseAt)
-                {
-                    Swing(sink, creature, now);
-                }
-
-                break;
-            default:
-                if (now >= creature.PhaseAt)
-                {
-                    creature.Phase = AttackPhase.Idle;
-                    Strike(sink, creature);
-                }
-
-                break;
-        }
-    }
-
-    private bool PlayerCanBeAttacked => !_dying && _reducer.State.Self.Qualities.TryGetVitalLevels(1, out var health, out _) && health > 0;
-
-    private bool InReach(StandInCreature creature)
-    {
-        var self = _reducer.State.Self;
-        if (self.Position is not { } here || !_reducer.State.Objects.TryGet(creature.Guid, out var body) || body.Position is not { } there)
-        {
-            return false;
-        }
-
-        var a = here.ToGlobal();
-        var b = there.ToGlobal();
-        var dx = a.X - b.X;
-        var dy = a.Y - b.Y;
-        var dz = a.Z - b.Z;
-        return (dx * dx) + (dy * dy) + (dz * dz) <= AttackReachMetres * AttackReachMetres;
-    }
-
-    private void Swing(IAcSessionSink sink, StandInCreature creature, double now)
-    {
-        // GetCombatManeuver: a random attack height (apparently by the monster's height over the player's, TODO there); DoSwingMotion: the attack action with the target.
-        creature.AttackHeight = _attackRandom.Next(0, 3);
-        var command = creature.AttackHeight switch { 0 => AttackLow1, 1 => AttackMed1, _ => AttackHigh1 };
-        creature.ActionStamp = (ushort)((creature.ActionStamp + 1) & 0x7FFF);
-        var stamps = _reducer.State.Objects.TryGet(creature.Guid, out var body) ? body.Stamps : default;
-        var wire = MotionCommandTable.ToWire(MotionCommands.HandCombat);
-        var state = new ServerMotionState
-        {
-            MovementType = MovementType.Interpreted,
-            Stance = wire,
-            Style = wire,
-            Commands = [new MotionItem(MotionCommandTable.ToWire(command), creature.ActionStamp, false, 1f)],
-        };
-        AnswerLog.Add("F74C");
-        sink.OnUpdateMotion(Context(sink), new UpdateMotionMsg(creature.Guid, stamps.Instance, unchecked((ushort)(stamps.Movement + 1)), stamps.ServerControl, false, state));
-        creature.Phase = AttackPhase.Swing;
-        creature.PhaseAt = now + StrikeSeconds;
-        creature.NextAttackAt = now + AttackIntervalMin + (_attackRandom.NextDouble() * (AttackIntervalMax - AttackIntervalMin));
-    }
-
-    private void SendCreatureStance(IAcSessionSink sink, uint guid) => SendCreatureMotion(sink, guid, MotionCommands.HandCombat, MotionCommands.Ready);
-
-    /// <summary>The strike: lifestone protection, an evade or a hit (<c>DamageEvent.CalculateDamage</c> then <c>TakeDamage</c> or <c>OnEvade</c>).</summary>
-    private void Strike(IAcSessionSink sink, StandInCreature creature)
-    {
-        if (creature.Dead || !PlayerCanBeAttacked)
-        {
-            return;
-        }
-
-        var self = _reducer.State.Self;
-        if (_protected)
-        {
-            ProtectedBlows++;
-            AnswerLog.Add("028A");
-            sink.OnWeenieError(Context(sink), new GameEventHeader(self.Guid, 0, 0x028A), new WeenieErrorEvent(LifestoneProtectsYou, null)); // HandleLifestoneProtection (Player_Death.cs 913-917)
-            PlayEffect(sink, self.Guid, ScriptShieldUpBlue, 1f);
-            return;
-        }
-
-        if (_attackRandom.NextDouble() >= HitChance)
-        {
-            TuskerEvades++;
-            if (self.Qualities.CombatMode != CombatModes.NonCombat)
-            {
-                // OnEvade: a combat mode loses a stamina point (the stand-in knows no defence skill, so the untrained rule: always).
-                UpdateVitalDelta(sink, Stamina, -1);
-            }
-
-            AnswerLog.Add("01B4");
-            sink.OnEvasionDefenderNotification(Context(sink), new GameEventHeader(self.Guid, 0, 0x01B4), new EvasionDefenderNotificationEvent(creature.Name));
-            return;
-        }
-
-        var amount = _attackRandom.Next(DamageMin, DamageMax + 1);
-        if (!self.Qualities.TryGetVitalLevels(1, out var current, out var maxHealth) || maxHealth == 0)
-        {
-            return;
-        }
-
-        TuskerHits++;
-        var percent = (float)amount / maxHealth;
-        UpdateVitalDelta(sink, Health, -amount); // UpdateVitalDelta(Health, -amount): 0x02E9 with the clamped value
-        if (self.Qualities.CombatMode != CombatModes.NonCombat)
-        {
-            UpdateVitalDelta(sink, Stamina, -1);
-        }
-
-        if (amount >= current)
-        {
-            // OnDeath(new DamageHistoryInfo(source), damageType) then Die().
-            var pick = _playerDeathRandom.Next(PierceVictimLines.Length);
-            var victim = string.Format(CultureInfo.InvariantCulture, PierceVictimLines[pick], self.Name ?? "You", creature.Name);
-            var broadcast = string.Format(CultureInfo.InvariantCulture, PierceBroadcastLines[pick], self.Name ?? "You", creature.Name);
-            AnswerLog.Add("01AC");
-            sink.OnVictimNotification(Context(sink), new GameEventHeader(self.Guid, 0, 0x01AC), new VictimNotificationEvent(victim));
-            AnswerLog.Add("019E");
-            sink.OnPlayerKilled(Context(sink), new PlayerKilledMsg(broadcast, self.Guid, creature.Guid));
-            Die(sink, suicide: false);
-            return;
-        }
-
-        AnswerLog.Add("01B2");
-        sink.OnDefenderNotification(Context(sink), new GameEventHeader(self.Guid, 0, 0x01B2), new DefenderNotificationEvent(creature.Name, PierceDamage, percent, (uint)amount, ChestLocation, false, 0));
-        PlaySound(sink, self.Guid, SoundHitFlesh1, 1f);
-        PlayEffect(sink, self.Guid, ScriptSplatterFirst + (uint)(creature.AttackHeight * 4) + (uint)(_attackRandom.Next(2) * 2) + 1, 1f); // Splatter<height><Left|Right>Front: the stand-in always strikes from the front
-        if (percent >= 0.1f)
-        {
-            PlaySound(sink, self.Guid, SoundWound3, 1f);
-        }
-    }
-
     private void PlaySound(IAcSessionSink sink, uint guid, uint sound, float volume)
     {
         AnswerLog.Add("F750");
         sink.OnSound(Context(sink), new SoundMsg(guid, sound, volume));
     }
 
-    /// <summary>Takes a placed object out of the world (a check's clean-up): a creature stops attacking at once, and the client is told with a DeleteObject.</summary>
+    /// <summary>Takes a placed object out of the world (a check's clean-up) and tells the client with a DeleteObject.</summary>
     internal void RemoveObject(uint guid)
     {
-        if (_creatures.TryGetValue(guid, out var creature))
-        {
-            creature.Dead = true;
-        }
-
         _placed.Remove(guid);
         Later(sink => DeleteObject(sink, guid));
     }
@@ -429,7 +133,7 @@ internal sealed partial class StandInWorld
     /// <summary>
     /// ACE's <c>Die</c> for the player (<c>Player_Death.cs</c> 150-242): the Dead motion and the updates, the vitae and the purge, then the corpse and the teleport after the Dead animation plus a second.
     /// </summary>
-    private void Die(IAcSessionSink sink, bool suicide)
+    private void Die(IAcSessionSink sink)
     {
         var self = _reducer.State.Self;
         _dying = true;
@@ -446,11 +150,8 @@ internal sealed partial class StandInWorld
         PrivateUpdate(sink, PrivateUpdateKind.VitalCurrent, Health, 0);
         AnswerLog.Add("02CD");
         PrivateUpdate(sink, PrivateUpdateKind.PropertyInt, PropertyNumDeaths, deaths);
-        if (suicide)
-        {
-            AnswerLog.Add("028A");
-            sink.OnWeenieError(Context(sink), new GameEventHeader(self.Guid, 0, 0x028A), new WeenieErrorEvent(YouKilledYourself, null));
-        }
+        AnswerLog.Add("028A");
+        sink.OnWeenieError(Context(sink), new GameEventHeader(self.Guid, 0, 0x028A), new WeenieErrorEvent(YouKilledYourself, null)); // the stand-in holds no monster (M4 4.1 t2): the only death is a suicide
 
         InflictVitaePenalty(sink);
         AnswerLog.Add("02C6");
@@ -773,7 +474,7 @@ internal sealed partial class StandInWorld
             return;
         }
 
-        Die(sink, suicide: true);
+        Die(sink);
     }
 
     // --- the lifestone ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------

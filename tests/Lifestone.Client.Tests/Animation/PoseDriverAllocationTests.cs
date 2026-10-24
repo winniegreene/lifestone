@@ -45,6 +45,7 @@ public sealed class PoseDriverAllocationTests(DatSetFixture fixture) : IClassFix
         Assert.True(hooks > 1_000, $"{hooks} hooks in 3600 steps (about 1800 frames crossed)");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_motion_table_step_adds_no_allocation_over_its_sequence_while_walking()
     {
@@ -107,6 +108,7 @@ public sealed class PoseDriverAllocationTests(DatSetFixture fixture) : IClassFix
         Assert.NotEmpty(copy);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_motion_table_step_allocates_nothing_while_walking()
     {
@@ -124,6 +126,7 @@ public sealed class PoseDriverAllocationTests(DatSetFixture fixture) : IClassFix
         Assert.True(allocated == 0, $"{allocating} steps allocated {allocated} B in total");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Steps_that_finish_a_link_and_run_animation_done_allocate_nothing()
     {

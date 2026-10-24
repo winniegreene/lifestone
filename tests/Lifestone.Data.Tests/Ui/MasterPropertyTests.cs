@@ -9,6 +9,7 @@ namespace Lifestone.Data.Tests.Ui;
 /// The master property table and <see cref="UiPropertyIds"/> (m2-plan.md R4): every constant is pinned to the table's
 /// name and type for its id, and every property the layouts hold is typed as the table says.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class MasterPropertyTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private DatSet Dats => fixture.Dats;

@@ -14,6 +14,7 @@ namespace Lifestone.Client.Tests.PortalSpace;
 /// tunnel with M1's object path and no guessing. Every record is reached through the UIASSET chain
 /// (<see cref="PortalSpaceAssets"/>), not a hard-coded id; only the parts below the Setup are named.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class PortalSpaceAssetConformanceTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private const uint HalfTorus = 0x0100080B;

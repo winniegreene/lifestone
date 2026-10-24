@@ -12,6 +12,7 @@ namespace Lifestone.Client.Tests.Objects;
 /// The statics inside EnvCells through the shared object path (docs/objects.md §2.6): created and posed like every other
 /// object, with retail's LOD (object and part rules, no far-cell rule) for the cells in view.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class CellObjectLodTests(ObjectsFixture fixture, ITestOutputHelper output) : IClassFixture<ObjectsFixture>
 {
     private static readonly LandblockCoord Redoubt = new(0x01, 0x63); // Holtburg Redoubt: 178 cells, 576 statics

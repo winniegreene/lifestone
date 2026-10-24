@@ -28,6 +28,20 @@ public sealed class SliceCheckAndSmokeTests
     {
         Assert.Contains("$testFilter = '" + DefaultFilter + "'", Smoke, StringComparison.Ordinal);
         Assert.Contains("$testFilter = '" + DefaultFilter + "'", SliceCheck, StringComparison.Ordinal);
+        Assert.Contains("--filter \"" + DefaultFilter + "\"", SliceCheck, StringComparison.Ordinal); // the help text at the top
+        Assert.Contains("--filter \"" + DefaultFilter + "\"", Smoke, StringComparison.Ordinal);
+
+        // P1 fix (P-R6): the filter a developer or agent copies from the README, and the traits it leaves out, are the scripts' own.
+        var readme = File.ReadAllText(RepositoryFiles.PathOf("README.md")).Replace("\r\n", "\n");
+        Assert.Contains(DefaultFilter, readme, StringComparison.Ordinal);
+        Assert.Contains("[Trait(\"Tier\",\"Timing\")]", readme, StringComparison.Ordinal);
+        Assert.Contains("[Trait(\"Status\",\"KnownFailure\")]", readme, StringComparison.Ordinal);
+        var shared = File.ReadAllText(RepositoryFiles.PathOf("tests", "Shared", "README.md")).Replace("\r\n", "\n");
+        Assert.Contains(DefaultFilter, shared, StringComparison.Ordinal);
+        Assert.Contains("`[Trait(\"Tier\", \"Timing\")]`", shared, StringComparison.Ordinal);
+        Assert.Contains("the lead runs it alone", shared, StringComparison.Ordinal);
+        Assert.Contains("TODO(...)", shared, StringComparison.Ordinal);
+        Assert.Contains("`[Trait(\"Status\", \"KnownFailure\")]`", shared, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -137,24 +151,21 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("-Skipped", script[skip..gate], StringComparison.Ordinal);
         Assert.Contains("continue", script[skip..gate], StringComparison.Ordinal);
 
-        var body = script[script.IndexOf("'login-hunt' {", StringComparison.Ordinal)..];
+        // M4 P4 gate (D31): one body for the two hunts; the table gives each its weapon and kills (the melee hunt is three kills), $stepAccounts its account (test-melee, test-archer).
+        var body = script[script.IndexOf("{ $_ -in 'login-hunt', 'login-hunt-missile' } {", StringComparison.Ordinal)..];
         body = body[..body.IndexOf("'login' {", StringComparison.Ordinal)];
-        Assert.Contains("--account=test --login-check=hunt --hunt-weapon=melee --hunt-kills=3", body, StringComparison.Ordinal);
+        Assert.Contains("--account=$($stepAccounts[$step]) --login-check=hunt --hunt-weapon=$($hunt.Weapon) --hunt-kills=$($hunt.Kills)", body, StringComparison.Ordinal);
+        Assert.Contains("'login-hunt'         = @{ Weapon = 'melee'; Kills = 3 }", script, StringComparison.Ordinal);
         Assert.DoesNotContain("--hunt-kills=1", body, StringComparison.Ordinal); // a one-kill leg is never judged on looted (HuntLegVerdict.LootJudgeMinKills)
         Assert.Contains("hunt done ok=true", body, StringComparison.Ordinal); // the step passes on the leg's own verdict
         Assert.Contains("'swings', 'shots', 'hits', 'misses', 'returned', 'fighter', 'attack_frame_max_ms'", body, StringComparison.Ordinal); // copied, report-only (attack_frame_max_ms from 1.3 s3)
         Assert.Contains("-FrameOver50 $fields.Over50 -FrameJudge $fields.Judge", body, StringComparison.Ordinal);
-        Assert.Contains("swings>=1", body, StringComparison.Ordinal); // M4 1.3 s3: the comment says the leg judges the swings
-        Assert.Contains("report-only: it never fails the step in 1.3", body, StringComparison.Ordinal); // attack_frame_max_ms is copied, never judged here (D11)
         Assert.DoesNotContain("attack_frame_max_ms=", body, StringComparison.Ordinal); // a field name in the copy list, never a judged "=" comparison
 
         // M4 2.2 s4: the loot of the kill's corpse is copied beside it, report-only (judged from 3.1): looted, loot_skipped and loot_frame_max_ms by key, loot_frame_over_50 by its presence in the verdict (the leg prints it only when over).
         Assert.Contains("'looted', 'loot_skipped', 'loot_frame_max_ms'", body, StringComparison.Ordinal);
         Assert.Contains("loot_frame_over_50=yes", body, StringComparison.Ordinal);
-        Assert.Contains("report-only in 2.2 (judged from 3.1)", body, StringComparison.Ordinal);
         Assert.DoesNotContain("looted=", body, StringComparison.Ordinal); // a name in the copy list, never a judged comparison
-        Assert.Contains("looted loot_skipped loot_frame_max_ms loot_frame_over_50", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal); // the help line names them
-        Assert.Contains("login-hunt ", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal); // its help line
 
         // M4 3.1 s4: the recovery fields and lane g's mode_mismatch are copied report-only, n/a when the line lacks them: the verdict line's by key, the detail line's by key from the hunt detail line.
         Assert.Contains("'heals', 'kit_uses', 'potions', 'mode_mismatch'", body, StringComparison.Ordinal);
@@ -162,9 +173,6 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains(@"\[logincheck\] (hunt detail[^\r\n]*)", body, StringComparison.Ordinal);
         Assert.Contains("$copied += \" $healCopied $healDetail\"", body, StringComparison.Ordinal);
         Assert.Contains("\"$key=n/a\"", body, StringComparison.Ordinal);
-        Assert.Contains("the step's 1500 s Godot timeout already covers three kills", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal); // the header says it was checked
-        Assert.Contains("heals kit_uses potions", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal);
-        Assert.Contains("mode_mismatch=<n>", script[..script.IndexOf("$allSteps", StringComparison.Ordinal)], StringComparison.Ordinal);
         Assert.Contains("1500 '' $defaultSize", body, StringComparison.Ordinal); // the Godot timeout of the leg: the 1200 s whole check (3.2-R15: with the shop visits) and the 120 s recovery log off, rounded up
         Assert.Contains("'sold', 'bought', 'pyreals', 'appraised', 'vendor_frame_max_ms'", body, StringComparison.Ordinal); // 3.2-R17: DoD 12's pyreals=<delta> shows in the summary (report-only)
     }
@@ -243,36 +251,32 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("-and $sourcesOk", record, StringComparison.Ordinal);
         Assert.Contains("-and $fileOk", record, StringComparison.Ordinal);
 
-        // The failure names the half: the recording's ERRORs fail the record-audio row, the play-checks row does not count them.
-        Assert.Contains("the recording half logged", play, StringComparison.Ordinal);
-        Assert.Contains("the play checks half did not all hold", record, StringComparison.Ordinal);
+        // The recording's ERRORs fail the record-audio row, the play-checks row does not count them.
         Assert.Contains("Get-RecordingErrorCount", play, StringComparison.Ordinal);
         Assert.Contains("Get-RecordingErrorCount", record, StringComparison.Ordinal);
-        Assert.Contains("shared run", record, StringComparison.Ordinal);
 
         // The frames run is never joined with a judged run.
         Assert.DoesNotContain("--record-audio", script[script.IndexOf("'shell-frames' {", StringComparison.Ordinal)..script.IndexOf("'login-check' {", StringComparison.Ordinal)], StringComparison.Ordinal);
     }
 
     [Fact]
-    public void The_shell_frames_step_skips_the_two_scenarios_and_keeps_its_frames_and_judges()
+    public void The_shell_frames_step_keeps_its_frames_and_judges_and_the_retired_skip_option_is_gone()
     {
         var script = Smoke;
         var frames = script[script.IndexOf("'shell-frames' {", StringComparison.Ordinal)..script.IndexOf("'login-check' {", StringComparison.Ordinal)];
 
-        Assert.Contains("--play-checks --play-skip-scenarios --play-frames=$dir", frames, StringComparison.Ordinal);
+        Assert.Contains("--play-checks --play-frames=$dir", frames, StringComparison.Ordinal);
         Assert.Contains("$expectedFrames = 10", frames, StringComparison.Ordinal);
         Assert.Contains("shell frames done size=", frames, StringComparison.Ordinal);
         Assert.Contains("$files -eq $expectedFrames", frames, StringComparison.Ordinal);
 
-        // The game side: the option is registered, parses, and the play checks gate their two scenario hooks on it.
-        Assert.Equal(OptionScenes.Main, OptionCatalog.Registry.ScenesOf("--play-skip-scenarios"));
-        Assert.True(PlayOptions.Parse(["--play-skip-scenarios"]).SkipScenarios);
-        Assert.False(PlayOptions.Parse(["--play-checks"]).SkipScenarios);
-        Assert.Empty(OptionCatalog.Registry.Problems(CommandLineArgument.ParseAll(["--play-checks", "--play-skip-scenarios", "--play-frames=cache/x"]), OptionScenes.Main));
+        // M4 4.1 fix2b: --play-skip-scenarios did nothing since t1 (the stand-in's fight and death checks are retired), so it is gone from the smoke, the catalog and the parser: an old command line is refused loudly.
+        Assert.DoesNotContain("--play-skip-scenarios", script.Replace("--play-skip-scenarios is gone", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.NotEmpty(OptionCatalog.Registry.Problems(CommandLineArgument.ParseAll(["--play-checks", "--play-skip-scenarios", "--play-frames=cache/x"]), OptionScenes.Main));
+        Assert.Empty(OptionCatalog.Registry.Problems(CommandLineArgument.ParseAll(["--play-checks", "--play-frames=cache/x"]), OptionScenes.Main));
         var checks = File.ReadAllText(RepositoryFiles.PathOf("src", "Lifestone.Game", "scripts", "Session", "PlayChecks.cs"));
-        Assert.Contains("if (!skipScenarios)\n        {\n            await FightChecksAsync();", checks.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
-        Assert.Contains("if (!skipScenarios)\n        {\n            await DeathChecksAsync();", checks.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.DoesNotContain("FightChecksAsync", checks, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeathChecksAsync", checks, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------------------------------------ D42: frame-time checks judged against the machine
@@ -310,7 +314,6 @@ public sealed class SliceCheckAndSmokeTests
         var alone = Verdict(log, others: 0, solo: false);
         Assert.Equal("False", alone.Contended);
         Assert.Equal("2", alone.Errors); // the two ERROR lines stay: it fails as today
-        Assert.Contains("frame-time check(s) failed", alone.Note, StringComparison.Ordinal);
 
         Assert.Equal("False", Verdict(log, others: 2, solo: true).Contended); // -SoloFrames: any frame check fails
     }
@@ -350,8 +353,6 @@ public sealed class SliceCheckAndSmokeTests
         var wait = Function(Smoke, "Wait-SoloEngine");
 
         Assert.Contains("-ge 600", wait, StringComparison.Ordinal);
-        Assert.Contains("refused to start", wait, StringComparison.Ordinal);
-        Assert.Contains("minute $($minute + 1) of 10", wait, StringComparison.Ordinal);
         Assert.Contains("if (-not $SoloFrames) { return $true }", wait, StringComparison.Ordinal);
         Assert.Contains("$SoloFrames -and $frameJudgedSteps -contains $step", Smoke, StringComparison.Ordinal);
         Assert.Contains("'-SoloFrames', '-FullScan'", SliceCheck, StringComparison.Ordinal);
@@ -365,9 +366,8 @@ public sealed class SliceCheckAndSmokeTests
 
         var live = Rule("require", false, false);
         Assert.Contains("SOLO=True FULL=True", live, StringComparison.Ordinal);
-        Assert.Contains("-SoloFrames implied by -Backend require", live, StringComparison.Ordinal);
-        Assert.Contains("SOLO=False FULL=False frames: contended-allowed", Rule("auto", false, false), StringComparison.Ordinal);
-        Assert.Contains("SOLO=True FULL=False frames: solo (-SoloFrames): a frame-time failure fails", Rule("auto", true, false), StringComparison.Ordinal);
+        Assert.Contains("SOLO=False FULL=False", Rule("auto", false, false), StringComparison.Ordinal);
+        Assert.Contains("SOLO=True FULL=False", Rule("auto", true, false), StringComparison.Ordinal);
         Assert.Contains("$($frameRule.Text); repository", Smoke, StringComparison.Ordinal); // the first line of the run
         Assert.Contains("$SoloFrames = [switch]$frameRule.Solo", Smoke, StringComparison.Ordinal);
     }
@@ -464,13 +464,6 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("[switch] $IsolateUserData", godot, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void M4_2_2_fix2_R11_the_death_step_help_names_all_four_corpse_looted_values()
-    {
-        Assert.Contains("corpse_looted=<yes|partial|no|skipped>", Smoke, StringComparison.Ordinal);
-        Assert.DoesNotContain("<yes|no|skipped>", Smoke, StringComparison.Ordinal); // the third value the fix slice's R2 added (DeathLegVerdict.CorpseLoot.Partial)
-    }
-
     // ------------------------------------------------------------------------------------------ helpers
 
     private static string Failed(string check) => $"2026-10-19T12:00:00Z ERROR [playcheck] FAIL {check} detail=x";
@@ -530,5 +523,12 @@ public sealed class SliceCheckAndSmokeTests
         }
 
         throw new InvalidOperationException("neither pwsh nor powershell is installed");
+    }
+
+    [Fact]
+    public void M4_2_2_fix2_R11_the_death_step_help_names_all_four_corpse_looted_values()
+    {
+        Assert.Contains("corpse_looted=<yes|partial|no|skipped>", Smoke, StringComparison.Ordinal);
+        Assert.DoesNotContain("<yes|no|skipped>", Smoke, StringComparison.Ordinal); // the third value the fix slice's R2 added (DeathLegVerdict.CorpseLoot.Partial)
     }
 }

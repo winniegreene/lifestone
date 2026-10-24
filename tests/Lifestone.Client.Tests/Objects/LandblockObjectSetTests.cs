@@ -11,6 +11,7 @@ namespace Lifestone.Client.Tests.Objects;
 /// <summary>Which objects retail creates for a landblock and where their parts go, on the user's dats.</summary>
 public sealed class LandblockObjectSetTests(ObjectsFixture fixture) : IClassFixture<ObjectsFixture>
 {
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_creates_every_LandBlockInfo_object_at_its_stored_landblock_local_frame()
     {
@@ -47,6 +48,7 @@ public sealed class LandblockObjectSetTests(ObjectsFixture fixture) : IClassFixt
         Assert.Contains(statics.Objects, o => o.Frame.Origin.Y > 150f);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Buildings_draw_with_the_building_rules_and_everything_else_as_objects()
     {
@@ -68,6 +70,7 @@ public sealed class LandblockObjectSetTests(ObjectsFixture fixture) : IClassFixt
         Assert.Equal("gfxobj:0x01000C1E:Building", set.Meshes[set.LevelMesh(building.FirstPart, 0)].CacheKey);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Part_frames_compose_the_object_frame_the_rest_pose_and_the_object_scale()
     {
@@ -92,6 +95,7 @@ public sealed class LandblockObjectSetTests(ObjectsFixture fixture) : IClassFixt
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Scenery_is_the_generator_output_with_normalised_orientations()
     {
@@ -121,6 +125,7 @@ public sealed class LandblockObjectSetTests(ObjectsFixture fixture) : IClassFixt
         Assert.False(LandblockObjectSet.IsInOwnLandblock(coord, new Vector3(10f, 200f, 10f)));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_LandBlockInfo_object_in_the_world_is_created_with_loadable_parts()
     {

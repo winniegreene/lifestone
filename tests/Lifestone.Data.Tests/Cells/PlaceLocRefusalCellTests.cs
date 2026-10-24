@@ -5,6 +5,7 @@ namespace Lifestone.Data.Tests.Cells;
 /// <c>invalid-cell</c> rule (AceFacts.CellExists, the cell dat's file index) refuses it. PlaceRulesTests pins the other half: the parser and
 /// PlaceRules accept it.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class PlaceLocRefusalCellTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private const uint RefusedCell = 0x0001FFFDu;

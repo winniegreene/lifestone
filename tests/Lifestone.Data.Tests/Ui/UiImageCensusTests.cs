@@ -12,6 +12,7 @@ namespace Lifestone.Data.Tests.Ui;
 /// mask, an animation frame or a cursor): how it resolves, its pixel format and size, and which of them
 /// <c>client_highres.dat</c> also holds (TextureLoader reads high-res first).
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class UiImageCensusTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     /// <summary>The media entry an image DID comes from.</summary>

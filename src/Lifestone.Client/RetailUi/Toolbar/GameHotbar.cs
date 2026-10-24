@@ -20,7 +20,9 @@ namespace Lifestone.Client.RetailUi.Toolbar;
 /// and the layout's empty-slot art when the slot is empty (the cell of an empty list is the empty cell of <c>UIElement_ItemList</c>, and each list's own template bakes its slot's number into that art as a large numeral); a cell with an item shows its slot's number in a corner box
 /// (<see cref="UiItem.SetShortcutNumber"/>, the dats' own digit art). A spell-only row is not drawn
 /// (<c>TODO(m4-shortcut-spell)</c>). The bar redraws on <see cref="ShortcutsChanged"/>, <see cref="InventoryChanged"/> (the holdings, a stack count, a missing object coming back) and the create or update of an object it names. An object the world table does not know yet
-/// (a missing row at login) is drawn with a blank icon (<c>TODO(m4-shortcut-missing-icon)</c>, logged once).
+/// (a missing row at login) is drawn as retail draws it: <c>gmToolbarUI::AddShortcut</c> (11.6096 0x004BE630) adds the cell for the id with <c>UIElement_ItemList::ItemList_AddItem</c> (0x004E4A90) whether or not the world table
+/// knows the object, and for an unknown one only remembers the slot number (<c>UIElement_UIItem::SetDelayedShortcutNum</c> 0x004E1EC0), so the cell has no icon until the object arrives and <see cref="OnObjectCreated"/> draws it. The cell is blank
+/// and ghosted here; whether retail ghosts a never-seen object is not read (<c>TODO(m4-shortcut-missing-icon)</c> narrowed to that, logged once).
 /// </para>
 /// <para>
 /// <b>Use.</b> A number key (input map 0x1000000C, which <c>ClientUISystem::OnBeginCharacterSession</c>, 11.6096 table, registers at priority 1000 with the keymap dat's actions 0x10000042 to 0x1000004D and 0x10000132 to 0x10000137; <c>gmToolbarUI::ListenToGlobalMessage</c>
@@ -244,7 +246,7 @@ public sealed class GameHotbar : IDisposable, IUiDragSourceOwner
             if (!_loggedBlankIcon)
             {
                 _loggedBlankIcon = true;
-                _context.Manager.Services.Log.Warn("retailui", $"TODO(m4-shortcut-missing-icon): shortcut slot {slot} names object 0x{row.ObjectId:X8}, which the world table does not know; the slot is drawn ghosted with a blank icon");
+                _context.Manager.Services.Log.Warn("retailui", $"TODO(m4-shortcut-missing-icon): shortcut slot {slot} names object 0x{row.ObjectId:X8}, which the world table does not know; the cell is blank until the object arrives, as retail's AddShortcut 0x004BE630 and SetDelayedShortcutNum 0x004E1EC0 leave it (whether retail ghosts it is not read)");
             }
         }
 

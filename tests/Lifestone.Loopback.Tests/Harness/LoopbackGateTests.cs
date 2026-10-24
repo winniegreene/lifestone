@@ -9,6 +9,7 @@ namespace Lifestone.Loopback.Tests.Harness;
 /// </summary>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
 public sealed class LoopbackGateTests
 {
     [LoopbackFact]

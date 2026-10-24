@@ -10,6 +10,7 @@ public sealed class TextureLoaderTests(DatSetFixture fixture) : IClassFixture<Da
 {
     private DatSet Dats => fixture.Dats;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Parallel_decodes_match_sequential_decodes()
     {

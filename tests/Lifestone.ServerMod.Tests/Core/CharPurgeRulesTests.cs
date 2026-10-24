@@ -45,15 +45,11 @@ public sealed class CharPurgeRulesTests
 
     [Theory]
     [InlineData("Lifestone Smoke")]
-    [InlineData("lifestone smoke")]
     [InlineData("LIFESTONE LOOPBACK")]
-    [InlineData("Lifestone Loopback")]
-    [InlineData("BSD Mage")]
     [InlineData("bsd mage")]
-    [InlineData("BSD MAGE")]
-    [InlineData("Holtburg Hunter")]
-    [InlineData("holtburg hunter")]
     [InlineData("HOLTBURG HUNTER")]
+    [InlineData("holtburg brawler")]
+    [InlineData("HOLTBURG ARCHER")]
     public void The_graduated_test_characters_are_refused_by_name_whatever_the_account_holds(string name)
     {
         // Even a pending-deletion copy of a graduated name is refused: they are the baseline.
@@ -67,7 +63,7 @@ public sealed class CharPurgeRulesTests
             Assert.Contains(CharPurgeRules.Graduated, g => string.Equals(g, name, StringComparison.OrdinalIgnoreCase) && decision.Refusal.Message.StartsWith(g, StringComparison.Ordinal));
         }
 
-        Assert.Equal(["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter"], CharPurgeRules.Graduated);
+        Assert.Equal(["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer"], CharPurgeRules.Graduated);
     }
 
     [Fact]
@@ -192,6 +188,8 @@ public sealed class CharPurgeRulesTests
         Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Lifestone Smoke"), Caller)!.Code);
         Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("BSD Mage"), Caller)!.Code);
         Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Holtburg Hunter"), Caller)!.Code);
+        Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Holtburg Brawler"), Caller)!.Code);
+        Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Holtburg Archer"), Caller)!.Code);
         Assert.Throws<ArgumentNullException>(() => CharPurgeRules.EarlyRefusal(null!, Caller));
         Assert.Throws<ArgumentNullException>(() => CharPurgeRules.Check(null!, Caller, CallerGuid, []));
         Assert.Throws<ArgumentNullException>(() => CharPurgeRules.Check(new CharPurgeRequest("a"), Caller, CallerGuid, null!));
@@ -262,7 +260,7 @@ public sealed class CharPurgeRulesTests
             new CharacterSlot(0x5000000A, "Same", 5),
         };
         var account = slots.Select(s => new AccountCharacter(s.Guid, s.Name, false, s.PendingDeletion ? s.DeleteTimeout : 0UL, s.Guid == CallerGuid)).ToArray();
-        var names = new[] { "Lifestone Smoke", "lifestone loopback", "BSD Mage", "bsd mage", "Holtburg Hunter", "holtburg hunter", "Pending One", "pending one", "Live One", "Twin", "Nobody", "Lifestone Throwaway", "Pair", "Same" };
+        var names = new[] { "Lifestone Smoke", "lifestone loopback", "BSD Mage", "bsd mage", "Holtburg Hunter", "holtburg hunter", "Holtburg Brawler", "holtburg archer", "Pending One", "pending one", "Live One", "Twin", "Nobody", "Lifestone Throwaway", "Pair", "Same" };
         foreach (var name in names)
         {
             var request = new CharPurgeRequest(name);
@@ -279,13 +277,15 @@ public sealed class CharPurgeRulesTests
         Assert.Equal(CharPurgeRules.Graduated, StandInCharPurge.Graduated);
         Assert.Contains("BSD Mage", StandInCharPurge.Graduated);
         Assert.Contains("Holtburg Hunter", StandInCharPurge.Graduated);
+        Assert.Contains("Holtburg Brawler", StandInCharPurge.Graduated);
+        Assert.Contains("Holtburg Archer", StandInCharPurge.Graduated);
 
         Assert.Equal(0x50000008u, StandInCharPurge.Decide(new CharPurgeRequest("Pair"), Caller, CallerGuid, slots).Target.Guid);
         Assert.Equal(0x50000009u, StandInCharPurge.Decide(new CharPurgeRequest("Same"), Caller, CallerGuid, slots).Target.Guid);
 
         // The table reaches every reason and the success.
         Assert.Equal(
-            [ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, null, null, ToolErrors.NotPendingDeletion, null, ToolErrors.UnknownCharacter, ToolErrors.UnknownCharacter, null, null],
+            [ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, null, null, ToolErrors.NotPendingDeletion, null, ToolErrors.UnknownCharacter, ToolErrors.UnknownCharacter, null, null],
             names.Select(n => StandInCharPurge.Decide(new CharPurgeRequest(n), Caller, CallerGuid, slots).Refusal?.Code));
         Assert.Equal(ToolErrors.OwnCharacter, StandInCharPurge.Decide(new CharPurgeRequest("Ann"), "Ann", CallerGuid, slots).Refusal!.Code);
         Assert.Equal(

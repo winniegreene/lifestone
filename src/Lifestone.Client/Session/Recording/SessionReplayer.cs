@@ -229,4 +229,10 @@ public sealed record ReplayResult(
     /// there is no trailer or it has no digest.
     /// </summary>
     public bool? DigestMatches => Trailer?.StateDigest is { } recorded ? recorded.AsSpan().SequenceEqual(StateDigest) : null;
+
+    /// <summary>The trailer's facts and both digests in one line, for a failed digest check to carry (M4 P4 sfix2, TODO(m4-headless-digest)).</summary>
+    internal string DigestEvidence() =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"trailer={(Trailer is null ? "missing" : "present")} frame_count_matches={Trailer?.FrameCountMatches.ToString() ?? "n/a"} stream_hash_matches={Trailer?.StreamHashMatches.ToString() ?? "n/a"} recorded_digest={(Trailer?.StateDigest is { } d ? GameStateDigest.ToHex(d) : "none")} replayed_digest={GameStateDigest.ToHex(StateDigest)} frames={Frames} inbound={InboundMessages} events={SessionEvents} notices={Notices} unknown={Unknown} malformed={Malformed} end={End} handler_failures={HandlerFailures}");
 }

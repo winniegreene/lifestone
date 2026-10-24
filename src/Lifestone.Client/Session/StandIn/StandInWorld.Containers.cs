@@ -11,7 +11,7 @@ using Lifestone.Net.Types;
 namespace Lifestone.Client.Session.StandIn;
 
 /// <summary>
-/// The stand-in's chest (M4 2.1 s3, <c>TODO(m4-standin-chest)</c>): an object the player can open. The stand-in has no weenie database, so it is the human Setup with a name that says it is a placeholder; its
+/// The stand-in's chest (M4 2.1 s3, <c>TODO(m4-standin-chest)</c>): an object the player can open. The stand-in has no weenie database, so it is weenie 143's own Setup and icon with a name that says it is a placeholder; its
 /// weenie class id (143, the "Chest" the live capture opened) is what marks it as a container. A host places one with <see cref="StandInServer.PlaceChest"/>.
 /// </summary>
 public static class StandInChest
@@ -27,7 +27,7 @@ public static class StandInChest
 
     /// <summary>A chest for a placement or a visit.</summary>
     /// <param name="guid">The object id.</param>
-    public static StandInObject Make(uint guid) => new(guid, Name, default, StandInVisit.HumanSetup, 0, DescriptionFlags: OpenableFlag, WeenieClassId: Wcid);
+    public static StandInObject Make(uint guid) => new(guid, Name, default, StandInWeenieArt.SetupOr(Wcid, StandInVisit.HumanSetup), 0, DescriptionFlags: OpenableFlag, WeenieClassId: Wcid); // M4 4.1 v4: weenie 143 "chest"'s own Setup (the class id the live capture opened), not a human
 }
 
 // M4 2.1 s3: the containers the player opens (a creature's corpse, a chest) and what they hold, in the order ACE sends (capture.md C2, C3).
@@ -84,53 +84,32 @@ internal sealed partial class StandInWorld
     private readonly Dictionary<uint, StandInContainer> _containers = [];
     private uint _open;
 
-    /// <summary>A container of the stand-in: a corpse or a chest and the items it holds.</summary>
-    private sealed class StandInContainer(uint guid, string name, bool chest)
+    /// <summary>A container of the stand-in: a chest and the items it holds (M4 4.1 fix2b: the creature corpse is gone with the creature, D23).</summary>
+    private sealed class StandInContainer(uint guid, string name)
     {
         public uint Guid { get; } = guid;
 
         public string Name { get; } = name;
-
-        public bool Chest { get; } = chest;
 
         public bool On { get; set; }
 
         public List<StandInPackEntry> Items { get; } = [];
     }
 
-    /// <summary>Test lever (2.1-R5): a killed creature leaves no corpse (the F747 still goes).</summary>
-    internal bool WithholdCreatureCorpses { get; set; }
-
     /// <summary>Test lever (2.1-R5): a Use of a closed container is answered by a UseDone alone (no 0196, no turn, nothing opens), as a refused open reads.</summary>
     internal bool AnswerOpenWithUseDoneOnly { get; set; }
-
-    /// <summary>Test lever (2.1-R10): a corpse's 0196 and UseDone come this many seconds after the Use (a chest has its own animation delay).</summary>
-    internal double CorpseOpenDelaySeconds { get; set; }
 
     /// <summary>Test lever (2.1-R5): the player's health becomes <paramref name="value"/> <paramref name="after"/> seconds from now (a PrivateUpdateVital, vital current 2).</summary>
     internal void SetPlayerHealthLater(double after, uint value) =>
         _reducer.StandIn!.At(_reducer.Clock.Now + after, sink => sink.OnPrivateUpdate(Context(sink), new PrivateUpdateMsg(PrivateUpdateKind.VitalCurrent, 200, 2, value, default, default, default)));
 
-    /// <summary>The container the player has open now (a corpse or a chest), or 0.</summary>
+    /// <summary>The container the player has open now (a chest), or 0.</summary>
     internal uint OpenContainerGuid => _open;
 
     /// <summary>The guids of the items the container <paramref name="container"/> holds (tests); empty for none.</summary>
     internal IReadOnlyList<uint> ContentsOf(uint container) => _containers.TryGetValue(container, out var c) ? [.. c.Items.Select(i => i.Guid)] : [];
 
-    /// <summary>
-    /// Registers the corpse the creature <paramref name="creatureName"/> leaves with <paramref name="corpse"/> as its guid, holding two fixed items. A placeholder, named: ACE fills a corpse from the creature's drop tables
-    /// (<c>Creature_Death.cs</c> <c>CreateCorpse</c>), which the stand-in has no model of.
-    /// </summary>
-    private void RegisterCorpse(uint corpse, string creatureName)
-    {
-        Placeholder("m4-standin-corpse-contents", "a corpse holds two fixed items (a Bowl and a Smock), not ACE's drops for the creature: the stand-in has no loot tables");
-        var container = new StandInContainer(corpse, "Corpse of " + creatureName, chest: false);
-        container.Items.Add(new StandInPackEntry(_nextContentGuid++, BowlWcid, "Bowl", 1));
-        container.Items.Add(new StandInPackEntry(_nextContentGuid++, SmockWcid, "Smock", 1));
-        _containers[corpse] = container;
-    }
-
-    /// <summary>Puts <paramref name="items"/> into the container <paramref name="container"/> (a corpse the stand-in made or a chest placed or in the visit); the tests' and the checks' way of stocking a chest.</summary>
+    /// <summary>Puts <paramref name="items"/> into the container <paramref name="container"/> (a chest placed or in the visit); the tests' and the checks' way of stocking a chest.</summary>
     internal void Stock(uint container, params StandInPackEntry[] items)
     {
         if (!TryContainer(container, out var c))
@@ -161,7 +140,7 @@ internal sealed partial class StandInWorld
         var kind = _placed.TryGetValue(guid, out var placed) ? placed : _visit.Objects.FirstOrDefault(o => o.Guid == guid);
         if (kind.Guid == guid && guid != 0 && kind.WeenieClassId == StandInChest.Wcid)
         {
-            container = _containers[guid] = new StandInContainer(guid, kind.Name, chest: true);
+            container = _containers[guid] = new StandInContainer(guid, kind.Name);
             return true;
         }
 
@@ -170,8 +149,8 @@ internal sealed partial class StandInWorld
     }
 
     /// <summary>
-    /// A Use of a container (capture.md C2, C3). Closed: the player's turn (F74C; a corpse also F748), then 0196 {container, entries}, 01C7 UseDone 0 and the F745 of every item (container = the container) 16 ms later; a
-    /// chest opens <see cref="ChestOpenSeconds"/> after the turn and its On motion follows the UseDone. Open: it closes (a corpse: 0052 then UseDone in one tick; a chest: its Off motion, UseDone, then 0052 <see cref="ChestCloseSeconds"/>
+    /// A Use of a chest (capture.md C3; the corpse path of C2 went with the creature, M4 4.1 fix2b). Closed: the player's turn (F74C), then 0196 {container, entries}, 01C7 UseDone 0 and the F745 of every item (container = the container) 16 ms later; a
+    /// chest opens <see cref="ChestOpenSeconds"/> after the turn and its On motion follows the UseDone. Open: it closes (its Off motion, UseDone, then 0052 <see cref="ChestCloseSeconds"/>
     /// later). Opening a second container closes the first (its 0052 first).
     /// </summary>
     private OutboundTicket UseContainer(StandInContainer container)
@@ -196,19 +175,8 @@ internal sealed partial class StandInWorld
             }
 
             TurnToContainer(sink, container);
-            if (container.Chest)
-            {
-                Placeholder("m4-standin-chest-motion", "a chest's On and Off are UpdateMotions with a placeholder command (Stop for On, Ready for Off): the stand-in has no motion table for the chest");
-                _reducer.StandIn!.At(_reducer.Clock.Now + ChestOpenSeconds, later => Reveal(later, container));
-            }
-            else if (CorpseOpenDelaySeconds > 0)
-            {
-                _reducer.StandIn!.At(_reducer.Clock.Now + CorpseOpenDelaySeconds, later => Reveal(later, container));
-            }
-            else
-            {
-                Reveal(sink, container);
-            }
+            Placeholder("m4-standin-chest-motion", "a chest's On and Off are UpdateMotions with a placeholder command (Stop for On, Ready for Off): the stand-in has no motion table for the chest");
+            _reducer.StandIn!.At(_reducer.Clock.Now + ChestOpenSeconds, later => Reveal(later, container));
         });
         return Ticket();
     }
@@ -224,15 +192,8 @@ internal sealed partial class StandInWorld
             }
 
             _open = 0;
-            if (open.Chest)
-            {
-                ChestMotion(sink, open, on: false);
-                _reducer.StandIn!.At(_reducer.Clock.Now + ChestCloseSeconds, later => Closed(later, open));
-            }
-            else
-            {
-                Closed(sink, open);
-            }
+            ChestMotion(sink, open, on: false);
+            _reducer.StandIn!.At(_reducer.Clock.Now + ChestCloseSeconds, later => Closed(later, open));
         });
         return Ticket();
     }
@@ -250,10 +211,7 @@ internal sealed partial class StandInWorld
         AnswerLog.Add("0196");
         sink.OnViewContents(Context(sink), new GameEventHeader(self, 0, ViewContentsType), new ViewContentsEvent(container.Guid, entries));
         UseDone(sink);
-        if (container.Chest)
-        {
-            ChestMotion(sink, container, on: true);
-        }
+        ChestMotion(sink, container, on: true);
 
         var items = container.Items.ToArray();
         _reducer.StandIn!.At(_reducer.Clock.Now + ContentsLagSeconds, later =>
@@ -277,27 +235,16 @@ internal sealed partial class StandInWorld
     private void CloseByUse(IAcSessionSink sink, StandInContainer container)
     {
         _open = 0;
-        if (container.Chest)
-        {
-            ChestMotion(sink, container, on: false);
-            UseDone(sink);
-            _reducer.StandIn!.At(_reducer.Clock.Now + ChestCloseSeconds, later => Closed(later, container));
-            return;
-        }
-
-        Closed(sink, container);
+        ChestMotion(sink, container, on: false);
         UseDone(sink);
+        _reducer.StandIn!.At(_reducer.Clock.Now + ChestCloseSeconds, later => Closed(later, container));
     }
 
     /// <summary>Closes the open container <paramref name="container"/> at once (another is being opened): a chest's Off motion, then the 0052.</summary>
     private void CloseNow(IAcSessionSink sink, StandInContainer container)
     {
         _open = 0;
-        if (container.Chest)
-        {
-            ChestMotion(sink, container, on: false);
-        }
-
+        ChestMotion(sink, container, on: false);
         Closed(sink, container);
     }
 
@@ -309,11 +256,7 @@ internal sealed partial class StandInWorld
 
     private void TurnToContainer(IAcSessionSink sink, StandInContainer container)
     {
-        SendPlayerMotion(sink, StanceNow(), MotionCommands.Ready); // the turn toward the container (a placeholder motion: the stand-in sends no MoveTo for it)
-        if (!container.Chest)
-        {
-            PlayerPositionNow(sink); // capture.md C2: the corpse's turn carries the player's F748, the chest's does not
-        }
+        SendPlayerMotion(sink, StanceNow(), MotionCommands.Ready); // the turn toward the chest (a placeholder motion: the stand-in sends no MoveTo for it; capture.md C3: a chest's turn carries no F748, a corpse's did)
     }
 
     private void ChestMotion(IAcSessionSink sink, StandInContainer container, bool on)
@@ -333,13 +276,7 @@ internal sealed partial class StandInWorld
     }
 
     /// <summary>The stance word of the player's combat mode now (the stand-in's own motions use it so a turn or a pick-up does not drop the stance).</summary>
-    private uint StanceNow() => _reducer.State.Self.Qualities.CombatMode switch
-    {
-        CombatModes.Melee => MotionCommands.HandCombat,
-        CombatModes.Missile => BowCombat,
-        CombatModes.Magic => MotionCommands.Magic,
-        _ => MotionCommands.NonCombat,
-    };
+    private uint StanceNow() => CombatStances.ForMode(_reducer.State.Self.Qualities.CombatMode, _reducer.State, out _); // by the wielded weapon, as ACE's GetCombatStance does (M4 4.1 v3)
 
     /// <summary>The player's position as the stand-in last knew it (F748 sends it as the player's own update), or null.</summary>
     private AcPosition? PlayerPlace() =>
@@ -363,7 +300,7 @@ internal sealed partial class StandInWorld
         (_visit.Items ?? StandInItemKind.Default).TryGetValue(wcid, out var kind) ? kind.MaxStack : KitWeenies.TryGetValue(wcid, out var kit) ? kit.Kind.MaxStack : null;
 
     /// <summary>
-    /// The CreateObject of an item the container / the ground / a wielder shows: no model of its own beyond the kit's Setup (<c>TODO(m3-standin-weenies)</c>, <c>TODO(m3-standin-unknown-item-setup)</c>), the item's stack and limit, and,
+    /// The CreateObject of an item the container / the ground / a wielder shows: the weenie's own Setup and icons from <see cref="StandInWeenieArt"/> (<c>TODO(m3-standin-weenies)</c>; <c>TODO(m4-standin-art-missing)</c> for a class id the table lacks), the item's stack and limit, and,
     /// when <paramref name="container"/> is set, that container; on the ground, <paramref name="at"/>.
     /// </summary>
     private CreateObjectMsg ItemObject(StandInPackEntry item, uint? container, AcPosition? at, uint wielder = 0, uint location = 0)
@@ -395,9 +332,9 @@ internal sealed partial class StandInWorld
         var physics = new PhysicsDesc
         {
             Flags = PhysicsDescFlags.CSetup | (at is not null ? PhysicsDescFlags.Position : PhysicsDescFlags.None),
-            State = at is not null ? PhysicsState.Gravity | PhysicsState.ReportCollisions : PhysicsState.IgnoreCollisions | PhysicsState.Ethereal,
+            State = (at is not null ? PhysicsState.Gravity | PhysicsState.ReportCollisions : PhysicsState.IgnoreCollisions | PhysicsState.Ethereal) | LightingOf(item.Wcid),
             Position = at ?? default,
-            SetupId = kit?.SetupId ?? PlaceholderItemSetup,
+            SetupId = SetupFor(item.Wcid, kit),
             Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1),
         };
         var weenie = new WeenieDesc
@@ -405,7 +342,7 @@ internal sealed partial class StandInWorld
             Header = header,
             Name = item.Name,
             WeenieClassId = item.Wcid,
-            IconId = 0x06000001,
+            IconId = StandInWeenieArt.PlaceholderIcon,
             ItemType = corpseItem ? corpseType : kit?.ItemType ?? (item.Wcid == StandInItemKind.PyrealWcid ? 0x40u : 0x80u),
             Value = corpseItem ? corpseValue : null,
             Burden = corpseItem ? corpseBurden : null,
@@ -416,6 +353,6 @@ internal sealed partial class StandInWorld
             StackSize = max is not null ? (ushort)Math.Min(item.Stack, ushort.MaxValue) : null,
             MaxStackSize = max is { } limit ? (ushort)Math.Min(limit, ushort.MaxValue) : null,
         };
-        return new CreateObjectMsg(item.Guid, ModelData.Empty, physics, weenie);
+        return new CreateObjectMsg(item.Guid, ModelData.Empty, physics, StandInWeenieArt.Apply(weenie, Log));
     }
 }

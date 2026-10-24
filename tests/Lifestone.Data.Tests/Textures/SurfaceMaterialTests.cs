@@ -114,6 +114,7 @@ public sealed class SurfaceMaterialTests(DatSetFixture fixture, ITestOutputHelpe
     }
 
     /// <summary>Known surfaces (first of each type combination by id; scratchpad textures/surf_samples.py).</summary>
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [InlineData(0x08000000u, 0x4u, 0x050025F2u, 0u, 0f, 0f)]
     [InlineData(0x08000002u, 0x2u, 0x050025F4u, 0u, 0f, 0f)]
@@ -142,6 +143,7 @@ public sealed class SurfaceMaterialTests(DatSetFixture fixture, ITestOutputHelpe
         Assert.Equal(SurfaceMaterial.DeriveRenderState(m.EffectiveType, m.Translucency, m.IsTextured), m.RenderState);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Sun_quad_surface_is_alpha_additive()
     {
@@ -160,6 +162,7 @@ public sealed class SurfaceMaterialTests(DatSetFixture fixture, ITestOutputHelpe
     /// that pass the test and are then blended ONE/INVSRCALPHA. Counts per unique level-0 RenderSurface, matching the
     /// reviewer's independent Python count (scratchpad review-textures/clip_alpha.py).
     /// </summary>
+    [Trait("Tier", "Exhaustive")]
     [RequiresHighResDatsFact]
     public void Non_paletted_clip_maps_have_texels_that_pass_the_alpha_test_and_blend()
     {
@@ -205,6 +208,7 @@ public sealed class SurfaceMaterialTests(DatSetFixture fixture, ITestOutputHelpe
         Assert.Equal(1, blendedAfterTest[PixelFormat.PFID_A4R4G4B4]);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresHighResDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_surface_builds_a_material_and_decodes_its_texture()

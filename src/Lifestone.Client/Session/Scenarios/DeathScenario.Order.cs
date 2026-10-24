@@ -399,6 +399,11 @@ public sealed partial class DeathScenario
             return died;
         }
 
+        if (FightManaWaiting(session))
+        {
+            return ScenarioStatus.Running;
+        }
+
         var inner = _inner!;
         var status = inner.Step(session, now);
         _denKills = inner.Kills;
@@ -415,6 +420,60 @@ public sealed partial class DeathScenario
                 return ScenarioStatus.Running;
         }
     }
+
+    /// <summary>
+    /// M4 P4 g3fix: the bounded precondition wait before the den (see <see cref="DeathOptions.FightManaWaitSeconds"/>): true while the mana is under the floor and the wait has time left. Logged once at its start and once at its end with the numbers;
+    /// when the bound passes with the mana short the fight goes on (it waits for mana itself, as before) and a WARN names the numbers, so the cause stays on the log.
+    /// </summary>
+    private bool FightManaWaiting(IGameSessionView session)
+    {
+        if (_options.FightManaWaitSeconds <= 0 || _fightManaDone)
+        {
+            return false;
+        }
+
+        var now = session.Clock.Now;
+        if (!session.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var current, out var max) || max == 0)
+        {
+            _fightManaDone = true;
+            _log.Warn(LogCategory, "fight: the read model has no mana vital; no mana wait before the den");
+            return false;
+        }
+
+        var floor = Math.Ceiling(max * _options.FightManaFloorPercent / 100.0);
+        if (double.IsNaN(_fightManaStart))
+        {
+            _fightManaStart = now;
+            if (current >= floor)
+            {
+                _fightManaDone = true;
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight: mana {current} of {max} is at the {floor:0} floor ({_options.FightManaFloorPercent:0.#}%): no wait before the den"));
+                return false;
+            }
+
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight: mana {current} of {max}, the floor is {floor:0} ({_options.FightManaFloorPercent:0.#}%): waiting for regeneration before the den, at most {_options.FightManaWaitSeconds:0} s (a precondition wait, nothing has been cast)"));
+            return true;
+        }
+
+        if (current >= floor)
+        {
+            _fightManaDone = true;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight: mana {current} reached the {floor:0} floor after {now - _fightManaStart:0.#} s"));
+            return false;
+        }
+
+        if (now - _fightManaStart > _options.FightManaWaitSeconds)
+        {
+            _fightManaDone = true;
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight: mana {current} of {max} did not reach the {floor:0} floor within {_options.FightManaWaitSeconds:0} s; the fight goes on and waits for mana itself"));
+            return false;
+        }
+
+        return true;
+    }
+
+    private double _fightManaStart = double.NaN;
+    private bool _fightManaDone;
 
     // ------------------------------------------------------------------------------------------------ the decoys
 

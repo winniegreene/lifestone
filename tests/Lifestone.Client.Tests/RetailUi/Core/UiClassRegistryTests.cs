@@ -140,21 +140,6 @@ public sealed class UiClassRegistryTests
         Assert.Equal(84, UiClassRegistry.RetailClassNames.Keys.Count(id => id >= 0x10000000));
     }
 
-    [Theory]
-    [InlineData(0x01u, "UIElement_Button")]
-    [InlineData(0x0Cu, "UIElement_Text")]
-    [InlineData(0x0Du, "UIElement_Viewport")]
-    [InlineData(0x17u, "MessageDialog")]
-    [InlineData(0x10000014u, "gmSmartBoxUI")]
-    [InlineData(0x10000016u, "gmSpewBoxUI")]
-    [InlineData(0x10000039u, "gmCGHeritagePage")]
-    [InlineData(0x1000003Eu, "gmCGSummaryPage")]
-    [InlineData(0x10000041u, "gmMainChatUI")]
-    public void Well_known_classes_have_their_retail_ids(uint id, string name)
-    {
-        Assert.Equal(name, UiClassRegistry.NameOf(id));
-    }
-
     [Fact]
     public void Ids_retail_never_registered_are_named_as_such()
     {

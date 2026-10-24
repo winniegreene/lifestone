@@ -5,18 +5,19 @@ using Lifestone.Client.Tests;
 namespace Lifestone.Tests.Shared.Loopback;
 
 /// <summary>
-/// The cross-process lock that serialises loopback tests: every worktree and every <c>dotnet test</c> shares the one
-/// localhost ACE and its test account, so only one process at a time may run loopback tests. Inside a process the
-/// <see cref="LoopbackCollection"/> runs them one at a time.
+/// The cross-process lock that serialises loopback tests per test account (M4 D31): every worktree and every <c>dotnet test</c>
+/// shares the one localhost ACE, but ACE boots a second login of one account, so only one process at a time may run the loopback tests
+/// of an account. Different accounts (<c>test</c>, <c>test-melee</c>, <c>test-archer</c>) hold different locks, so their processes run at
+/// once. Inside a process the <see cref="LoopbackCollection"/> runs tests one at a time.
 /// </summary>
 /// <remarks>
-/// <para>The lock is a file, <c>&lt;main checkout&gt;\cache\loopback.lock</c>, opened with <see cref="FileShare.None"/>
-/// and <see cref="FileOptions.DeleteOnClose"/>. The OS releases it when the holder exits or dies, and a crashed holder
+/// <para>The lock is a file per account, <c>&lt;main checkout&gt;\cache\loopback-&lt;account&gt;.lock</c> (<see cref="PathFor"/>), opened with
+/// <see cref="FileShare.None"/> and <see cref="FileOptions.DeleteOnClose"/>. The OS releases it when the holder exits or dies, and a crashed holder
 /// leaves at most an unlocked file behind. (A named mutex is thread-affine, which xUnit's fixture disposal breaks, and a
 /// semaphore does not get its count back when its holder crashes.)</para>
-/// <para>A process takes the lock when its first loopback test is about to run (<see cref="EnsureHeldByThisProcess"/>),
-/// waits at most <see cref="DefaultMaxWait"/> for it, and keeps it until it exits. If the wait runs out, every loopback
-/// test of the process skips with the reason.</para>
+/// <para>A process takes an account's lock when its first loopback test of that account is about to run (<see cref="EnsureHeldByThisProcess(string)"/>),
+/// waits at most <see cref="DefaultMaxWait"/> for it, and keeps it until it exits. If the wait runs out, every loopback test of that account in the
+/// process skips with the reason, which names the account.</para>
 /// </remarks>
 public sealed class LoopbackLock : IDisposable
 {
@@ -25,9 +26,7 @@ public sealed class LoopbackLock : IDisposable
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
     private static readonly object ProcessGate = new();
-    private static LoopbackLock? _processLock;
-    private static string? _processFailure;
-    private static bool _processAttempted;
+    private static readonly Dictionary<string, (LoopbackLock? Held, string? Failure)> Processes = new(StringComparer.Ordinal);
 
     private readonly FileStream _file;
 
@@ -37,44 +36,67 @@ public sealed class LoopbackLock : IDisposable
         Path = path;
     }
 
-    /// <summary>The lock file of the main checkout (<see cref="RepositoryFiles.MainCheckout"/>).</summary>
-    public static string DefaultPath => System.IO.Path.Combine(RepositoryFiles.MainCheckout, "cache", "loopback.lock");
+    /// <summary>The lock file of the <c>test</c> account in the main checkout (<see cref="RepositoryFiles.MainCheckout"/>).</summary>
+    public static string DefaultPath => PathFor(BackendProbe.TestAccountKey);
 
-    /// <summary>True when this process holds the main checkout's lock.</summary>
-    public static bool IsHeldByThisProcess
+    /// <summary>The lock file of <paramref name="account"/> in the main checkout: <c>cache\loopback-&lt;account&gt;.lock</c>.</summary>
+    /// <param name="account">An account key (lower-case letters, digits and '-').</param>
+    public static string PathFor(string account)
     {
-        get
+        ArgumentException.ThrowIfNullOrWhiteSpace(account);
+        foreach (var c in account)
         {
-            lock (ProcessGate)
+            if (!(c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-'))
             {
-                return _processLock is not null;
+                throw new ArgumentException("an account key is lower-case letters, digits and '-'", nameof(account));
             }
+        }
+
+        return System.IO.Path.Combine(RepositoryFiles.MainCheckout, "cache", "loopback-" + account + ".lock");
+    }
+
+    /// <summary>True when this process holds the main checkout's lock of the <c>test</c> account.</summary>
+    public static bool IsHeldByThisProcess => IsHeldByThisProcessFor(BackendProbe.TestAccountKey);
+
+    /// <summary>True when this process holds the main checkout's lock of <paramref name="account"/>.</summary>
+    /// <param name="account">The account key.</param>
+    public static bool IsHeldByThisProcessFor(string account)
+    {
+        lock (ProcessGate)
+        {
+            return Processes.TryGetValue(account, out var state) && state.Held is not null;
         }
     }
 
     /// <summary>The lock file this instance holds.</summary>
     public string Path { get; }
 
+    /// <summary>As <see cref="EnsureHeldByThisProcess(string)"/> for the <c>test</c> account.</summary>
+    public static string? EnsureHeldByThisProcess() => EnsureHeldByThisProcess(BackendProbe.TestAccountKey);
+
     /// <summary>
-    /// Takes the main checkout's lock for this process if it does not hold it yet (waiting at most
+    /// Takes <paramref name="account"/>'s lock for this process if it does not hold it yet (waiting at most
     /// <see cref="DefaultMaxWait"/>), and keeps it until the process exits. Returns null when the lock is held, or the
-    /// skip reason when it could not be taken; a failure is remembered, so the remaining tests do not wait again.
+    /// skip reason (naming the account) when it could not be taken; a failure is remembered per account, so the remaining tests do not wait again.
     /// </summary>
-    public static string? EnsureHeldByThisProcess()
+    /// <param name="account">The account key.</param>
+    public static string? EnsureHeldByThisProcess(string account)
     {
+        var path = PathFor(account);
         lock (ProcessGate)
         {
-            if (!_processAttempted)
+            if (!Processes.TryGetValue(account, out var state))
             {
-                _processAttempted = true;
-                _processLock = TryAcquire(DefaultPath, DefaultMaxWait, out _processFailure);
-                if (_processLock is { } held)
+                var held = TryAcquire(path, DefaultMaxWait, out var failure);
+                state = (held, failure is null ? null : $"account '{account}': {failure}");
+                Processes[account] = state;
+                if (held is not null)
                 {
                     AppDomain.CurrentDomain.ProcessExit += (_, _) => held.Dispose();
                 }
             }
 
-            return _processLock is null ? _processFailure : null;
+            return state.Held is null ? state.Failure : null;
         }
     }
 
@@ -115,7 +137,7 @@ public sealed class LoopbackLock : IDisposable
             catch (IOException)
             {
                 failure = $"another loopback test run (another worktree or process) has held {full} for {FormatWait(maxWait)}: " +
-                          "loopback tests run one process at a time against the single localhost ACE";
+                          "loopback tests of one test account run one process at a time (ACE boots a second login of an account)";
                 return null;
             }
             catch (UnauthorizedAccessException e)

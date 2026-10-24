@@ -140,14 +140,75 @@ public sealed class EnterWorldTests
         rig.Script.EnterWorldErrors.Enqueue((uint)CharacterErrorCode.EnterGameCharacterInWorld);
 
         rig.Session.EnterWorld(SessionRig.HeroGuid);
-        Assert.True(rig.RunUntil(() => rig.Session.Phase == SessionPhase.InWorld, TimeSpan.FromSeconds(5)));
+        Assert.True(rig.RunUntil(() => rig.Session.Phase == SessionPhase.InWorld, TimeSpan.FromSeconds(10)));
 
         var retry = Assert.Single(rig.Sink.OfKind(SessionEventKind.RetryScheduled));
         Assert.Equal((2, 0x0Du, SessionPhase.EnteringWorld), (retry.Attempt, retry.Code, retry.Phase));
+        Assert.Equal(TimeSpan.FromSeconds(5), retry.Delay); // M4 4.1 fix: the wait for a character ACE still holds is 5 s a time
         Assert.Equal(2, rig.Tap.OutboundOpcodes.Count(o => o == MessageOpcodes.CharacterEnterWorldRequest));
         Assert.Equal(2, rig.Tap.OutboundOpcodes.Count(o => o == MessageOpcodes.CharacterEnterWorld));
         Assert.Empty(rig.Sink.OfKind(SessionEventKind.CharacterErrorReceived));
         Assert.Equal(1, rig.SocketsOpened);
+    }
+
+    [Fact]
+    public void A_character_ACE_still_holds_is_waited_for_with_a_logged_wait_past_the_four_attempts_and_the_thirty_second_cap()
+    {
+        // M4 4.1 fix: ACE answers 0x0D until the previous session's logout finishes (up to its 60 s session timeout plus the animation), so the request waits 5 s a time, not 3 s three times.
+        using var rig = new SessionRig();
+        rig.ToCharacterSelect();
+        for (var i = 0; i < 8; i++)
+        {
+            rig.Script.EnterWorldErrors.Enqueue((uint)CharacterErrorCode.EnterGameCharacterInWorld);
+        }
+
+        rig.Session.EnterWorld(SessionRig.HeroGuid);
+        Assert.True(rig.RunUntil(() => rig.Session.Phase == SessionPhase.InWorld, TimeSpan.FromSeconds(60)));
+
+        var retries = rig.Sink.OfKind(SessionEventKind.RetryScheduled).ToList();
+        Assert.Equal(Enumerable.Range(2, 8), retries.Select(r => r.Attempt));
+        Assert.All(retries, r => Assert.Equal((0x0Du, TimeSpan.FromSeconds(5)), (r.Code, r.Delay)));
+        Assert.Equal(9, rig.Tap.OutboundOpcodes.Count(o => o == MessageOpcodes.CharacterEnterWorld));
+
+        // Never silent: each retry logs its attempt and the wait so far.
+        var lines = rig.Log.At(NetLogLevel.Warning).Where(l => l.Contains("enter world: CharacterError 0x0D", StringComparison.Ordinal)).ToList();
+        Assert.Equal(8, lines.Count);
+        Assert.Contains("attempt 2 in 5 s", lines[0], StringComparison.Ordinal);
+        Assert.Contains("waited 5 of at most 75 s", lines[0], StringComparison.Ordinal);
+        Assert.Contains("attempt 9 in 5 s", lines[7], StringComparison.Ordinal);
+        Assert.Contains("waited 40 of at most 75 s", lines[7], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_character_ACE_never_lets_go_of_fails_back_to_character_select_after_the_wait_and_says_how_long()
+    {
+        using var rig = new SessionRig();
+        rig.ToCharacterSelect();
+        for (var i = 0; i < 20; i++)
+        {
+            rig.Script.EnterWorldErrors.Enqueue((uint)CharacterErrorCode.EnterGameCharacterInWorld);
+        }
+
+        rig.Session.EnterWorld(SessionRig.HeroGuid);
+        Assert.True(rig.RunUntil(() => rig.Session.Phase == SessionPhase.CharacterSelect, TimeSpan.FromSeconds(120)));
+
+        Assert.Equal(SessionPhase.CharacterSelect, rig.Session.Phase);
+        Assert.Equal(15, rig.Sink.OfKind(SessionEventKind.RetryScheduled).Count()); // 75 s in 5 s steps
+        Assert.Contains(rig.Log.At(NetLogLevel.Warning), static l => l.Contains("after waiting 75 s for ACE to let go of the character", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_retail_policy_does_not_wait_for_a_character_ACE_holds()
+    {
+        using var rig = new SessionRig(configure: o => o with { Retry = LoginRetryPolicy.Retail });
+        rig.ToCharacterSelect();
+        rig.Script.EnterWorldErrors.Enqueue((uint)CharacterErrorCode.EnterGameCharacterInWorld);
+
+        rig.Session.EnterWorld(SessionRig.HeroGuid);
+        Assert.True(rig.RunUntil(() => rig.Sink.CharacterErrors.Count == 1, TimeSpan.FromSeconds(5)));
+
+        Assert.Empty(rig.Sink.OfKind(SessionEventKind.RetryScheduled));
+        Assert.Equal(SessionPhase.CharacterSelect, rig.Session.Phase);
     }
 
     [Fact]

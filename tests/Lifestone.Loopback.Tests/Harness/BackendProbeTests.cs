@@ -155,6 +155,28 @@ public sealed class BackendProbeTests : IDisposable
     }
 
     [Fact]
+    public void A_characters_account_is_checked_by_key_name_and_the_probe_still_gates_on_test_only()
+    {
+        // M4 D31: Holtburg Brawler logs in on test-melee, Holtburg Archer on test-archer, every earlier character on test.
+        Assert.Equal("test-melee", LoopbackAccounts.For("Holtburg Brawler"));
+        Assert.Equal("test-archer", LoopbackAccounts.For("Holtburg Archer"));
+        Assert.Equal("test", LoopbackAccounts.For("BSD Mage"));
+        Assert.Equal("test", LoopbackAccounts.For(null));
+
+        WriteReadyBackend(); // a secrets file with accounts.test only
+        Assert.True(Probe().IsReady);
+        Assert.Null(BackendProbe.AccountProblem(_files.SecretsFile, "test"));
+        var missing = BackendProbe.AccountProblem(_files.SecretsFile, "test-melee");
+        Assert.NotNull(missing);
+        Assert.Contains("'accounts.test-melee'", missing, StringComparison.Ordinal);
+        Assert.DoesNotContain(SentinelPassword, missing, StringComparison.Ordinal);
+
+        File.WriteAllText(_files.SecretsFile, "{\"accounts\":{\"test\":{},\"test-melee\":{\"password\":\"" + SentinelPassword + "\"}}}");
+        Assert.Null(BackendProbe.AccountProblem(_files.SecretsFile, "test-melee"));
+        Assert.Contains("'accounts.test-archer'", BackendProbe.AccountProblem(_files.SecretsFile, "test-archer"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Malformed_secrets_are_not_ready_and_their_content_is_not_quoted()
     {
         WriteReadyBackend();

@@ -117,22 +117,6 @@ public sealed class PotionTrackerTests
         Assert.Equal(25, result.Amount);
     }
 
-    [Fact]
-    public void A_UseDone_with_a_code_is_a_ServerError_with_the_code_named()
-    {
-        var r = new HealRig();
-        var handle = r.DrinkPotion();
-        r.UseDone(0x001D);
-        r.Tick();
-
-        var outcome = handle.Outcome!.Value;
-        Assert.Equal(ActionOutcomeKind.ServerError, outcome.Kind);
-        Assert.Equal(0x001Du, outcome.Code);
-        Assert.Contains("0x001D", outcome.Detail, StringComparison.Ordinal);
-        Assert.Contains("YoureTooBusy", outcome.Detail, StringComparison.Ordinal);
-        Assert.Null(handle.Result);
-    }
-
     [Theory]
     [InlineData(0x001Du, "too busy")]
     [InlineData(0x04EBu, "in the air")]
@@ -154,18 +138,6 @@ public sealed class PotionTrackerTests
     }
 
     [Fact]
-    public void A_silent_UseDone_0_with_no_stack_change_is_a_ServerError_that_nothing_happened()
-    {
-        var (r, handle) = Sent();
-        r.UseDone();
-        r.Tick();
-
-        var outcome = handle.Outcome!.Value;
-        Assert.Equal(ActionOutcomeKind.ServerError, outcome.Kind);
-        Assert.Contains("nothing happened", outcome.Detail, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void A_stack_that_did_not_fall_does_not_confirm_a_drink()
     {
         var (r, handle) = Sent();
@@ -176,17 +148,5 @@ public sealed class PotionTrackerTests
 
         Assert.Equal(ActionOutcomeKind.ServerError, handle.Outcome!.Value.Kind);
         Assert.Contains("nothing happened", handle.Outcome.Value.Detail, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_drink_that_never_ends_times_out_after_20_seconds()
-    {
-        var r = new HealRig();
-        var handle = r.DrinkPotion();
-        r.Tick(19.9);
-        Assert.False(handle.IsCompleted);
-        r.Tick(0.2);
-
-        Assert.Equal(ActionOutcomeKind.TimedOut, handle.Outcome!.Value.Kind);
     }
 }

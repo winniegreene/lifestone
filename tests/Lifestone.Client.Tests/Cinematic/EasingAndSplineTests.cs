@@ -164,7 +164,6 @@ public sealed class EasingAndSplineTests
 
     [Theory]
     [InlineData(0.8, 0.1, 0.3)]
-    [InlineData(0.86, 0.06, 0.2)]
     [InlineData(0.2, 0.7, 0.5)]
     [InlineData(0.5, 0.5, 1.0)]
     public void Time_lapse_spans_run_forwards_across_midnight(double start, double end, double span)

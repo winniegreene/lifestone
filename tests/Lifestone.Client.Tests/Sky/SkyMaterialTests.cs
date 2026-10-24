@@ -97,6 +97,7 @@ public sealed class SkyMaterialTests(SkyDatsFixture fixture) : IClassFixture<Sky
         Assert.Equal((SurfaceBlend.Mix, false), (clipFaded.Blend, clipFaded.AlphaTest));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_regions_sky_surfaces_map_to_the_expected_variants()
     {

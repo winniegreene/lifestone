@@ -61,8 +61,8 @@ internal sealed record CharPurgeDecision(ToolError? Refusal, AccountCharacter? T
 /// </remarks>
 internal static class CharPurgeRules
 {
-    /// <summary>The graduated test characters, which stay as the baseline and are never purged (m2-log-in §7 decision 13; "BSD Mage", the M3 mage, from m3-plan D11; "Holtburg Hunter", the M4 fighter, from m4-plan D1).</summary>
-    public static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter"];
+    /// <summary>The graduated test characters, which stay as the baseline and are never purged (m2-log-in §7 decision 13; "BSD Mage", the M3 mage, from m3-plan D11; "Holtburg Hunter", the M4 fighter, from m4-plan D1; "Holtburg Brawler" and "Holtburg Archer", the M4 melee and archer lanes' fighters, from m4-plan D31).</summary>
+    public static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer"];
 
     /// <summary>The refusals that need no database read: a graduated name, then the caller's own character; null when neither applies.</summary>
     public static ToolError? EarlyRefusal(CharPurgeRequest request, string callerName)

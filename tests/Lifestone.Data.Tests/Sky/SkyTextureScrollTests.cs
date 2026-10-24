@@ -6,6 +6,7 @@ namespace Lifestone.Data.Tests.Sky;
 /// <summary>CPhysics::AddGfxVelocity / UseTime / UpdateTexVelocity (acclient.c:311467, 311335, 311248).</summary>
 public sealed class SkyTextureScrollTests(SkyFixture fixture) : IClassFixture<SkyFixture>
 {
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Sync_registers_the_scrolling_clouds_and_rain_of_the_Region()
     {

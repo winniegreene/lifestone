@@ -9,6 +9,7 @@ namespace Lifestone.Client.Tests.Sky;
 /// The allocation-free object evaluator gives the same bits as <see cref="SkyEvaluator.GetSky"/>, and the clock's start
 /// rule keeps automated runs reproducible.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class SkyObjectEvaluatorTests(SkyDatsFixture fixture) : IClassFixture<SkyDatsFixture>
 {
     [RequiresDatsFact]

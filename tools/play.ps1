@@ -20,8 +20,8 @@
     account and character NAMES only (tools\lib\Play.psm1 checks them and refuses anything that looks like a password option).
 
     Agents and tests always pass -Offscreen -IsolateUserData -TimeoutSeconds N (no window on the owner's desktop, no audio,
-    user data inside the repository, a hard stop). An automated run uses the test account only: -Offscreen makes -Account default to
-    `test` and refuses any other; the play account is the owner's.
+    user data inside the repository, a hard stop). An automated run uses the three test accounts only (M4 D31): -Offscreen makes -Account default to
+    `test`, accepts `test-melee` and `test-archer`, and refuses any other; the play account is the owner's.
 
 .PARAMETER Account
     The entry of server\runtime\secrets.json's accounts to sign in with (play, test, or one setup-server.ps1 -AddAccount made); a
@@ -49,7 +49,7 @@
     godot.ps1 -Resolution WxH.
 
 .PARAMETER Audio
-    godot.ps1 -Audio (with -Offscreen: keep the normal audio driver).
+    godot.ps1 -Audio. Refused with -Offscreen (M4 P4 gate: an automated run is silent, M2 D8); only a run you play yourself can have sound.
 
 .PARAMETER DatDir
     godot.ps1 -DatDir.
@@ -101,12 +101,18 @@ Import-Module (Join-Path $PSScriptRoot 'lib\Play.psm1') -Force -DisableNameCheck
 
 function Invoke-PlayChild {
     <# Runs a PowerShell script as a child process on this console and returns its exit code. The arguments go through ArgumentList, so a quoted value (a character name with spaces) reaches the child whole. #>
-    param([string] $Script, [string[]] $Arguments = @())
+    param([string] $Script, [string[]] $Arguments = @(), [switch] $Capture)
     $psi = [System.Diagnostics.ProcessStartInfo]::new($pwshExe)
+    if ($Capture) { $psi.RedirectStandardOutput = $true }
     foreach ($a in @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Script) + $Arguments) { $psi.ArgumentList.Add($a) }
     $psi.UseShellExecute = $false   # CreateProcess: no shell verbs, no elevation, inherits this console
     $psi.WorkingDirectory = $repoRoot
     $child = [System.Diagnostics.Process]::Start($psi)
+    if ($Capture) {
+        # -Offscreen (P4-R15): the output is echoed line by line and kept for the audio check.
+        $script:capturedOutput = [System.Text.StringBuilder]::new()
+        while ($null -ne ($line = $child.StandardOutput.ReadLine())) { Write-Host $line; [void]$script:capturedOutput.AppendLine($line) }
+    }
     $child.WaitForExit()
     return $child.ExitCode
 }
@@ -117,7 +123,7 @@ function Stop-Refused([string] $Message, [int] $Code = 1) {
 }
 
 # --- 1. The arguments: names only, the automated run's account, and nothing that carries a password. ---
-$game = Get-PlayGameOptions -Account $Account -Character $Character -Offscreen:$Offscreen -GameArgs $GameArgs
+$game = Get-PlayGameOptions -Account $Account -Character $Character -Offscreen:$Offscreen -GameArgs $GameArgs -Audio:$Audio
 if ($game.Problems.Count -gt 0) { Stop-Refused ($game.Problems -join "`n  ") }
 
 # --- 2. The backend: the main checkout's (a worktree has no runtime of its own). ---
@@ -128,7 +134,7 @@ $cfg = Get-LsConfig
 try { Assert-PlayLoopback $cfg.Versions } catch { Stop-Refused $_.Exception.Message }
 # The game talks to the port the backend was configured with (not its compiled default): the two cannot disagree.
 try { $serverEndpoint = Get-PlayServerEndpoint $cfg.Versions } catch { Stop-Refused $_.Exception.Message }
-$game = Get-PlayGameOptions -Account $Account -Character $Character -Offscreen:$Offscreen -GameArgs $GameArgs -Server $serverEndpoint
+$game = Get-PlayGameOptions -Account $Account -Character $Character -Offscreen:$Offscreen -GameArgs $GameArgs -Server $serverEndpoint -Audio:$Audio
 if ($game.Problems.Count -gt 0) { Stop-Refused ($game.Problems -join "`n  ") }
 
 $state = Get-LsBackendState $cfg
@@ -171,8 +177,14 @@ try {
     }
 
     Write-Host '[play] starting the game'
-    $exitCode = Invoke-PlayChild $godotScript $godotParameters
+    $exitCode = Invoke-PlayChild $godotScript $godotParameters -Capture:$Offscreen
     Write-Host "[play] the game exited with code $exitCode"
+    if ($Offscreen) {
+        # M2 D8 / P4-R15: an automated run is muted, the capture runs (--play-look-shots, --play-panel-shots, --play-screenshot) included; none or muted=false fails the run (exit 3) and says why.
+        $audioVerdict = Get-PlayAudioVerdict $script:capturedOutput.ToString()
+        if (-not $audioVerdict.Ok) { Write-Host "[play] AUDIO CHECK FAILED: $($audioVerdict.Reason)" -ForegroundColor Red; if ($exitCode -eq 0) { $exitCode = 3 } }
+        else { Write-Host '[play] audio check: muted' }
+    }
 }
 catch {
     Write-Host "[play] $($_.Exception.Message)" -ForegroundColor Red

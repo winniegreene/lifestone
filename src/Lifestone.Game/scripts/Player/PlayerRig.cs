@@ -164,6 +164,8 @@ public sealed class PlayerRig
         }
 
         // The character's "run by default" option (PlayerModule::ToggleRun) comes with the request; a host that has not read it leaves the default (true) and the TODO is logged.
+        // P5a S4: scripted walks no longer depend on this value being guessed right: the host binds it to MoveIntents (RunByDefault) and RouteDriver and the runner
+        // hold the run key as run != RunByDefault, so "run" runs whatever it is. TODO(g5-run-by-default) stays open for its other half (the option's source: a later toggle, the offline player).
         var movement = new MovementOptions { RunByDefault = request.RunByDefault };
         if (request.RunByDefault)
         {

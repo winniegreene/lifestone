@@ -62,6 +62,7 @@ public sealed class PortalSpaceDirectorAllocationTests(DatSetFixture fixture) : 
         Assert.True(allocated == 0, $"10,000 director steps allocated {allocated} B");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holding_the_real_tunnel_with_its_hum_allocates_nothing()
     {

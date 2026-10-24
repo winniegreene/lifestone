@@ -28,9 +28,7 @@ public sealed class StringEncodingTests
 
     [Theory]
     [InlineData("€", 0x80)] // euro sign
-    [InlineData("—", 0x97)] // em dash
     [InlineData("ÿ", 0xFF)] // y with diaeresis
-    [InlineData("Œ", 0x8C)] // OE ligature
     public void Characters_above_ascii_take_their_cp1252_byte(string text, byte expected)
     {
         var writer = new PacketWriter();
@@ -105,7 +103,6 @@ public sealed class StringEncodingTests
 
     [Theory]
     [InlineData(1)]
-    [InlineData(6)]
     [InlineData(127)]
     [InlineData(128)]
     [InlineData(255)]

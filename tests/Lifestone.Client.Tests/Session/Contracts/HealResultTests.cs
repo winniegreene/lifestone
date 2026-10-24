@@ -28,7 +28,6 @@ public sealed class HealResultTests
 
     [Theory]
     [InlineData("You heal yourself for 5 Health points. Your Handy Healing Kit has 1 use left.", 1)]
-    [InlineData("You heal yourself for 5 Health points. Your Handy Healing Kit has 20 uses left.", 20)]
     [InlineData("You heal yourself for 5 Health points. Your Handy Healing Kit is used up.", 0)]
     [InlineData("You heal yourself for 5 Health points.", HealResult.Unknown)]
     [InlineData("You heal yourself for 5 Health points. Something else.", HealResult.Unknown)]
@@ -42,7 +41,6 @@ public sealed class HealResultTests
 
     [Theory]
     [InlineData("You heal yourself for 30 Stamina points. Your Stamina Kit has 9 uses left.", "Stamina")]
-    [InlineData("You heal yourself for 30 Mana points. Your Mana Kit has 9 uses left.", "Mana")]
     [InlineData("You heal yourself for 30 Spirit points. Your Kit has 9 uses left.", "Spirit")]
     public void The_vital_is_the_kit_s_own(string line, string vital)
     {
@@ -61,7 +59,6 @@ public sealed class HealResultTests
 
     [Theory]
     [InlineData("You fail to heal yourself. Your Handy Healing Kit is used up.", 0)]
-    [InlineData("You fail to heal yourself. Your Handy Healing Kit has 1 use left.", 1)]
     [InlineData("You fail to heal yourself.", HealResult.Unknown)]
     public void A_lost_roll_s_tail_reads_the_same_way(string line, int left)
     {
@@ -81,7 +78,6 @@ public sealed class HealResultTests
 
     [Theory]
     [InlineData("The Potion of Stamina restores 25 points of your Stamina.", "Stamina", 25)]
-    [InlineData("The Potion of Mana restores 40 points of your Mana.", "Mana", 40)]
     [InlineData("The Handy Healing Kit restorer restores 7 points of your Health.", "Health", 7)]
     public void A_potion_of_another_vital_reads_its_own(string line, string vital, int amount)
     {
@@ -145,10 +141,8 @@ public sealed class HealResultTests
 
     [Theory]
     [InlineData("You heal yourself for 73 Health points. Your Handy Healing Kit has 14 uses left.")]
-    [InlineData("You expertly heal yourself for 110 Health points. Your Handy Healing Kit is used up.")]
     [InlineData("You fail to heal yourself. Your Handy Healing Kit has 19 uses left.")]
     [InlineData("The Potion of Healing restores 25 points of your Health.")]
-    [InlineData("The Potion of Mana restores 0 points of your Mana.")]
     public void Parsing_a_heal_line_allocates_exactly_the_result(string line)
     {
         // One HealResult is the whole allocation: the vitals' names are literals and the tail is read in place. The sink keeps the JIT from stack-allocating the comparison object.

@@ -24,7 +24,7 @@ namespace Lifestone.Client.Session.StandIn;
 /// <item><b>Wield</b> (0x001A; <c>Player_Inventory.cs</c> <c>TryEquipObjectWithNetworking</c> 297-306): 0x02DA Wielder 0, 0x02CE CurrentWieldedLocation 0, then GameEvent 0x0023 with the location.
 /// An item the player does not hold is GameEvent 0x00A0 (1538-1543).</item>
 /// <item><b>Unwield</b> and <b>MoveToPack</b> (0x0019; <c>TryDequipObjectWithNetworking</c> 400-405 for a worn item, <c>Player_Inventory.cs</c> 1359-1361 for the put): a worn item first gets the Wielder and
-/// CurrentWieldedLocation zeros, then every move is 0x02DA Container and GameEvent 0x0022 with the container and the placement.</item>
+/// CurrentWieldedLocation zeros and the PickupEvent F74A that unparents it (M4 4.1 fix2b), then every move is 0x02DA Container and GameEvent 0x0022 with the container and the placement.</item>
 /// <item><b>MergeStack</b> (0x0054; <c>Player_Inventory.cs</c> <c>HandleActionStackableMerge</c> 2849-3040, <c>DoHandleActionStackableMerge</c> 3072-3178): the refusals in ACE's order (an amount of 0 or less 2853-2859, a source or target that is not
 /// held 2866 and 2888, items that do not stack 2912, two different weenies 2929, an empty source or a full target 2937 and 2945, an amount above the source 2953, the room for the sum 3088 and 3138), each GameEvent 0x00A0 for the source.
 /// A merge inside the pack is the self-contained branch (3066): a whole source stack is the source's 0x0024 (3096) and the target's 0x0197 (3121-3123), and nothing else (ACE's <c>Destroy</c> of a contained item sends no F747: it only
@@ -41,6 +41,9 @@ internal sealed partial class StandInWorld
 
     /// <summary>ACE's <c>WeenieError.MagicInvalidSpellType</c> (0x03FC): the UseDone for a spell the character does not know.</summary>
     internal const uint MagicInvalidSpellType = 0x03FC;
+
+    /// <summary>ACE's <c>WeenieError.TargetNotAcquired</c> (0x042C): the UseDone for a cast at a guid the world does not hold.</summary>
+    internal const uint TargetNotAcquired = 0x042C;
 
     /// <summary>How long after a cast's effect (or fizzle) UseDone follows: ACE's recoil (<c>Player_Magic.cs</c> 977-990).</summary>
     internal const double CastRecoilSeconds = 1.0;
@@ -162,11 +165,7 @@ internal sealed partial class StandInWorld
     /// <summary>A ChangeCombatMode (0x0053).</summary>
     internal OutboundTicket ChangeCombatMode(uint mode)
     {
-        Later(sink =>
-        {
-            AnswerLog.Add("02CD");
-            PrivateUpdate(sink, PrivateUpdateKind.PropertyInt, CombatModes.Property, mode);
-        });
+        Later(sink => EnterMode(sink, (CombatMode)mode)); // M4 4.1 v3: the stance motion by weapon first, then the 02CD (StandInWorld.Stance.cs)
         return Ticket();
     }
 
@@ -228,6 +227,13 @@ internal sealed partial class StandInWorld
         if (!Knows(spellId) || (placeholder ? spellId is 0 or > PlaceholderMaxSpellId : info is null))
         {
             UseDone(sink, MagicInvalidSpellType); // ACE: VerifySpell fails (Player_Magic.cs 129-132, 320-322)
+            return;
+        }
+
+        // A war spell at a guid the stand-in does not hold (it holds no creature, M4 4.1 t2): ACE's GetTargetCategory finds no object and the cast ends with UseDone TargetNotAcquired before its words (Player_Magic.cs 134-140).
+        if (info is not null && target != 0 && target != self.Guid && CastTracker.Classify(info, target, self.Guid) == CastTracker.Expectation.Projectile && !_reducer.State.Objects.Contains(target))
+        {
+            UseDone(sink, TargetNotAcquired);
             return;
         }
 
@@ -404,6 +410,7 @@ internal sealed partial class StandInWorld
         Zeros(sink, item);
         AnswerLog.Add("0023");
         sink.OnWieldObject(Context(sink), new GameEventHeader(self.Guid, 0, 0x0023), new WieldObjectEvent(item, mask));
+        ShuffleAfterWield(sink, mask); // ACE's TryShuffleStance: a player in a combat mode moves to the new weapon's mode (M4 4.1 v3)
     }
 
     private void PutNow(IAcSessionSink sink, uint item, uint container, uint placement)
@@ -416,16 +423,22 @@ internal sealed partial class StandInWorld
             return;
         }
 
-        if (from.Kind == InventoryPlaceKind.Equipped)
-        {
-            Zeros(sink, item); // ACE: TryDequipObjectWithNetworking (Player_Inventory.cs 400-405)
-        }
-
+        var unwieldedFrom = _wieldMasks.TryGetValue(item, out var wasMask) ? wasMask : 0u;
         if (_wielded.Remove(item, out var entry))
         {
             _wieldMasks.Remove(item);
             _pack.Add(entry);
-            SendLook(sink, entry.Worn); // TryDequipObjectWithNetworking: the ObjDescEvent after the dequip (Creature_Equipment.cs 438)
+            SendLook(sink, entry.Worn, always: true); // TryDequipObjectWithBroadcasting: the ObjDescEvent first, for every dequip (Creature_Equipment.cs 438; M4 4.1 fix3, R24)
+        }
+
+        if (from.Kind == InventoryPlaceKind.Equipped)
+        {
+            // TryDequipObjectWithNetworking (Player_Inventory.cs 400-405), after the broadcast: 02DA Wielder 0, 02CE CurrentWieldedLocation 0, then the PickupEvent (F74A) that takes the item out of the hand (M4 4.1 fix2b: the
+            // stand-in sent no F74A, so a stowed item stayed parented and drawn). Its sounds (the broadcast and the session's UnwieldObject, 399-405) are not sent: TODO(m4-standin-unwield-sound).
+            Placeholder("m4-standin-unwield-sound", "ACE plays the UnwieldObject sound for a dequipped item (Creature_Equipment.cs 436, Player_Inventory.cs 405); the stand-in sends no sound for a stow");
+            Zeros(sink, item);
+            AnswerLog.Add("F74A");
+            sink.OnPickupEvent(Context(sink), PickupOf(item));
         }
 
         var count = self.Inventory.ItemsIn(container).Count - (from.Container == container && from.Kind != InventoryPlaceKind.Equipped ? 1 : 0);
@@ -433,6 +446,10 @@ internal sealed partial class StandInWorld
         Instance(sink, item, ContainerProperty, container); // ACE: the put (Player_Inventory.cs 1359-1361)
         AnswerLog.Add("0022");
         sink.OnInventoryPutObjInContainer(Context(sink), new GameEventHeader(self.Guid, 0, 0x0022), new InventoryPutObjInContainerEvent(item, container, slot, container == self.Guid ? 0u : 1u));
+        if (unwieldedFrom != 0)
+        {
+            ShuffleAfterUnwield(sink, unwieldedFrom); // ACE's dequip swap: a player in a combat mode goes to melee (hand combat with empty hands), or to peace for the arrows of a missile mode (M4 4.1 v3)
+        }
     }
 
     /// <summary>ACE's <c>WeenieError.YouCannotMergeDifferentStacks</c> (0x0427), the error of the 0x00A0 for two different weenies.</summary>

@@ -241,9 +241,11 @@ public sealed class ChaseCameraModel
     /// 0 is <see cref="SetDefaultOffsets"/>.
     /// </summary>
     /// <param name="degrees">The turn, in degrees; the sign picks the side.</param>
-    public void SetHeadingOffset(float degrees)
+    /// <param name="pivotZ">The pivot's height above the player's origin (default <see cref="DefaultPivotZ"/>): the look capture lowers it to the chest so the hands are in frame (a capture aid; the next <see cref="SetDefaultOffsets"/> puts retail's back).</param>
+    public void SetHeadingOffset(float degrees, float pivotZ = DefaultPivotZ)
     {
         SetDefaultOffsets();
+        PivotOffset = new Vector3(0f, 0f, pivotZ);
         if (degrees == 0f)
         {
             return;

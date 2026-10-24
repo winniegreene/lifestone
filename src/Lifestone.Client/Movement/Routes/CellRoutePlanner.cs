@@ -14,6 +14,12 @@ namespace Lifestone.Client.Movement.Routes;
 /// </param>
 public sealed record CellRoute(IReadOnlyList<uint> Cells, IReadOnlyList<CellFrame> Waypoints);
 
+/// <summary>A portal's doorway in landblock space (<see cref="CellRoutePlanner.DoorwayOf"/>).</summary>
+/// <param name="Centre">The polygon's centroid.</param>
+/// <param name="Sill">The height of the polygon's lowest corner.</param>
+/// <param name="Outward">The unit horizontal direction toward the neighbour cell (outside, for an outside portal).</param>
+public readonly record struct Doorway(Vector3 Centre, float Sill, Vector3 Outward);
+
 /// <summary>
 /// Plans a walk between two EnvCells of one landblock: a breadth-first search over the cells' portals
 /// (<see cref="EnvCellData.Portals"/>, <see cref="CellPortalData.OtherCellId"/>) that a standing human can walk through,
@@ -31,6 +37,12 @@ public sealed record CellRoute(IReadOnlyList<uint> Cells, IReadOnlyList<CellFram
 /// else the sill's height). Walking straight from one to the next crosses each doorway square to it. A point that would
 /// fall outside its room (a room thinner than the distance) moves half as far, and an approach point that still does is
 /// left out; the point beyond a doorway then falls back to the doorway's centre.</para>
+/// <para><b>Lean.</b> A doorway's plane may lean: the Black Spawn Den's plazas are octagons whose doorways lean 11 degrees (the
+/// portal normal has a vertical part of 0.196). <c>maxLean</c> (constructor; default 0, today's rule) is the largest
+/// vertical part of the normal accepted; the rule never goes below the upright 0.1. The fit test is projected on the flat
+/// normal (the horizontal part, renormalised), so a leaning doorway is judged by the width and height of the opening a
+/// human walks through it, not of the tilted polygon (P5a: closes <c>m3-fight-planner-lean</c>; the den's own planner is
+/// gone). Not retail: Lifestone's own constant.</para>
 /// <para>Not retail: the client has no path planner; this drives the scenarios the way a player walks.</para>
 /// </remarks>
 public sealed class CellRoutePlanner
@@ -44,14 +56,48 @@ public sealed class CellRoutePlanner
     /// <summary>The widest a standing human is: the human Setup's sphere radius (0.48 m) either side.</summary>
     public const float HumanHalfWidth = 0.48f;
 
-    private readonly LandblockCellSet _cells;
+    /// <summary>The largest vertical part of an upright doorway's normal (the Academy portal test's rule); <c>maxLean</c> raises it, never lowers it.</summary>
+    public const float UprightNormalZ = 0.1f;
 
-    /// <summary>A planner over <paramref name="cells"/>.</summary>
+    /// <summary>The height of a standing human the fit test probes under a doorway's lintel (the human Setup's two spheres: 0.48 m radius).</summary>
+    public const float HumanHeight = 1.8f;
+
+    private readonly LandblockCellSet _cells;
+    private readonly float _limit;
+
+    /// <summary>A planner over <paramref name="cells"/> that walks upright doorways only.</summary>
     public CellRoutePlanner(LandblockCellSet cells)
+        : this(cells, 0f, 0f)
+    {
+    }
+
+    /// <summary>A planner over <paramref name="cells"/> that also walks doorways leaning up to <paramref name="maxLean"/> (the vertical part of the portal normal; 0 keeps the upright rule).</summary>
+    public CellRoutePlanner(LandblockCellSet cells, float maxLean)
+        : this(cells, maxLean, 0f)
+    {
+    }
+
+    /// <summary>
+    /// A planner as above whose fit test probes <paramref name="headSlack"/> metres under <see cref="HumanHeight"/>: the shops' doorways
+    /// are exactly 1.8 m tall (Renald's room 0xA9B40141 is reached through two), so the probe at the lintel's own height fails by no margin
+    /// at all (0 keeps the Academy rule). Not retail: Lifestone's own.
+    /// </summary>
+    public CellRoutePlanner(LandblockCellSet cells, float maxLean, float headSlack)
     {
         ArgumentNullException.ThrowIfNull(cells);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxLean);
+        ArgumentOutOfRangeException.ThrowIfNegative(headSlack);
         _cells = cells;
+        MaxLean = maxLean;
+        HeadSlack = headSlack;
+        _limit = MathF.Max(UprightNormalZ, maxLean);
     }
+
+    /// <summary>The lean accepted beyond the upright rule: the largest vertical part of a doorway's normal (0: upright only).</summary>
+    public float MaxLean { get; }
+
+    /// <summary>How far under <see cref="HumanHeight"/> the fit test probes (0: at the full height).</summary>
+    public float HeadSlack { get; }
 
     /// <summary>The cells planned over.</summary>
     public LandblockCellSet Cells => _cells;
@@ -73,12 +119,13 @@ public sealed class CellRoutePlanner
         {
             var cell = _cells.GetCell(path[i])!;
             var portal = FindWalkablePortal(cell, path[i + 1])!.Value;
-            if (InsideWaypoint(cell, portal, -ApproachMetres) is { } approach)
+            var (approach, push) = DoorwayPair(cell, portal);
+            if (approach is { } before)
             {
-                waypoints.Add(approach);
+                waypoints.Add(before);
             }
 
-            waypoints.Add(InsideWaypoint(cell, portal, PushIntoCellMetres) ?? Waypoint(cell, portal, 0f));
+            waypoints.Add(push);
         }
 
         return new CellRoute(path, waypoints);
@@ -136,20 +183,54 @@ public sealed class CellRoutePlanner
 
     /// <summary>
     /// True when a standing human can walk through <paramref name="portal"/> of <paramref name="cell"/>: an inside portal
-    /// in an upright polygon wide and tall enough (see the remarks).
+    /// in a polygon wide and tall enough (see <see cref="Fits"/> and the remarks).
     /// </summary>
     public bool IsWalkable(EnvCellData cell, CellPortalData portal)
     {
         ArgumentNullException.ThrowIfNull(cell);
-        if (portal.LeadsOutside || _cells.GetStructure(cell).GetPortal(portal.PolygonId) is not { } polygon)
+        return !portal.LeadsOutside && Fits(cell, portal);
+    }
+
+    /// <summary>
+    /// True when <paramref name="portal"/>'s polygon stands upright enough to be a doorway: it exists in the cell's structure and its plane's
+    /// normal leans no more than the limit (0.1, or <see cref="MaxLean"/>) from horizontal. Floors and ceilings are not.
+    /// </summary>
+    public bool IsUpright(EnvCellData cell, CellPortalData portal)
+    {
+        ArgumentNullException.ThrowIfNull(cell);
+        if (_cells.GetStructure(cell).GetPortal(portal.PolygonId) is not { } polygon)
         {
             return false;
         }
 
         var normal = cell.Frame.RotateToParent(polygon.Plane.Normal);
-        if (MathF.Abs(normal.Z) > 0.1f)
+        return MathF.Abs(normal.Z) <= _limit && (normal.X * normal.X) + (normal.Y * normal.Y) >= 1e-6f;
+    }
+
+    /// <summary>
+    /// True when a standing human fits through <paramref name="portal"/> of <paramref name="cell"/>, wherever it leads
+    /// (an outside portal included): its plane's normal leans no more than the limit (0.1, or <see cref="MaxLean"/>), and
+    /// the points 0.2 m and 1.8 m above its sill, and 0.48 m either side of its centre 1 m above the sill, all lie in its
+    /// polygon seen along the flat normal.
+    /// </summary>
+    public bool Fits(EnvCellData cell, CellPortalData portal)
+    {
+        ArgumentNullException.ThrowIfNull(cell);
+        if (_cells.GetStructure(cell).GetPortal(portal.PolygonId) is not { } polygon)
         {
             return false;
+        }
+
+        var normal = cell.Frame.RotateToParent(polygon.Plane.Normal);
+        if (MathF.Abs(normal.Z) > _limit)
+        {
+            return false;
+        }
+
+        var flat = new Vector3(normal.X, normal.Y, 0f);
+        if (flat.LengthSquared() < 1e-6f)
+        {
+            return false; // a floor or a ceiling
         }
 
         Span<Vector3> corners = stackalloc Vector3[polygon.Vertices.Length];
@@ -163,12 +244,58 @@ public sealed class CellRoutePlanner
         }
 
         centre /= corners.Length;
-        var along = Vector3.Normalize(new Vector3(-normal.Y, normal.X, 0f));
+        flat = Vector3.Normalize(flat);
+        var along = new Vector3(-flat.Y, flat.X, 0f);
         var floor = new Vector3(centre.X, centre.Y, sill);
-        return InPortal(corners, normal, floor + new Vector3(0, 0, 0.2f))
-            && InPortal(corners, normal, floor + new Vector3(0, 0, 1.8f))
-            && InPortal(corners, normal, floor + new Vector3(0, 0, 1f) + (along * HumanHalfWidth))
-            && InPortal(corners, normal, floor + new Vector3(0, 0, 1f) - (along * HumanHalfWidth));
+        return InPortal(corners, along, floor + new Vector3(0, 0, 0.2f))
+            && InPortal(corners, along, floor + new Vector3(0, 0, HumanHeight - HeadSlack))
+            && InPortal(corners, along, floor + new Vector3(0, 0, 1f) + (along * HumanHalfWidth))
+            && InPortal(corners, along, floor + new Vector3(0, 0, 1f) - (along * HumanHalfWidth));
+    }
+
+    /// <summary>
+    /// The doorway of <paramref name="portal"/> in landblock space: the polygon's centroid, its sill height and the unit
+    /// horizontal direction toward the neighbour (outside, for an outside portal; <see cref="Waypoint"/>'s rule), or null
+    /// when the cell's structure has no such portal polygon or its normal is vertical.
+    /// </summary>
+    public Doorway? DoorwayOf(EnvCellData cell, CellPortalData portal)
+    {
+        ArgumentNullException.ThrowIfNull(cell);
+        if (_cells.GetStructure(cell).GetPortal(portal.PolygonId) is not { } polygon)
+        {
+            return null;
+        }
+
+        var centre = Vector3.Zero;
+        var sill = float.MaxValue;
+        foreach (var vertex in polygon.Vertices)
+        {
+            var corner = cell.Frame.LocalToParent(vertex);
+            centre += corner;
+            sill = MathF.Min(sill, corner.Z);
+        }
+
+        centre /= polygon.Vertices.Length;
+        var normal = cell.Frame.RotateToParent(polygon.Plane.Normal);
+        var into = portal.PortalSide ? normal : -normal;
+        into.Z = 0f;
+        if (into.LengthSquared() < 1e-6f)
+        {
+            return null;
+        }
+
+        return new Doorway(centre, sill, Vector3.Normalize(into));
+    }
+
+    /// <summary>
+    /// The pair of waypoints of a walk through <paramref name="portal"/>: the approach <see cref="ApproachMetres"/> before it in
+    /// <paramref name="cell"/> (null when the room is too thin for it) and the push <see cref="PushIntoCellMetres"/> past it in the
+    /// neighbour (the doorway's centre when neither lies inside the neighbour).
+    /// </summary>
+    public (CellFrame? Approach, CellFrame Push) DoorwayPair(EnvCellData cell, CellPortalData portal)
+    {
+        ArgumentNullException.ThrowIfNull(cell);
+        return (InsideWaypoint(cell, portal, -ApproachMetres), InsideWaypoint(cell, portal, PushIntoCellMetres) ?? Waypoint(cell, portal, 0f));
     }
 
     /// <summary>
@@ -268,11 +395,9 @@ public sealed class CellRoutePlanner
         return best is { } height ? cell.Frame.LocalToParent(new Vector3(local.X, local.Y, height)).Z : null;
     }
 
-    /// <summary>True when <paramref name="point"/> lies inside the upright polygon <paramref name="corners"/> (its plane's normal <paramref name="normal"/>).</summary>
-    private static bool InPortal(ReadOnlySpan<Vector3> corners, Vector3 normal, Vector3 point)
+    /// <summary>True when <paramref name="point"/> lies inside the polygon <paramref name="corners"/> seen along the horizontal axis <paramref name="along"/> and Z (a crossing test).</summary>
+    private static bool InPortal(ReadOnlySpan<Vector3> corners, Vector3 along, Vector3 point)
     {
-        // Project onto the plane's horizontal axis and Z, then a crossing test.
-        var along = new Vector3(-normal.Y, normal.X, 0f);
         var inside = false;
         var px = Vector3.Dot(point, along);
         var py = point.Z;

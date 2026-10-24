@@ -19,6 +19,7 @@ public sealed class LandscapeCollisionTests(DatSetFixture fixture, ITestOutputHe
 {
     private DatSet Dats => fixture.Dats;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_test_human_has_the_human_Setups_spheres_and_step_heights()
     {
@@ -29,6 +30,7 @@ public sealed class LandscapeCollisionTests(DatSetFixture fixture, ITestOutputHe
         Assert.Equal([new(new Vector3(0, 0, 0.475f), 0.48f), new(new Vector3(0, 0, 1.35f), 0.48f)], human.Spheres.Select(s => new PhysSphere(s.Center, s.Radius)));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_sphere_dropped_on_each_of_the_576_land_cells_around_Holtburg_rests_on_the_terrain()
     {
@@ -84,6 +86,7 @@ public sealed class LandscapeCollisionTests(DatSetFixture fixture, ITestOutputHe
         Assert.Equal(576, dropped);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Walking_across_a_landblock_seam_changes_the_cell_and_wraps_the_local_origin()
     {
@@ -150,6 +153,7 @@ public sealed class LandscapeCollisionTests(DatSetFixture fixture, ITestOutputHe
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void An_entirely_flooded_landblock_stops_a_walker_and_a_flooded_cell_lets_it_sink()
     {

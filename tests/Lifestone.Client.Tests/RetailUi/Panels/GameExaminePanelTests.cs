@@ -230,7 +230,7 @@ public sealed class GameExaminePanelTests(DatSetFixture fixture) : IClassFixture
         return basis with { Weenie = basis.Weenie with { IconId = icon, ItemType = itemType, ContainerId = container, ValidLocations = valid } };
     }
 
-    private Game Enter()
+    private Game Enter(bool examineIcon = false)
     {
         IInboundMessageHandler? handler = null;
         var rig = new LoginRig(fixture, h =>
@@ -238,7 +238,7 @@ public sealed class GameExaminePanelTests(DatSetFixture fixture) : IClassFixture
             handler = h;
             StandInSessions.DataCheckThenCharacterSelect(h, TimeSpan.FromSeconds(2));
             StandInSessions.AnswerLocally(h, TimeSpan.FromSeconds(0.6));
-        }, liveGame: true);
+        }, liveGame: true, examineIcon: examineIcon);
         rig.Run(2.5);
         rig.Flow.QueueUIMode(UiModes.GamePlay);
         rig.Frame();
@@ -300,6 +300,59 @@ public sealed class GameExaminePanelTests(DatSetFixture fixture) : IClassFixture
         Assert.Equal("Handy Healing Kit", title.Text);
         Assert.True(g.Screen.Root!.GetChildRecursive(GameExaminePanel.ItemFieldId)!.Visible);
         Assert.False(g.Screen.Root!.GetChildRecursive(GameExaminePanel.CreatureFieldId)!.Visible);
+    }
+
+    [RequiresLocalDatsFact]
+    public void The_item_window_draws_the_objects_composed_icon_with_its_overlay_and_the_Appraisals_icon_only_when_the_table_has_none()
+    {
+        // M4 4.1 v4 (m4-examine-icon): the floaty's layout has no icon element, so the panel makes one from the standalone layout and composes the object's icon in it (the pack cell's path). With --examine-icon on only (review R8).
+        using var g = Enter(examineIcon: true);
+        var plain = Item(0x80000B01, "Orb", 0x060011D0, 0x8000);
+        g.Create(plain with { Weenie = plain.Weenie with { Header = plain.Weenie.Header | WeenieHeaderFlags.IconOverlay, IconOverlayId = 0x060011D5 } });
+        var bare = Item(0x80000B02, "Plain Thing", 0, 0x80);
+        g.Create(bare);
+        g.Frames(2);
+        var examine = g.Examine;
+        Assert.NotNull(examine.IconElement);
+        Assert.Equal(GameExaminePanel.ItemIconId, examine.IconElement!.ElementId);
+        Assert.Same(g.Screen.Root!.GetChildRecursive(GameExaminePanel.ItemFieldId), examine.IconElement.Parent);
+
+        examine.Open(0x80000B01);
+        g.Frames(3);
+        Assert.Equal(0x060011D0u, examine.IconId);
+        Assert.Equal(0x060011D5u, examine.Icon.OverlayId);
+        Assert.Equal(0x8000u, examine.Icon.ItemType);
+        Assert.False(examine.IconPending);
+        Assert.True(examine.IconCompositions >= 1);
+        Assert.NotNull(examine.IconElement.GeneratedImage);
+        Assert.Equal(32, examine.IconElement.GeneratedImage!.Width);
+
+        // The world table holds no icon for this object: the Appraisal's DataId 8 (property data) is the fallback it always was.
+        examine.Open(0x80000B02);
+        g.Answer(0x80000B02, new AceAppraisal { Success = true, Ints = new Dictionary<uint, int> { [AppraisalIds.Value] = 5 }, Strings = new Dictionary<uint, string> { [AppraisalIds.Name] = "Plain Thing" }, DataIds = new Dictionary<uint, uint> { [8] = 0x060011D6 } });
+        g.Frames(3);
+        Assert.Equal(0x060011D6u, examine.IconId);
+        Assert.NotNull(examine.IconElement.GeneratedImage);
+
+        examine.Close();
+    }
+
+    [RequiresLocalDatsFact]
+    public void By_default_the_item_window_has_no_icon_as_retails_merged_layout_draws_it()
+    {
+        // Review R8: the icon is an addition to retail (SetAppraiseInfo 0x004B7ED0 skips it), so without --examine-icon on the panel makes no icon element and composes nothing.
+        using var g = Enter();
+        g.Frames(2);
+        Assert.Null(g.Examine.IconElement);
+        g.Examine.Open(Kit);
+        g.Answer(Kit, KitAnswer());
+        g.Frames(3);
+        Assert.Equal("Handy Healing Kit", g.Examine.Title);
+        Assert.Contains("Value: 1,200", g.Examine.Lines);
+        Assert.Equal(0, g.Examine.IconCompositions);
+        Assert.False(g.Examine.IconPending);
+        Assert.DoesNotContain(g.Rig.Log.Lines, static l => l.Contains("TODO(m4-examine-icon)", StringComparison.Ordinal));
+        g.Examine.Close();
     }
 
     [RequiresLocalDatsFact]

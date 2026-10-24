@@ -86,6 +86,7 @@ public sealed class GfxObjMeshCacheTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal(3, calls);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Dat_backed_cache_returns_the_same_meshes_as_direct_builds_under_parallel_load()
     {

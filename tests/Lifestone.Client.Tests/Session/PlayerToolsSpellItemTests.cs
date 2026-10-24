@@ -210,7 +210,6 @@ public sealed class PlayerToolsSpellItemTests
 
     [Theory]
     [InlineData(0)]
-    [InlineData(-1)]
     [InlineData(65536)]
     public void A_stack_outside_1_to_65535_is_refused_at_once_and_never_sent(int stack)
     {

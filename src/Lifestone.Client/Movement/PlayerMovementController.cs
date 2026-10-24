@@ -48,7 +48,7 @@ namespace Lifestone.Client.Movement;
 /// <c>TODO(physics)</c> warning).</para>
 /// <para>Main thread (or the headless tick) only. <see cref="Tick"/> allocates nothing once warm.</para>
 /// </remarks>
-public sealed partial class PlayerMovementController : IPlayerMovementIntents
+public sealed partial class PlayerMovementController : IPlayerMovementIntents, IRunByDefaultSource
 {
     /// <summary>Retail <c>autonomy_level</c>: 2, the <c>CommandInterpreter</c> constructor's value; the only level M2 uses.</summary>
     public const uint AutonomyLevel = 2;
@@ -111,6 +111,9 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents
 
     /// <summary>The options the controller runs with.</summary>
     public MovementOptions Options { get; }
+
+    /// <inheritdoc/>
+    public bool RunByDefault => Options.RunByDefault;
 
     /// <summary>The jump bar (for the UI's power bar: <see cref="JumpCharge.GetJumpPowerLevel"/>).</summary>
     public JumpCharge Jump { get; } = new();
@@ -263,7 +266,7 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents
     /// Retail <c>CPhysicsObj::IsMovingTo</c> (11.4186 0x0050EB10, 11.6096 0x0050F5E0): the server's MoveTo or TurnTo for the
     /// player (an out-of-range Use's approach) is under way; control does not come back while it is.
     /// </summary>
-    private bool IsMovingTo => _player.IsMovingTo;
+    public bool IsMovingTo => _player.IsMovingTo;
 
     /// <summary>
     /// Retail <c>CommandInterpreter::SendPositionEvent</c> (11.4186 0x006B4770, 11.6096 0x006B56B0): only while the player

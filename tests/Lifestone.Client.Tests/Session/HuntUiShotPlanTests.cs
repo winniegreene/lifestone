@@ -66,6 +66,9 @@ public sealed class HuntUiShotPlanTests
         plan.Expire(52.1); // the other slots hold 3 s; this one 2 s
         Assert.False(plan.Owed);
         Assert.Contains("corpse: given up (held longer than 2 s)", plan.Note(), StringComparison.Ordinal);
+        Assert.True(plan.IsGivenUp(HuntUiShotPlan.Corpse));
+        Assert.False(plan.IsTaken(HuntUiShotPlan.Corpse));
+        Assert.False(plan.IsGivenUp(Combat));
     }
 
     [Fact]
@@ -101,10 +104,7 @@ public sealed class HuntUiShotPlanTests
 
     [Theory]
     [InlineData(0.0f, 0.5f, false)] // not begun
-    [InlineData(0.04f, 0.5f, false)] // too near 0
     [InlineData(0.07f, 0.5f, false)] // 1.3-R2: the first frames of the charge read as an empty bar
-    [InlineData(0.3f, 0.5f, true)]
-    [InlineData(0.06f, 0.5f, false)]
     [InlineData(0.25f, 0.5f, true)] // half the power: the window opens
     [InlineData(0.44f, 0.5f, true)]
     [InlineData(0.46f, 0.5f, false)] // too near the run's power
@@ -136,8 +136,7 @@ public sealed class HuntUiShotPlanTests
     [Fact]
     public void The_target_must_be_within_six_metres_for_the_frames()
     {
-        Assert.Equal(6.0, HuntUiShotPlan.TargetRangeMetres);
-        Assert.Equal(3.0, HuntUiShotPlan.HoldSeconds);
+        Assert.Equal(6.0, HuntUiShotPlan.TargetRangeMetres); // the hold (3 s) is asserted with the heal slots below
     }
 
     [Theory]
@@ -170,24 +169,6 @@ public sealed class HuntUiShotPlanTests
         Assert.Equal(HuntUiShotPlan.SideOffsetDegrees, first);
         Assert.Equal(-HuntUiShotPlan.SideOffsetDegrees, second);
         Assert.Equal(0f, HuntUiShotPlan.NextSideOffset(second));
-    }
-
-    [Fact]
-    public void The_corpse_frame_is_given_up_after_its_2_second_hold_and_the_slot_says_so()
-    {
-        // M4 2.2 s4: the frame waits for the container window inside the scenario's hold; a window that never draws gives the slot up by name (the runner logs why).
-        var plan = new HuntUiShotPlan();
-        plan.Trigger(HuntUiShotPlan.Corpse, 50.0);
-        Assert.True(plan.Owed);
-        Assert.False(plan.IsGivenUp(HuntUiShotPlan.Corpse));
-        plan.Expire(51.9);
-        Assert.True(plan.Owed);
-        plan.Expire(52.1);
-        Assert.False(plan.Owed);
-        Assert.True(plan.IsGivenUp(HuntUiShotPlan.Corpse));
-        Assert.Contains("held longer than 2 s", plan.Note(), StringComparison.Ordinal);
-        Assert.False(plan.IsTaken(HuntUiShotPlan.Corpse));
-        Assert.False(plan.IsGivenUp(Combat));
     }
 
     [Fact]

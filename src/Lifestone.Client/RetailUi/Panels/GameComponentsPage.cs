@@ -11,6 +11,17 @@ using Lifestone.Data.Ui;
 namespace Lifestone.Client.RetailUi.Panels;
 
 /// <summary>
+/// What a session offers the components page beside <see cref="IGameSessionView"/>: the SpellComponentTable's icon of a component (<c>SpellComponentTable::InqSpellComponentBase</c>, 11.6096 0x0048A1F0), which retail's
+/// <c>gmSpellComponentUI::MakeIcon</c> (0x0048A250) draws in a row. Read through a type test so a session without the table (tests, headless) needs nothing.
+/// </summary>
+public interface ISpellComponentIcons
+{
+    /// <summary>The icon (a RenderSurface DID) of the component with SpellComponentTable id <paramref name="componentId"/>, or 0 when the table is not loaded or lacks it.</summary>
+    /// <param name="componentId">The SpellComponentTable id (the component id of <see cref="SpellPageData.CategoryOf"/>).</param>
+    uint ComponentIcon(uint componentId);
+}
+
+/// <summary>
 /// The components tab of the spell page (panel 13, <c>gmSpellComponentUI</c> 0x1000002F, tab element 0x100002AD; M3 2.2 slice b3, docs/milestones/m3-plan.md section 4.6): the spell components in the pack, a title row
 /// for each of retail's seven categories and under it a row for each component class the pack holds, with its icon, name, count and the desired ("buy rate") amount.
 /// </summary>
@@ -26,8 +37,8 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// <para>
 /// <b>Lifestone.</b> The tracker is the pack: every item whose ItemType is a spell component (<see cref="SpellPageData.IsSpellComponent"/>) in the main pack and in the side packs the model knows, summed by weenie
 /// class (a stack of 12 and a stack of 30 are one row of 42). The category comes from the pinned component map (<see cref="SpellPageData.CategoryOf"/>); a weenie it lacks lists under "peas" and logs
-/// <c>TODO(m3-component-category)</c> once. Rows within a category are ordered by the SpellComponentTable id (retail's tracker order is its hash order). The icon is the pack object's own (<c>TODO(m3-component-icon)</c>:
-/// retail draws the SpellComponentTable's, which the session does not expose). A component the character wants to rebuy but does not carry has no row (retail's tracker is read from the pack; <c>TODO(m3-component-zero-rows)</c>
+/// <c>TODO(m3-component-category)</c> once. Rows within a category are ordered by the SpellComponentTable id (retail's tracker order is its hash order). The icon is the SpellComponentTable's, as <c>MakeIcon</c> draws it (11.6096 0x0048A250, 11.4186 0x00489F20, over <c>SpellComponentTable::InqSpellComponentBase</c> 0x0048A1F0):
+/// a session that can read the table (<see cref="ISpellComponentIcons"/>) gives it by the component's id; a session that cannot (the table is not loaded, no dats) leaves the pack object's own icon in its place and the page logs <c>TODO(m3-component-icon)</c> once. A component the character wants to rebuy but does not carry has no row (retail's tracker is read from the pack; <c>TODO(m3-component-zero-rows)</c>
 /// is whether retail keeps a zero-count row). The buy-rate box shows the desired amount; typing in it answers NotInM3 and puts the shown amount back (<c>TODO(m3-component-buy-rate)</c>: no action sends the level).
 /// The page redraws once when it shows and, while shown, on the next frame after an <see cref="InventoryChanged"/> or <see cref="SpellbookChanged"/>. A change of the set of rows rebuilds the list over frames
 /// (<see cref="RowsPerFrame"/> a frame); a change of a count or a desired amount only rewrites that text.
@@ -399,7 +410,14 @@ public sealed class GameComponentsPage : IGamePanel, IUiElementListener, IDispos
                 _context.Manager.Services.Log.Warn("retailui", $"TODO(m3-component-category): the component class {wcid} ({obj.Name}) is not in the pinned component map; it is listed under peas");
             }
 
-            _lines.Add(new Line(false, category, componentId, wcid, obj.Name, fields.IconId, count, book.DesiredComponentAmount(wcid)));
+            var tableIcon = known && _context.Session is ISpellComponentIcons icons ? icons.ComponentIcon(componentId) : 0u;
+            if (tableIcon == 0 && fields.IconId != 0 && !_iconTodoLogged)
+            {
+                _iconTodoLogged = true;
+                _context.Manager.Services.Log.Warn("retailui", $"TODO(m3-component-icon): the component class {wcid} ({obj.Name}) has no SpellComponentTable icon to read (the session gives none); the row draws the pack object's own icon in its place");
+            }
+
+            _lines.Add(new Line(false, category, componentId, wcid, obj.Name, tableIcon != 0 ? tableIcon : fields.IconId, count, book.DesiredComponentAmount(wcid)));
         }
     }
 
@@ -473,11 +491,6 @@ public sealed class GameComponentsPage : IGamePanel, IUiElementListener, IDispos
         if (line.IconId != 0)
         {
             icon?.SetImageByDid(line.IconId, UiDrawMode.AlphaBlend); // MakeIcon (0x0048A250)
-            if (!_iconTodoLogged)
-            {
-                _iconTodoLogged = true;
-                _context.Manager.Services.Log.Warn("retailui", "TODO(m3-component-icon): a row draws the pack object's own icon; retail draws the SpellComponentTable's, which the session does not expose");
-            }
         }
 
         return new Built(row, line.Wcid, line.Category, name, row.GetChildRecursive(RowCountId) as UiTextElement, row.GetChildRecursive(RowBuyRateId) as UiTextElement, null, -1, -1);

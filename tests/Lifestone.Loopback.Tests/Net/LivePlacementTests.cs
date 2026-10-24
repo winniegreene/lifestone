@@ -13,25 +13,14 @@ public sealed class LivePlacementTests
     private static WhereData Where(string cell, float x, float y, float z) =>
         new(cell, x, y, z, 1f, 0f, 0f, 0f, "0x8602FFFF", cell, false, 0, 0);
 
-    [Fact]
-    public void IsAtStart_is_true_for_the_start_cell_within_half_a_metre()
+    [Theory]
+    [InlineData(null, 0f, 0f, true)] // the start itself
+    [InlineData(null, 0.3f, 0.3f, true)] // within half a metre
+    [InlineData("0x860201AE", 0f, 0f, false)] // another cell of the same landblock
+    [InlineData(null, 0.6f, 0f, false)] // beyond half a metre
+    public void IsAtStart_is_the_start_cell_within_half_a_metre_and_nothing_looser(string? cell, float dx, float dy, bool atStart)
     {
         var start = LivePlacement.AcademyStart;
-        Assert.True(LiveSteps.IsAtStart(Where($"0x{start.CellId:X8}", start.Origin.X, start.Origin.Y, start.Origin.Z), start));
-        Assert.True(LiveSteps.IsAtStart(Where($"0x{start.CellId:X8}", start.Origin.X + 0.3f, start.Origin.Y + 0.3f, start.Origin.Z), start));
-    }
-
-    [Fact]
-    public void IsAtStart_is_false_for_another_cell_of_the_same_landblock()
-    {
-        var start = LivePlacement.AcademyStart;
-        Assert.False(LiveSteps.IsAtStart(Where("0x860201AE", start.Origin.X, start.Origin.Y, start.Origin.Z), start));
-    }
-
-    [Fact]
-    public void IsAtStart_is_false_beyond_half_a_metre()
-    {
-        var start = LivePlacement.AcademyStart;
-        Assert.False(LiveSteps.IsAtStart(Where($"0x{start.CellId:X8}", start.Origin.X + 0.6f, start.Origin.Y, start.Origin.Z), start));
+        Assert.Equal(atStart, LiveSteps.IsAtStart(Where(cell ?? $"0x{start.CellId:X8}", start.Origin.X + dx, start.Origin.Y + dy, start.Origin.Z), start));
     }
 }

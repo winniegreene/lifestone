@@ -657,11 +657,96 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
+    public void The_re_buff_driver_waits_for_the_margin_then_recasts_the_lines_RebuffDue_lists()
+    {
+        // M4 4.1 lane a (DoD 14): the driver's schedule on the cycle's own expiry times. Margin 10 s, as the pass test above: only the earliest lines are inside it.
+        var t = new RebuffRig();
+        Assert.Equal(BuffStatus.Done, t.BuildBuffs());
+        t.SkipTo(RebuffRig.Margin + 0.5);
+        var answered = t.Caster.Answered.Count;
+
+        t.Frame(0.1); // the first check: the soonest line has more than the margin left, so nothing is due and nothing starts
+        Assert.True(t.Cycle.MinRemainingSeconds(t.Now) > RebuffRig.Margin);
+        Assert.Empty(t.Cycle.RebuffDue(t.Now, RebuffRig.Margin));
+        Assert.Equal(RebuffDriverState.Idle, t.Driver.State);
+        Assert.Equal(answered, t.Caster.Answered.Count);
+
+        // Checks run every 5 s: the pass starts at the first check after the margin is crossed.
+        Assert.True(t.RunUntil(() => t.Driver.State == RebuffDriverState.Running, 30));
+        var due = t.Cycle.RebuffDue(t.Now, RebuffRig.Margin);
+        Assert.NotEmpty(due);
+        Assert.True(due.Count < 24);
+        Assert.True(t.RunUntil(() => t.Driver.State != RebuffDriverState.Running, 120));
+        Assert.Equal(1, t.Driver.Passes);
+        var pass = t.Cycle.Result!;
+        Assert.Equal("rebuff", pass.Pass);
+        Assert.False(pass.Forced);
+
+        // The pass recasts every line that was due when it began, in the cycle's order; a line that drifted into the margin while the pass ran is recast too (the cycle decides each line when it comes to it).
+        var recast = t.Caster.Answered.Skip(answered).Where(a => !a.Fizzled).Select(a => ArenaProfile.Lines.First(l => l.Spells.Any(s => s.Id == a.Spell))).Where(l => l.IsBuff).Select(l => l.Name).ToList();
+        Assert.Equal(recast.Count, pass.Cast);
+        Assert.All(due, line => Assert.Contains(line, recast));
+        Assert.Equal(recast, t.Cycle.LineOrder.Where(recast.Contains));
+        Assert.Equal(24, pass.Active);
+    }
+
+    [Fact]
+    public void The_re_buff_driver_leaves_a_pass_somebody_else_runs_alone_and_finds_nothing_due_after_it()
+    {
+        var t = new RebuffRig();
+        Assert.True(t.Cycle.Start(t.Now)); // another host starts the first cycle on the same object
+
+        t.Advance(5);
+        Assert.Equal(BuffStatus.Running, t.Cycle.Status);
+        Assert.Equal(RebuffDriverState.Waiting, t.Driver.State);
+        Assert.Equal(RebuffDriver.GuardCycle, t.Driver.WaitingFor);
+        Assert.Equal(0, t.Driver.Passes);
+
+        // The driver never steps a pass it did not start; the other host does, to the end.
+        var status = BuffStatus.Running;
+        for (var i = 0; i < 20000 && status == BuffStatus.Running; i++)
+        {
+            t.R.Tick(0.25);
+            t.Caster.Pump();
+            t.R.Tick();
+            status = t.Cycle.Step(t.Now);
+            t.Driver.Tick(t.Now);
+        }
+
+        Assert.Equal(BuffStatus.Done, status);
+        t.Advance(12);
+        Assert.Equal(0, t.Driver.Passes);
+        Assert.Equal(RebuffDriverState.Idle, t.Driver.State);
+        Assert.Equal(24, t.Cycle.Result!.Active);
+    }
+
+    [Fact]
+    public void The_auto_buff_options_parse_as_a_switch_and_a_check_interval_of_at_least_a_second()
+    {
+        Assert.True(BuffOptions.FromArguments(CommandLineArgument.ParseAll(["--buff-auto=on"])).Auto);
+        Assert.True(BuffOptions.FromArguments(CommandLineArgument.ParseAll(["--buff-auto"])).Auto);
+        Assert.False(BuffOptions.FromArguments(CommandLineArgument.ParseAll(["--buff-auto=off"])).Auto);
+
+        var set = BuffOptions.FromArguments(CommandLineArgument.ParseAll(["--buff-auto=on", "--buff-auto-check-s=1", "--buff-rebuff-margin-s=120"]));
+        Assert.Empty(set.Errors);
+        Assert.Equal((true, 1.0, 120.0), (set.Auto, set.AutoCheckSeconds, set.RebuffMarginSeconds));
+        Assert.Contains("auto=on auto_check_s=1", set.ToString(), StringComparison.Ordinal);
+
+        var bad = BuffOptions.FromArguments(CommandLineArgument.ParseAll(["--buff-auto=maybe", "--buff-auto-check-s=0.5", "--buff-auto-check-s=often", "--buff-auto-check-s=-3"]));
+        Assert.Equal(4, bad.Errors.Count);
+        Assert.False(bad.Auto);
+        Assert.Equal(BuffOptions.DefaultAutoCheckSeconds, bad.AutoCheckSeconds);
+        Assert.Contains(bad.Errors, e => e.StartsWith("--buff-auto:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void The_options_default_parse_and_report_what_they_cannot_read()
     {
         var defaults = BuffOptions.FromArguments([]);
         Assert.Equal((0.9, 300.0, 8, 180.0), (defaults.CastChance, defaults.RebuffMarginSeconds, defaults.TransferTries, defaults.ManaWaitSeconds));
         Assert.Empty(defaults.Errors);
+        Assert.False(defaults.Auto); // M4 4.1: the driver is off unless asked for
+        Assert.Equal(5.0, defaults.AutoCheckSeconds);
 
         var set = BuffOptions.FromArguments(CommandLineArgument.ParseAll(["--buff-cast-chance=0.95", "--buff-rebuff-margin-s=120", "--buff-transfer-tries=3", "--buff-mana-wait-s=60"]));
         Assert.Equal((0.95, 120.0, 3, 60.0), (set.CastChance, set.RebuffMarginSeconds, set.TransferTries, set.ManaWaitSeconds));
@@ -672,7 +757,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal(defaults.CastChance, bad.CastChance);
         Assert.Equal(defaults.TransferTries, bad.TransferTries);
 
-        foreach (var name in new[] { "--buff-cast-chance", "--buff-rebuff-margin-s", "--buff-transfer-tries", "--buff-mana-wait-s" })
+        foreach (var name in new[] { "--buff-cast-chance", "--buff-rebuff-margin-s", "--buff-transfer-tries", "--buff-mana-wait-s", "--buff-auto", "--buff-auto-check-s" })
         {
             Assert.Equal(OptionScenes.Main | OptionScenes.Headless, OptionCatalog.Registry.ScenesOf(name));
         }

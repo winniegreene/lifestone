@@ -68,6 +68,15 @@ public sealed record MovementAuditSummary
     /// <summary>The server's force-position sequence at the last where-am-I check (equal to the first when nothing corrected the player).</summary>
     public ushort? ForcePositionSequenceLast { get; init; }
 
+    /// <summary>Routes the wayfinding runner planned (<c>NavRunner</c>, P5a): the first plan and every replan. 0 for a scripted walk.</summary>
+    public int Plans { get; init; }
+
+    /// <summary>Of <see cref="Plans"/>, the replans (off the route, a horizon, a failed confirmation, the ladder's fourth rung).</summary>
+    public int Replans { get; init; }
+
+    /// <summary>Rungs of the runner's stuck ladder climbed (back off, sidestep, jump, scar and replan). 0 for a scripted walk.</summary>
+    public int LadderRungs { get; init; }
+
     /// <summary>True when there were no corrections and every where-am-I check agreed within <see cref="WhereToleranceMetres"/>; false when no check ran.</summary>
     public bool Passed => Corrections == 0 && WhereMaxMetres is { } where && where <= WhereToleranceMetres
         && ForcePositionSequenceFirst == ForcePositionSequenceLast;
@@ -104,6 +113,9 @@ public sealed class MovementAudit : IMovementSink, IMovementSinkGate, IDisposabl
     private int _echoes;
     private int _teleports;
     private int _laps;
+    private int _plans;
+    private int _replans;
+    private int _rungs;
     private int _whereChecks;
     private double? _whereMax;
     private ushort? _forceFirst;
@@ -155,7 +167,32 @@ public sealed class MovementAudit : IMovementSink, IMovementSinkGate, IDisposabl
         WhereMaxMetres = _whereMax,
         ForcePositionSequenceFirst = _forceFirst,
         ForcePositionSequenceLast = _forceLast,
+        Plans = _plans,
+        Replans = _replans,
+        LadderRungs = _rungs,
     };
+
+    /// <summary>Routes planned so far (<see cref="RecordPlan"/>).</summary>
+    public int Plans => _plans;
+
+    /// <summary>Replans so far.</summary>
+    public int Replans => _replans;
+
+    /// <summary>Ladder rungs so far (<see cref="RecordRung"/>).</summary>
+    public int LadderRungs => _rungs;
+
+    /// <summary>The runner planned a route (<paramref name="replan"/>: not its first). Not part of the verdict line.</summary>
+    public void RecordPlan(bool replan)
+    {
+        _plans++;
+        if (replan)
+        {
+            _replans++;
+        }
+    }
+
+    /// <summary>The runner climbed a rung of its stuck ladder. Not part of the verdict line.</summary>
+    public void RecordRung() => _rungs++;
 
     /// <summary>The verdict line for <see cref="Summary"/> (<see cref="FormatSummaryLine"/>).</summary>
     public string SummaryLine() => FormatSummaryLine(Summary);

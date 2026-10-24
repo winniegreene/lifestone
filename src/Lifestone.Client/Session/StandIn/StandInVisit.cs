@@ -27,12 +27,7 @@ public readonly record struct StandInTeleport(double After, uint Cell, Vector3 O
 /// <param name="BlipColor">The server's radar blip colour byte (1 to 10), or 0 to send none.</param>
 /// <param name="UnhideAfter">Null for an object created in plain sight. Otherwise the server creates it Hidden (with the human's script table, as a real server does for an object it materialises: the Hidden script's bubbles and
 /// the UnHide script's fade) and clears the bit this many seconds after the player's unhide (D63: the materialise fade of an object, drawn by the same path as the player's).</param>
-/// <param name="WeenieClassId">The weenie class id the object's description carries (2 for the stand-in's own placeholder objects; <see cref="StandInTusker.Wcid"/> for a tusker).</param>
-/// <param name="MaxHealth">M3 3.1 fb: more than 0 makes the object a creature with health: the spell hit takes health from it, QueryHealth answers its real fraction (0x01C0) and at zero it dies as ACE's creature does
-/// (<c>StandInWorld.Combat.cs</c>). 0: no health model (QueryHealth answers <see cref="StandInWorld.PlaceholderHealth"/> for an attackable object, as before).</param>
-/// <param name="XpOverride">The experience a kill grants (ACE's <c>XpOverride</c>: <c>Creature_Death.cs</c> <c>OnDeath_GrantXP</c>); 0 grants none.</param>
-/// <param name="Height">The object's height in metres, which aims a projectile (ACE aims at two thirds of it); 0: the stand-in's placeholder (<c>TODO(m3-standin-object-sizes)</c>).</param>
-/// <param name="Attacks">M3 3.2 db: a placed creature with health that attacks a player within reach, as ACE's monster does (<c>StandInWorld.Death.cs</c>, <c>TODO(m3-standin-tusker-attack)</c>). False (the default) keeps the creature still, as the fight's checks use it.</param>
+/// <param name="WeenieClassId">The weenie class id the object's description carries (2 for the stand-in's own placeholder objects).</param>
 public readonly record struct StandInObject(
     uint Guid,
     string Name,
@@ -43,47 +38,7 @@ public readonly record struct StandInObject(
     uint DescriptionFlags = 0,
     byte BlipColor = 0,
     double? UnhideAfter = null,
-    uint WeenieClassId = 2,
-    uint MaxHealth = 0,
-    long XpOverride = 0,
-    float Height = 0f,
-    bool Attacks = false);
-
-/// <summary>
-/// The stand-in's Tusker Slave (M3 3.1 fb; <c>TODO(m3-standin-tusker-stats)</c>): the creature the Aluvian den's floor holds (weenie 1628, the Setup 0x02000964, attackable). The stand-in has no weenie database, so the
-/// numbers ACE's world database holds for it that the checks need are placeholders: the maximum health (<see cref="PlaceholderMaxHealth"/>), and the motion table (the caller reads the Setup's own default from the dats). Its
-/// <see cref="XpOverride"/> is the plan's figure for the kill (30,000), not read from the database.
-/// </summary>
-public static class StandInTusker
-{
-    /// <summary>The weenie class id of the Tusker Slave.</summary>
-    public const uint Wcid = 1628;
-
-    /// <summary>The Tusker Slave's Setup.</summary>
-    public const uint Setup = 0x02000964;
-
-    /// <summary>The Tusker Slave's name.</summary>
-    public const string Name = "Tusker Slave";
-
-    /// <summary>The object description bit of an attackable creature (ACE <c>ObjectDescriptionFlags.Attackable</c>).</summary>
-    public const uint AttackableFlag = 0x10;
-
-    /// <summary>The experience a kill of it grants (ACE's <c>XpOverride</c> as the plan gives it).</summary>
-    public const long XpOverride = 30_000;
-
-    /// <summary>The maximum health the stand-in gives it (a placeholder: ACE's weenie row is not in the stand-in; <c>TODO(m3-standin-tusker-stats)</c>).</summary>
-    public const uint PlaceholderMaxHealth = 400;
-
-    /// <summary>A tusker for a visit or a placement: an attackable creature on its Setup with health, and its kill's experience.</summary>
-    /// <param name="guid">The object id.</param>
-    /// <param name="offset">Where it stands (from the player's creation position in a visit; ignored by a placement).</param>
-    /// <param name="motionTable">Its motion table (the Setup's default, read from the dats by the caller), or 0 for none.</param>
-    /// <param name="height">Its height in metres, or 0 for the placeholder.</param>
-    /// <param name="maxHealth">Its maximum health; 0 takes <see cref="PlaceholderMaxHealth"/>.</param>
-    /// <param name="attacks">True: a placed tusker attacks a player within reach (M3 3.2 db; <c>TODO(m3-standin-tusker-attack)</c>); false keeps it still.</param>
-    public static StandInObject Make(uint guid, Vector3 offset, uint motionTable = 0, float height = 0f, uint maxHealth = 0, bool attacks = false) =>
-        new(guid, Name, offset, Setup, motionTable, DescriptionFlags: AttackableFlag, WeenieClassId: Wcid, MaxHealth: maxHealth != 0 ? maxHealth : PlaceholderMaxHealth, XpOverride: XpOverride, Height: height, Attacks: attacks);
-}
+    uint WeenieClassId = 2);
 
 /// <summary>
 /// The stand-in's lifestone (M3 3.2 db): an object whose description flags carry <c>BF_LIFESTONE</c> (0x4000, <see cref="Contracts.WorldObjectTable.LifestoneFlag"/>). A Use of it binds the player (<c>StandInWorld.Death.cs</c>: the Sanctuary
@@ -707,7 +662,7 @@ public static partial class StandInSessions
             PhysicsEffectTableId = StandInVisit.HumanScriptTable,
             Timestamps = Stamps(1, 1),
         };
-        var weenie = new WeenieDesc { Header = WeenieHeaderFlags.None, Name = name, WeenieClassId = 1, IconId = 0x06000001, ItemType = 0x10, ObjectDescriptionFlags = 0x8 };
+        var weenie = StandInWeenieArt.Apply(new WeenieDesc { Header = WeenieHeaderFlags.None, Name = name, WeenieClassId = 1, IconId = StandInWeenieArt.PlaceholderIcon, ItemType = 0x10, ObjectDescriptionFlags = 0x8 }, null);
         sink.OnCreateObject(WorldContext(sink), new CreateObjectMsg(guid, visit.HumanModel, physics, weenie), isUpdate: false);
         if (visit.Recorded is { } contents)
         {
@@ -749,6 +704,26 @@ public static partial class StandInSessions
         (sink as GameStateReducer)?.LocalResponder?.World is { } world ? world.WithVendorState(world.WithBars(description)) : description; // M4 3.2 s3: the shortcut list and the purse ride the same funnel
 
     /// <summary>
+    /// The weenie ItemType the stand-in gives <paramref name="obj"/> (M4 4.1 t2, D23: no stand-in object but a person reads as a creature): a chest is a Container (0x200); a person is a Creature (0x10), that is an object whose description
+    /// carries the Player bit (0x8, another player), the Vendor bit (0x200, the stand-in's two vendors) or the Attackable bit (0x10, a unit-test fixture); every other object (a lifestone, a portal, a statue, an apparition) is Misc (0x80).
+    /// </summary>
+    /// <param name="obj">The object.</param>
+    internal static uint ItemTypeOf(in StandInObject obj) =>
+        obj.WeenieClassId == StandInChest.Wcid ? 0x200u : (obj.DescriptionFlags & (PlayerFlag | StandInWorld.VendorFlag | AttackableFlag)) != 0 ? CreatureItemType : MiscItemType;
+
+    /// <summary>ACE's <c>ObjectDescriptionFlags.Player</c> (BF_PLAYER).</summary>
+    internal const uint PlayerFlag = 0x8;
+
+    /// <summary>ACE's <c>ObjectDescriptionFlags.Attackable</c> (BF_ATTACKABLE): an attackable object is a creature in the stand-in's model (a unit-test fixture only; no check places one).</summary>
+    internal const uint AttackableFlag = 0x10;
+
+    /// <summary>ITEM_TYPE::TYPE_CREATURE.</summary>
+    internal const uint CreatureItemType = 0x10;
+
+    /// <summary>ITEM_TYPE::TYPE_MISC.</summary>
+    internal const uint MiscItemType = 0x80;
+
+    /// <summary>
     /// The CreateObject the server sends for one object of a visit (<paramref name="obj"/>) at <paramref name="position"/>: the visit's objects at their offsets from the player's creation position, and an object a check places (M3 3.1 fb,
     /// <see cref="StandInServer.Place"/>) where it is told.
     /// </summary>
@@ -773,12 +748,18 @@ public static partial class StandInSessions
             Header = WeenieHeaderFlags.RadarBehavior | (obj.BlipColor != 0 ? WeenieHeaderFlags.RadarBlipColor : WeenieHeaderFlags.None),
             Name = obj.Name,
             WeenieClassId = obj.WeenieClassId,
-            IconId = 0x06000001,
-            ItemType = obj.WeenieClassId == StandInChest.Wcid ? 0x200u : (obj.DescriptionFlags & Contracts.WorldObjectTable.LifestoneFlag) != 0 ? 0x80u : 0x10u, // a chest is a Container (M4 2.1 s3); // Misc for a lifestone (M3 3.2 db: it must not read as a creature); every other stand-in object keeps Creature
+            IconId = StandInWeenieArt.PlaceholderIcon,
+            ItemType = ItemTypeOf(obj), // a chest is a Container (M4 2.1 s3), a lifestone, a portal and a statue are Misc (M4 4.1 t2: D23, a placeholder that is not a person must not read as a creature); only another player and a vendor are Creature
             ObjectDescriptionFlags = obj.DescriptionFlags | (obj.PortalTo is not null ? 0x40000u : 0u),
             RadarBehavior = 4,
             RadarBlipColor = obj.BlipColor != 0 ? obj.BlipColor : null,
         };
+        if (StandInWeenieArt.TryGet(obj.WeenieClassId, out _))
+        {
+            // M4 4.1 v4: the chest and the two vendors carry their weenie's own icon (a creature, the lifestone and a placement the table does not hold keep the placeholder icon without a TODO: the examine panel and the radar are all that read it).
+            objectWeenie = StandInWeenieArt.Apply(objectWeenie, null);
+        }
+
         return new CreateObjectMsg(obj.Guid, humanLook is not null && obj.Setup == StandInVisit.HumanSetup ? humanLook : ModelData.Empty, objectPhysics, objectWeenie);
     }
 

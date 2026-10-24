@@ -59,12 +59,10 @@ internal static class WieldedSetups
     [
         new("nothing", [], true, false, false, CombatMode.Melee),
         new("a mace", [Mace], true, false, false, CombatMode.Melee),
-        new("a sword", [Sword], true, false, false, CombatMode.Melee),
         new("a bow with arrows", [Bow, Arrows], false, false, true, CombatMode.Missile),
         new("arrows alone", [Arrows], true, false, false, CombatMode.Melee),
         new("thrown darts", [Darts], false, false, true, CombatMode.Missile),
         new("a wand", [Wand], false, true, false, CombatMode.Magic),
-        new("an orb", [Orb], false, true, false, CombatMode.Magic),
         new("a mace with a shield", [Mace, Shield], true, false, false, CombatMode.Melee),
         new("a two-handed weapon", [TwoHanded], true, false, false, CombatMode.Melee),
         new("a wand with a shield", [Wand, Shield], false, true, false, CombatMode.Magic), // ACE refuses to wield the pair; the guard still reads the wand

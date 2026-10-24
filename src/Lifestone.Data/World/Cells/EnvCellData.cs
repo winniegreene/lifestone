@@ -123,6 +123,16 @@ public sealed class EnvCellData
         return bytes is null ? null : Decode(cellId, bytes);
     }
 
+    /// <summary>Assembles a cell from parts (synthetic unit tests; real data goes through <see cref="Decode"/>).</summary>
+    internal static EnvCellData FromParts(
+        uint id,
+        uint environmentId,
+        ushort cellStructureIndex,
+        Placement frame,
+        IReadOnlyList<CellPortalData> portals,
+        EnvCellFlags flags = EnvCellFlags.None) =>
+        new(id, flags, [], environmentId, cellStructureIndex, frame, portals, [], [], 0);
+
     /// <summary>Decodes raw EnvCell bytes.</summary>
     /// <exception cref="InvalidDataException">The record is malformed, has trailing bytes or a wrong id.</exception>
     public static EnvCellData Decode(uint cellId, byte[] bytes)

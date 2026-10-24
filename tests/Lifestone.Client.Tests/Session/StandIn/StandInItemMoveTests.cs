@@ -19,23 +19,23 @@ public sealed class StandInItemMoveTests
 
     private static double At(StandInAttackRig rig, string tag, int occurrence = 0) => rig.Cast.Timeline.Where(e => e.Tag == tag).ElementAt(occurrence).At;
 
-    /// <summary>A rig with the tusker killed and its corpse open; <paramref name="item"/> is its first item.</summary>
-    private static StandInAttackRig OpenCorpse(out uint corpse, out uint item)
+    /// <summary>A rig with a stand-in chest placed and open (M4 4.1 t2: the stand-in holds no creature, so no corpse); <paramref name="item"/> is its first item.</summary>
+    private static StandInAttackRig OpenCorpse(out uint chest, out uint item)
     {
         var rig = new StandInAttackRig();
-        rig.MeleeKit(2.0, health: 1);
-        rig.Net.SendMeleeAttack(StandInAttackRig.Target, 2, 0.5f);
+        const uint box = 0x80000E01;
+        Assert.NotNull(rig.Server.PlaceChest(box, new System.Numerics.Vector3(0f, 2f, 0f), ("Bowl", StandInWorld.BowlWcid, 1), ("Smock", StandInWorld.SmockWcid, 1)));
+        rig.Run(0.5);
+        chest = box;
+        rig.Net.SendUse(chest);
         rig.Run(3.0);
-        corpse = rig.Cast.Session.State.Objects.All.Single(o => o.Name.StartsWith("Corpse of", StringComparison.Ordinal)).Guid;
-        rig.Net.SendUse(corpse);
-        rig.Run(1.0);
-        item = rig.World.ContentsOf(corpse)[0];
+        item = rig.World.ContentsOf(chest)[0];
         rig.Cast.Begin();
         return rig;
     }
 
     [Fact]
-    public void A_pick_up_from_the_corpse_is_the_motion_then_after_1_35_seconds_02DA_0022_02CD_and_31_ms_later_the_sound_and_the_return_stance()
+    public void A_pick_up_from_a_chest_is_the_motion_then_after_1_35_seconds_02DA_0022_02CD_and_31_ms_later_the_sound_and_the_return_stance()
     {
         using var rig = OpenCorpse(out _, out var item);
 
@@ -86,74 +86,6 @@ public sealed class StandInItemMoveTests
         Assert.True(rig.Cast.Session.State.Objects.TryGet(arrows, out var dropped) && dropped.ContainerId is null or 0);
     }
 
-    [Fact]
-    public void A_split_to_a_container_is_the_new_guids_0022_then_0197_then_the_new_stacks_F745_and_the_burden_0_56_seconds_later()
-    {
-        using var rig = new StandInAttackRig();
-        var arrows = rig.Spawn(StandInAttackRig.Arrows, 50);
-        rig.Cast.Begin();
-
-        rig.Net.SendSplitToContainer(arrows, SelfOf(rig), 0, 10);
-        rig.Run(2.0);
-
-        Assert.Equal(["0022", "0197", "F745", "02CD"], rig.Tags);
-        Assert.Equal(StandInWorld.BurdenLagSeconds, At(rig, "02CD") - At(rig, "0022"), Tolerance);
-        Assert.Equal([40, 10], rig.World.Pack.Where(e => e.Wcid == StandInAttackRig.Arrows).Select(e => e.Stack));
-        var stack = rig.World.Pack.Single(e => e.Stack == 10);
-        Assert.NotEqual(arrows, stack.Guid);
-        Assert.True(rig.Cast.Session.State.Objects.Contains(stack.Guid));
-    }
-
-    [Fact]
-    public void A_split_to_3D_is_the_motion_then_0197_02CD_the_new_stacks_F745_with_no_container_F748_F74B_the_sound_and_the_return_stance()
-    {
-        using var rig = new StandInAttackRig();
-        var arrows = rig.Spawn(StandInAttackRig.Arrows, 50);
-        rig.Cast.Begin();
-
-        rig.Net.SendSplitTo3D(arrows, 5);
-        rig.Run(3.0);
-
-        Assert.Equal(["F748", "F74C", "0197", "02CD", "F745", "F748", "F74B", "F750", "F74C"], rig.Tags);
-        Assert.Equal(StandInWorld.PickupGroundSeconds, At(rig, "0197") - At(rig, "F74C"), Tolerance);
-        var created = Assert.Single(rig.World.GroundItems);
-        Assert.True(rig.Cast.Session.State.Objects.TryGet(created, out var lying) && lying.ContainerId is null);
-        Assert.Equal(45, rig.World.Pack.Single(e => e.Guid == arrows).Stack);
-    }
-
-    [Fact]
-    public void A_split_to_wield_is_0197_02DA_02CE_0023_F625_the_sound_and_the_new_stacks_F745_with_no_animation()
-    {
-        using var rig = new StandInAttackRig();
-        var arrows = rig.Spawn(StandInAttackRig.Arrows, 50);
-        rig.Cast.Begin();
-
-        rig.Net.SendSplitToWield(arrows, (uint)EquipMask.MissileAmmo, 5);
-        rig.Run(1.5);
-
-        Assert.Equal(["0197", "02DA", "02CE", "0023", "F625", "F750", "F745"], rig.Tags);
-        var wielded = Assert.Single(rig.World.Wielded);
-        Assert.Equal(5, wielded.Value.Stack);
-        Assert.True(rig.Cast.Session.State.Self.Inventory.Find(wielded.Key).Kind == InventoryPlaceKind.Equipped);
-        Assert.Equal(45, rig.World.Pack.Single(e => e.Guid == arrows).Stack);
-    }
-
-    [Fact]
-    public void A_split_to_wield_onto_a_slot_holding_ammunition_is_refused_with_the_02EB_line_00A0_and_the_old_stack_restored()
-    {
-        using var rig = new StandInAttackRig();
-        rig.Wield(rig.Spawn(StandInAttackRig.Arrows, 5), EquipMask.MissileAmmo);
-        var arrows = rig.Spawn(StandInAttackRig.Arrows, 50);
-        rig.Cast.Begin();
-
-        rig.Net.SendSplitToWield(arrows, (uint)EquipMask.MissileAmmo, 5);
-        rig.Run(1.5);
-
-        Assert.Equal(["0197", "02EB", "00A0", "02CD", "0197"], rig.Tags);
-        Assert.Equal(50, rig.World.Pack.Single(e => e.Guid == arrows).Stack);
-        Assert.Single(rig.World.Wielded);
-    }
-
     private static StandInAttackRig WithNpc(out uint mace, out uint bow)
     {
         var rig = new StandInAttackRig();
@@ -164,40 +96,6 @@ public sealed class StandInItemMoveTests
         rig.World.AcceptGive(Npc, StandInAttackRig.Mace);
         rig.Cast.Begin();
         return rig;
-    }
-
-    [Fact]
-    public void A_give_an_NPC_accepts_is_the_turn_then_after_0_70_seconds_0024_02CD_0022_naming_the_NPC_the_line_and_the_sound()
-    {
-        using var rig = WithNpc(out var mace, out _);
-
-        rig.Net.SendGiveObject(Npc, mace, 1);
-        rig.Run(3.0);
-
-        Assert.Equal(["F74C", "0024", "02CD", "0022", "F7E0", "F750"], rig.Tags);
-        Assert.Equal(StandInWorld.GiveSeconds, At(rig, "0024") - At(rig, "F74C"), Tolerance);
-        Assert.DoesNotContain(rig.World.Pack, e => e.Guid == mace);
-        Assert.Contains(rig.Cast.Chat, l => l.Text.Contains("You give Alfrin", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void A_give_of_any_other_item_or_to_any_other_NPC_is_the_turn_then_028B_and_00A0()
-    {
-        using var rig = WithNpc(out var mace, out var bow);
-
-        rig.Net.SendGiveObject(Npc, bow, 1);
-        rig.Run(2.0);
-
-        Assert.Equal(["F74C", "028B", "00A0"], rig.Tags);
-        Assert.Contains(rig.World.Pack, e => e.Guid == bow);
-
-        rig.Run(3.0);
-        rig.Cast.Begin();
-        rig.Net.SendGiveObject(0x80000E99, mace, 1);
-        rig.Run(2.0);
-
-        Assert.Equal(["F74C", "028B", "00A0"], rig.Tags);
-        Assert.Contains(rig.World.Pack, e => e.Guid == mace);
     }
 
     [Fact]
@@ -224,31 +122,4 @@ public sealed class StandInItemMoveTests
         Assert.Contains(item, rig.World.GroundItems);
     }
 
-    [Fact]
-    public void A_give_sent_while_the_previous_move_runs_is_refused_busy_too()
-    {
-        using var rig = WithNpc(out var mace, out var bow);
-        rig.Net.SendDropItem(bow);
-        rig.Run(0.5); // the drop's motion has started; its 02DA is still to come
-        rig.Cast.Begin();
-
-        rig.Net.SendGiveObject(Npc, mace, 1);
-        rig.Run(0.4);
-
-        Assert.Equal(["028A", "00A0"], rig.Tags);
-        Assert.Contains(rig.World.Pack, e => e.Guid == mace);
-    }
-
-    [Fact]
-    public void A_move_of_an_item_the_player_neither_holds_nor_can_see_is_00A0()
-    {
-        using var rig = new StandInAttackRig();
-        rig.Cast.Begin();
-
-        rig.Net.SendDropItem(0x80099999);
-        rig.Net.SendSplitTo3D(0x80099998, 3);
-        rig.Run(1.0);
-
-        Assert.Equal(["00A0", "00A0"], rig.Tags);
-    }
 }

@@ -20,10 +20,28 @@ public sealed class CellStructureLibrary
     private readonly DatSet _dats;
     private readonly ConcurrentDictionary<uint, Lazy<CellStructure[]?>> _environments = new();
 
+    private CellStructureLibrary()
+    {
+        _dats = null!;
+    }
+
     public CellStructureLibrary(DatSet dats)
     {
         ArgumentNullException.ThrowIfNull(dats);
         _dats = dats;
+    }
+
+    /// <summary>A library holding only the given structs (synthetic unit tests: <see cref="Dats"/> is null, so no environment outside <paramref name="structs"/> loads).</summary>
+    internal static CellStructureLibrary FromStructures(IEnumerable<CellStructure> structs)
+    {
+        var library = new CellStructureLibrary();
+        foreach (var group in structs.GroupBy(c => c.EnvironmentId))
+        {
+            var ordered = group.OrderBy(c => c.Index).ToArray();
+            library._environments[group.Key] = new Lazy<CellStructure[]?>(ordered);
+        }
+
+        return library;
     }
 
     public DatSet Dats => _dats;

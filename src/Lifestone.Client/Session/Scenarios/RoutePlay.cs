@@ -94,6 +94,7 @@ public sealed partial class RoutePlay : IScenario, IDisposable
     private bool _returning;
     private IDisposable? _movesSubscription;
     private OfflineWalker? _walker;
+    private MoveIntents? _move; // set only when this play bound its own walker (headless)
     private MovementAudit? _audit;
     private PresenceGatedMovementSink? _gate;
     private RouteDriver? _driver;
@@ -239,6 +240,11 @@ public sealed partial class RoutePlay : IScenario, IDisposable
         _disposed = true;
         PutTheQuestBackAfterFailure(); // a play ended from outside (a timeout, a quit) after it changed the registry: say so, and send the cleanup if it is safe
         _driver?.Abandon(); // however the play ends, no key stays held: hosted, the walker is the game's real player controller
+        if (_move is not null && _walker is not null)
+        {
+            _move.Unbind(_walker.Controller); // only the controller this play bound (hosted, the host owns its binding)
+        }
+
         if (_host is { } host && ReferenceEquals(host.Current, _audit))
         {
             host.Current = null;
@@ -397,12 +403,14 @@ public sealed partial class RoutePlay : IScenario, IDisposable
             _audit = new MovementAudit(gate, session.Events, () => session.Clock.Now, _route.Name);
             _world.SetTime(now);
             _walker = OfflineWalker.Create(_dats, _world, _log, weenie, _geometry, id: self.Guid, sink: _audit);
+            _move = session.Actions.Move; // the walk goes through IActionApi.Move in this host too (the Godot host binds its own controller)
+            _move.Bind(_walker.Controller, _walker.Controller.Options.RunByDefault);
         }
 
         var audit = _audit!;
         if (_exit is null)
         {
-            _driver = new RouteDriver(_walker.Controller, _route);
+            _driver = new RouteDriver(_walker.Controller, _route, session.Actions.Move);
             _driver.Stopped += _ => audit.CompleteLap();
         }
 

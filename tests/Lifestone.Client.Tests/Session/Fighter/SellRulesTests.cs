@@ -138,6 +138,20 @@ public sealed class SellRulesTests
     }
 
     [Fact]
+    public void Spell_components_and_the_pack_caster_are_never_sold_even_to_a_vendor_whose_mask_takes_them_M4_P5a_F_abil()
+    {
+        var h = new Held();
+        var scarab = h.Pack("Lead Scarab", 691, 0x1000, 20, 29);
+        var caster = h.Pack("The Healer's Heart", 8552, 0x8000, 1500);
+        var loot = h.Pack("Smock", 2589, Clothing, 25);
+        var everything = new SellRules { FallbackMask = uint.MaxValue };
+
+        Assert.Equal(SellDecision.Kept, everything.Decide(scarab, h.State.Self.Inventory, null));
+        Assert.Equal(SellDecision.Kept, everything.Decide(caster, h.State.Self.Inventory, null));
+        Assert.Equal(SellDecision.Sell, everything.Decide(loot, h.State.Self.Inventory, null));
+    }
+
+    [Fact]
     public void Money_that_is_not_the_pyreal_class_is_never_sold_either()
     {
         var h = new Held();

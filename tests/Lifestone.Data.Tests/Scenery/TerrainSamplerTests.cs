@@ -63,6 +63,7 @@ public sealed class TerrainSamplerTests(DatSetFixture fixture) : IClassFixture<D
         Assert.Throws<ArgumentOutOfRangeException>(() => sampler.GetHeight(-1f, 5f));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Matches_TerrainMeshBuilder_vertices_triangles_and_normals_around_Holtburg()
     {
@@ -95,6 +96,7 @@ public sealed class TerrainSamplerTests(DatSetFixture fixture) : IClassFixture<D
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Heights_equal_barycentric_interpolation_of_the_mesh_triangle_under_the_point()
     {
@@ -126,6 +128,7 @@ public sealed class TerrainSamplerTests(DatSetFixture fixture) : IClassFixture<D
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Exact_arithmetic_puts_a_point_4_microns_off_the_diagonal_in_the_second_triangle()
     {

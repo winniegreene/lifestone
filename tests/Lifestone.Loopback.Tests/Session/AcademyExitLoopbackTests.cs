@@ -41,6 +41,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[Trait("Lane", "solo")]
 public sealed class AcademyExitLoopbackTests(ITestOutputHelper output)
 {
     private const string Character = "Lifestone Loopback";
@@ -284,6 +286,7 @@ public sealed class AcademyExitLoopbackTests(ITestOutputHelper output)
             skillClasses: HeadlessCharacter.RetailSkillClasses(dats),
             portalCell: PortalExit.ExitToHoltburgCell,
             exitQuest: exitQuest);
+        LiveCharacter.Release(output, BackendProbe.TestAccountKey);
         var secrets = File.ReadAllBytes(files.SecretsFile);
         HeadlessRunner runner;
         try

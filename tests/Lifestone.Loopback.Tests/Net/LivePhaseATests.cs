@@ -25,6 +25,7 @@ namespace Lifestone.Loopback.Tests.Net;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
 [TestCaseOrderer("Lifestone.Loopback.Tests.Net.LiveStepOrderer", "Lifestone.Loopback.Tests")]
 public sealed class LivePhaseATests(ITestOutputHelper output)
 {

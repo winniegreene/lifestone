@@ -9,6 +9,7 @@ using Xunit.Abstractions;
 namespace Lifestone.Client.Tests.Interiors;
 
 /// <summary>Which cells are meshed (retail <c>CLandBlock::init_buildings</c>, <c>CEnvCell::grab_visible_cells</c>).</summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class InteriorCellSetsTests(InteriorsFixture fixture, ITestOutputHelper output) : IClassFixture<InteriorsFixture>
 {
     private static readonly LandblockCoord Holtburg = InteriorsFixture.Holtburg;

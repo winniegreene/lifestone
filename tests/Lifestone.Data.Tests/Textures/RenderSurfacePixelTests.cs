@@ -13,6 +13,7 @@ namespace Lifestone.Data.Tests.Textures;
 /// <see cref="ScoutReferenceDecoder"/>. Samples: the first and last record of every format in each dat, plus the
 /// records local-scout.md checked visually.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class RenderSurfacePixelTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private DatSet Dats => fixture.Dats;

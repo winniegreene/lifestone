@@ -567,6 +567,10 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         _poseDirty = true;
         PoseParts();
         UpdateChildren();
+        if (position.CellId != 0)
+        {
+            ResumeEmitters();
+        }
     }
 
     /// <summary>
@@ -749,6 +753,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         }
 
         parent.UpdateChild(this);
+        ResumeEmitters();
         return true;
     }
 
@@ -779,6 +784,50 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
     {
         Parent?.RemoveChild(this);
         LeaveWorld();
+        StopEmitters();
+    }
+
+    /// <summary>
+    /// True after <see cref="StopEmitters"/> until <see cref="ResumeEmitters"/>: the object left the world with its emitters running and they were destroyed.
+    /// </summary>
+    public bool EmittersStopped { get; private set; }
+
+    /// <summary>
+    /// M4 4.1 v1: an object that has left the world (a held item stowed, dropped into a pack, a holder deleted) keeps no emitter. Retail leaves the emitters of an out-of-cell
+    /// object in its <c>ParticleManager</c> (<c>CPhysicsObj::leave_world</c> 11.6096 0x005160A0 does not destroy it; <c>destroy_particle_manager</c> 0x00511820 runs only
+    /// with the object) but nothing draws or updates them, because <c>CPhysicsObj::UpdateChild</c> (0x00513850) and the cell's draw lists reach only objects in a cell; here every
+    /// emitter is destroyed at the leave (<c>ParticleManager::DestroyParticleEmitter</c>) so none can outlive its object, and <see cref="ResumeEmitters"/> replays the Setup's
+    /// default script when the object enters a cell again. The player-visible result is the same as retail's.
+    /// </summary>
+    public void StopEmitters()
+    {
+        var particles = Effects.Particles;
+        if (particles.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var emitter in particles.Emitters.ToArray())
+        {
+            particles.DestroyParticleEmitter(emitter.Id);
+        }
+
+        EmittersStopped = true;
+    }
+
+    /// <summary>Replays the Setup's default script once after <see cref="StopEmitters"/> (the object is in a cell again); nothing otherwise.</summary>
+    internal void ResumeEmitters()
+    {
+        if (!EmittersStopped)
+        {
+            return;
+        }
+
+        EmittersStopped = false;
+        if (Setup.DefaultScriptId != 0)
+        {
+            Effects.PlayScriptId(Setup.DefaultScriptId);
+        }
     }
 
     /// <summary>

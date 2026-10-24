@@ -240,6 +240,12 @@ public partial class Main : Node3D
         // --- M2 G6 play mode: the explore scene with a server behind it (Session/PlayMode.cs); made before the portal view, which asks it for the destination's cell ---
         PlayMode? playMode = sessionHost is null ? null : PlayMode.Install(this, _services, sessionHost, _world, interiors, _camera, retailUi, autoEnter: loginCheck == LoginCheckKind.None); // a login check enters by its own script
 
+        // --- M4 polish pass P2: play mode draws with retail's field of view (RetailLens), before the portal view reads the camera's rest lens ---
+        if (playMode is not null)
+        {
+            ApplyRetailFov();
+        }
+
         // --- M2 portal view: the portal track's wave-2 stage fills this seam (PortalSpace/PortalSpaceSetup.cs) ---
         var portal = PortalSpace.PortalSpaceSetup.Install(this, _services, _world, _camera, skyController, playMode is null ? null : () => playMode.DestinationCell);
         playMode?.AttachPortal(portal);
@@ -276,6 +282,30 @@ public partial class Main : Node3D
         }
 
         Log.Info("main", "ready", ("start", start), ("camera", _camera.WorldPosition));
+    }
+
+    /// <summary>
+    /// M4 polish pass P2: the play camera draws with retail's field of view (<see cref="RetailLens"/>: the 90-degree preference turned into a vertical angle for the window's aspect, 73 degrees at 800x600) unless <c>--fov</c> says otherwise
+    /// (<c>--fov=60</c> is the old default). Explore mode keeps its 60. The window's aspect is read once here: <c>TODO(cam-fov-resize)</c>, a window resized after the start keeps the angle it had (retail recomputes it every frame).
+    /// </summary>
+    private void ApplyRetailFov()
+    {
+        if (_services.Options.Fov is not null)
+        {
+            Log.Info("camera", "the world camera keeps the --fov given", ("fov_degrees", _camera.Camera.Fov));
+            return;
+        }
+
+        var size = GetViewport().GetVisibleRect().Size;
+        if (size.X < 2f || size.Y < 2f)
+        {
+            Log.Warn("camera", "TODO(cam-fov-resize): the window has no size yet; the camera keeps its default field of view", ("fov_degrees", _camera.Camera.Fov));
+            return;
+        }
+
+        var fov = Lifestone.Client.Camera.RetailLens.VerticalFovDegrees(Lifestone.Client.Camera.RetailLens.DefaultFovDegrees, size.X / size.Y);
+        _camera.Camera.Fov = fov;
+        Log.Info("camera", "the world camera draws with retail's field of view (Render.FieldOfView 90, SmartBox::RenderNormalMode)", ("vertical_fov_degrees", fov), ("window", size.ToString()), ("was", GameOptions.DefaultFov));
     }
 
     public override void _Process(double delta)

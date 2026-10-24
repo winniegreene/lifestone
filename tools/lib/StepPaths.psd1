@@ -38,7 +38,7 @@
         'docs/', 'tests/', 'server/', 'README.md', 'CLAUDE.md', 'LICENSE', '.github/', '.gitignore', '.gitattributes',
         'src/Lifestone.Headless/', 'src/Lifestone.Client/LegalNotices.cs',
         'src/Lifestone.Game/scripts/Main.cs.uid',
-        'tools/slice-check.ps1', 'tools/commit.ps1', 'tools/hero-video.ps1', 'tools/installer/', 'tools/protocol/', 'tools/research/', 'tools/data/',
+        'tools/slice-check.ps1', 'tools/commit.ps1', 'tools/live-gate.ps1', 'tools/lib/GateAreas.psd1', 'tools/hero-video.ps1', 'tools/installer/', 'tools/protocol/', 'tools/research/', 'tools/data/',
         'tools/lib/StepPaths.psd1', 'tools/lib/TestTimes.psm1'
     )
 
@@ -46,5 +46,8 @@
     Live = @{
         'login-check' = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
         'login'       = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
+        # M4 P4 gate: the two hunts (backend steps on the fighter templates' accounts); they run only at the lead's gate, so slice-check prints the advisory.
+        'login-hunt'  = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
+        'login-hunt-missile' = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
     }
 }

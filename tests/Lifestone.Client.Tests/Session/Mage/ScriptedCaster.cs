@@ -37,10 +37,14 @@ internal sealed class ScriptedCaster
     public static readonly string[] PieceNames = ["Leather Cap", "Leather Vest", "Leather Gloves", "Leather Boots", "Leather Leggings"];
 
     private const uint WandGuid = 0x80000200;
+
+    /// <summary>The Mana Potion stack a fighter's rig may hold (M4 P5a C7).</summary>
+    public const uint ManaPotionGuid = 0x80000260;
     private const uint FirstPieceGuid = 0x80000201;
     private const uint Wand = 0x01000000;
 
     private readonly WorldActionRig _rig;
+    private readonly Lifestone.Client.Session.Fighter.FighterTemplate? _fighter;
     private readonly Dictionary<uint, int> _layers = [];
     private readonly Dictionary<uint, byte> _sequence = [];
     private readonly List<(Func<SpellInfo, bool> Match, int Left)> _fizzles = [];
@@ -53,6 +57,7 @@ internal sealed class ScriptedCaster
     private readonly Random _manaRolls;
     private double _manaAcc;
     private double _staminaAcc;
+    private byte _potionSeq;
 
     /// <summary>The divisor of Mana Conversion's skill formula, (Focus + Self) / 6 (the SkillTable's entry 16).</summary>
     public const int ManaConversionDivisor = 6;
@@ -60,11 +65,15 @@ internal sealed class ScriptedCaster
     /// <summary>The seed of the Mana Conversion rolls (the same seed gives the same cycle).</summary>
     public const int DefaultManaSeed = 0x2A1;
 
-    public ScriptedCaster(WorldActionRig rig, uint mana, uint stamina, int manaSeed = DefaultManaSeed)
+    /// <param name="lines">The lines the spell table holds: the mage's <see cref="ArenaProfile.Lines"/> by default; a fighter's rig (M4 P5a C4) passes the fighter profile's buff and mana lines.</param>
+    /// <param name="fighter">A fighter template (M4 P5a C4): the attributes, the three magic skills and the vitals are the fighter's level-55 build (Creature Enchantment and Life Magic 183, Max Mana about 225), not the mage's.</param>
+    public ScriptedCaster(WorldActionRig rig, uint mana, uint stamina, int manaSeed = DefaultManaSeed, IReadOnlyList<ProfileLine>? lines = null, Lifestone.Client.Session.Fighter.FighterTemplate? fighter = null, uint manaPotions = 0)
     {
         _rig = rig;
+        _fighter = fighter;
         _manaRolls = new Random(manaSeed);
-        Table = BuildTable();
+        ManaPotions = manaPotions;
+        Table = BuildTable(lines ?? ArenaProfile.Lines);
         Mana = mana;
         Stamina = stamina;
         rig.Spells([.. Table.Values]);
@@ -93,11 +102,20 @@ internal sealed class ScriptedCaster
     /// <summary>Seconds of the fake clock a cast takes before ACE answers it (the cast gesture's time; 0, the default, answers in the frame the cast arrives; the live buff cycle averaged about 1.9 s a cast, M3 2.1 fix B).</summary>
     public double CastSeconds { get; set; }
 
+    /// <summary>The Mana Potions held (M4 P5a C7); set by the constructor's <c>manaPotions</c>, each drink restores <see cref="Lifestone.Client.Session.Fighter.FighterKit.VitalPotionBoost"/> and the potion's use is answered in <see cref="Pump"/>.</summary>
+    public uint ManaPotions { get; private set; }
+
+    /// <summary>How many Mana Potions were drunk (M4 P5a C7).</summary>
+    public int PotionsDrunk { get; private set; }
+
     /// <summary>The mana each landed cast was charged, in order (the spell id and the cost).</summary>
     public List<(uint Spell, uint Cost)> Charged { get; } = [];
 
     /// <summary>Every cast answered, in order: the spell id and the session-clock time of the answer.</summary>
     public List<(uint Spell, double At, bool Fizzled)> Answered { get; } = [];
+
+    /// <summary>A hook over the untargeted casts the Action API sent (M4 P5a C1c): returns true when the test answers the cast itself, so the scripted table never sees it.</summary>
+    public Func<uint, bool>? CastHook { get; set; }
 
     /// <summary>The combat modes asked for, in order (GameAction 0x0053), each answered at once.</summary>
     public List<int> ModesSent { get; } = [];
@@ -121,6 +139,15 @@ internal sealed class ScriptedCaster
     public IEnumerable<uint> Landed => Answered.Where(a => !a.Fizzled).Select(a => a.Spell);
 
     /// <summary>Applies the regeneration since the last call and answers every cast the Action API sent since.</summary>
+    /// <summary>M4 P5a fix r4: sets the current mana and stamina and tells the session at once (a drained character after the login, as round 4's heal leg left the Archer).</summary>
+    public void SetVitals(uint mana, uint stamina)
+    {
+        Mana = mana;
+        Stamina = stamina;
+        SendVital(MageTemplate.MaxMana, Mana);
+        SendVital(MageTemplate.MaxStamina, Stamina);
+    }
+
     public void Pump()
     {
         var now = _rig.H.R.Clock.Now;
@@ -132,10 +159,18 @@ internal sealed class ScriptedCaster
             switch (send.Kind)
             {
                 case FakeSendKind.CastUntargetedSpell:
+                    if (CastHook?.Invoke((uint)send.Guid) == true)
+                    {
+                        break; // M4 P5a C1c: a test answers this spell itself (Lifestone Recall is no spell of the scripted table)
+                    }
+
                     _pending.Enqueue(((uint)send.Guid, 0, now + CastSeconds));
                     break;
                 case FakeSendKind.CastTargetedSpell:
                     _pending.Enqueue(((uint)send.Index, send.Guid, now + CastSeconds));
+                    break;
+                case FakeSendKind.Use when send.Guid == ManaPotionGuid:
+                    DrinkManaPotion();
                     break;
                 case FakeSendKind.ChangeCombatMode:
                     // ACE changes the mode after the stance animation and tells it with the private int update 0x02CD (Player_Combat.cs HandleActionChangeCombatMode).
@@ -152,11 +187,11 @@ internal sealed class ScriptedCaster
         }
     }
 
-    private static Dictionary<uint, SpellInfo> BuildTable()
+    private static Dictionary<uint, SpellInfo> BuildTable(IReadOnlyList<ProfileLine> lines)
     {
         var table = new Dictionary<uint, SpellInfo>();
         var category = 200u;
-        foreach (var line in ArenaProfile.Lines)
+        foreach (var line in lines)
         {
             category++;
             foreach (var spell in line.Spells)
@@ -195,27 +230,55 @@ internal sealed class ScriptedCaster
         return table;
     }
 
+    /// <summary>A Mana Potion (ACE <c>Food.BoostVital</c>): +25 mana, the line, the stack, the use done (M4 P5a C7).</summary>
+    private void DrinkManaPotion()
+    {
+        var before = Mana;
+        Mana = Math.Min(MaxMana, Mana + (uint)Lifestone.Client.Session.Fighter.FighterKit.VitalPotionBoost);
+        PotionsDrunk++;
+        SendVital(MageTemplate.MaxMana, Mana);
+        Chat($"The Mana Potion restores {Mana - before} points of your Mana.");
+        ManaPotions--;
+        if (ManaPotions == 0)
+        {
+            _rig.Raw(AceM3Writers.InventoryRemoveObject(ManaPotionGuid));
+        }
+        else
+        {
+            _rig.Raw(AceM3Writers.SetStackSize(++_potionSeq, ManaPotionGuid, ManaPotions, ManaPotions * 170));
+        }
+
+        _rig.UseDone();
+    }
+
+    private uint MaxMana => _rig.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out _, out var max) ? max : uint.MaxValue;
+
     private void Describe()
     {
         var attributes = ImmutableArray.CreateBuilder<AttributeDesc>();
         foreach (var id in new[] { MageTemplate.Strength, MageTemplate.Endurance, MageTemplate.Quickness, MageTemplate.Coordination, MageTemplate.Focus, MageTemplate.Self })
         {
-            var ranks = MageTemplate.TargetOf(MageStatKind.Attribute, id)?.Ranks ?? 0;
-            attributes.Add(new AttributeDesc(id, (uint)ranks, MageTemplate.CreationValue(id), 0));
+            var ranks = _fighter is null ? MageTemplate.TargetOf(MageStatKind.Attribute, id)?.Ranks ?? 0 : _fighter.TargetOf(MageStatKind.Attribute, id)?.Ranks ?? 0;
+            attributes.Add(new AttributeDesc(id, (uint)ranks, _fighter is null ? MageTemplate.CreationValue(id) : _fighter.CreationValue(id), 0));
         }
 
         var skills = ImmutableArray.CreateBuilder<SkillDesc>();
         foreach (var id in new[] { MageTemplate.CreatureEnchantment, MageTemplate.ItemEnchantment, MageTemplate.LifeMagic, MageTemplate.WarMagic, MageTemplate.ManaConversion })
         {
-            var t = MageTemplate.TargetOf(MageStatKind.Skill, id)!;
+            var t = _fighter is null ? MageTemplate.TargetOf(MageStatKind.Skill, id) : _fighter.TargetOf(MageStatKind.Skill, id);
+            if (t is null)
+            {
+                continue; // a fighter trains no War Magic and no Mana Conversion
+            }
+
             skills.Add(new SkillDesc(id, (ushort)t.Ranks, 1, t.Specialized ? 3u : 2u, 0, t.Specialized ? 10u : 0u, 0, 0));
         }
 
         // Vitals: start 0, the ranks the template buys, so the maximum is the formula's (mana 159 + Self 267 = 426, stamina 135 + Endurance 140 = 275).
         var vitals = ImmutableArray.CreateBuilder<VitalDesc>();
         vitals.Add(new VitalDesc(MageTemplate.MaxHealth, 100, 0, 0, 200));
-        vitals.Add(new VitalDesc(MageTemplate.MaxStamina, (uint)MageTemplate.TargetOf(MageStatKind.Vital, MageTemplate.MaxStamina)!.Ranks, 0, 0, Stamina));
-        vitals.Add(new VitalDesc(MageTemplate.MaxMana, (uint)MageTemplate.TargetOf(MageStatKind.Vital, MageTemplate.MaxMana)!.Ranks, 0, 0, Mana));
+        vitals.Add(new VitalDesc(MageTemplate.MaxStamina, (uint)(_fighter is null ? MageTemplate.TargetOf(MageStatKind.Vital, MageTemplate.MaxStamina)! : _fighter.TargetOf(MageStatKind.Vital, MageTemplate.MaxStamina)!).Ranks, 0, 0, Stamina));
+        vitals.Add(new VitalDesc(MageTemplate.MaxMana, (uint)(_fighter is null ? MageTemplate.TargetOf(MageStatKind.Vital, MageTemplate.MaxMana)! : _fighter.TargetOf(MageStatKind.Vital, MageTemplate.MaxMana)!).Ranks, 0, 0, Mana));
 
         // The gear kit's own weenies (the wand, the leather set) in their locations, so a gear scenario sees a ready mage and sends no gear step.
         Wear(WandGuid, "Test Wand", 0x8000, GearKit.Wand.Wcid);
@@ -226,7 +289,15 @@ internal sealed class ScriptedCaster
             equipped.Add(new EquippedDesc(FirstPieceGuid + (uint)i, (uint)GearKit.Armour[i].ValidLocations, 0));
         }
 
-        _rig.H.Describe(new PlayerDescriptionMsg { Attributes = attributes.ToImmutable(), Skills = skills.ToImmutable(), Vitals = vitals.ToImmutable(), Equipped = [.. equipped] });
+        var pack = new List<ContentDesc>();
+        if (ManaPotions > 0)
+        {
+            var basis = ReducerHarness.Create(ManaPotionGuid, ReducerHarness.Stamps(), null, name: "Mana Potion");
+            _rig.H.R.Reducer.OnCreateObject(_rig.H.R.Context, basis with { Weenie = basis.Weenie with { Header = Lifestone.Net.Types.WeenieHeaderFlags.Container, ContainerId = WorldActionRig.Player, ItemType = 0x80, WeenieClassId = Lifestone.Client.Session.Fighter.FighterKit.ManaPotionWcid } }, isUpdate: false);
+            pack.Add(new ContentDesc(ManaPotionGuid, 0));
+        }
+
+        _rig.H.Describe(new PlayerDescriptionMsg { Attributes = attributes.ToImmutable(), Skills = skills.ToImmutable(), Vitals = vitals.ToImmutable(), Equipped = [.. equipped], Inventory = [.. pack] });
     }
 
     private void Wear(uint guid, string name, uint itemType, uint wcid)
@@ -368,8 +439,7 @@ internal sealed class ScriptedCaster
             var additive = 0;
             foreach (var id in _topOfCategory.Values)
             {
-                var mod = BuffStatMods.BySpell[id];
-                if (mod.IsSkill && mod.IsAdditive && mod.Key == MageTemplate.ManaConversion)
+                if (BuffStatMods.BySpell.TryGetValue(id, out var mod) && mod.IsSkill && mod.IsAdditive && mod.Key == MageTemplate.ManaConversion)
                 {
                     additive += (int)mod.Value;
                 }
@@ -428,7 +498,8 @@ internal sealed class ScriptedCaster
     /// <summary>ACE's <c>EnchantmentManager.Add</c> for a player caster and target: a repeat of the spell refreshes its layer, another spell of the category takes the next layer; GameEvent 0x02C2.</summary>
     private void Enchant(SpellInfo info)
     {
-        var mod = BuffStatMods.BySpell[info.Id];
+        // M4 P5a C4: the fighters' weapon-mastery lines have no BuffStatMods row (the mage has none): a stand-in additive row with value 0, so the enchantment arrives and changes no stat; the cycle judges a line by its spell being enchanted.
+        var mod = BuffStatMods.BySpell.TryGetValue(info.Id, out var known) ? known : new BuffStatMod(info.Id, 0x9001, 1, 0.0);
         if (!_topOfCategory.TryGetValue(info.Category, out var top) || Table[top].Power <= info.Power)
         {
             _topOfCategory[info.Category] = info.Id; // the strongest of a category is the one that counts (EnchantmentManager.GetSkillMod_Additives)

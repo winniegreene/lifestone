@@ -348,7 +348,9 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
 - `--disable-build-servers` keeps MSBuild and compiler servers from lingering after a build.
 - **Test categories.** Tests that need the local server carry `[Trait("Category","Loopback")]` and live in
   `tests/Lifestone.Loopback.Tests`; they skip, with the reason, unless the backend is running with the Lifestone
-  server mod ready. Long soaks and fuzz runs carry `[Trait("Tier","Soak")]`. The `--filter` in the commands above
+  server mod ready. The tests that read the retail dats (the sweeps and the decoder and asset pins) carry
+  `[Trait("Tier","Exhaustive")]`: they run at every gate (`tools\slice-check.ps1 -Exhaustive`, which a slice that touches
+  `src/Lifestone.Data` or one of the Client folders whose tests moved (`src/Lifestone.Client/` `Audio`, `Effects`, `Interiors`, `Movement`, `Navigation`, `Objects`, `Play`, `PortalSpace`, `Rendering` or `Sky`) runs), not in the default run. Long soaks and fuzz runs carry `[Trait("Tier","Soak")]`. The `--filter` in the commands above
   leaves both out, as the smoke suite's test step does; without it the soaks run too (minutes, not seconds). With the
   backend running ([server/README.md](server/README.md)), `--filter "Category=Loopback&Tier!=Soak"` runs
   the loopback tests, and `--filter "Tier=Soak"` runs the soaks.
@@ -358,6 +360,44 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
   in the green total, and each one names its TODO row in the test's reason, so the failure stays visible in the plan. Both are
   left out of the default filter of `dotnet test`, `tools\smoke.ps1` and `tools\slice-check.ps1`; run one with
   `--filter "Status=KnownFailure"`. No test carries either trait yet.
+
+### Live tests and the live gate (M4 P4)
+
+The loopback tests and the live legs of `tools\smoke.ps1` play on the local backend
+([server/README.md](server/README.md)). Each automated run uses one of three test accounts, whose keys live in
+`server\runtime\secrets.json` (gitignored; read the key names, never print the values):
+
+| Account key | Characters | What it does |
+|---|---|---|
+| `test` | BSD Mage (level 126, the Black Spawn Den), Holtburg Hunter, and the baseline Lifestone Smoke and Lifestone Loopback; Lifestone Throwaway | the mage, the Hunter and the throwaway |
+| `test-melee` | Holtburg Brawler (level 40, Heavy Weapons specialised, the Mace; hunts the Low B belt, levels 8 to 20) | the melee fighter |
+| `test-archer` | Holtburg Archer (level 40, Missile Weapons specialised, the Shortbow and arrows; hunts the low north forest, levels 20 to 30) | the missile fighter |
+
+- **Traits.** Each loopback class carries one `[Trait("Account", "<key>")]`, and its characters live on that account;
+  `LoopbackConventionTests` enforces it. `[Trait("Lane", "solo")]` marks the classes that need the game to themselves
+  (the movement-precision runs). A filter picks an account and a lane, for example
+  `--filter "Category=Loopback&Tier!=Soak&Account=test-melee&Lane!=solo"`. Each account has its own lock file,
+  `cache\loopback-<account>.lock`, so two runs never log in to one account at once.
+- **Adding an account.** `pwsh -File server\setup-server.ps1 -AddAccount <name>` runs on its own (no other switch). It
+  adds the name to `secrets.json` only; ACE creates the account at its first login. The new account has no character until
+  a build scenario makes one, and the owner decides any new test character.
+- **Session mode.** `LIFESTONE_LOOPBACK_SESSION=shared` (the default) keeps one live session per account for its tests:
+  the first run of a test resets the known state (peace mode, the launcher and ammunition off, the rest weapon, Holtburg),
+  and each run logs `[live-session]` lines (`reset`, `logged <name> in`, `relog after failure`). `per-test` logs every run
+  in and out, as before M4 P4. `-Serial` in the gate uses `per-test`.
+- **The live gate.** `pwsh -File tools\live-gate.ps1 [-Worktree <path>] [-Tag <name>] [-Loopback full|core|<areas>] [-Serial] [-Soak] [-Plan]`
+  runs the backend from the main checkout (it stops it in a finally), so only an item's lead runs it. The default is
+  the parallel gate: the three account lanes run at once (`test`: its loopback classes, then the throwaway, buff, BSD and death
+  login legs; `test-melee`: its loopback classes; `test-archer`: its loopback classes, then the missile hunt), then a solo
+  phase that judges the frames and runs the melee hunt, the movement-precision classes and the leak scan. `-Serial` is the
+  old order, for a comparison. `-Soak` adds the Soak tier once at the end. `-Plan` (or `-WhatIf`) prints every step and runs
+  nothing. `-Loopback core` (the default) is the fixed list in `tools\lib\GateAreas.psd1` plus the areas the diff touches
+  (`net`, `movement`, `actions`, `fighter`, `mage`, `servermod`); `full` runs every non-Soak class and is used at a wave's last
+  item and at the milestone's end; an area list runs those areas only. Logs go to `cache\gate\<Tag>`, and the gate's
+  exit code is 0 only when every step passed.
+- **The audio check.** Every automated Godot run must log `audio service installed ... muted=true`; a smoke step whose
+  run does not fails with `audio check`. Capture runs count as automated. `tools\play.ps1 -Audio` is refused with `-Offscreen`,
+  since an offscreen run is the muted path.
 
 ### Slice check
 

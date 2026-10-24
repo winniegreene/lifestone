@@ -10,6 +10,7 @@ public sealed class SurfaceTextureResolutionTests(DatSetFixture fixture, ITestOu
 {
     private DatSet Dats => fixture.Dats;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresHighResDatsFact]
     public void Every_surface_texture_resolves_with_highres_first()
     {
@@ -59,6 +60,7 @@ public sealed class SurfaceTextureResolutionTests(DatSetFixture fixture, ITestOu
         Assert.Empty(absentRefs);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Without_highres_two_level_lists_take_level_1_and_report_nothing_missing()
     {
@@ -126,6 +128,7 @@ public sealed class SurfaceTextureResolutionTests(DatSetFixture fixture, ITestOu
         Assert.Equal(new[] { lo, hi }, r.MissingIds); // walk order
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Low_detail_prefers_the_second_level_which_is_always_in_the_portal()
     {
@@ -149,6 +152,7 @@ public sealed class SurfaceTextureResolutionTests(DatSetFixture fixture, ITestOu
         Assert.Equal(3024, twoLevel);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresHighResDatsFact]
     public void Landscape_alpha_map_resolves_to_its_highres_level()
     {
@@ -162,6 +166,7 @@ public sealed class SurfaceTextureResolutionTests(DatSetFixture fixture, ITestOu
         Assert.Null(loader.ResolveSurfaceTexture(0x05FFFFFFu));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Loader_reads_do_not_fill_the_datreaderwriter_file_cache()
     {

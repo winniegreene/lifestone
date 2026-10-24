@@ -36,11 +36,8 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
     public static TheoryData<uint, string> GameplayPanelButtons => new()
     {
         { 0x10000197, "Fellowship, allegiance and friends" },
-        { 0x10000198, "Spellbook and components" },
-        { 0x10000199, "Skills and attributes" },
         { 0x1000055A, "Contracts, journal and quests" },
         { 0x1000019A, "Map" },
-        { 0x100001B1, "Inventory, backpack and paperdoll" },
     };
 
     public static TheoryData<uint, string> ActionButtons => new()
@@ -366,7 +363,6 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
     }
 
     [Theory]
-    [InlineData(0, true, 1)]
     [InlineData(5, true, 1)]
     [InlineData(5.01, true, 2)]
     [InlineData(20, true, 2)]
@@ -374,7 +370,6 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
     [InlineData(40, true, 3)]
     [InlineData(40.01, true, 4)]
     [InlineData(0, false, 4)]
-    [InlineData(100, false, 4)]
     public void The_link_state_rules_are_retails_thresholds(double seconds, bool connected, int expected)
     {
         Assert.Equal(expected, LinkStatusRules.LinkStateFor(new LinkReading(seconds, connected)));

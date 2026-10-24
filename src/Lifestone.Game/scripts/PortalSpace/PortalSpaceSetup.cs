@@ -137,7 +137,7 @@ public static class PortalSpaceSetup
 
             // The director plays the whooshes and the hum through the audio service's retail sound player; the presenter plays none.
             var director = new PortalSpaceDirector(machine, progress, assets, ReadinessPolicy.Default, audio?.Sound, notice, GodotLogSink.Instance);
-            var view = PortalTunnelView.Create(services, assets.TunnelSetupId, tunnel);
+            var view = PortalTunnelView.Create(services, assets.TunnelSetupId, tunnel, camera.Camera.Fov); // the tunnel starts from the world camera's own field of view (retail's in play mode, Main.ApplyRetailFov)
             main.AddChild(view);
             Log.Info("portal", "portal tunnel ready", ("setup", $"0x{assets.TunnelSetupId:X8}"), ("parts", view.Parts.Count), ("hold", portal.Hold && !frames), ("transition", portal.Transition), ("ms", timer.Elapsed.TotalMilliseconds));
 

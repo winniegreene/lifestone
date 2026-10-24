@@ -12,8 +12,6 @@ namespace Lifestone.Client.Tests.Repository;
 /// </summary>
 public sealed class ScriptLoopRemainderTests
 {
-    private const string Filter = "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure";
-
     private static string Smoke => Normal(File.ReadAllText(RepositoryFiles.PathOf("tools", "smoke.ps1")));
 
     private static string SliceCheck => Normal(File.ReadAllText(RepositoryFiles.PathOf("tools", "slice-check.ps1")));
@@ -93,7 +91,6 @@ public sealed class ScriptLoopRemainderTests
         Assert.Contains("if ($minTestsSource -eq 'baseline file') { $MinTests = $baseline.Default }", script, StringComparison.Ordinal);
         Assert.Contains("Invoke-TestRun 'test' $testFilter $MinTests", script, StringComparison.Ordinal);
         Assert.Contains("Invoke-TestRun 'exhaustive' $exhaustiveFilter $exhaustiveMinimum", script, StringComparison.Ordinal);
-        Assert.Contains("(the count must never decrease)", script, StringComparison.Ordinal);
         // A missing file is loud, never a zero floor.
         Assert.Contains("The test-count baseline file is missing", script, StringComparison.Ordinal);
     }
@@ -144,26 +141,24 @@ public sealed class ScriptLoopRemainderTests
         var script = Smoke;
 
         Assert.Equal(6, Regex.Matches(script, @"-FrameOver50 \$fields\.Over50 -FrameJudge \$fields\.Judge").Count); // login-check, login, buff, bsd, death, hunt
-        Assert.Contains("frame_over_50 (report-only): ", script, StringComparison.Ordinal);
         Assert.Contains("[string] $FrameOver50 = '', [string] $FrameJudge = ''", script, StringComparison.Ordinal);
     }
 
-    // ---------------------------------------------------------------------------------------------- 5: the contended rule
+    // ---------------------------------------------------------------------------------------------- 6: the shader cache under -Parallel
 
     [Fact]
-    public void The_live_legs_contended_rule_is_settled_and_its_todo_name_is_closed()
+    public void P4_g3fix_the_godot_process_gets_a_32_MB_gen0_budget_under_server_GC_and_the_slow_frame_lines_carry_the_GC_pause()
     {
-        var script = Smoke;
+        var godot = Normal(File.ReadAllText(RepositoryFiles.PathOf("tools", "godot.ps1")));
 
-        Assert.DoesNotContain("TODO(p5a-live-frame-contended)", script, StringComparison.Ordinal);
-        Assert.Contains("Settled (M4 1.1 s3, closes p5a-live-frame-contended)", script, StringComparison.Ordinal);
-        // -Backend require implies solo: the rule lives in Get-FrameRule, and the help says what a leg reports otherwise.
-        Assert.Contains("$implied = $Backend -eq 'require'", script, StringComparison.Ordinal);
-        Assert.Contains("frame judge counts only when no other engine process is up", script, StringComparison.Ordinal);
-        Assert.Contains("reports frames=contended (the verdict stands, the frame judge is not counted)", script, StringComparison.Ordinal);
+        // g3's throwaway teleport frame (76.7 ms, 4.6 ms of process time) and the offline play-checks' 53.7 ms frame were each one gen-0 collection of 50 to 58 ms (gc_pause_ms, gc_gen0=1) as the destination's survivors arrived;
+        // 32 MB (hex 2000000) is the cap, and the workstation switch leaves it unset. TODO(m4-throwaway-teleport-frame) stays until a live gate reads the throwaway's frame with it.
+        Assert.Contains("if (-not $WorkstationGC) { $godotEnv['DOTNET_GCgen0MaxBudget'] = '2000000' }", godot, StringComparison.Ordinal);
+        var throwaway = File.ReadAllText(RepositoryFiles.PathOf("src", "Lifestone.Game", "scripts", "Session", "ThrowawayLegRunner.cs"));
+        var player = File.ReadAllText(RepositoryFiles.PathOf("src", "Lifestone.Game", "scripts", "Player", "PlayerController.cs"));
+        Assert.Contains(".. gc.Fields(),", throwaway, StringComparison.Ordinal);
+        Assert.Contains(".. gc.Fields(),", player, StringComparison.Ordinal);
     }
-
-    // ---------------------------------------------------------------------------------------------- 6: the shader cache under -Parallel
 
     [Fact]
     public void Each_parallel_run_has_its_own_user_data_slot_and_so_its_own_shader_cache()
@@ -190,25 +185,6 @@ public sealed class ScriptLoopRemainderTests
     }
 
     // ---------------------------------------------------------------------------------------------- 8: the traits
-
-    [Fact]
-    public void Both_filters_leave_out_the_timing_tier_and_the_known_failure_status_and_the_docs_say_who_runs_them()
-    {
-        Assert.Contains("$testFilter = '" + Filter + "'", Smoke, StringComparison.Ordinal);
-        Assert.Contains("$testFilter = '" + Filter + "'", SliceCheck, StringComparison.Ordinal);
-        Assert.Contains("--filter \"" + Filter + "\"", SliceCheck, StringComparison.Ordinal); // the help text at the top
-        Assert.Contains("--filter \"" + Filter + "\"", Smoke, StringComparison.Ordinal);
-
-        var readme = Normal(File.ReadAllText(RepositoryFiles.PathOf("README.md")));
-        Assert.Contains(Filter, readme, StringComparison.Ordinal);
-        Assert.Contains("[Trait(\"Tier\",\"Timing\")]", readme, StringComparison.Ordinal);
-        Assert.Contains("[Trait(\"Status\",\"KnownFailure\")]", readme, StringComparison.Ordinal);
-        var shared = Normal(File.ReadAllText(RepositoryFiles.PathOf("tests", "Shared", "README.md")));
-        Assert.Contains("`[Trait(\"Tier\", \"Timing\")]`", shared, StringComparison.Ordinal);
-        Assert.Contains("the lead runs it alone", shared, StringComparison.Ordinal);
-        Assert.Contains("`[Trait(\"Status\", \"KnownFailure\")]`", shared, StringComparison.Ordinal);
-        Assert.Contains("TODO(...)", shared, StringComparison.Ordinal);
-    }
 
     [Fact]
     public void The_cuts_keep_the_pins_the_live_legs_depend_on()

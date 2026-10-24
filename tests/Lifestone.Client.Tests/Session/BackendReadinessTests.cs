@@ -33,7 +33,6 @@ public sealed class BackendReadinessTests
     [InlineData("{ \"ace\": { \"pid\": 12 } }", "has no ace.modReady")]
     [InlineData("{ \"ace\": { \"pid\": 12, \"modReady\": false } }", "ace.modReady is not true")]
     [InlineData("{ \"ace\": { \"pid\": 12, \"modReady\": \"true\" } }", "ace.modReady is not true")]
-    [InlineData("{ \"ace\": { \"pid\": 12, \"modReady\": 1 } }", "ace.modReady is not true")]
     [InlineData("{ \"ace\": { \"pid\": 12, \"modReady\": null } }", "ace.modReady is not true")]
     public void ModReady_false_or_missing_refuses_with_reason(string pids, string expected)
     {

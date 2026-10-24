@@ -18,6 +18,7 @@ namespace Lifestone.Loopback.Tests.ServerMod;
 [Trait("Category", LoopbackCollection.Category)]
 [Trait("Tier", "OwnerApproved")]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
 [TestCaseOrderer("Lifestone.Loopback.Tests.Net.LiveStepOrderer", "Lifestone.Loopback.Tests")]
 public sealed class ModXpLiveTests(ITestOutputHelper output)
 {

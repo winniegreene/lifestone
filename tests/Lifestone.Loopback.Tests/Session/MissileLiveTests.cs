@@ -1,3 +1,4 @@
+using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Tests.Shared.Loopback;
 using Xunit.Abstractions;
@@ -13,16 +14,19 @@ namespace Lifestone.Loopback.Tests.Session;
 /// <para><b>What it proves.</b> The weapon swap of capture C2 (the Mace to the pack, the Shortbow and then the Arrows wielded, in that order, which ACE needs) and that <c>IActionApi.MissileAttack</c> (GameAction 0x000A)
 /// drives a real ACE: arrows are launched (<c>shots&gt;=1</c>, each fall of the wielded ammo's stack in 0x0197 or an arrow's F745), at least one lands (<c>hits&gt;=1</c> from 0x01B1), and the hunt returns to Holtburg
 /// (<c>returned=yes</c>) with the swap undone: the bow and the arrows are back in the pack and the Mace is wielded (<c>Restored</c>, which the scenario sets only after it found both in the pack and the Mace wielded). It
-/// prints the same lines as <see cref="MeleeLiveTests"/>. The shots burn arrows of the kit's stack; the kill levels Holtburg Hunter (owner decision D1).</para>
+/// prints the same lines as <see cref="MeleeLiveTests"/>. The shots burn arrows of the kit's stack; the kill levels Holtburg Archer (on test-archer, hunting the low north forest; M4 P4: it was the Hunter's test; owner decision D1).</para>
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test-archer")]
+[LoopbackCharacter("Holtburg Archer")]
+[LiveSharedSession]
 public sealed class MissileLiveTests(ITestOutputHelper output)
 {
     [LoopbackFact]
-    public void The_fighter_shoots_a_creature_with_the_Shortbow_and_restores_the_Mace()
+    public void The_archer_shoots_a_creature_with_its_kit_bow_in_the_forest_and_puts_the_bow_away()
     {
-        var run = HuntLiveRun.Run(output, "missile", new HuntOptions { Kills = 1, Weapon = HuntWeapon.Missile });
+        var run = HuntLiveRun.Run(output, "missile", new HuntOptions { Kills = 1, Weapon = HuntWeapon.Missile, Ground = HuntGroundChoice.Forest }, character: FighterTemplate.Archer.Name);
         var tally = run.Scenario.Tally;
 
         Assert.True(run.Result.Ok, run.Result.Failure);
@@ -30,8 +34,8 @@ public sealed class MissileLiveTests(ITestOutputHelper output)
         Assert.Null(run.Scenario.Failure);
         Assert.Equal("done", run.Scenario.Stage);
         Assert.True(tally.Shots >= 1, "shots " + tally.Shots);
-        Assert.True(tally.Hits >= 1, "hits " + tally.Hits + " (0x01B1 lines the player dealt)");
+        Assert.True(tally.Hits >= 1 || run.Scenario.OneBlowKills >= 1, "hits " + tally.Hits + " one_blow_kills " + run.Scenario.OneBlowKills + " (0x01B1 lines the player dealt; a lethal arrow has none, P5a r3)");
         Assert.True(run.Scenario.Returned, "returned=no (the run did not end in Holtburg's landblock)");
-        Assert.True(run.Scenario.Restored, "the bow and the arrows are not back in the pack with the Mace wielded");
+        Assert.True(run.Scenario.Restored, "the bow and the arrows are not back in the pack (the Archer rests with nothing wielded)");
     }
 }

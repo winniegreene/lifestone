@@ -16,6 +16,7 @@ namespace Lifestone.Data.Tests.Physics;
 /// Buildings and EnvCells as collision on the real dats (retail CBuildingObj, CEnvCell, 11.4186 PORTAL/ccell and
 /// cphysobj): walking in through Holtburg's doorways, through the Training Academy's portals, and into a wall.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class InteriorCollisionTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     /// <summary>The Training Academy cell new characters start in (CharGen StarterAreas[0].Locations[0]).</summary>

@@ -15,6 +15,7 @@ public sealed class SoundTableTests(DatSetFixture fixture) : IClassFixture<DatSe
     /// <summary>The UIASSET enum of the UI sound table (<c>UISoundTable</c>; the Client's <c>UiAssetIds.UiSoundTable</c>).</summary>
     private const uint UiSoundTableEnum = 0x10000003;
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_table_decodes_exactly_and_none_has_grandchildren()
@@ -59,6 +60,7 @@ public sealed class SoundTableTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal([(0x200000A8u, (uint)Sound.Swoosh2, 2)], multiVariant);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_table_matches_DatReaderWriter_entry_for_entry()
@@ -92,6 +94,7 @@ public sealed class SoundTableTests(DatSetFixture fixture) : IClassFixture<DatSe
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_wave_a_table_names_exists()
@@ -114,6 +117,7 @@ public sealed class SoundTableTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal(701, named.Count);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_ui_sound_table_plays_the_portal_whooshes()
     {

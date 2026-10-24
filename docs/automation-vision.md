@@ -22,6 +22,9 @@
   - Automation and scripting may run only when the session's server endpoint is a loopback address (the bundled ACE). The session layer enforces this: it refuses to start runners otherwise and logs why.
   - Rationale: the project's security posture, and botting on public servers breaks their rules.
 - **R2. Same path as the human.** Bots act only through the same intent API the UI uses, which the client turns into AC GameActions. Server-side shortcuts are allowed only through the player tools of Lifestone's server mod on the local server (§1.4 I); the play account never has admin rights.
+  - *As built in P5a.* The one path is `IActionApi.Move` (`MoveIntents`), bound in both hosts (the Godot play host binds the rig's controller; the headless
+    scenarios bind their walker). The run key is asked as "run" or "walk" (`SetRun`) and the binding applies the character's run-by-default option. The wayfinder's
+    runner (`NavRunner`) presses keys only through it (rate-limited, audit-logged, kill switch) and reads the body through `INavBody` (`ControllerNavBody`).
 - **R3. Server-confirmed perception.** Conditions read state that the server has confirmed: enchantments, vitals, inventory, objects, chat. Client-side guesses never feed a condition. ACE is authoritative for every rule (`research/game-logic.md` §1).
 - **R4. Headless core.**
   - Transport, session, game state and automation are plain net10.0 libraries with no Godot dependency.
@@ -35,6 +38,10 @@
   - A dry-run mode: evaluate rules and log intended actions without sending them.
   - Rate limits; a per-tick CPU budget for scripts.
   - An audit log of every action sent and its outcome.
+  - *As built in P5a.* The play host raises `MovementBindings.HumanKey` for every movement-map press (not releases, not camera keys, not automation); it reaches
+    `MoveIntents.ReportHumanKey`, and the runner ends Interrupted, releasing every key it holds (the controller's command lists are stacks, so even the key the person
+    pressed carries a runner entry that must go). Headless has no human: the event never fires. A run paused by a station may be moved (a recall) without failing; `Resume`
+    re-anchors and replans. The stuck recovery is a four-rung ladder ending Blocked, naming the nearest static, after three plans.
 - **R7. Loud stubs.** An unimplemented action fails with a visible error. It never fakes success.
 
 ### 1.2 Observation API: what the automation layer must be able to see

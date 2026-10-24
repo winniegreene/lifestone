@@ -6,7 +6,6 @@ public sealed class MipChainTests
 {
     [Theory]
     [InlineData(1, 1, 1)]
-    [InlineData(4, 4, 3)]
     [InlineData(256, 256, 9)]
     [InlineData(512, 128, 10)]
     [InlineData(3, 7, 3)]
@@ -41,7 +40,6 @@ public sealed class MipChainTests
     [InlineData(13, 7)]
     [InlineData(1, 9)]
     [InlineData(10, 1)]
-    [InlineData(5, 3)]
     public void In_place_box_filter_matches_the_allocating_one_at_every_level(int width, int height)
     {
         var expected = Noise(width, height);

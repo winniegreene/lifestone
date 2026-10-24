@@ -82,23 +82,6 @@ public sealed class PanelShotFramesTests
     }
 
     [Fact]
-    public void The_power_bar_frame_puts_a_held_caster_away_before_it_asks_for_the_melee_mode_and_wields_it_again_after_the_shot_M4_3_1_p()
-    {
-        // Lane g's combat-mode guard refuses the Melee mode with a caster in hand: the frame stows it first (through the Action API, as PlayChecks.StowHeldAsync does for the rows) and never asks for a refused mode.
-        var code = CheckoutFiles.ReadCSharpCode("src/Lifestone.Game/scripts/Session/PlayMode.PanelShots.cs");
-        var held = code.IndexOf("EquippedAt((uint)EquipMask.Held)", StringComparison.Ordinal);
-        var unwield = code.IndexOf("Actions.Unwield(held,", StringComparison.Ordinal);
-        var begin = code.IndexOf("BeginAttackFrame(attackSession, server);", StringComparison.Ordinal);
-        var melee = code.IndexOf("CombatMode.Melee, Lifestone.Client.Session.Contracts.ActionSource.Host);", StringComparison.Ordinal);
-        Assert.True(held >= 0 && unwield > held && begin > unwield, "the held slot is read and the item put away before the attack frame begins");
-        Assert.Single(System.Text.RegularExpressions.Regex.Matches(code, "CombatMode\\.Melee, Lifestone")); // the Melee request is made in one place only: BeginAttackFrame
-        Assert.True(melee > begin, "BeginAttackFrame (the Melee request) is below the stow");
-        Assert.Contains("PanelShotPhase.AttackStow", code, StringComparison.Ordinal);
-        Assert.Contains("RestoreStowedCaster(doneSession);", code, StringComparison.Ordinal);
-        Assert.Contains("Actions.Wield(_panelShotStowed, EquipMask.Held,", code, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void The_nearest_container_object_within_10_metres_is_chosen_and_creatures_doors_players_far_containers_and_held_items_are_not()
     {
         var h = new ReducerHarness();

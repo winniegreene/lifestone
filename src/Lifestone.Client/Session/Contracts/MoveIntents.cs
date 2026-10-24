@@ -21,8 +21,14 @@ namespace Lifestone.Client.Session.Contracts;
 /// any other automation action, and engaging the kill switch releases every command, hold and autorun that automation
 /// left on, so the player stops.</para>
 /// <para>Intents need no server: an offline session's controller takes them too. Game thread only.</para>
+/// <para><b>The run key.</b> The binding carries the player's run-by-default option (<see cref="RunByDefault"/>, bound with
+/// the controller). Retail's run key is inverted by it (<c>CommandInterpreter::SetHoldRun</c>, 11.6096 0x006B42B0: the motion's
+/// run key is the key XOR the option), so a caller that means "run" or "walk" asks <see cref="SetRun"/> and the key goes
+/// down only when it must. <see cref="HoldRun"/> is the raw key.</para>
+/// <para><b>The human's key wins (R6).</b> The play host reports every movement key a person presses through
+/// <see cref="ReportHumanKey"/>; a runner subscribes to <see cref="HumanKey"/> and gives the player back.</para>
 /// </remarks>
-public sealed class MoveIntents
+public sealed class MoveIntents : IRunByDefaultSource
 {
     private readonly ActionApi _api;
     private readonly HashSet<uint> _heldByAutomation = [];
@@ -41,24 +47,75 @@ public sealed class MoveIntents
     public bool IsBound => _controller is not null;
 
     /// <summary>
+    /// The bound player's run-by-default option (<see cref="MovementOptions.RunByDefault"/>): true when an unheld run key
+    /// runs and a held one walks. False while nothing is bound (read <see cref="IsBound"/> first).
+    /// </summary>
+    public bool RunByDefault { get; private set; }
+
+    /// <summary>
+    /// Raised on the game thread when a person pressed a movement key (the argument names it, e.g. "MoveForward", "Jump",
+    /// "RunKey"): the player's keys are the human's first (R6), so a runner ends as Interrupted. Raised by the play host through
+    /// <see cref="ReportHumanKey"/>; never by an automation intent, and not by a key release.
+    /// </summary>
+    public event Action<string>? HumanKey;
+
+    /// <summary>
+    /// The host reports a movement key a person pressed (the play host's input path, <c>MovementBindings.HumanKey</c>);
+    /// raises <see cref="HumanKey"/>. Not an action: nothing is queued, logged to the audit or rate-limited.
+    /// </summary>
+    /// <param name="key">The key's name.</param>
+    public void ReportHumanKey(string key)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(key);
+        _api.CheckThread("MoveIntents.ReportHumanKey");
+        HumanKey?.Invoke(key);
+    }
+
+    /// <summary>
     /// Binds the player's movement controller (physics' <c>PlayerMovementController</c>), or unbinds it with null. Intents
-    /// already queued reach whichever controller is bound when their turn comes.
+    /// already queued reach whichever controller is bound when their turn comes. Binding the controller that is bound only
+    /// updates <paramref name="runByDefault"/>.
     /// </summary>
     /// <param name="controller">The controller, or null.</param>
-    public void Bind(IPlayerMovementIntents? controller)
+    /// <param name="runByDefault">The player's run-by-default option (<c>controller.Options.RunByDefault</c>): the run key is inverted by it.</param>
+    public void Bind(IPlayerMovementIntents? controller, bool runByDefault)
     {
         _api.CheckThread("MoveIntents.Bind");
         if (ReferenceEquals(controller, _controller))
         {
+            RunByDefault = controller is not null && runByDefault;
             return;
         }
 
         _controller = controller;
+        RunByDefault = controller is not null && runByDefault;
         _heldByAutomation.Clear();
         _runHeldByAutomation = false;
         _sidestepHeldByAutomation = false;
         _autoRunToggledByAutomation = false;
-        _api.Log.Info(SessionLog.Category, controller is null ? "movement intents: controller unbound" : "movement intents: controller bound");
+        _api.Log.Info(
+            SessionLog.Category,
+            controller is null ? "movement intents: controller unbound" : "movement intents: controller bound",
+            new LogField("run_by_default", RunByDefault));
+    }
+
+    /// <summary>Unbinds the controller (<c>Bind(null, false)</c>): every intent then completes <see cref="ActionOutcomeKind.NotImplemented"/>.</summary>
+    public void Unbind() => Bind(null, false);
+
+    /// <summary>
+    /// Unbinds only when <paramref name="expected"/> is the bound controller (a scenario that bound its own walker releases it
+    /// without unbinding a host's controller bound after it). Returns whether it unbound.
+    /// </summary>
+    public bool Unbind(IPlayerMovementIntents expected)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        if (!ReferenceEquals(_controller, expected))
+        {
+            return false;
+        }
+
+        Bind(null, false);
+        return true;
     }
 
     /// <summary>Starts or stops a motion command (forward, backward, turn, sidestep; full 32-bit retail motion ids).</summary>
@@ -75,8 +132,16 @@ public sealed class MoveIntents
         return Accept(MoveIntent.Command, motionCommand, start, speed, source, problem);
     }
 
-    /// <summary>Holds or releases the run key.</summary>
+    /// <summary>Holds or releases the run key itself (retail's key, which <see cref="RunByDefault"/> inverts: see <see cref="SetRun"/>).</summary>
     public ActionHandle HoldRun(bool on, ActionSource source) => Accept(MoveIntent.HoldRun, 0, on, 1f, source, null);
+
+    /// <summary>
+    /// Asks for running (<paramref name="run"/> true) or walking (false) whatever the player's run-by-default option is: the run
+    /// key is held when <paramref name="run"/> differs from <see cref="RunByDefault"/> (<c>HoldRun(run != RunByDefault)</c>).
+    /// </summary>
+    /// <param name="run">True to run, false to walk.</param>
+    /// <param name="source">Who asked (normally <see cref="ActionSource.Automation"/>).</param>
+    public ActionHandle SetRun(bool run, ActionSource source) => HoldRun(run != RunByDefault, source);
 
     /// <summary>Holds or releases the sidestep modifier.</summary>
     public ActionHandle HoldSidestep(bool on, ActionSource source) => Accept(MoveIntent.HoldSidestep, 0, on, 1f, source, null);

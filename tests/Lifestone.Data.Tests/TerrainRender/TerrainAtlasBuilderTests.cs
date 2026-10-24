@@ -105,6 +105,7 @@ public sealed class TerrainAtlasBuilderTests(DatSetFixture fixture) : IClassFixt
             TerrainAtlasBuilder.Build(manifest, (id, isAlpha) => isAlpha ? Synthetic(id, true, 8) : rectangular, parallel: false));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Real_atlas_matches_an_independent_raw_decode_of_every_layer()
     {
@@ -143,6 +144,7 @@ public sealed class TerrainAtlasBuilderTests(DatSetFixture fixture) : IClassFixt
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Real_grass_is_green_and_dirt_is_brown_after_decoding()
     {
@@ -156,6 +158,7 @@ public sealed class TerrainAtlasBuilderTests(DatSetFixture fixture) : IClassFixt
         Assert.True(dirt.R > dirt.G && dirt.G > dirt.B, $"dirt mean {dirt}");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_SurfaceTexture_level_choice_does_not_change_the_terrain_pixels()
     {

@@ -93,6 +93,12 @@ public sealed class LoginScenario : IScenario
     /// <summary>The limit on the arrival, in seconds.</summary>
     public double ArrivalSeconds { get; }
 
+    /// <summary>
+    /// True when the scenario ends in the world, logged in, once the server's view of the player agrees (M4 P4: the entry of a
+    /// <see cref="Hosting.HeadlessSession"/>, which runs the next scenarios over the same login); no log off, no quit. Default false.
+    /// </summary>
+    public bool StayInWorld { get; init; }
+
     /// <summary>The character entered (its guid), or 0.</summary>
     public uint EnteredGuid { get; private set; }
 
@@ -213,6 +219,8 @@ public sealed class LoginScenario : IScenario
             case "playing":
                 switch (_play!.Step(session, now))
                 {
+                    case ScenarioStatus.Succeeded when StayInWorld:
+                        return Go("done", ScenarioStatus.Succeeded);
                     case ScenarioStatus.Succeeded:
                         _pending = actions.LogOff(ActionSource.Host);
                         return Go("logging-off");
@@ -314,6 +322,11 @@ public sealed class LoginScenario : IScenario
         if (_play is not null)
         {
             return Go("playing");
+        }
+
+        if (StayInWorld)
+        {
+            return Go("done", ScenarioStatus.Succeeded);
         }
 
         _pending = session.Actions.LogOff(ActionSource.Host);

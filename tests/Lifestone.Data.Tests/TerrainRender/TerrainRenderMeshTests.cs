@@ -59,6 +59,7 @@ public sealed class TerrainRenderMeshTests(DatSetFixture fixture) : IClassFixtur
         AssertMesh(TerrainRenderMesh.Build(terrain, region, merge), terrain, region, merge, manifest);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Real_blocks_carry_their_recipes_geometry_and_retail_normals()
     {
@@ -84,6 +85,7 @@ public sealed class TerrainRenderMeshTests(DatSetFixture fixture) : IClassFixtur
         Assert.Contains(seen, s => s.Roads == 2);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Explicit_grid_normals_replace_the_retail_ones()
     {

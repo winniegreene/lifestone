@@ -9,7 +9,7 @@ using Lifestone.Game.Diagnostics;
 namespace Lifestone.Game.Sessions;
 
 /// <summary>
-/// M3 4.2 p6: the looks of the stand-in server's humans. A real server sends a human's clothing in its CreateObject; the stand-in used to send none, so the player, the placeholder guards and vendors and the
+/// M3 4.2 p6: the looks of the stand-in server's humans. A real server sends a human's clothing in its CreateObject; the stand-in used to send none, so the player, the placeholder vendors and the
 /// corpse were drawn as the bare base body (the naked figures of the Holtburg frames). The player wears the stand-in look of explore mode (<see cref="OfflinePlayerLook"/> through CharGen's composition); each
 /// placeholder role wears another garment of the same lists. Every choice is a placeholder, logged once per role (<c>TODO(m3-standin-human-look)</c>).
 /// </summary>
@@ -18,7 +18,6 @@ public sealed partial class PlayChecks
     /// <summary>The garment (index into CharGen's lists) and shade each placeholder role wears; a name not listed wears the player's look.</summary>
     private static readonly (string Name, int Garment, double Shade)[] RoleGarments =
     [
-        ("Stand-in Guard", 1, 0.2),
         ("Stand-in Vendor", 2, 0.8),
         ("Stand-in Player Killer", 1, 0.9),
         ("Stand-in Player", 2, 0.3),

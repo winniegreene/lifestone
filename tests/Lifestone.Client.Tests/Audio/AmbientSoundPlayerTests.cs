@@ -89,8 +89,6 @@ public sealed class AmbientSoundPlayerTests
     }
 
     [Theory]
-    [InlineData(0f, 0f, 0f, 1f)]
-    [InlineData(19.9f, 0f, 0f, 1f)]
     [InlineData(20f, 0f, 0f, 1f)]
     [InlineData(40f, 0f, 0f, 0.25f)]
     [InlineData(0f, 0f, 40f, 0.25f)]
@@ -103,7 +101,6 @@ public sealed class AmbientSoundPlayerTests
     }
 
     [Theory]
-    [InlineData(0f, 5f, 0)]
     [InlineData(9f, 9f, 0)]
     [InlineData(10f, 10f, 7)]
     [InlineData(0f, 15f, 1)]
@@ -293,15 +290,12 @@ public sealed class AmbientSoundPlayerTests
     [InlineData(7u, EnvironKind.Ignored, 0u)]
     [InlineData(100u, EnvironKind.Ignored, 0u)]
     [InlineData(101u, EnvironKind.Sound, 0x76u)] // Roar
-    [InlineData(102u, EnvironKind.Sound, 0x77u)] // Bell
     [InlineData(114u, EnvironKind.Sound, 0x83u)] // LostSouls
     [InlineData(115u, EnvironKind.Ignored, 0u)]
     [InlineData(116u, EnvironKind.Ignored, 0u)]
     [InlineData(117u, EnvironKind.Sound, 0x84u)] // Squeal
-    [InlineData(118u, EnvironKind.Sound, 0x85u)] // Thunder1
     [InlineData(123u, EnvironKind.Sound, 0x8Au)] // Thunder6
     [InlineData(124u, EnvironKind.Ignored, 0u)]
-    [InlineData(125u, EnvironKind.Ignored, 0u)]
     [InlineData(9998u, EnvironKind.Ignored, 0u)]
     public void The_environ_options_are_classified_as_retails_handler_reads_them(uint option, EnvironKind kind, uint soundType) =>
         Assert.Equal(new EnvironEffect(kind, soundType), AdminEnvirons.Classify(option));

@@ -55,12 +55,6 @@ public sealed class InboundDispatcherTests
         { nameof(IInboundMessageHandler.OnSpeech), AceWireWriters.HearRangedSpeech("hi", "Crier", 0x7A9B4001, 30f, 2) },
         { nameof(IInboundMessageHandler.OnEmote), AceWireWriters.EmoteText(0x50000001, "Hero", "waves.") },
         { nameof(IInboundMessageHandler.OnEmote), AceWireWriters.SoulEmote(0x50000001, "Hero", "bows.") },
-        { nameof(IInboundMessageHandler.OnPrivateUpdate), AceWireWriters.PrivateUpdatePropertyInt(1, 0x19, 2) },
-        { nameof(IInboundMessageHandler.OnPrivateUpdate), AceWireWriters.PrivateUpdatePropertyInt64(2, 0x01, 1000) },
-        { nameof(IInboundMessageHandler.OnPrivateUpdate), AceWireWriters.PrivateUpdateSkill(3, new AceSkill(0x06, 1, 2, 10, 10)) },
-        { nameof(IInboundMessageHandler.OnPrivateUpdate), AceWireWriters.PrivateUpdateAttribute(4, 1, 1, 100, 110) },
-        { nameof(IInboundMessageHandler.OnPrivateUpdate), AceWireWriters.PrivateUpdateVital(5, 1, 0, 0, 0, 30) },
-        { nameof(IInboundMessageHandler.OnPrivateUpdate), AceWireWriters.PrivateUpdateAttribute2ndLevel(6, 2, 29) },
     };
 
     /// <summary>One ACE event per game event N7 and N10 decode, and the callback it must reach.</summary>
@@ -73,7 +67,6 @@ public sealed class InboundDispatcherTests
         { nameof(IInboundMessageHandler.OnTransientString), AceWireWriters.TransientString(0x50000001, 6, "busy") },
         { nameof(IInboundMessageHandler.OnUseDone), AceWireWriters.UseDone(0x50000001, 7) },
         { nameof(IInboundMessageHandler.OnUpdateHealth), AceWireWriters.UpdateHealth(0x50000001, 8, 0x80000001, 0.5f) },
-        { nameof(IInboundMessageHandler.OnPlayerDescription), AceWireWriters.PlayerDescription(0x50000001, 9, AcePlayerDescription.NewCharacter("Tester")) },
     };
 
     [Theory]
@@ -125,7 +118,7 @@ public sealed class InboundDispatcherTests
 
     [Theory]
     [MemberData(nameof(DecodedBodies))]
-    public void Each_login_message_reaches_its_own_callback(string callback, byte[] body)
+    public void Each_login_message_reaches_its_own_callback_and_with_a_trailing_byte_is_malformed_and_named(string callback, byte[] body)
     {
         var handler = new RecordingHandler();
 
@@ -136,22 +129,13 @@ public sealed class InboundDispatcherTests
         var call = Assert.Single(handler.Calls);
         Assert.Equal(callback, call.Name);
         Assert.Equal(Context, call.Context);
-    }
 
-    [Theory]
-    [MemberData(nameof(DecodedBodies))]
-    public void Each_login_message_with_a_trailing_byte_is_malformed_and_named(string callback, byte[] body)
-    {
-        _ = callback;
-        var handler = new RecordingHandler();
-
-        var result = InboundDispatcher.Dispatch(Context, [.. body, 0xAA], handler);
-
-        Assert.Equal(DispatchOutcome.Malformed, result.Outcome);
-        var call = Assert.Single(handler.Calls);
-        Assert.Equal(nameof(IInboundMessageHandler.OnMalformed), call.Name);
-        Assert.Equal(body.Length + 1, call.Length);
-        Assert.StartsWith($"{BitConverter.ToUInt32(body):X4} ", call.Reason);
+        var trailing = new RecordingHandler();
+        Assert.Equal(DispatchOutcome.Malformed, InboundDispatcher.Dispatch(Context, [.. body, 0xAA], trailing).Outcome);
+        var extra = Assert.Single(trailing.Calls);
+        Assert.Equal(nameof(IInboundMessageHandler.OnMalformed), extra.Name);
+        Assert.Equal(body.Length + 1, extra.Length);
+        Assert.StartsWith($"{BitConverter.ToUInt32(body):X4} ", extra.Reason);
     }
 
     [Fact]

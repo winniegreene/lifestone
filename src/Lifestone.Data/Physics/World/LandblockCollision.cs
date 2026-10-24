@@ -208,5 +208,5 @@ public sealed class LandblockCollision
     }
 
     /// <summary>True when the terrain word's type (bits 2-6 of its low byte) is water.</summary>
-    internal static bool IsWater(ushort terrainWord) => ((terrainWord & 0xFF) >> 2 & 0x1F) is >= FirstWaterType and <= LastWaterType;
+    public static bool IsWater(ushort terrainWord) => ((terrainWord & 0xFF) >> 2 & 0x1F) is >= FirstWaterType and <= LastWaterType;
 }

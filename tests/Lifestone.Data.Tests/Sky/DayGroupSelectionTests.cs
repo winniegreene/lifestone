@@ -77,6 +77,7 @@ public sealed class DayGroupSelectionTests(SkyFixture fixture) : IClassFixture<S
         Assert.Throws<ArgumentOutOfRangeException>(() => SkyDescription.CalcPresentDayGroup(0, 360, 10, 0));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Day_group_changes_only_at_midnight_and_follows_the_calendar_day()
     {
@@ -92,6 +93,7 @@ public sealed class DayGroupSelectionTests(SkyFixture fixture) : IClassFixture<S
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     [Trait("Tier", "Exhaustive")]
     public void Every_day_group_is_reachable_over_ten_years()

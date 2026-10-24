@@ -43,6 +43,26 @@ public sealed class HuntTally : IDisposable
     /// <summary>The blows that did not land: 0x01B3 and the arrows that hit the environment.</summary>
     public int Misses { get; private set; }
 
+    /// <summary>The arrows that hit the environment (the "hit the environment" chat lines; <c>blocked</c>, M4 P4 bow, report-only in its first gate). They are also counted in <see cref="Misses"/>.</summary>
+    public int Blocked { get; private set; }
+
+    /// <summary>The environment misses since the last hit or evade (the walk-on rule's count, <see cref="HuntScenario.BlockedBeforeWalking"/>).</summary>
+    public int BlockedRun { get; private set; }
+
+    /// <summary>The times the hunt sent the player to a creature the client already knew (<c>seeks</c>, M4 P4 seek; report-only in its first gate, printed after <c>blocked=</c>).</summary>
+    public int Seeks { get; private set; }
+
+    /// <summary>Counts one seek (<see cref="Seeks"/>).</summary>
+    public void NoteSeek() => Seeks++;
+
+    /// <summary>Called with one line per shot or blow outcome (<c>shot &lt;n&gt;: hit|evaded|environment ...</c>); the hunt logs it at INFO. Null: nothing is told.</summary>
+    public Action<string>? OutcomeLogged { get; set; }
+
+    private int _outcomes;
+
+    /// <summary>Zeroes the environment run (a new target or a new cell starts a new count).</summary>
+    public void ClearBlockedRun() => BlockedRun = 0;
+
     /// <summary>The damage the player's blows did, from the 0x01B1 lines (the killing blow has none: 0x01AD).</summary>
     public long DamageDealt { get; private set; }
 
@@ -140,6 +160,10 @@ public sealed class HuntTally : IDisposable
         Kills = 0;
         Hits = 0;
         Misses = 0;
+        Blocked = 0;
+        BlockedRun = 0;
+        Seeks = 0;
+        _outcomes = 0;
         DamageDealt = 0;
         DamageTaken = 0;
         SpellDamageTaken = 0;
@@ -156,9 +180,9 @@ public sealed class HuntTally : IDisposable
         TakeBaseline();
     }
 
-    /// <summary>The counters as verdict fields (no spaces inside a value): <c>kills swings shots hits misses damage_dealt damage_taken hits_taken evades xp_gained</c>.</summary>
+    /// <summary>The counters as verdict fields (no spaces inside a value): <c>kills swings shots hits misses blocked seeks damage_dealt damage_taken hits_taken evades xp_gained</c>.</summary>
     public string Fields() =>
-        string.Create(CultureInfo.InvariantCulture, $"kills={Kills} swings={Swings} shots={Shots} hits={Hits} misses={Misses} damage_dealt={DamageDealt} damage_taken={DamageTaken} hits_taken={HitsTaken} evades={Evades} xp_gained={XpGained}");
+        string.Create(CultureInfo.InvariantCulture, $"kills={Kills} swings={Swings} shots={Shots} hits={Hits} misses={Misses} blocked={Blocked} seeks={Seeks} damage_dealt={DamageDealt} damage_taken={DamageTaken} hits_taken={HitsTaken} evades={Evades} xp_gained={XpGained}");
 
     private void TakeBaseline()
     {
@@ -188,10 +212,14 @@ public sealed class HuntTally : IDisposable
         {
             case CombatEventKind.AttackLanded:
                 Hits++;
+                BlockedRun = 0;
                 DamageDealt += e.Damage;
+                Outcome($"hit for {e.Damage} (0x01B1)");
                 break;
             case CombatEventKind.AttackEvaded:
                 Misses++;
+                BlockedRun = 0; // an evade is the target's dodge: the arrow reached it
+                Outcome("evaded (0x01B3)");
                 break;
             case CombatEventKind.DefenseHit:
                 HitsTaken++;
@@ -229,8 +257,13 @@ public sealed class HuntTally : IDisposable
         if (e.Line.Text.Contains(EnvironmentText, StringComparison.OrdinalIgnoreCase))
         {
             Misses++;
+            Blocked++;
+            BlockedRun++;
+            Outcome($"environment (chat: {e.Line.Text.Trim()}); {BlockedRun} in a row");
         }
     }
+
+    private void Outcome(string what) => OutcomeLogged?.Invoke(string.Create(CultureInfo.InvariantCulture, $"shot {++_outcomes}: {what}"));
 
     private void OnQualities(in QualitiesChanged e)
     {

@@ -1181,10 +1181,20 @@ public sealed class AvatarSet : ITargetWorld
         SyncLight(avatar, lights[0]);
     }
 
+    /// <summary>
+    /// Whether the body's lights are in a cell. An object on its own: in the world. A held object (M4 4.1 v1): while it is drawn, because retail adds a child's lights to the cell it is changed
+    /// into (<c>CPhysicsObj::set_parent</c> 11.6096 0x00516590 -> <c>change_cell</c> 0x00513E90 -> <c>enter_cell</c> 0x005119A0 -> <c>CPartArray::AddLightsToCell</c> 0x005189D0; the holder's
+    /// <c>enter_cell</c> does the same for each child) and moves them with it (<c>UpdateChild</c> 0x00513850 -> <c>set_frame</c> -> <c>LIGHTLIST::set_frame</c> 0x00518790), and takes them out
+    /// at <c>leave_cell</c> 0x00511A20 (<c>RemoveLightsFromCell</c> 0x00518A20). It goes dark when its holder is Hidden (the child gets NoDraw); the first-person fade does not put it out, since
+    /// that is a translucency and not a cell change.
+    /// </summary>
+    private static bool LightIsPlaced(AvatarBody body) =>
+        body.Parent is null ? body.InWorld : body.IsDrawn && body.Position.CellId != 0;
+
     private void SyncLight(Avatar avatar, ModelLight light)
     {
         var body = avatar.Body;
-        var on = body.InWorld && body.LightsOn && body.Effects.Visual.LightsOn;
+        var on = LightIsPlaced(body) && body.LightsOn && body.Effects.Visual.LightsOn;
         var position = body.Position;
         var at = position.Origin + (position.CellId == 0 ? light.Offset.Origin : Vector3.Transform(light.Offset.Origin, position.Orientation));
         if (!DynamicLights.Contains(avatar.Guid))
@@ -1244,6 +1254,7 @@ public sealed class AvatarSet : ITargetWorld
         {
             avatar.Body.RemoveChild(child);
             child.LeaveWorld();
+            child.StopEmitters();
         }
 
         avatar.Body.ExitWorld();

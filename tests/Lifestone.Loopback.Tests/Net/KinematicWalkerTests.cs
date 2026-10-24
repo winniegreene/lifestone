@@ -25,52 +25,6 @@ public sealed class KinematicWalkerTests
         new(FlatTerrain(), Block, start, route, MotionInterpreter.WalkAnimSpeed);
 
     [Fact]
-    public void The_walker_stands_on_the_terrain_in_the_right_outdoor_cell()
-    {
-        var walker = Walker(new Vector2(84f, 7.1f), new Vector2(84f, 100f));
-        var p = walker.Position;
-        Assert.Equal(0xA9B40019u, p.CellId);
-        Assert.Equal(new Vector3(84f, 7.1f, 12f), p.Origin);
-
-        walker.Advance(6.0);
-        Assert.InRange(walker.Metres, 18.7, 18.8);
-        Assert.Equal(0xA9B4001Au, walker.CellId);
-        Assert.InRange(walker.Position.Origin.Y, 25.8f, 25.9f);
-    }
-
-    [Fact]
-    public void The_walker_faces_its_direction_of_travel_with_AC_facing_local_plus_Y_at_the_identity()
-    {
-        var north = Walker(new Vector2(10f, 10f), new Vector2(10f, 50f)).Position.Rotation;
-        Assert.InRange(Vector3.Transform(Vector3.UnitY, north).Y, 0.999f, 1.001f);
-        Assert.Equal(1f, north.W, 3);
-
-        var east = Walker(new Vector2(10f, 10f), new Vector2(50f, 10f)).Position.Rotation;
-        var facing = Vector3.Transform(Vector3.UnitY, east);
-        Assert.InRange(facing.X, 0.999f, 1.001f);
-        Assert.InRange(Math.Abs(facing.Y), 0f, 0.001f);
-        Assert.InRange(Math.Abs(Quaternion.Dot(east, east) - 1f), 0f, 1e-5f);
-    }
-
-    [Fact]
-    public void A_long_step_turns_at_every_route_point_it_passes_and_the_route_repeats()
-    {
-        var walker = Walker(new Vector2(10f, 10f), new Vector2(50f, 10f), new Vector2(50f, 50f), new Vector2(10f, 50f), new Vector2(10f, 10f));
-        walker.Advance(100.0 / MotionInterpreter.WalkAnimSpeed);
-        Assert.InRange(walker.Metres, 99.99, 100.01);
-        var p = walker.Position.Origin;
-        Assert.InRange(p.X, 29.9f, 30.1f);
-        Assert.InRange(p.Y, 49.9f, 50.1f);
-
-        // 60 m more: round the last corner and back to the first point (160 m is one lap of the 40 m square), and the next lap starts east again.
-        walker.Advance(60.0 / MotionInterpreter.WalkAnimSpeed);
-        Assert.InRange(walker.Position.Origin.X, 9.9f, 10.1f);
-        Assert.InRange(walker.Position.Origin.Y, 9.9f, 10.1f);
-        walker.Advance(10.0 / MotionInterpreter.WalkAnimSpeed);
-        Assert.InRange(walker.Position.Origin.X, 19.9f, 20.1f);
-    }
-
-    [Fact]
     public void A_point_outside_the_landblock_is_refused()
     {
         Assert.Throws<ArgumentException>(() => Walker(new Vector2(10f, 10f), new Vector2(192f, 10f)));

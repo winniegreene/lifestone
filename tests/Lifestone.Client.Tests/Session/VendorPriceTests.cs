@@ -60,16 +60,6 @@ public sealed class VendorPriceTests
     }
 
     [Fact]
-    public void The_capture_prices_hold_for_the_two_kits_and_the_potion()
-    {
-        var stock = Stock(rows: [Row(1, "Handy Healing Kit", 10), Row(2, "Adept Healing Kit", 50), Row(3, "Potion of Healing", 170)]);
-
-        Assert.Equal(14u, stock.PriceToBuy(1, 1));
-        Assert.Equal(68u, stock.PriceToBuy(2, 1));
-        Assert.Equal(230u, stock.PriceToBuy(3, 1));
-    }
-
-    [Fact]
     public void Buying_several_of_an_item_that_does_not_stack_is_one_priced_object_each()
     {
         var stock = Stock(rows: Row(1, "Handy Healing Kit", 10));

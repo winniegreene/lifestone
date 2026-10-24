@@ -157,6 +157,7 @@ public sealed class GroundProbeTests(DatSetFixture fixture, ITestOutputHelper ou
         Assert.True(allocated == 0, $"probing allocated {allocated} B over 200 windows of 100 probes");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Around_Holtburg_the_probe_finds_the_terrain_and_the_floors_of_its_rooms()
     {

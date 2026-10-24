@@ -29,7 +29,7 @@ public static class BlackSpawnDen
     /// <summary>
     /// The arrival's floor, as low words of the cell id (all z 0): the arrival cell 0x0375 and the twelve cells of the floor's 17 Tusker Slave spawns (the first 13 entries, s0's), then the
     /// corridor and plaza cells between them (M3 3.1 lane fa): every cell of landblock 0x0105 at z -1 to 0.5 that a standing human can walk to from the arrival through the doorways
-    /// <c>DenPlanner.Passable</c> accepts, without the exit portal's room (<see cref="IsExcluded"/>) and the north wing. Read from the dat's cell graph (158 cells in all); pinned by
+    /// <c>RoomGraph.IsPassable</c> (lean 0.3) accepts, without the exit portal's room (<see cref="IsExcluded"/>) and the north wing. Read from the dat's cell graph (158 cells in all); pinned by
     /// <c>BlackSpawnDenFloorDatTests</c>, which recomputes it from the dats. Widen it only with cells at z -1 or above.
     /// </summary>
     public static readonly IReadOnlyList<ushort> FloorLowWords =

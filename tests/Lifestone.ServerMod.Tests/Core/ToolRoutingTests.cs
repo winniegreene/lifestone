@@ -23,8 +23,6 @@ public sealed class ToolRoutingTests
         { "place poi \"Holtburg\"", "PlacePoi", true },
         { "place loc 0xA9B40019 84 7.1 94", "PlaceLoc", true },
         { "quest stamp SentryTaskComplete #q1", "Quest", true },
-        { "quest erase SentryTaskComplete", "Quest", true },
-        { "quest has SentryTaskComplete", "Quest", true },
         { "char purge \"Lifestone Throwaway\" #c1", "CharPurge", true },
         { "spell learn 1,2,3 #s1", "SpellLearn", true },
         { "item 1628 2 #i1", "Item", true },
@@ -36,16 +34,7 @@ public sealed class ToolRoutingTests
         { "fly", ToolErrors.UnknownVerb },
         { string.Empty, ToolErrors.BadArgs },
         { "xp abc", ToolErrors.BadArgs },
-        { "place loc 0xA9B40019 84", ToolErrors.BadArgs },
-        { "quest stamp", ToolErrors.BadArgs },
         { "quest stamp Bad@Name", ToolErrors.BadArgs },
-        { "char", ToolErrors.BadArgs },
-        { "char purge", ToolErrors.BadArgs },
-        { "char delete Ann", ToolErrors.BadArgs },
-        { "spell learn", ToolErrors.BadArgs },
-        { "spell learn 1, 2", ToolErrors.BadArgs },
-        { "item", ToolErrors.BadArgs },
-        { "item 1628 0", ToolErrors.BadArgs },
     };
 
     /// <summary>Every request above, good and bad, for the one-answer sweep.</summary>

@@ -3,6 +3,7 @@ using Lifestone.Client.Avatars;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement;
 using Lifestone.Client.Movement.Routes;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Play;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
@@ -74,31 +75,16 @@ public interface IFightWalk : IDisposable
 }
 
 /// <summary>
-/// Routes over the den's floor: a breadth-first search over the floor's cells through the doorways a standing human fits, with the waypoints of <see cref="CellRoutePlanner"/>
-/// (<see cref="CellRoutePlanner.Waypoint"/>). Not <see cref="CellRoutePlanner.Plan"/>: the den's plazas are octagons whose doorways lean 11 degrees (the portal plane's normal has a
-/// vertical part of 0.196), which <see cref="CellRoutePlanner.IsWalkable"/> refuses (it wants upright portals, normal Z under 0.1), so the planner finds no walk from the arrival to any
-/// spawn cell but one. <see cref="Passable"/> accepts the planner's doorways and the leaning ones (normal Z under <see cref="MaxLean"/>) by the planner's own fit test.
-/// <c>TODO(m3-fight-planner-lean)</c>: the planner could take the lean as a parameter; the lane that owns it can then drop this class's search.
+/// The Black Spawn Den's rooms for the fight walk: the floor's cells (<see cref="FloorOf"/>) as a <see cref="RoomGraph"/> whose lean is
+/// <see cref="MaxLean"/>. The den's plazas are octagons whose doorways lean 11 degrees (the portal plane's normal has a vertical part of
+/// 0.196), which the upright rule (normal Z under 0.1) refuses, so a graph with no lean finds no walk from the arrival to any spawn cell
+/// but one. The den's own planner (<c>DenPlanner</c>) is gone: P5a moved its lean into <see cref="CellRoutePlanner"/> and its search into
+/// <see cref="RoomGraph"/> (closes <c>m3-fight-planner-lean</c>).
 /// </summary>
-public sealed class DenPlanner
+public static class DenRooms
 {
-    /// <summary>The largest vertical part of a doorway's normal accepted here (the den's plazas lean 0.196; floors and ceilings are 1).</summary>
+    /// <summary>The largest vertical part of a doorway's normal accepted in the den (the plazas lean 0.196; floors and ceilings are 1).</summary>
     public const float MaxLean = 0.3f;
-
-    private readonly LandblockCellSet _cells;
-    private readonly CellRoutePlanner _planner;
-
-    /// <summary>A planner over <paramref name="cells"/> (the floor's cells alone: a doorway into a cell outside it is not walked).</summary>
-    /// <param name="cells">The floor's cells.</param>
-    public DenPlanner(LandblockCellSet cells)
-    {
-        ArgumentNullException.ThrowIfNull(cells);
-        _cells = cells;
-        _planner = new CellRoutePlanner(cells);
-    }
-
-    /// <summary>The cells planned over.</summary>
-    public LandblockCellSet Cells => _cells;
 
     /// <summary>The den's floor out of a loaded landblock: the cells <see cref="BlackSpawnDen.IsFloorCell"/> accepts.</summary>
     /// <param name="all">Every cell of landblock 0x0105.</param>
@@ -108,222 +94,15 @@ public sealed class DenPlanner
         return LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => BlackSpawnDen.IsFloorCell(c.Id)));
     }
 
-    /// <summary>True when a standing human can walk through <paramref name="portal"/> of <paramref name="cell"/> (see the class remarks).</summary>
-    /// <param name="cell">The cell the portal is in.</param>
-    /// <param name="portal">The portal.</param>
-    public bool Passable(EnvCellData cell, CellPortalData portal)
-    {
-        ArgumentNullException.ThrowIfNull(cell);
-        if (_planner.IsWalkable(cell, portal))
-        {
-            return true;
-        }
-
-        if (portal.LeadsOutside || _cells.GetStructure(cell).GetPortal(portal.PolygonId) is not { } polygon)
-        {
-            return false;
-        }
-
-        var normal = cell.Frame.RotateToParent(polygon.Plane.Normal);
-        if (MathF.Abs(normal.Z) > MaxLean || MathF.Abs(normal.Z) <= 0.1f)
-        {
-            return false; // a floor or a ceiling, or an upright doorway the planner already judged
-        }
-
-        var corners = new Vector3[polygon.Vertices.Length];
-        var centre = Vector3.Zero;
-        var sill = float.MaxValue;
-        for (var i = 0; i < corners.Length; i++)
-        {
-            corners[i] = cell.Frame.LocalToParent(polygon.Vertices[i]);
-            centre += corners[i];
-            sill = MathF.Min(sill, corners[i].Z);
-        }
-
-        centre /= corners.Length;
-        var flat = new Vector3(normal.X, normal.Y, 0f);
-        if (flat.LengthSquared() < 1e-6f)
-        {
-            return false;
-        }
-
-        var along = Vector3.Normalize(new Vector3(-flat.Y, flat.X, 0f));
-        var floor = new Vector3(centre.X, centre.Y, sill);
-        return Inside(corners, along, floor + new Vector3(0, 0, 0.2f))
-            && Inside(corners, along, floor + new Vector3(0, 0, 1.8f))
-            && Inside(corners, along, floor + new Vector3(0, 0, 1f) + (along * CellRoutePlanner.HumanHalfWidth))
-            && Inside(corners, along, floor + new Vector3(0, 0, 1f) - (along * CellRoutePlanner.HumanHalfWidth));
-    }
-
-    /// <summary>The cells of the shortest walk (fewest doorways) from <paramref name="from"/> to <paramref name="to"/>, or null.</summary>
-    /// <param name="from">The first cell.</param>
-    /// <param name="to">The last cell.</param>
-    public IReadOnlyList<uint>? FindPath(uint from, uint to)
-    {
-        if (_cells.GetCell(from) is null || _cells.GetCell(to) is null)
-        {
-            return null;
-        }
-
-        var previous = new Dictionary<uint, uint> { [from] = 0 };
-        var queue = new Queue<uint>();
-        queue.Enqueue(from);
-        while (queue.Count > 0)
-        {
-            var id = queue.Dequeue();
-            if (id == to)
-            {
-                var path = new List<uint>();
-                for (var at = to; at != 0; at = previous[at])
-                {
-                    path.Add(at);
-                    if (at == from)
-                    {
-                        break;
-                    }
-                }
-
-                path.Reverse();
-                return path;
-            }
-
-            var cell = _cells.GetCell(id)!;
-            foreach (var portal in cell.Portals)
-            {
-                if (portal.LeadsOutside || previous.ContainsKey(portal.OtherCellId) || _cells.GetCell(portal.OtherCellId) is null || !Passable(cell, portal))
-                {
-                    continue;
-                }
-
-                previous[portal.OtherCellId] = id;
-                queue.Enqueue(portal.OtherCellId);
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>The walk from <paramref name="from"/> to the middle of cell <paramref name="toCell"/>: a pass point before and after each doorway, then a stop within <paramref name="stopWithin"/>.</summary>
-    /// <param name="name">The route's name.</param>
-    /// <param name="from">Where the walk starts.</param>
-    /// <param name="toCell">The last cell.</param>
-    /// <param name="stopWithin">The arrival radius of the stop, in metres.</param>
-    /// <returns>The route, or null when no walk joins the cells.</returns>
-    public ScriptedRoute? Plan(string name, in CellFrame from, uint toCell, float stopWithin)
-    {
-        if (FindPath(from.CellId, toCell) is not { } path || RoomFrame(toCell) is not { } target)
-        {
-            return null;
-        }
-
-        var goals = new List<RouteGoal>(path.Count * 2);
-        for (var i = 0; i + 1 < path.Count; i++)
-        {
-            var cell = _cells.GetCell(path[i])!;
-            CellPortalData? door = null;
-            foreach (var portal in cell.Portals)
-            {
-                if (portal.OtherCellId == path[i + 1] && Passable(cell, portal))
-                {
-                    door = portal;
-                    break;
-                }
-            }
-
-            if (door is not { } p)
-            {
-                return null;
-            }
-
-            if (Inside(cell, p, -CellRoutePlanner.ApproachMetres) is { } approach)
-            {
-                goals.Add(new RouteGoal(approach, CellRoutePlanner.PushIntoCellMetres, Stop: false, DwellSeconds: 0));
-            }
-
-            goals.Add(new RouteGoal(Inside(cell, p, CellRoutePlanner.PushIntoCellMetres) ?? _planner.Waypoint(cell, p, 0f), CellRoutePlanner.PushIntoCellMetres, Stop: false, DwellSeconds: 0));
-        }
-
-        goals.Add(new RouteGoal(target, stopWithin, Stop: true, DwellSeconds: StopDwellSeconds));
-        return new ScriptedRoute(name, goals) { Start = from };
-    }
-
-    /// <summary>The largest floor polygon's centre of the cell, as a frame in it (or null for a cell without a floor).</summary>
-    /// <param name="cellId">The cell.</param>
-    public CellFrame? RoomFrame(uint cellId)
-    {
-        if (_cells.GetCell(cellId) is not { } cell)
-        {
-            return null;
-        }
-
-        var floors = _cells.GetStructure(cell).Floors;
-        if (floors.Count == 0)
-        {
-            return null;
-        }
-
-        var best = floors[0];
-        foreach (var f in floors)
-        {
-            if (f.Area > best.Area)
-            {
-                best = f;
-            }
-        }
-
-        return new CellFrame(cell.Id, new AcFrame(cell.Frame.LocalToParent(best.Centroid), Quaternion.Identity));
-    }
-
-    /// <summary>How long the walker stands at the end of a leg, in seconds (a short rest; the loop then casts).</summary>
-    public const double StopDwellSeconds = 0.25;
-
-    /// <summary><see cref="CellRoutePlanner.Waypoint"/> at <paramref name="metres"/> or half of it, whichever lies inside the cell it is meant for (the planner's own rule, <c>InsideWaypoint</c>, which is private).</summary>
-    private CellFrame? Inside(EnvCellData cell, CellPortalData portal, float metres)
-    {
-        var expected = metres >= 0f ? _cells.GetCell(portal.OtherCellId) : cell;
-        if (expected is null)
-        {
-            return null;
-        }
-
-        foreach (var distance in (ReadOnlySpan<float>)[metres, metres * 0.5f])
-        {
-            var point = _planner.Waypoint(cell, portal, distance);
-            if (_cells.Contains(expected, point.Frame.Origin + new Vector3(0f, 0f, 1f)))
-            {
-                return point;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>A crossing test of the point against the polygon in the plane of the horizontal axis <paramref name="along"/> and Z.</summary>
-    private static bool Inside(Vector3[] corners, Vector3 along, Vector3 point)
-    {
-        var inside = false;
-        var px = Vector3.Dot(point, along);
-        var py = point.Z;
-        for (int i = 0, j = corners.Length - 1; i < corners.Length; j = i++)
-        {
-            var xi = Vector3.Dot(corners[i], along);
-            var yi = corners[i].Z;
-            var xj = Vector3.Dot(corners[j], along);
-            var yj = corners[j].Z;
-            if ((yi > py) != (yj > py) && px < ((xj - xi) * (py - yi) / (yj - yi)) + xi)
-            {
-                inside = !inside;
-            }
-        }
-
-        return inside;
-    }
+    /// <summary>The den's room graph over a loaded landblock: the floor's cells with <see cref="MaxLean"/>.</summary>
+    /// <param name="all">Every cell of landblock 0x0105.</param>
+    public static RoomGraph GraphOf(LandblockCellSet all) => new(FloorOf(all), MaxLean);
 }
 
 /// <summary>
 /// The real <see cref="IFightWalk"/>: an <see cref="OfflineWalker"/> in the den's collision (landblock 0x0105 alone), placed where the server puts the player and given the server's
 /// positions and moves as <see cref="RoutePlay"/> gives them to its walker (the same session wiring: the presence-gated movement sink, the player's own ObjectMoved and ObjectMotionChanged,
-/// <see cref="SessionTargetWorld"/> for the TurnToObject ACE sends when it turns the caster), and a <see cref="RouteDriver"/> for each leg of <see cref="DenPlanner"/>'s route.
+/// <see cref="SessionTargetWorld"/> for the TurnToObject ACE sends when it turns the caster), and a <see cref="RouteDriver"/> for each leg of the <see cref="RoomGraph"/>'s route.
 /// </summary>
 /// <remarks>
 /// <para>The waypoints are the floor's spawn cells in <see cref="Tour"/> order, nearest the arrival first; a leg goes to the next one in the tour that is not the cell the player stands in and
@@ -338,6 +117,9 @@ public sealed class DenWalk : IFightWalk
     /// <summary>The arrival radius of a leg's last stop, in metres.</summary>
     public const float StopWithinMetres = 1.0f;
 
+    /// <summary>How long the walker stands at the end of a leg, in seconds (a short rest; the loop then casts).</summary>
+    public const double StopDwellSeconds = 0.25;
+
     /// <summary>The longest a leg may take, in seconds on the session clock.</summary>
     public const double LegSeconds = 90;
 
@@ -346,7 +128,7 @@ public sealed class DenWalk : IFightWalk
     private readonly DatSet _dats;
     private readonly PhysicsGeometryLibrary _geometry;
     private readonly PhysicsWorld _world;
-    private readonly DenPlanner _planner;
+    private readonly RoomGraph _planner;
     private readonly ILogSink _log;
     private readonly List<ObjectMoved> _moves = [];
     private readonly List<ObjectMotionChanged> _serverMotions = [];
@@ -354,6 +136,7 @@ public sealed class DenWalk : IFightWalk
     private IDisposable? _movesSubscription;
     private IDisposable? _motionSubscription;
     private OfflineWalker? _walker;
+    private MoveIntents? _move;
     private PresenceGatedMovementSink? _gate;
     private SessionTargetWorld? _targets;
     private RouteDriver? _driver;
@@ -363,7 +146,7 @@ public sealed class DenWalk : IFightWalk
     private int _legs;
     private double _legStart;
 
-    private DenWalk(DatSet dats, PhysicsGeometryLibrary geometry, PhysicsWorld world, DenPlanner planner, ILogSink log)
+    private DenWalk(DatSet dats, PhysicsGeometryLibrary geometry, PhysicsWorld world, RoomGraph planner, ILogSink log)
     {
         (_dats, _geometry, _world, _planner, _log) = (dats, geometry, world, planner, log);
     }
@@ -378,7 +161,7 @@ public sealed class DenWalk : IFightWalk
     public OfflineWalker? Walker => _walker;
 
     /// <summary>The floor planner.</summary>
-    public DenPlanner Planner => _planner;
+    public RoomGraph Planner => _planner;
 
     /// <summary>Builds the den's collision and floor graph from the dats (a few seconds).</summary>
     /// <param name="dats">The dats.</param>
@@ -392,8 +175,7 @@ public sealed class DenWalk : IFightWalk
         var coord = new LandblockCoord(1, 5);
         var world = new PhysicsWorld();
         world.Attach(new LandblockCollisionBuilder(dats, geometry).Build(coord));
-        var floor = DenPlanner.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(dats), coord));
-        return new DenWalk(dats, geometry, world, new DenPlanner(floor), log);
+        return new DenWalk(dats, geometry, world, DenRooms.GraphOf(LandblockCellSet.Load(new CellStructureLibrary(dats), coord)), log);
     }
 
     /// <inheritdoc/>
@@ -416,6 +198,8 @@ public sealed class DenWalk : IFightWalk
         _gate = new PresenceGatedMovementSink(session.Actions.Movement, () => session.State.Self.Travel == SelfTravel.Present);
         _world.SetTime(now);
         _walker = OfflineWalker.Create(_dats, _world, _log, weenie, _geometry, id: self.Guid, sink: _gate);
+        _move = session.Actions.Move; // scripted movement goes through IActionApi.Move (the human's keys, R2)
+        _move.Bind(_walker.Controller, _walker.Controller.Options.RunByDefault);
         _targets = new SessionTargetWorld(session.State, _dats, _geometry, () => _world.CurrentTime, _walker.Physics);
         _walker.Physics.TargetWorld = _targets;
         _movesSubscription = session.Events.Subscribe<ObjectMoved>((in ObjectMoved e) =>
@@ -454,7 +238,7 @@ public sealed class DenWalk : IFightWalk
                 continue;
             }
 
-            if (_planner.Plan("den-leg-" + (_legs + 1), in from, cellId, StopWithinMetres) is not { } route)
+            if (_planner.PlanScripted("den-leg-" + (_legs + 1), in from, cellId, StopWithinMetres, StopDwellSeconds) is not { } route)
             {
                 _log.Warn(LogCategory, "no walk joins the player's cell and a waypoint", new LogField("from", $"0x{from.CellId:X8}"), new LogField("to", $"0x{cellId:X8}"));
                 continue;
@@ -544,6 +328,11 @@ public sealed class DenWalk : IFightWalk
 
         _disposed = true;
         Abandon();
+        if (_move is not null && _walker is not null)
+        {
+            _move.Unbind(_walker.Controller);
+        }
+
         _movesSubscription?.Dispose();
         _motionSubscription?.Dispose();
     }

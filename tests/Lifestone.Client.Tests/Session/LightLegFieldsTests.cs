@@ -153,16 +153,13 @@ public sealed class LightLegFieldsTests
     }
 
     [Fact]
-    public void The_leg_line_prints_the_three_fields_and_bolt_light_is_report_only_live_and_judged_offline()
+    public void Bolt_light_is_judged_live_and_offline_the_line_s_light_fields_are_in_the_fight_golden_line()
     {
         var m = new FightLegMeasures(3, 912, 14, 2, 90_000, 0, 0, 1, 14, 31.0, 40.0, 58.5, 123.9, BoltLight: true, DynamicLightsMax: 3, ViewerLight: true);
-        Assert.EndsWith(" fight_s=123 bolt_light=yes dyn_lights_max=3 viewer_light=on", FightLegVerdict.Compose(null, m).Line, StringComparison.Ordinal);
 
         var dark = m with { BoltLight = false, ViewerLight = false };
         var live = FightLegVerdict.Compose(null, dark);
         Assert.False(live.Ok); // judged in every leg since M3 4.2 (was report-only in 4.1)
-        Assert.Contains(" bolt_light=no ", live.Line, StringComparison.Ordinal);
-        Assert.Contains(" viewer_light=off", live.Line, StringComparison.Ordinal);
         var offline = FightLegVerdict.Compose(null, dark, judgeBoltLight: true);
         Assert.False(offline.Ok);
         Assert.Contains(offline.Problems, p => p.StartsWith("bolt_light=no", StringComparison.Ordinal));

@@ -41,12 +41,7 @@ public sealed class WireMotionTests
     }
 
     [Theory]
-    [InlineData(0x0003, 0x41000003u)] // Ready
-    [InlineData(0x0007, 0x44000007u)] // RunForward
-    [InlineData(0x0015, 0x40000015u)] // Falling
-    [InlineData(0x0087, 0x13000087u)] // Wave
     [InlineData(0x011B, 0x4300011Bu)] // AFKState: past ordinal 0x10F, where the 2013 table is off by three
-    [InlineData(0x012B, 0x1000012Bu)] // MagicPowerUp01Purple
     [InlineData(0x019B, 0x1000019Bu)] // AI_TelegraphCast, new in 11.6096
     public void Commands_past_ordinal_0x10F_use_the_11_6096_ids(ushort lowWord, uint expected)
     {

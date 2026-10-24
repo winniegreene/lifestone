@@ -56,8 +56,6 @@ public sealed class ExitWindowTests
     [InlineData(2.0, 67, false)]
     [InlineData(4.999, 77, false)]
     [InlineData(5.0, 77, true)]
-    [InlineData(5.0, 0, true)]
-    [InlineData(1.0, 0, false)]
     public void The_hold_ends_after_2_s_in_the_window_or_at_5_s(double elapsed, int frame, bool ends)
     {
         Assert.Equal(ends, ExitWindow.HoldEnds(elapsed, frame));

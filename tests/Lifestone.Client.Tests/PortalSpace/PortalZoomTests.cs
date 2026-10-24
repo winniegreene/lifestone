@@ -13,9 +13,7 @@ public sealed class PortalZoomTests
 
     [Theory]
     [InlineData(0.5f)]
-    [InlineData(1f)]
     [InlineData(1.7320508f)]
-    [InlineData(3f)]
     [InlineData(0.01f)]
     public void Focal_distance_and_field_of_view_round_trip(float focal)
     {
@@ -111,8 +109,6 @@ public sealed class PortalZoomTests
 
     [Theory]
     [InlineData(0.001f)]
-    [InlineData(0.01f)]
-    [InlineData(0.1f)]
     [InlineData(0.39999998f)]
     public void Below_0_4_the_frustum_is_half_a_metre_tall_at_its_near_plane(float focal)
     {

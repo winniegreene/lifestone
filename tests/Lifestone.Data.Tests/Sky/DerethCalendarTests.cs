@@ -22,6 +22,7 @@ public sealed class DerethCalendarTests(SkyFixture fixture) : IClassFixture<SkyF
     /// </list>
     /// ACE hard-codes these; the dat-driven retail algorithm must reproduce every one.
     /// </summary>
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsTheory]
     [InlineData(0.0, 10, "Morningthaw", 1, "Morntide-and-Half")]
     [InlineData(210.0, 10, "Morningthaw", 1, "Midsong")]
@@ -40,6 +41,7 @@ public sealed class DerethCalendarTests(SkyFixture fixture) : IClassFixture<SkyF
         Assert.Equal(timeOfDay, d.TimeString);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Game_time_zero_is_7_16ths_plus_into_the_first_day()
     {
@@ -55,6 +57,7 @@ public sealed class DerethCalendarTests(SkyFixture fixture) : IClassFixture<SkyF
         Assert.Equal(210.0, d.NextEventTime);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Time_of_day_boundaries_are_inclusive_at_their_begin()
     {
@@ -71,6 +74,7 @@ public sealed class DerethCalendarTests(SkyFixture fixture) : IClassFixture<SkyF
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Day_rolls_over_at_Darktide()
     {
@@ -81,6 +85,7 @@ public sealed class DerethCalendarTests(SkyFixture fixture) : IClassFixture<SkyF
         Assert.Equal((1, 0, 0f), (next.DayOfYear, next.TimeOfDayIndex, next.DayFraction));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Last_time_of_day_progress_keeps_the_retail_day_length_divisor()
     {
@@ -94,6 +99,7 @@ public sealed class DerethCalendarTests(SkyFixture fixture) : IClassFixture<SkyF
         Assert.Equal(0.5, mid.TimeOfDayProgress, 9);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Calendar_to_game_time_round_trips_for_every_day_and_time_of_day_of_several_years()
     {
@@ -117,6 +123,7 @@ public sealed class DerethCalendarTests(SkyFixture fixture) : IClassFixture<SkyF
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Game_time_to_calendar_round_trips_for_arbitrary_times()
     {
@@ -133,6 +140,7 @@ public sealed class DerethCalendarTests(SkyFixture fixture) : IClassFixture<SkyF
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void With_day_fraction_keeps_the_date()
     {
@@ -146,6 +154,7 @@ public sealed class DerethCalendarTests(SkyFixture fixture) : IClassFixture<SkyF
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Invalid_times_fail_loudly()
     {

@@ -35,11 +35,13 @@ namespace Lifestone.Loopback.Tests.Session;
 /// expiry of another buff in the same window would add to <c>f750</c> only after the removal of this one was seen, so the removal by id is the assertion and the sound follows it in the same bundle). (d) The removal came within
 /// [duration - 30 s, duration + 120 s] of the cast on the session clock. The leg prints <c>expiry_live spell=&lt;id&gt; duration_s=&lt;n&gt; removed_after_s=&lt;n&gt; f750=&lt;n&gt;</c> and, apart, the overdue count
 /// (<c>TODO(m3-enchant-overdue)</c>: entries the registry holds past their end).</para>
-/// <para>The mage ends in non-combat and logs off. The cast burns a component or two and the mana its cost. Skipped, with the probe's reason, unless the backend runs with the Lifestone server mod ready.</para>
+/// <para>The mage ends in non-combat. Since M4 P4 the run is over the mage's shared session (one login per test process; the mage is put in peace mode first) and does not log off at the end; on another character it fails at once and sends nothing. The cast burns a component or two and the mana its cost. Skipped, with the probe's reason, unless the backend runs with the Lifestone server mod ready.</para>
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Trait("Tier", "Soak")]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[LiveSharedSession]
 public sealed class EnchantmentExpiryLiveTests(ITestOutputHelper output)
 {
     /// <summary>The headless limit of the run, in seconds: the gear, the 1,800 s buff, 120 s of allowance and the log off.</summary>
@@ -50,49 +52,10 @@ public sealed class EnchantmentExpiryLiveTests(ITestOutputHelper output)
     {
         using var dats = DatSet.Open();
         var spells = SpellTableData.Load(dats).Spells;
-        var files = BackendProbe.MainCheckoutFiles;
         var log = new RecordingLogSink();
-        var secrets = File.ReadAllBytes(files.SecretsFile);
-        ExpiryLeg leg;
-        HeadlessRunner runner;
-        try
-        {
-            string account;
-            using (var credentials = PlayAccounts.Parse(secrets, AccountChoice.FromOption(BackendProbe.TestAccountKey, AccountChoice.Default)))
-            {
-                account = credentials.Account;
-            }
+        using var leg = new ExpiryLeg(GearKit.Build(spells, LiveMage.KitAccount()), spells, log, output.WriteLine);
+        var result = LiveMage.Run(output, leg, "expiry", QuitAfterSeconds).Result;
 
-            leg = new ExpiryLeg(GearKit.Build(spells, account), spells, log, output.WriteLine);
-            runner = HeadlessRunner.Start(
-                new HeadlessRunOptions
-                {
-                    Session = new SessionOptions { Account = BackendProbe.TestAccountKey, Server = BackendProbe.Probe().AceEndPoint! },
-                    QuitAfterSeconds = QuitAfterSeconds,
-                },
-                leg,
-                secrets,
-                File.ReadAllBytes(files.PidsFile),
-                dats,
-                TimeProvider.System,
-                log,
-                recording: null);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(secrets);
-        }
-
-        HeadlessRunResult result;
-        var context = new GameThreadSynchronizationContext();
-        using (context.Install())
-        using (runner)
-        {
-            result = runner.Run(context, CancellationToken.None);
-        }
-
-        leg.Dispose();
-        output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{result.SummaryLine("memory")}"));
         foreach (var line in log.Lines.Where(l => l.Contains("[gear]", StringComparison.Ordinal) || l.Contains("WARN", StringComparison.Ordinal) || l.Contains("ERROR", StringComparison.Ordinal)))
         {
             output.WriteLine(line);
@@ -144,7 +107,7 @@ public sealed class EnchantmentExpiryLiveTests(ITestOutputHelper output)
 
         public ExpiryLeg(GearKit kit, IReadOnlyDictionary<uint, SpellInfo> spells, ILogSink log, Action<string> write)
         {
-            _gear = new GearScenario(kit, log, endSession: false, cast: false, spells: spells);
+            _gear = new GearScenario(kit, log, endSession: false, cast: false, spells: spells) { RequireCharacter = true };
             _spells = spells;
             _write = write;
         }
@@ -203,6 +166,15 @@ public sealed class EnchantmentExpiryLiveTests(ITestOutputHelper output)
             ArgumentNullException.ThrowIfNull(session);
             _session = session;
             var clock = session.Clock.Now;
+            if (Stage == "start" && GearScenario.WrongCharacter(session) is { } wrong)
+            {
+                // Nothing was sent (no gear, no log off: the shared session is the host's).
+                Failure = wrong;
+                _write("FAILED: " + wrong);
+                Stage = "failed";
+                return ScenarioStatus.Failed;
+            }
+
             switch (Stage)
             {
                 case "done":
@@ -360,6 +332,13 @@ public sealed class EnchantmentExpiryLiveTests(ITestOutputHelper output)
                         if (!peace.Succeeded)
                         {
                             _write("WARN: the mage was left in the magic combat mode: " + peace.Kind);
+                        }
+
+                        if (LiveRun.KeepSession)
+                        {
+                            _write("the shared session stays logged in (no log off at the end of the leg)");
+                            Stage = "done";
+                            return ScenarioStatus.Succeeded;
                         }
 
                         _pending = session.Actions.LogOff(ActionSource.Host);

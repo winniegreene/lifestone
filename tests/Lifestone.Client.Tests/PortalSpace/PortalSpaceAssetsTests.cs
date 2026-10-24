@@ -14,6 +14,7 @@ public sealed class PortalSpaceAssetsTests(DatSetFixture fixture) : IClassFixtur
     /// <summary>The aliases of <see cref="UiAssetIds"/>: constants that name a range, not a map entry.</summary>
     private static readonly string[] Aliases = [nameof(UiAssetIds.IdleEmoteFirst), nameof(UiAssetIds.IdleEmoteLast)];
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Portal_space_resolves_the_tunnel_its_spin_and_the_ui_sound_table()
     {
@@ -22,6 +23,7 @@ public sealed class PortalSpaceAssetsTests(DatSetFixture fixture) : IClassFixtur
         Assert.Equal(new PortalSpaceAssets(0x02000306u, 0x030005ACu, 0x2000004Bu), assets);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_resolved_records_exist_in_the_portal_dat()
     {
@@ -32,6 +34,7 @@ public sealed class PortalSpaceAssetsTests(DatSetFixture fixture) : IClassFixtur
         Assert.True(fixture.Dats.TryGetPortal<DatReaderWriter.DBObjs.SoundTable>(assets.UiSoundTableId, out _));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_UIASSET_entry_has_one_constant_named_as_the_map_names_it()
     {
@@ -51,6 +54,7 @@ public sealed class PortalSpaceAssetsTests(DatSetFixture fixture) : IClassFixtur
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_idle_emotes_are_the_five_animations_between_first_and_last()
     {

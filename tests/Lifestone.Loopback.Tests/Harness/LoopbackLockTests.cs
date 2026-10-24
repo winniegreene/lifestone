@@ -99,9 +99,27 @@ public sealed class LoopbackLockTests : IDisposable
     }
 
     [Fact]
+    public void Two_accounts_hold_their_locks_at_once_and_the_same_account_excludes_itself()
+    {
+        var melee = Path.Combine(_root, "cache", "loopback-test-melee.lock");
+        var archer = Path.Combine(_root, "cache", "loopback-test-archer.lock");
+        using var first = LoopbackLock.TryAcquire(melee, TimeSpan.Zero, out var failure1);
+        using var second = LoopbackLock.TryAcquire(archer, TimeSpan.Zero, out var failure2);
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Null(failure1);
+        Assert.Null(failure2);
+        Assert.Null(LoopbackLock.TryAcquire(melee, TimeSpan.FromMilliseconds(300), out var busy));
+        Assert.Contains("one test account", busy, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_real_lock_lives_in_the_main_checkout_s_cache()
     {
-        Assert.Equal(Path.Combine(RepositoryFiles.MainCheckout, "cache", "loopback.lock"), LoopbackLock.DefaultPath);
+        Assert.Equal(Path.Combine(RepositoryFiles.MainCheckout, "cache", "loopback-test.lock"), LoopbackLock.DefaultPath);
+        Assert.Equal(Path.Combine(RepositoryFiles.MainCheckout, "cache", "loopback-test-melee.lock"), LoopbackLock.PathFor("test-melee"));
+        Assert.Equal(Path.Combine(RepositoryFiles.MainCheckout, "cache", "loopback-test-archer.lock"), LoopbackLock.PathFor("test-archer"));
+        Assert.Throws<ArgumentException>(() => LoopbackLock.PathFor("../x"));
         Assert.True(File.Exists(Path.Combine(RepositoryFiles.MainCheckout, "Lifestone.slnx")));
         Assert.StartsWith(RepositoryFiles.MainCheckout, RepositoryFiles.Root, StringComparison.OrdinalIgnoreCase);
     }

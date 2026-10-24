@@ -11,7 +11,7 @@ namespace Lifestone.Game.Sessions;
 /// Slice pb (the spellcasting panel), docs/milestones/m3-plan.md section 4.8 row "pb". The window is a floaty window of the gameplay layout, not a host page: the checks reach it through the Action API's combat mode on the
 /// stand-in. Peace hides it; the stand-in is asked for favourite spells through <c>AddSpellFavorite</c> (it keeps them for its next description, so the session's bars are whatever the description held); the Magic mode shows
 /// the window with its eight tabs and the bar the session holds listed in order (judged against the session's own bars, never against a guess); a self spell cast from the window goes through <c>IActionApi.Cast</c> at the
-/// player, a targeted one with nothing selected says so in the chat and sends nothing, and with the stand-in's drudge selected goes at it; peace hides the window again. With <c>--play-frames</c> the review frame
+/// player, a targeted one with nothing selected says so in the chat and sends nothing, and with the stand-in's statue selected goes at it; peace hides the window again. With <c>--play-frames</c> the review frame
 /// <c>c2-spellcasting</c> (Magic mode, then the shot) is saved under <c>panels/</c>. Ends in peace. Nothing here clicks a spell on a live server (D29's rule): the stand-in only.
 /// </summary>
 public sealed partial class PlayChecks
@@ -103,9 +103,9 @@ public sealed partial class PlayChecks
             && selfHandle.Outcome?.Kind is ActionOutcomeKind.Confirmed or ActionOutcomeKind.Sent,
             $"spell={self} summary='{selfHandle?.Summary}' outcome={selfHandle?.Outcome?.Kind} casts={window.Casts}");
 
-        // A targeted spell (Flame Bolt I, id 27, in the probe book): with nothing selected the chat says so and nothing is sent; with the stand-in's drudge selected it goes at it.
+        // A targeted spell (Flame Bolt I, id 27, in the probe book): with nothing selected the chat says so and nothing is sent; with the stand-in's statue selected it goes at it.
         const uint bolt = 27;
-        const uint drudge = 0x80000A04;
+        const uint statue = StatueGuid; // M4 4.1 t2: the retired drudge's place; the bolt flies at a non-creature placeholder
         var previous = _mode.Selection.Selected;
         var chat = new List<string>();
         var oldNotice = window.ChatNotice;
@@ -114,14 +114,14 @@ public sealed partial class PlayChecks
         var noneSent = window.Casts;
         var none = window.Cast(bolt);
         var noneOk = none is null && window.Casts == noneSent && chat.Count == 1 && chat[0] == GameSpellcastingPanel.NoTargetText;
-        _mode.Selection.Select(drudge);
+        _mode.Selection.Select(statue);
         var at = window.Cast(bolt);
         var atDone = at is not null && await WaitFor(() => at.IsCompleted, 12.0);
         window.ChatNotice = oldNotice;
         _mode.Selection.Select(previous);
         Check(
             targetedName,
-            noneOk && at is not null && atDone && at.Kind == ActionKind.CastSpell && at.Source == ActionSource.Ui && at.Summary.Contains($"target=0x{drudge:X8}", StringComparison.Ordinal) && chat.Count == 1,
+            noneOk && at is not null && atDone && at.Kind == ActionKind.CastSpell && at.Source == ActionSource.Ui && at.Summary.Contains($"target=0x{statue:X8}", StringComparison.Ordinal) && chat.Count == 1,
             $"none_sent={none is not null} chat=[{string.Join("|", chat)}] summary='{at?.Summary}' outcome={at?.Outcome?.Kind}");
 
         var peace = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);

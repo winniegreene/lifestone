@@ -9,6 +9,7 @@ namespace Lifestone.Data.Tests.Terrain;
 /// <summary>
 /// Conformance of the per-cell TexMerge recipes against the ACViewer/ACE oracle on the user's real dats.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class TerrainCellBlendConformanceTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     [RequiresDatsFact]

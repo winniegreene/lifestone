@@ -9,6 +9,7 @@ namespace Lifestone.Client.Tests.Sky;
 /// but must stay rare so the tests keep their teeth.
 /// </summary>
 [Collection(AllocationMeasurementCollection.Name)]
+[Trait("Tier", "Exhaustive")]
 public sealed class SkyDirectorAllocationTests(SkyDatsFixture fixture) : IClassFixture<SkyDatsFixture>
 {
     private double Noon(int group = 0) => Lifestone.Client.Navigation.GoldenViewpoints.GameTimeFor(new(0.5, group), fixture.Sky);

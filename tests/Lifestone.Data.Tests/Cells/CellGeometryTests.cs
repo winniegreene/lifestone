@@ -7,6 +7,7 @@ namespace Lifestone.Data.Tests.Cells;
 
 public sealed class CellGeometryTests(CellsFixture fixture) : IClassFixture<CellsFixture>
 {
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_inn_cells_build_well_formed_meshes_facing_into_the_rooms()
     {
@@ -58,6 +59,7 @@ public sealed class CellGeometryTests(CellsFixture fixture) : IClassFixture<Cell
         Assert.True(probesInside > 9 * probesOutside, $"inside {probesInside}, outside {probesOutside}");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Mesh_cache_shares_builds_and_is_bounded()
     {

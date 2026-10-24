@@ -29,6 +29,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </summary>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test")]
+[LiveSharedSession]
 public sealed class ItemMovesLiveTests(ITestOutputHelper output)
 {
     [LoopbackFact]
@@ -37,7 +39,7 @@ public sealed class ItemMovesLiveTests(ITestOutputHelper output)
         using var dats = DatSet.Open();
         var classes = HeadlessCharacter.RetailSkillClasses(dats);
         var leg = new MovesLeg(classes, output.WriteLine, dats);
-        LiveRun.Run(output, dats, leg, "moves", 400);
+        LiveRun.Run(output, leg, "moves", 400);
 
         var line = $"moves split_container={leg.SplitContainer} split_3d={leg.Split3D} pickup={leg.PickedUp} drop={leg.Dropped} split_wield={leg.SplitWield} give_accept={leg.GiveAccept} give_refuse={leg.GiveRefuse}";
         output.WriteLine(line);

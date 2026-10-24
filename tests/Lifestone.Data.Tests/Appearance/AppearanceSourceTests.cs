@@ -12,6 +12,7 @@ namespace Lifestone.Data.Tests.Appearance;
 /// The dat-backed appearance inputs: <see cref="GfxObjMesh.SurfaceIds"/>, <see cref="TextureLoader.GetOriginalPaletteId"/>
 /// and <see cref="DatAppearanceSource"/>.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class AppearanceSourceTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private DatSet Dats => fixture.Dats;

@@ -580,6 +580,30 @@ public sealed class GameSpellPageTests(DatSetFixture fixture, ITestOutputHelper 
     }
 
     [RequiresLocalDatsFact]
+    public void A_row_draws_the_SpellComponentTables_icon_through_the_session_and_logs_no_TODO()
+    {
+        // M4 4.1 fix (review R9): GameSession implements ISpellComponentIcons (the table is loaded where the stat tables are), so gmSpellComponentUI::MakeIcon (0x0048A250) draws the table's icon and not the pack object's.
+        var herb = WcidOf(7);
+        using var g = Enter(packed: [0x80000221, 0x80000222]);
+        g.Create(Component(0x80000221, herb, "Hyssop", 5, icon: 0x060011D7));
+        g.Create(Component(0x80000222, WcidOf(8), "Mandrake", 3, icon: 0x060011D8));
+        g.Frames(2);
+        g.Open();
+        Assert.True(g.Panel.OpenTab(ComponentsTab));
+        g.Frames(14);
+        var first = g.Components.Rows.First(static r => !r.IsTitle);
+        Lifestone.Client.Session.Contracts.SpellPageData.CategoryOf(first.Wcid, out var componentId, out var known);
+        Assert.True(known);
+        var expected = Lifestone.Data.Magic.SpellComponentTableData.Load(fixture.Dats).Components[componentId].IconId;
+        Assert.NotEqual(0u, expected);
+        Assert.NotEqual(0x060011D7u, expected); // the table's icon, not the pack object's
+        var icon = g.Screen.Root!.GetChildRecursive(GameComponentsPage.RowIconId);
+        Assert.NotNull(icon);
+        Assert.Equal(expected, icon!.Image.Did);
+        Assert.DoesNotContain(g.Rig.Log.Entries, static e => e.Message.Contains("TODO(m3-component-icon)", StringComparison.Ordinal));
+    }
+
+    [RequiresLocalDatsFact]
     public void The_components_follow_the_pack_live_a_count_rewrites_its_text_and_a_new_class_builds_the_rows_again()
     {
         var herb = WcidOf(7);

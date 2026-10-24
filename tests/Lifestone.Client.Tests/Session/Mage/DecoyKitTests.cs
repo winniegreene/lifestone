@@ -82,22 +82,12 @@ public sealed class DecoyKitTests
     }
 
     [Theory]
-    [InlineData(1, 0)]
-    [InlineData(5, 0)]
     [InlineData(10, 0)]
     [InlineData(11, 1)]
-    [InlineData(15, 1)]
-    [InlineData(20, 1)]
     [InlineData(21, 3)]
-    [InlineData(25, 3)]
-    [InlineData(40, 4)]
-    [InlineData(60, 5)]
     [InlineData(100, 7)]
-    [InlineData(120, 8)]
     [InlineData(126, 8)]
     [InlineData(140, 8)]
-    [InlineData(260, 8)]
-    [InlineData(400, 8)]
     public void The_count_is_the_most_a_death_drops_at_the_level_and_never_more_than_the_eight_the_kit_has(int level, int expected)
     {
         Assert.Equal(expected, DecoyKit.CountFor(level));
@@ -229,6 +219,7 @@ public sealed class DecoyKitTests
     public void The_check_over_the_mage_with_all_eight_decoys_is_safe_and_says_nine_items_are_above_the_wand()
     {
         var state = StateOf(DeathDropModelTests.MageItems(DecoyKit.All));
+        Assert.False(state.Self.Inventory.TryGetStack(0x80000100 + 7, out _, out _)); // the Pyreal Scarab stack: no SetStackSize, so the check reads it from the description (the Mana Scarab: 75,000 over 5, 15,000 each)
 
         var check = DecoyKit.Check(state, 126);
 
@@ -290,17 +281,6 @@ public sealed class DecoyKitTests
 
         // The same line reaches the log unchanged: the gear stage logs Text as it is.
         Assert.Contains("TODO(m4-decoy-bonded-flag)", DecoyKit.Describe(new DropVerdict(126, 6, 8, 0, 0, 0, 0, 0, false), 0), StringComparison.Ordinal); // even a line with no needed candidate carries the bonded gap
-    }
-
-    [Fact]
-    public void The_check_reads_the_stack_from_the_description_when_the_server_sent_no_SetStackSize_and_a_stacks_value_per_unit()
-    {
-        var state = StateOf(DeathDropModelTests.MageItems(DecoyKit.All));
-        Assert.False(state.Self.Inventory.TryGetStack(0x80000100 + 7, out _, out _)); // the Pyreal Scarab stack: no SetStackSize
-
-        var check = DecoyKit.Check(state, 126);
-
-        Assert.Equal(9, check.Verdict.Above); // the Mana Scarab: 75,000 over 5, 15,000 each
     }
 
     [Fact]

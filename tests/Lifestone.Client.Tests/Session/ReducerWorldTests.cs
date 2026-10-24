@@ -174,21 +174,21 @@ public sealed class ReducerWorldTests
     [InlineData(true, 10, 5, 3, 2, 5, 4, "ForceBlip", 2, 5, 4)] // a newer force sequence blips, even with an older position
     [InlineData(true, 10, 5, 3, 11, 6, 4, "ForceBlip", 11, 5, 4)] // a newer teleport is not older: still a blip, teleport unstored
     [InlineData(true, 10, 5, 3, 11, 4, 4, "StaleTeleport", 10, 5, 4)] // force stored, then the older teleport drops it
+    [InlineData(true, 10, 5, 3, 9, 5, 3, "Stale", 10, 5, 3)]
+    [InlineData(true, 10, 5, 0xFFFF, 1, 5, 0, "ForceBlip", 1, 5, 0)] // the force sequence wraps forward too
+    [InlineData(true, 10, 0, 3, 11, 0xFFFF, 4, "StaleTeleport", 10, 0, 4)] // 0xFFFF is older than 0 (the teleport sequence), the newer force is stored
     [InlineData(true, 10, 5, 3, 11, 5, 3, "SelfEcho", 11, 5, 3)]
     [InlineData(true, 10, 5, 3, 11, 6, 3, "SelfTeleport", 11, 6, 3)]
     [InlineData(true, 10, 5, 3, 10, 5, 3, "Stale", 10, 5, 3)]
     [InlineData(true, 10, 5, 3, 10, 6, 3, "Stale!", 10, 5, 3)] // retail's error count: an old position with a newer teleport
-    [InlineData(true, 10, 5, 3, 9, 5, 3, "Stale", 10, 5, 3)]
     [InlineData(true, 0xFFFF, 5, 3, 0, 5, 3, "SelfEcho", 0, 5, 3)] // 0xFFFF -> 0 is newer
     [InlineData(true, 0, 5, 3, 0xFFFF, 5, 3, "Stale", 0, 5, 3)]
     [InlineData(true, 10, 0xFFFF, 3, 11, 0, 3, "SelfTeleport", 11, 0, 3)]
-    [InlineData(true, 10, 5, 0xFFFF, 1, 5, 0, "ForceBlip", 1, 5, 0)]
-    [InlineData(true, 10, 0, 3, 11, 0xFFFF, 4, "StaleTeleport", 10, 0, 4)]
     [InlineData(false, 10, 5, 3, 11, 5, 3, "Remote", 11, 5, 3)]
     [InlineData(false, 10, 5, 3, 11, 6, 3, "Remote+", 11, 6, 3)]
+    [InlineData(false, 0xFFFE, 0xFFFF, 3, 0, 0, 3, "Remote+", 0, 0, 3)] // both counters wrap
     [InlineData(false, 10, 5, 3, 10, 5, 4, "Stale", 10, 5, 3)] // only the player blips
     [InlineData(false, 10, 5, 3, 11, 4, 3, "StaleTeleport", 10, 5, 3)]
-    [InlineData(false, 0xFFFE, 0xFFFF, 3, 0, 0, 3, "Remote+", 0, 0, 3)]
     public void Position_verdicts_follow_HandleReceivedPosition(
         bool player,
         int storedPosition,

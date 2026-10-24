@@ -62,7 +62,7 @@ public sealed class M3InboundDispatcherTests
 
     [Theory]
     [MemberData(nameof(Bodies))]
-    public void Each_code_reaches_its_own_callback_with_its_decoded_record(string callback, byte[] body, object expected)
+    public void Each_code_reaches_its_own_callback_with_its_decoded_record_and_a_trailing_or_missing_byte_is_malformed_and_named(string callback, byte[] body, object expected)
     {
         var handler = new RecordingHandler();
         var opcode = BitConverter.ToUInt32(body);
@@ -84,36 +84,18 @@ public sealed class M3InboundDispatcherTests
         {
             Assert.Equal(new DispatchResult(DispatchOutcome.Decoded, opcode), result);
         }
-    }
 
-    [Theory]
-    [MemberData(nameof(Bodies))]
-    public void Each_code_with_a_trailing_byte_is_malformed_and_named(string callback, byte[] body, object expected)
-    {
-        _ = (callback, expected);
-        var handler = new RecordingHandler();
-        var opcode = BitConverter.ToUInt32(body);
+        // A trailing byte, and the body cut by a byte, are malformed with a reason naming the message (never unknown, never OnGameEvent).
+        var trailing = new RecordingHandler();
+        Assert.Equal(DispatchOutcome.Malformed, InboundDispatcher.Dispatch(Context, [.. body, 0xAA], trailing).Outcome);
+        var extra = Assert.Single(trailing.Calls);
+        Assert.Equal(nameof(IInboundMessageHandler.OnMalformed), extra.Name);
+        Assert.Equal(body.Length + 1, extra.Length);
+        Assert.StartsWith(isEvent ? $"F7B0 GameEvent 0x{BitConverter.ToUInt32(body, 12):X4} " : $"{opcode:X4} ", extra.Reason);
 
-        var result = InboundDispatcher.Dispatch(Context, [.. body, 0xAA], handler);
-
-        Assert.Equal(DispatchOutcome.Malformed, result.Outcome);
-        var call = Assert.Single(handler.Calls);
-        Assert.Equal(nameof(IInboundMessageHandler.OnMalformed), call.Name);
-        Assert.Equal(body.Length + 1, call.Length);
-        Assert.StartsWith(opcode == MessageOpcodes.GameEvent ? $"F7B0 GameEvent 0x{BitConverter.ToUInt32(body, 12):X4} " : $"{opcode:X4} ", call.Reason);
-    }
-
-    [Theory]
-    [MemberData(nameof(Bodies))]
-    public void Each_code_truncated_by_a_byte_is_malformed_never_unknown(string callback, byte[] body, object expected)
-    {
-        _ = (callback, expected);
-        var handler = new RecordingHandler();
-
-        var result = InboundDispatcher.Dispatch(Context, body[..^1], handler);
-
-        Assert.NotEqual(DispatchOutcome.Unknown, result.Outcome);
-        Assert.DoesNotContain(handler.Calls, call => call.Name is nameof(IInboundMessageHandler.OnUnknown) or nameof(IInboundMessageHandler.OnGameEvent));
+        var truncated = new RecordingHandler();
+        Assert.Equal(DispatchOutcome.Malformed, InboundDispatcher.Dispatch(Context, body[..^1], truncated).Outcome);
+        Assert.Equal(nameof(IInboundMessageHandler.OnMalformed), Assert.Single(truncated.Calls).Name);
     }
 
     [Fact]

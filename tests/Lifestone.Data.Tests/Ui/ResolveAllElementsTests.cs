@@ -7,6 +7,7 @@ namespace Lifestone.Data.Tests.Ui;
 /// Template inheritance and anchoring on the user's layouts (m2-plan.md R3): every element resolves, every base link
 /// names a top-level element, and the gameplay shell anchors to wide screens as worked out by hand.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class ResolveAllElementsTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private static readonly UiBox Screen800X600 = new(0, 0, 799, 599);

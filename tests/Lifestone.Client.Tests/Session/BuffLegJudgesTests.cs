@@ -19,9 +19,7 @@ public sealed class BuffLegJudgesTests
     // ---------------------------------------------------------------------------------------------- the walking legs' judge
 
     [Theory]
-    [InlineData(1, 1)]
     [InlineData(37, 2)]
-    [InlineData(1, 3)]
     public void Walking_legs_that_sounded_a_hook_hold(int hooks, int legs)
     {
         Assert.Null(LoginCheckScenario.JudgeWalkingSounds(hooks, legs));
@@ -184,8 +182,8 @@ public sealed class BuffLegJudgesTests
         // The step: the buff leg's command, the leg's own time for a whole cycle, and a PASS that needs ok=true.
         var body = script[script.IndexOf("'login-buff' {", StringComparison.Ordinal)..];
         body = body[..body.IndexOf("'login' {", StringComparison.Ordinal)];
-        Assert.Contains("--account=test --login-check=buff", body, StringComparison.Ordinal);
-        Assert.Contains("' 900 ", body, StringComparison.Ordinal);
+        Assert.Contains("--account=$($stepAccounts[$step]) --login-check=buff --buff-auto=on", body, StringComparison.Ordinal); // M4 4.1 lane c: the driver run, no forced pass
+        Assert.Contains("\" 900 ", body, StringComparison.Ordinal);
         Assert.Contains("buff done ok=true", body, StringComparison.Ordinal);
         Assert.Contains("$verdict", body, StringComparison.Ordinal);
     }

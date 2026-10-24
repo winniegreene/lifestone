@@ -18,7 +18,7 @@ public sealed class MotionStateDataTests
     }
 
     [Fact]
-    public void Raw_state_defaults_are_NonCombat_Ready_at_speed_1()
+    public void Both_states_default_to_NonCombat_Ready_at_speed_1()
     {
         var raw = new RawMotionState();
 
@@ -36,11 +36,7 @@ public sealed class MotionStateDataTests
         Assert.Equal(HoldKey.Invalid, raw.TurnHoldKey);
         Assert.Equal(1f, raw.TurnSpeed);
         Assert.Empty(raw.Actions);
-    }
 
-    [Fact]
-    public void Interpreted_state_defaults_are_NonCombat_Ready_at_speed_1()
-    {
         var state = new InterpretedMotionState();
 
         Assert.Equal(0x8000003Du, state.CurrentStyle);
@@ -54,7 +50,7 @@ public sealed class MotionStateDataTests
     }
 
     [Fact]
-    public void Init_defaults_resets_a_changed_raw_state_and_keeps_its_action_list()
+    public void Init_defaults_resets_a_changed_state_and_the_raw_one_keeps_its_action_list()
     {
         var raw = new RawMotionState
         {
@@ -88,11 +84,7 @@ public sealed class MotionStateDataTests
         Assert.Equal(1f, raw.TurnSpeed);
         Assert.Empty(raw.Actions);
         Assert.Same(actions, raw.Actions);
-    }
 
-    [Fact]
-    public void Init_defaults_resets_a_changed_interpreted_state()
-    {
         var state = new InterpretedMotionState
         {
             CurrentStyle = MotionCommands.Magic,
@@ -118,7 +110,7 @@ public sealed class MotionStateDataTests
     }
 
     [Fact]
-    public void A_raw_clone_is_independent_of_its_source()
+    public void A_clone_is_independent_of_its_source()
     {
         var raw = new RawMotionState { CurrentHoldKey = HoldKey.Run, ForwardCommand = MotionCommands.WalkForward, ForwardSpeed = 2f };
         raw.Actions.Add(new MotionActionNode(0x13000087, 1f, 3, Autonomous: true));
@@ -134,22 +126,18 @@ public sealed class MotionStateDataTests
         copy.Actions.Clear();
         Assert.Equal(MotionCommands.WalkForward, raw.ForwardCommand);
         Assert.Single(raw.Actions);
-    }
 
-    [Fact]
-    public void An_interpreted_clone_is_independent_of_its_source()
-    {
         var state = new InterpretedMotionState { ForwardCommand = MotionCommands.RunForward, ForwardSpeed = 2.9f, TurnCommand = MotionCommands.TurnRight };
         state.Actions.Add(new MotionActionNode(0x13000087, 1.25f, 0xFFFF, Autonomous: false));
 
-        var copy = state.Clone();
-        Assert.Equal(MotionCommands.RunForward, copy.ForwardCommand);
-        Assert.Equal(2.9f, copy.ForwardSpeed);
-        Assert.Equal(MotionCommands.TurnRight, copy.TurnCommand);
-        Assert.Equal(state.Actions, copy.Actions);
+        var stateCopy = state.Clone();
+        Assert.Equal(MotionCommands.RunForward, stateCopy.ForwardCommand);
+        Assert.Equal(2.9f, stateCopy.ForwardSpeed);
+        Assert.Equal(MotionCommands.TurnRight, stateCopy.TurnCommand);
+        Assert.Equal(state.Actions, stateCopy.Actions);
 
-        copy.TurnCommand = 0;
-        copy.Actions.Add(new MotionActionNode(0x13000087, 1f, 0, Autonomous: false));
+        stateCopy.TurnCommand = 0;
+        stateCopy.Actions.Add(new MotionActionNode(0x13000087, 1f, 0, Autonomous: false));
         Assert.Equal(MotionCommands.TurnRight, state.TurnCommand);
         Assert.Single(state.Actions);
     }

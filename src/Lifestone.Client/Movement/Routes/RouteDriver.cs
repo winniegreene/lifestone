@@ -63,7 +63,8 @@ public sealed class RouteDriver
     private bool _forward;
     private int _turn;
     private bool _runKey;
-    private readonly bool _runByDefault;
+    private readonly bool? _runByDefault;
+    private readonly IRunByDefaultSource? _runSource;
     private double _lastProgressTime;
     private float _bestDistance;
     private double _bestHeadingError;
@@ -72,8 +73,29 @@ public sealed class RouteDriver
     /// <summary>Creates a driver that walks <paramref name="route"/> with <paramref name="controller"/>.</summary>
     /// <param name="controller">The player to drive.</param>
     /// <param name="route">The route to walk.</param>
-    /// <param name="runByDefault">The player's run-by-default option (<see cref="MovementOptions.RunByDefault"/>): with it on, the run key walks.</param>
-    public RouteDriver(IPlayerMovementIntents controller, ScriptedRoute route, bool runByDefault = false)
+    /// <param name="runByDefault">
+    /// The player's run-by-default option (<see cref="MovementOptions.RunByDefault"/>): with it on, the run key walks. Null (the
+    /// default) reads it from the controller when that is an <see cref="IRunByDefaultSource"/> (the real
+    /// <see cref="PlayerMovementController"/>), else the option is off: "run" then means run whatever the rig's default.
+    /// </param>
+    public RouteDriver(IPlayerMovementIntents controller, ScriptedRoute route, bool? runByDefault = null)
+        : this(controller, route, runByDefault, null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a driver whose run decision follows <paramref name="runSource"/> (the bound <c>MoveIntents.RunByDefault</c>),
+    /// read every tick, so "run" means run whatever the rig's default is.
+    /// </summary>
+    /// <param name="controller">The player to drive.</param>
+    /// <param name="route">The route to walk.</param>
+    /// <param name="runSource">Where the run-by-default option is read (<c>session.Actions.Move</c>).</param>
+    public RouteDriver(IPlayerMovementIntents controller, ScriptedRoute route, IRunByDefaultSource runSource)
+        : this(controller, route, null, runSource ?? throw new ArgumentNullException(nameof(runSource)))
+    {
+    }
+
+    private RouteDriver(IPlayerMovementIntents controller, ScriptedRoute route, bool? runByDefault, IRunByDefaultSource? source)
     {
         ArgumentNullException.ThrowIfNull(controller);
         ArgumentNullException.ThrowIfNull(route);
@@ -86,6 +108,7 @@ public sealed class RouteDriver
         Controller = controller;
         Route = route;
         _runByDefault = runByDefault;
+        _runSource = source;
     }
 
     /// <summary>Raised when the dwell at a stop ends (before the driver moves on).</summary>
@@ -97,8 +120,11 @@ public sealed class RouteDriver
     /// <summary>The route being walked.</summary>
     public ScriptedRoute Route { get; }
 
-    /// <summary>The player's run-by-default option the driver presses the run key against.</summary>
-    public bool RunByDefault => _runByDefault;
+    /// <summary>
+    /// The player's run-by-default option the driver presses the run key against: the bound source's, else the one given,
+    /// else the controller's own, else off.
+    /// </summary>
+    public bool RunByDefault => _runSource?.RunByDefault ?? _runByDefault ?? (Controller as IRunByDefaultSource)?.RunByDefault ?? false;
 
     /// <summary>The status <see cref="Tick"/> last returned.</summary>
     public RouteStatus Status { get; private set; } = RouteStatus.Running;
@@ -282,7 +308,7 @@ public sealed class RouteDriver
     }
 
     /// <summary>Runs (true) or walks (false): the run key is held when that is not what the run-by-default option already gives.</summary>
-    private void SetRun(bool run) => SetRunKey(run != _runByDefault);
+    private void SetRun(bool run) => SetRunKey(run != RunByDefault);
 
     private void SetRunKey(bool down)
     {

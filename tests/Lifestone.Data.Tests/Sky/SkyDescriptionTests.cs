@@ -8,6 +8,7 @@ namespace Lifestone.Data.Tests.Sky;
 /// research dumps in docs/research/rendering.md §8 ("Data and time", "Sky objects") and docs/research/local-scout.md
 /// (Region 0x13000000 GameTime), both produced by independent Python readers.
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class SkyDescriptionTests(SkyFixture fixture) : IClassFixture<SkyFixture>
 {
     private SkyDescription Sky => fixture.Sky.Sky;

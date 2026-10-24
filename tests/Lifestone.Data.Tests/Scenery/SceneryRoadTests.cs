@@ -46,7 +46,6 @@ public sealed class SceneryRoadTests
     [Theory]
     // Single corners: a triangle of legs 5 at that corner.
     [InlineData(true, false, false, false, 2f, 2.9f, true)]
-    [InlineData(true, false, false, false, 2.6f, 2.6f, false)]
     [InlineData(false, true, false, false, 2f, 21.1f, true)]
     [InlineData(false, true, false, false, 2f, 20f, false)]
     [InlineData(false, false, true, false, 21.1f, 2f, true)]

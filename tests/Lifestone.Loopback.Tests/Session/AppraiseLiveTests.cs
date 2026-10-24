@@ -9,30 +9,33 @@ using Xunit.Abstractions;
 namespace Lifestone.Loopback.Tests.Session;
 
 /// <summary>
-/// M4 3.2 s4c: the appraisal, live, through <see cref="IActionApi.Identify"/> only. WRITTEN AND COMPILED BY THE SLICE, RUN BY THE LEAD: it needs the backend with the Lifestone server mod ready and Holtburg Hunter built
+/// M4 3.2 s4c: the appraisal, live, through <see cref="IActionApi.Identify"/> only. WRITTEN AND COMPILED BY THE SLICE, RUN BY THE LEAD: it needs the backend with the Lifestone server mod ready and Holtburg Archer built (account test-archer)
 /// (<c>--scenario=fighter-build</c>); nothing is created, moved, sold or levelled. One session, about 2 minutes (the log in, one <c>place loc</c> beside Thelnoth with its settle, three Identifies of 1 to 10 ms each in the capture, the log off).
-/// No creature is spawned (D23): the creature is Thelnoth Cort the Healer (an NPC is a Creature in ACE), placed beside the hunter so he is a known object.
+/// No creature is spawned (D23): the creature is Thelnoth Cort the Healer (an NPC is a Creature in ACE), placed beside the archer so he is a known object.
 /// <list type="bullet">
-/// <item>(1) a Handy Healing Kit of the pack (capture C3: flags 0x5, success 1, no profile), (2) the wielded Mace (flags 0x25, the weapon profile) and (3) Thelnoth (flags 0x510D, the creature profile and the armour levels, or a failed roll: ACE sends the
+/// <item>(1) a Handy Healing Kit of the pack (capture C3: flags 0x5, success 1, no profile), (2) the Shortbow of the pack (the weapon profile) and (3) Thelnoth (flags 0x510D, the creature profile and the armour levels, or a failed roll: ACE sends the
 /// tables and withholds the profiles): each <see cref="ActionOutcomeKind.Confirmed"/>, with the 00C9's flags and success printed as <c>appraise &lt;what&gt; flags=0x... success=&lt;0|1&gt; kind=... profile=...</c> and read from the model
 /// (<see cref="IGameSessionView.TryGetAppraisal"/>), never from the handle's own claim.</item>
 /// <item>The counter: an <see cref="AppraisalTally"/> fed the three handles says <c>appraised=3</c> when the creature roll succeeded; a failed roll (never seen yet, <c>TODO(m4-appraise-fail-live)</c>) is a finding, not a failure: the line then says
 /// <c>appraised=2 failed=1</c> with the flags ACE sent, and the test passes if the tables are present and no profile came.</item>
 /// </list>
-/// Prints <c>appraise_live kit=... mace=... thelnoth=... appraised=&lt;n&gt; failed=&lt;n&gt;</c>. Run it alone with <c>dotnet test tests/Lifestone.Loopback.Tests --filter "FullyQualifiedName~AppraiseLiveTests" --logger "console;verbosity=detailed"</c>.
+/// Prints <c>appraise_live kit=... bow=... thelnoth=... appraised=&lt;n&gt; failed=&lt;n&gt;</c>. Run it alone with <c>dotnet test tests/Lifestone.Loopback.Tests --filter "FullyQualifiedName~AppraiseLiveTests" --logger "console;verbosity=detailed"</c>.
 /// </summary>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
+[Trait("Account", "test-archer")]
+[LoopbackCharacter("Holtburg Archer")]
+[LiveSharedSession]
 public sealed class AppraiseLiveTests(ITestOutputHelper output)
 {
     private const string Item = "3-2";
 
     [LoopbackFact]
-    public void Holtburg_Hunter_identifies_a_kit_the_wielded_Mace_and_Thelnoth_and_the_counter_says_appraised_3()
+    public void Holtburg_Archer_identifies_a_kit_the_Shortbow_and_Thelnoth_and_the_counter_says_appraised_3()
     {
         using var dats = DatSet.Open();
         var leg = new AppraiseLeg(output.WriteLine, dats);
-        var result = LiveRun.Run(output, dats, leg, "appraise-hunter", 240, item: Item);
+        var result = LiveRun.Run(output, leg, "appraise-archer", 240, item: Item, character: FighterTemplate.Archer.Name);
         var verdict = leg.VerdictLine();
         output.WriteLine(verdict);
         Assert.True(leg.Problems.Count == 0, "the checks that failed: " + string.Join("; ", leg.Problems) + " | " + verdict);
@@ -49,7 +52,7 @@ public sealed class AppraiseLiveTests(ITestOutputHelper output)
         }
     }
 
-    private sealed class AppraiseLeg(Action<string> log, DatSet dats) : HunterShopLeg("appraise-hunter", log, dats)
+    private sealed class AppraiseLeg(Action<string> log, DatSet dats) : HunterShopLeg("appraise-archer", FighterTemplate.Archer.Name, log, dats)
     {
         private readonly string[] _lines = ["n/a", "n/a", "n/a"];
 
@@ -58,7 +61,7 @@ public sealed class AppraiseLiveTests(ITestOutputHelper output)
         public bool FailedRollHadNoProfile { get; private set; } = true;
 
         public string VerdictLine() =>
-            $"appraise_live kit={_lines[0]} mace={_lines[1]} thelnoth={_lines[2]} appraised={Tally.Appraised} failed={Tally.Failed} cooldowns={Tally.Cooldowns} not_found={Tally.NotFound}";
+            $"appraise_live kit={_lines[0]} bow={_lines[1]} thelnoth={_lines[2]} appraised={Tally.Appraised} failed={Tally.Failed} cooldowns={Tally.Cooldowns} not_found={Tally.NotFound}";
 
         protected override IEnumerable<ActionHandle?> Script()
         {
@@ -68,12 +71,12 @@ public sealed class AppraiseLiveTests(ITestOutputHelper output)
 
             var thelnoth = NpcGuid;
             var kit = InPack(KitWcid).FirstOrDefault();
-            var mace = S.State.Self.Inventory.Equipped.Select(e => e.Guid).FirstOrDefault(g => S.State.Objects.TryGet(g, out var o) && o.Weenie.WeenieClassId == MaceWcid);
+            var bow = HeldOf(FighterTemplate.Archer.Kit.LauncherWcid).FirstOrDefault(); // the Archer rests with the Shortbow in its pack (M4 P4: the Hunter's wielded Mace moved here as the weapon to identify)
             Check(kit != 0, "no Handy Healing Kit in the pack to identify");
-            Check(mace != 0, "the Mace is not wielded: nothing to identify");
+            Check(bow != 0, "the Archer's launcher (the Longbow) is not held: nothing to identify");
             Check(thelnoth != 0, "Thelnoth never came into the object table");
 
-            (string What, uint Guid)[] targets = [("kit", kit), ("mace", mace), ("thelnoth", thelnoth)];
+            (string What, uint Guid)[] targets = [("kit", kit), ("bow", bow), ("thelnoth", thelnoth)];
             for (var i = 0; i < targets.Length; i++)
             {
                 var (what, guid) = targets[i];

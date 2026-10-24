@@ -31,6 +31,7 @@ public sealed class TerrainMeshBuilderTests(DatSetFixture fixture) : IClassFixtu
         AssertWellFormed(mesh);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_mesh_from_dats()
     {
@@ -48,6 +49,7 @@ public sealed class TerrainMeshBuilderTests(DatSetFixture fixture) : IClassFixtu
         Assert.Equal(66f, mesh.Positions[TerrainConstants.VertexIndex(3, 5)].Z);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Holtburg_neighbourhood_shares_edge_heights()
     {

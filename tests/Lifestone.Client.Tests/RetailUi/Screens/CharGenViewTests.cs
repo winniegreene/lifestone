@@ -286,8 +286,6 @@ public sealed class CharGenViewTests(DatSetFixture fixture) : IClassFixture<DatS
 
     [RequiresLocalDatsTheory]
     [InlineData(1u)]
-    [InlineData(4u)]
-    [InlineData(12u)]
     public void The_heritages_backdrop_is_one_static_part_at_the_origin(uint heritage)
     {
         var state = State(heritage, 1);

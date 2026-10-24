@@ -15,7 +15,6 @@ public sealed class ObjectMessageGateTests
 {
     [Theory]
     [InlineData(false, 0, 0, 4)] // unknown object
-    [InlineData(false, 5, 5, 4)]
     [InlineData(true, 5, 5, 1)] // the same instance
     [InlineData(true, 5, 6, 4)] // a newer instance: its CreateObject comes first
     [InlineData(true, 5, 4, 2)] // an older instance

@@ -157,7 +157,7 @@ The indoor views stand at the curated floor points of `InteriorLocations` (docs/
   - global metres;
   - retail map coordinates (none indoors: retail shows none there);
   - ACE's admin command to stand there, e.g. `@teleloc 0xA9B30015 [69.921 110.208 139.000] 0.996917 0 0 -0.078459` (cell, origin, then the quaternion w x y z of the heading). Indoors it names the floor point, e.g. `@teleloc 0x01880307 [30.000 -70.000 0.000] 1.000000 0 0 0.000000`.
-- **Camera:** heading, pitch and vertical field of view (60°).
+- **Camera:** heading, pitch and vertical field of view (60° in explore mode and the video shots, which set their own; play mode draws retail's 73° at 800x600, docs/game-core.md `--fov`).
 - **Time:** the game time, the retail date and time strings, the day fraction and the day group.
 - **Light and fog:** the sun elevation, heading, colour and brightness; the ambient colour and level; the fog range and colour. For a view in a dungeon cell (not seen_outside) the table says "indoor: ambient 0.2, static lights; time of day does not apply" instead (retail lights such cells with 0.2 white ambient and their burned-in static lights, `CellManager::ChangePosition`, docs/interiors.md); `manifest.json` still records the sky's values, as `indoorLighting` beside them. Building interiors keep the outdoor values (seen_outside: the sky lights them).
 - **The resolution.**

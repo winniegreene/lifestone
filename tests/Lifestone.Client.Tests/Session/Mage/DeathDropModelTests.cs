@@ -62,18 +62,13 @@ public sealed class DeathDropModelTests
     }
 
     [Theory]
-    [InlineData(5, 0, 0)]
     [InlineData(10, 0, 0)]
     [InlineData(11, 0, 1)]
-    [InlineData(15, 0, 1)]
     [InlineData(20, 0, 1)]
     [InlineData(21, 1, 3)]
-    [InlineData(25, 1, 3)]
-    [InlineData(40, 2, 4)]
     [InlineData(126, 6, 8)]
     [InlineData(260, 13, 14)]
     [InlineData(280, 14, 14)]
-    [InlineData(400, 14, 14)]
     public void The_count_of_dropped_items_is_zero_up_to_ten_zero_or_one_to_twenty_and_level_over_twenty_plus_zero_to_two_at_most_fourteen(int level, int min, int max)
     {
         Assert.Equal(min, DeathDropModel.MinDrops(level));
@@ -359,6 +354,12 @@ public sealed class DeathDropModelTests
         Assert.Equal(1, without.Above); // the Mana Scarab alone
         Assert.Equal(7, without.Candidates);
 
+        // Eight decoys alone cover the most a death drops at level 126 and the Mana Scarab is the spare (the manaScarab:false corner, folded in by the M4 polish fold).
+        var eightAlone = DeathDropModel.Survives(MageItems(DecoyKit.All, manaScarab: false), 126);
+        Assert.True(eightAlone.Survives, eightAlone.Describe());
+        Assert.Equal(8, eightAlone.Above);
+        Assert.Equal(DeathDropModel.MaxDrops(126), DecoyKit.CountFor(126));
+
         var neither = DeathDropModel.Survives(MageItems([], manaScarab: false), 126);
         Assert.False(neither.Survives);
         Assert.Equal(0, neither.Above);
@@ -379,16 +380,6 @@ public sealed class DeathDropModelTests
         Assert.False(v.Survives, v.Describe());
         Assert.Equal(8897u, v.BestNeededWcid);
         Assert.Equal(11_000, v.BestNeededMax);
-    }
-
-    [Fact]
-    public void Eight_decoys_alone_cover_the_most_a_death_drops_at_level_126_and_the_Mana_Scarab_is_the_spare()
-    {
-        var v = DeathDropModel.Survives(MageItems(DecoyKit.All, manaScarab: false), 126);
-
-        Assert.True(v.Survives, v.Describe());
-        Assert.Equal(8, v.Above);
-        Assert.Equal(DeathDropModel.MaxDrops(126), DecoyKit.CountFor(126));
     }
 
     [Fact]

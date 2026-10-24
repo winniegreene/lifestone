@@ -11,6 +11,7 @@ namespace Lifestone.Client.Tests.Navigation;
 /// teleport panel and the position HUD name a place the same way (review finding: the panel said "indoors" where the HUD
 /// said "indoors (dungeon)", and searching "dungeon" did not list the Underground City).
 /// </summary>
+[Trait("Tier", "Exhaustive")]
 public sealed class CatalogClassificationTests(InteriorsFixture fixture) : IClassFixture<InteriorsFixture>
 {
     [RequiresDatsFact]

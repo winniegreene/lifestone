@@ -309,6 +309,9 @@ public sealed class PlayerDescriptionCodecTests
         Assert.Equal(new GameEventHeader(Player, 9, GameEventTypes.PlayerDescription), handler.Header);
         Assert.Equal("Dispatch", handler.Description!.StringProperties[1]);
 
+        // A trailing byte is malformed too (this test took over the dispatcher table's PlayerDescription row: polish fold data-net-mod).
+        Assert.Equal(DispatchOutcome.Malformed, InboundDispatcher.Dispatch(new InboundContext(5, MessageQueue.Ui, 0), [.. body, 0xAA], handler).Outcome);
+
         var bad = Build(vectorFlags: 0x4, module: static w => Module(w, 0, 0));
         Assert.Equal(DispatchOutcome.Malformed, InboundDispatcher.Dispatch(new InboundContext(4, MessageQueue.Ui, 0), bad, handler).Outcome);
         Assert.StartsWith("F7B0 GameEvent 0x0013 PlayerDescription: vector flag 0x4 (Body)", handler.Malformed);

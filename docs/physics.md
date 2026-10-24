@@ -821,3 +821,33 @@ online player jumps (the controller logs it once per controller, category `movem
 **Frame times.** The routes are planned once when the world around the player is complete (`plan_ms` in the log, about 11 ms:
 the ring is validated against the collision) and that frame is not counted; every frame from the first check to the last is,
 the teleports between checks included. Offscreen the 12000 frames of a run took at most 10.5 ms.
+
+## 16. Wayfinding over the collision (P5a)
+
+The wayfinder (`docs/wayfinding.md` is the reference for it) reads the collision the physics already uses. Nothing here
+changes what the physics does; the wayfinder asks it questions and presses keys through the Action API.
+
+- **The tile from the collision.** `NavTileBuilder` reads only the immutable `LandblockCollision`. The ground is the terrain
+  polygon's plane (`PhysLandCell.FindTerrainPoly`, as `RouteLibrary.TryStand` reads it). The statics are the physics BSP
+  parts' boxes, taken in retail's order (`CPhysicsObj::FindObjCollisions` 11.6096 0x0050FB20), inflated by the body radius
+  0.48 and a margin 0.1 (0.58 m). The buildings are the shell's collision polygons projected on the ground. The doorway lanes
+  come from the portal polygons (`PhysCellPortal.Vertices`, cell-local, new in P5a). `LandblockCollision.IsWater(ushort)` is
+  public: the water test of a terrain word (ACE's types 16-20). Collision itself still uses only the portal plane.
+- **The confirmation by TryGroundZ and the placement probe.** `RouteConfirmer` checks every route before a key is pressed.
+  Every metre it calls `PhysicsWorld.TryGroundZ` with the body's foot sphere, from the previous sample's z (the step rule is
+  `CTransition::step_down`'s 0.6 m up and 0.6 m down window). Every 2 m it places the player's Setup
+  (`PhysicsObj.SetPosition(Placement)`, the `TryStand` pattern) 0.05 m above the ground found, at most 0.5 m sideways. The
+  probe body is a non-player-killer that no player blocks, and it leaves the world after each call. The cost is 9 to 13
+  microseconds a metre (Debug).
+- **The run key through `MoveIntents.Bind`.** Retail's run key is inverted by the character's run-by-default option
+  (`CommandInterpreter::SetHoldRun`, 11.6096 0x006B42B0: the motion's run key is the key XOR the option). A scripted walk
+  therefore holds the key only when its wish differs from the option. `MoveIntents.Bind(controller, runByDefault)` supplies
+  the option, and `HoldRun(run != RunByDefault)` applies it. `RouteDriver` now reads the option live, where before it assumed
+  "off" (so a Godot walk with the option on would have walked the whole route).
+- **The corridor streamer.** `CollisionStreamer.SetCorridor(ahead, keepBehind)` keeps the landblocks ahead of the body
+  attached, with a trail behind. `SetFocus` keeps its old focus while the body is in the edge row or column of the next
+  landblock. `HeadlessStreamer` pumps the landblock builds on `WorkerPool(2)` under a 4 ms `FrameBudgetScheduler`, and each
+  attached landblock's `NavTile` is built on a worker. The belt run peaked at 12 landblocks and 12 tiles.
+
+The planner, the room graph, the runner, the ladder, the streamer's numbers and the `wayfind` scenario are in
+`docs/wayfinding.md`.

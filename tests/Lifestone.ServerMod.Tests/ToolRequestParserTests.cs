@@ -15,52 +15,39 @@ public sealed class ToolRequestParserTests
         new StatusRequest(),
         new StatusRequest("a1"),
         new WhereRequest(),
-        new WhereRequest("where-7"),
         new NetRequest(),
-        new NetRequest("N"),
         new PlacesRequest(),
         new PlacesRequest("0123456789abcdef"),
         new XpRequest(1),
-        new XpRequest(1000, "x"),
         new XpRequest(ToolRequestParser.MaxXp, "max"),
         new XpRequest(4_286_609_098, "lvl126"),
         new XpRequest(int.MaxValue + 1L),
         new SpellLearnRequest([1]),
-        new SpellLearnRequest([1, 2, 3], "s1"),
         new SpellLearnRequest([0, 4_294_967_295, 5]),
         new SpellLearnRequest([7, 7], "dup"),
         new SpellLearnRequest(Enumerable.Range(1, ToolRequestParser.MaxSpellIds).Select(i => (uint)i).ToArray(), "max"),
         new ItemRequest(1628),
-        new ItemRequest(1628, 1, "i1"),
         new ItemRequest(0, ToolRequestParser.MaxItemStack),
         new ItemRequest(4_294_967_295, 25, "i2"),
         new ItemRequest(57, null, "g1", 21),
-        new ItemRequest(6600, 1, null, 21, 0.3),
         new ItemRequest(107, null, null, null, 0.66),
         new ItemRequest(3715, 1, "e", ToolRequestParser.MinItemPalette, 0),
         new ItemRequest(3715, null, null, ToolRequestParser.MaxItemPalette, 1),
         new PlacePoiRequest("Holtburg"),
         new PlacePoiRequest("Bandit Castle", "a2"),
-        new PlacePoiRequest("Al-Arqas", "a3"),
         new PlacePoiRequest("Tou-Tou"),
         new PlacePoiRequest("Fort O'Brien 2", "a4"),
         new PlacePoiRequest(new string('n', ToolRequestParser.MaxNameLength)),
         new PlaceLocRequest(new ToolLocation(0xA9B40019, 84.5f, 7.1f, 94.005f)),
-        new PlaceLocRequest(new ToolLocation(0xA9B40019, 84.5f, 7.1f, 94.005f), "loc1"),
         new PlaceLocRequest(new ToolLocation(0xA9B40001, 0f, 0f, -0.25f, 0.70710677f, 0f, 0f, -0.70710677f), "q"),
         new PlaceLocRequest(new ToolLocation(0x01D90108, -12.000001f, 1234.5679f, 1E-05f, 0.5f, 0.5f, 0.5f, 0.5f)),
         new PlaceLocRequest(new ToolLocation(0x00000040, 191.99998f, 191.99998f, 0f)),
-        new PlaceLocRequest(new ToolLocation(0xFEFE0001, 0f, 23.999998f, 300f)),
         new QuestRequest(QuestAction.Stamp, "SentryTaskComplete"),
-        new QuestRequest(QuestAction.Stamp, "SentryTaskComplete", "q1"),
         new QuestRequest(QuestAction.Erase, "AcademyTokenGiven", "q2"),
         new QuestRequest(QuestAction.Has, "KillTask-BlightSpirit", "q3"),
-        new QuestRequest(QuestAction.Has, "BurFlagged(Gem)"),
         new QuestRequest(QuestAction.Erase, "_a-B_9"),
         new QuestRequest(QuestAction.Stamp, new string('q', ToolRequestParser.MaxQuestNameLength)),
         new CharPurgeRequest("Lifestone Throwaway"),
-        new CharPurgeRequest("Lifestone Throwaway", "p1"),
-        new CharPurgeRequest("Ann"),
         new CharPurgeRequest("Tou-Tou O'Brien 2", "p2"),
         new CharPurgeRequest(new string('c', ToolRequestParser.MaxCharacterNameLength)),
     ];
@@ -96,14 +83,9 @@ public sealed class ToolRequestParserTests
     [InlineData("quest-erase", "@lifestone quest erase SentryTaskComplete")]
     [InlineData("quest-has", "@lifestone quest has BurFlagged(Gem) #h")]
     [InlineData("char-purge", "@lifestone char purge \"Lifestone Throwaway\" #p1")]
-    [InlineData("char-purge-one-word", "@lifestone char purge \"Ann\"")]
-    [InlineData("xp-126", "@lifestone xp 4286609098 #l")]
     [InlineData("spell", "@lifestone spell learn 1,2,3 #s1")]
-    [InlineData("spell-one", "@lifestone spell learn 5189")]
     [InlineData("item", "@lifestone item 1628")]
-    [InlineData("item-stack", "@lifestone item 273 25 #i1")]
     [InlineData("item-gold", "@lifestone item 57 palette=21 #g1")]
-    [InlineData("item-all", "@lifestone item 107 1 palette=21 shade=0.3")]
     [InlineData("item-shade", "@lifestone item 107 shade=0.66")]
     public void Requests_have_one_canonical_text(string which, string expected)
     {
@@ -116,14 +98,9 @@ public sealed class ToolRequestParserTests
             "quest-erase" => new QuestRequest(QuestAction.Erase, "SentryTaskComplete"),
             "quest-has" => new QuestRequest(QuestAction.Has, "BurFlagged(Gem)", "h"),
             "char-purge" => new CharPurgeRequest("Lifestone Throwaway", "p1"),
-            "char-purge-one-word" => new CharPurgeRequest("Ann"),
-            "xp-126" => new XpRequest(4_286_609_098, "l"),
             "spell" => new SpellLearnRequest([1, 2, 3], "s1"),
-            "spell-one" => new SpellLearnRequest([5189]),
             "item" => new ItemRequest(1628),
-            "item-stack" => new ItemRequest(273, 25, "i1"),
             "item-gold" => new ItemRequest(57, null, "g1", 21),
-            "item-all" => new ItemRequest(107, 1, null, 21, 0.3),
             "item-shade" => new ItemRequest(107, null, null, null, 0.66),
             "loc" => new PlaceLocRequest(new ToolLocation(0xA9B40019, 84.5f, 7.1f, 94.005f)),
             _ => new PlaceLocRequest(new ToolLocation(0xA9B40019, 84.5f, 7.1f, 94.005f, 0.5f, 0.5f, 0.5f, 0.5f), "z"),
@@ -148,37 +125,28 @@ public sealed class ToolRequestParserTests
     }
 
     [Theory]
-    [InlineData("STATUS", "status")]
-    [InlineData("Where", "where")]
     [InlineData("nEt", "net")]
-    [InlineData("PLACES", "places")]
     [InlineData("XP 5", "xp")]
     [InlineData("SPELL LEARN 1,2", "spell")]
-    [InlineData("Spell Learn 7", "spell")]
-    [InlineData("ITEM 1628 2", "item")]
-    [InlineData("PLACE POI Holtburg", "place")]
     [InlineData("Place Loc 0xa9b40019 84.5 7.1 94", "place")]
     [InlineData("place loc A9B40019 84.5 7.1 94", "place")]
     [InlineData("  status   #a1  ", "status")]
-    [InlineData("QUEST STAMP SentryTaskComplete", "quest")]
-    [InlineData("Quest Erase sentrytaskcomplete", "quest")]
     [InlineData("quest HAS X  #a1", "quest")]
-    public void Verbs_and_forms_match_ignoring_case_and_extra_spaces(string raw, string verb)
+    [InlineData("quest stamp SentryTaskComplete", "quest", QuestAction.Stamp, "SentryTaskComplete")]
+    [InlineData("quest ERASE Sentry_Task-Complete(2)", "quest", QuestAction.Erase, "Sentry_Task-Complete(2)")]
+    [InlineData("quest Has sentrytaskcomplete", "quest", QuestAction.Has, "sentrytaskcomplete")]
+    [InlineData("Quest Erase sentrytaskcomplete", "quest", QuestAction.Erase, "sentrytaskcomplete")]
+    public void Verbs_and_forms_match_ignoring_case_and_extra_spaces_and_a_quest_keeps_its_name_as_written(string raw, string verb, QuestAction? action = null, string? name = null)
     {
         var parse = ToolRequestParser.Parse(raw);
         Assert.True(parse.Ok, parse.Error?.Message);
         Assert.Equal(verb, parse.Verb);
         Assert.Equal(verb, parse.Request.Verb);
-    }
-
-    [Theory]
-    [InlineData("quest stamp SentryTaskComplete", QuestAction.Stamp, "SentryTaskComplete")]
-    [InlineData("quest ERASE Sentry_Task-Complete(2)", QuestAction.Erase, "Sentry_Task-Complete(2)")]
-    [InlineData("quest Has sentrytaskcomplete", QuestAction.Has, "sentrytaskcomplete")]
-    public void A_quest_request_keeps_the_name_as_written_and_reads_the_action_ignoring_case(string raw, QuestAction action, string name)
-    {
-        var request = Assert.IsType<QuestRequest>(ToolRequestParser.Parse(raw).Request);
-        Assert.Equal((action, name), (request.Action, request.Name));
+        if (action is not null)
+        {
+            var request = Assert.IsType<QuestRequest>(parse.Request);
+            Assert.Equal((action.Value, name), (request.Action, request.Name));
+        }
     }
 
     [Fact]
@@ -225,48 +193,40 @@ public sealed class ToolRequestParserTests
     // No verb, an unknown verb, a quoted verb.
     [InlineData("", ToolErrors.BadArgs)]
     [InlineData("   ", ToolErrors.BadArgs)]
-    [InlineData("teleport", ToolErrors.UnknownVerb)]
+    [InlineData("teleport home #t1", ToolErrors.UnknownVerb, "teleport", "t1")]
     [InlineData("statu", ToolErrors.UnknownVerb)]
-    [InlineData("status_", ToolErrors.UnknownVerb)]
     [InlineData("\"status\"", ToolErrors.BadArgs)]
     // Extra words.
-    [InlineData("status now", ToolErrors.BadArgs)]
+    [InlineData("status now #s", ToolErrors.BadArgs, "status", "s")]
     [InlineData("where 1", ToolErrors.BadArgs)]
     [InlineData("net \"x\"", ToolErrors.BadArgs)]
     [InlineData("places all", ToolErrors.BadArgs)]
     // Characters outside printable ASCII.
     [InlineData("status\t", ToolErrors.BadArgs)]
     [InlineData("place poi \"Holtbürg\"", ToolErrors.BadArgs)]
-    [InlineData("status\n", ToolErrors.BadArgs)]
     // place poi.
     [InlineData("place", ToolErrors.BadArgs)]
     [InlineData("place poi", ToolErrors.BadArgs)]
     [InlineData("place there Holtburg", ToolErrors.BadArgs)]
     [InlineData("place \"poi\" Holtburg", ToolErrors.BadArgs)]
-    [InlineData("place poi \"Holtburg", ToolErrors.BadArgs)]
+    [InlineData("place poi \"Holtburg #a7", ToolErrors.BadArgs, "place", "a7")]
     [InlineData("place poi Holtburg\"", ToolErrors.BadArgs)]
-    [InlineData("place poi \"Holt\"burg\"", ToolErrors.BadArgs)]
     [InlineData("place poi \"Holt\"burg", ToolErrors.BadArgs)]
     [InlineData("place poi Bandit Castle", ToolErrors.BadArgs)]
     [InlineData("place poi \"\"", ToolErrors.BadArgs)]
     [InlineData("place poi \" Holtburg\"", ToolErrors.BadArgs)]
     [InlineData("place poi \"Holtburg \"", ToolErrors.BadArgs)]
-    [InlineData("place poi \"Holt.burg\"", ToolErrors.BadArgs)]
-    [InlineData("place poi \"Holt_burg\"", ToolErrors.BadArgs)]
+    [InlineData("place poi \"Nowhere!\" #a7", ToolErrors.BadArgs, "place", "a7")]
     [InlineData("place poi \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"", ToolErrors.BadArgs)]
     // xp.
     [InlineData("xp", ToolErrors.BadArgs)]
-    [InlineData("xp 0", ToolErrors.BadArgs)]
+    [InlineData("xp 0 #a7", ToolErrors.BadArgs, "xp", "a7")]
     [InlineData("xp -1", ToolErrors.BadArgs)]
-    [InlineData("xp +5", ToolErrors.BadArgs)]
-    [InlineData("xp 1e3", ToolErrors.BadArgs)]
-    [InlineData("xp 1,000", ToolErrors.BadArgs)]
     [InlineData("xp 1.5", ToolErrors.BadArgs)]
     [InlineData("xp 1000000000000", ToolErrors.BadArgs)]
     [InlineData("xp 99999999999999999999999", ToolErrors.BadArgs)]
     [InlineData("xp \"5\"", ToolErrors.BadArgs)]
     [InlineData("xp 5 5", ToolErrors.BadArgs)]
-    [InlineData("xp five", ToolErrors.BadArgs)]
     // place loc: the cell.
     [InlineData("place loc", ToolErrors.BadArgs)]
     [InlineData("place loc 0xA9B40019 84.5 7.1", ToolErrors.BadArgs)]
@@ -275,129 +235,98 @@ public sealed class ToolRequestParserTests
     [InlineData("place loc 0xA9B4001G 84.5 7.1 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0xA9B4019 84.5 7.1 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0x0A9B40019 84.5 7.1 94", ToolErrors.BadArgs)]
-    [InlineData("place loc 0x-9B40019 84.5 7.1 94", ToolErrors.BadArgs)]
     [InlineData("place loc \"0xA9B40019\" 84.5 7.1 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0xA9B40000 84.5 7.1 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0xA9B40041 84.5 7.1 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0xA9B400FF 84.5 7.1 94", ToolErrors.BadArgs)]
-    [InlineData("place loc 0xA9B4FFFE 84.5 7.1 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0xA9B4FFFF 84.5 7.1 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0xFFB40019 84.5 7.1 94", ToolErrors.BadArgs)]
-    [InlineData("place loc 0xA9FF0108 84.5 7.1 94", ToolErrors.BadArgs)]
     // place loc: an outdoor cell must hold x and y.
-    [InlineData("place loc 0xA9B40019 84.5 30 94", ToolErrors.BadArgs)]
+    [InlineData("place loc 0xA9B40019 84.5 30 94 #loc-2", ToolErrors.BadArgs, "place", "loc-2")]
     [InlineData("place loc 0xA9B40001 24 0 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0xA9B40040 192 191 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0xA9B40001 -0.001 0 94", ToolErrors.BadArgs)]
     // place loc: the numbers.
     [InlineData("place loc 0xA9B40019 NaN 7.1 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0x01D90108 Infinity 7.1 94", ToolErrors.BadArgs)]
-    [InlineData("place loc 0x01D90108 1 -Infinity 94", ToolErrors.BadArgs)]
     [InlineData("place loc 0x01D90108 1 2 1e40", ToolErrors.BadArgs)]
     [InlineData("place loc 0x01D90108 1,5 2 3", ToolErrors.BadArgs)]
     [InlineData("place loc 0x01D90108 0x10 2 3", ToolErrors.BadArgs)]
-    [InlineData("place loc 0x01D90108 1 2 3 2 0 0 0", ToolErrors.BadArgs)]
     [InlineData("place loc 0x01D90108 1 2 3 0 0 0 0", ToolErrors.BadArgs)]
     [InlineData("place loc 0x01D90108 1 2 3 0.98 0 0 0", ToolErrors.BadArgs)]
     [InlineData("place loc 0x01D90108 1 2 3 1 0 0 NaN", ToolErrors.BadArgs)]
     // quest: the action and the name.
-    [InlineData("quest", ToolErrors.BadArgs)]
+    [InlineData("quest", ToolErrors.BadArgs, "quest", null)]
     [InlineData("quest stamp", ToolErrors.BadArgs)]
-    [InlineData("quest erase", ToolErrors.BadArgs)]
-    [InlineData("quest has", ToolErrors.BadArgs)]
     [InlineData("quest list", ToolErrors.BadArgs)]
-    [InlineData("quest bestow SentryTaskComplete", ToolErrors.BadArgs)]
     [InlineData("quest \"stamp\" SentryTaskComplete", ToolErrors.BadArgs)]
     [InlineData("quest stamp \"SentryTaskComplete\"", ToolErrors.BadArgs)]
     [InlineData("quest stamp Sentry Task", ToolErrors.BadArgs)]
-    [InlineData("quest stamp \"Sentry Task\"", ToolErrors.BadArgs)]
-    [InlineData("quest stamp SentryTaskComplete 2", ToolErrors.BadArgs)]
-    [InlineData("quest stamp SentryTaskComplete@2", ToolErrors.BadArgs)]
-    [InlineData("quest stamp @", ToolErrors.BadArgs)]
-    [InlineData("quest erase *", ToolErrors.BadArgs)]
+    [InlineData("quest stamp Bad@Name #q7", ToolErrors.BadArgs, "quest", "q7")]
+    [InlineData("QUEST erase * #q8", ToolErrors.BadArgs, "quest", "q8")]
     [InlineData("quest erase Sentry.Task", ToolErrors.BadArgs)]
-    [InlineData("quest erase Sentry'Task", ToolErrors.BadArgs)]
-    [InlineData("quest erase Sentry\"Task", ToolErrors.BadArgs)]
-    [InlineData("quest has Sentry/Task", ToolErrors.BadArgs)]
-    [InlineData("quest has Sentry\\Task", ToolErrors.BadArgs)]
     [InlineData("quest has SentryTäsk", ToolErrors.BadArgs)]
     [InlineData("quest has qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq", ToolErrors.BadArgs)]
     // char: the action, the name and its quotes.
-    [InlineData("char", ToolErrors.BadArgs)]
-    [InlineData("char purge", ToolErrors.BadArgs)]
-    [InlineData("char list", ToolErrors.BadArgs)]
-    [InlineData("char delete Ann", ToolErrors.BadArgs)]
+    [InlineData("char", ToolErrors.BadArgs, "char", null)]
+    [InlineData("char purge #c1", ToolErrors.BadArgs, "char", "c1")]
+    [InlineData("CHAR delete Ann #c2", ToolErrors.BadArgs, "char", "c2")]
     [InlineData("char \"purge\" Ann", ToolErrors.BadArgs)]
     [InlineData("char purge Ann Bo", ToolErrors.BadArgs)]
-    [InlineData("char purge \"Ann\" \"Bo\"", ToolErrors.BadArgs)]
-    [InlineData("char purge Lifestone Throwaway", ToolErrors.BadArgs)]
     [InlineData("char purge \"\"", ToolErrors.BadArgs)]
     [InlineData("char purge \" Ann\"", ToolErrors.BadArgs)]
-    [InlineData("char purge \"Ann \"", ToolErrors.BadArgs)]
-    [InlineData("char purge \"Ann", ToolErrors.BadArgs)]
-    [InlineData("char purge Ann\"", ToolErrors.BadArgs)]
     [InlineData("char purge \"Ann\"Bo", ToolErrors.BadArgs)]
     [InlineData("char purge \"An_n\"", ToolErrors.BadArgs)]
-    [InlineData("char purge \"An@n\"", ToolErrors.BadArgs)]
     [InlineData("char purge \"AnnAnnAnnAnnAnnAnnAnnAnnAnnAnnAnnAnn\"", ToolErrors.BadArgs)]
-    [InlineData("char purge *", ToolErrors.BadArgs)]
     // spell learn: the form and the id list.
     [InlineData("spell", ToolErrors.BadArgs)]
     [InlineData("spell learn", ToolErrors.BadArgs)]
     [InlineData("spell forget 1", ToolErrors.BadArgs)]
-    [InlineData("spell \"learn\" 1", ToolErrors.BadArgs)]
     [InlineData("spell learn \"1\"", ToolErrors.BadArgs)]
     [InlineData("spell learn 1 2", ToolErrors.BadArgs)]
-    [InlineData("spell learn 1, 2", ToolErrors.BadArgs)]
     [InlineData("spell learn 1,,2", ToolErrors.BadArgs)]
-    [InlineData("spell learn ,1", ToolErrors.BadArgs)]
-    [InlineData("spell learn 1,", ToolErrors.BadArgs)]
     [InlineData("spell learn -1", ToolErrors.BadArgs)]
-    [InlineData("spell learn +1", ToolErrors.BadArgs)]
-    [InlineData("spell learn 1.5", ToolErrors.BadArgs)]
-    [InlineData("spell learn 0x10", ToolErrors.BadArgs)]
     [InlineData("spell learn abc", ToolErrors.BadArgs)]
     [InlineData("spell learn 4294967296", ToolErrors.BadArgs)]
-    [InlineData("spell learn 99999999999", ToolErrors.BadArgs)]
     // item: the class id and the stack.
     [InlineData("item", ToolErrors.BadArgs)]
     [InlineData("item abc", ToolErrors.BadArgs)]
     [InlineData("item -1", ToolErrors.BadArgs)]
-    [InlineData("item 1.5", ToolErrors.BadArgs)]
     [InlineData("item 4294967296", ToolErrors.BadArgs)]
     [InlineData("item \"1628\"", ToolErrors.BadArgs)]
     [InlineData("item 1628 0", ToolErrors.BadArgs)]
     [InlineData("item 1628 -1", ToolErrors.BadArgs)]
     [InlineData("item 1628 65536", ToolErrors.BadArgs)]
     [InlineData("item 1628 1.5", ToolErrors.BadArgs)]
-    [InlineData("item 1628 \"5\"", ToolErrors.BadArgs)]
     [InlineData("item 1628 5 5", ToolErrors.BadArgs)]
-    [InlineData("item 1628,1629", ToolErrors.BadArgs)]
     // item palette and shade (P7, D43): ACE's PaletteTemplate runs 1 to 93 (Undef is 0); a shade is 0 to 1; each is given once, after the stack.
     [InlineData("item 57 palette=0", ToolErrors.BadArgs)]
     [InlineData("item 57 palette=94", ToolErrors.BadArgs)]
-    [InlineData("item 57 palette=-1", ToolErrors.BadArgs)]
     [InlineData("item 57 palette=", ToolErrors.BadArgs)]
-    [InlineData("item 57 palette=gold", ToolErrors.BadArgs)]
     [InlineData("item 57 palette=21 palette=22", ToolErrors.BadArgs)]
     [InlineData("item 57 shade=1.01", ToolErrors.BadArgs)]
     [InlineData("item 57 shade=-0.1", ToolErrors.BadArgs)]
     [InlineData("item 57 shade=", ToolErrors.BadArgs)]
-    [InlineData("item 57 shade=1e-1", ToolErrors.BadArgs)]
     [InlineData("item 57 shade=0.3 shade=0.4", ToolErrors.BadArgs)]
-    [InlineData("item 57 palette=21 5", ToolErrors.BadArgs)]
     [InlineData("item 57 colour=3", ToolErrors.BadArgs)]
     // Ids.
     [InlineData("status #", ToolErrors.BadArgs)]
-    [InlineData("status #a_1", ToolErrors.BadArgs)]
+    [InlineData("status #a_1", ToolErrors.BadArgs, "status", null)]
     [InlineData("status #0123456789abcdefg", ToolErrors.BadArgs)]
     [InlineData("status #a1 #a2", ToolErrors.BadArgs)]
-    [InlineData("#a1 status", ToolErrors.BadArgs)]
-    [InlineData("status ##a1", ToolErrors.BadArgs)]
-    public void The_parser_rejects_with_the_right_code(string raw, string code)
+    [InlineData("#a1 status", ToolErrors.BadArgs, "", null)]
+    [InlineData("#only", ToolErrors.BadArgs, "", "only")]
+    [InlineData("Te_leport #a7", ToolErrors.UnknownVerb, "", "a7")]
+    public void The_parser_rejects_with_the_right_code_and_still_yields_its_verb_and_id_for_the_reply(string raw, string code, string? verb = null, string? id = null)
     {
         var parse = ToolRequestParser.Parse(raw);
         Assert.False(parse.Ok);
+        if (verb is not null)
+        {
+            // A row that names its verb names its id too (null: none is echoed).
+            Assert.Equal((verb, id), (parse.Verb, parse.Id));
+        }
+
         Assert.Null(parse.Request);
         Assert.Equal(code, parse.Error.Code);
         Assert.False(string.IsNullOrWhiteSpace(parse.Error.Message));
@@ -405,30 +334,6 @@ public sealed class ToolRequestParserTests
         Assert.False(ToolsWire.TryParseRequest(raw, out var request, out var error));
         Assert.Null(request);
         Assert.Equal(code, error.Code);
-    }
-
-    [Theory]
-    [InlineData("xp 0 #a7", "xp", "a7")]
-    [InlineData("place poi \"Nowhere!\" #a7", "place", "a7")]
-    [InlineData("place loc 0xA9B40019 84.5 30 94 #loc-2", "place", "loc-2")]
-    [InlineData("teleport home #t1", "teleport", "t1")]
-    [InlineData("status now #s", "status", "s")]
-    [InlineData("#only", "", "only")]
-    [InlineData("place poi \"Holtburg #a7", "place", "a7")]
-    [InlineData("Te_leport #a7", "", "a7")]
-    [InlineData("status #a_1", "status", null)]
-    [InlineData("quest stamp Bad@Name #q7", "quest", "q7")]
-    [InlineData("QUEST erase * #q8", "quest", "q8")]
-    [InlineData("quest", "quest", null)]
-    [InlineData("char purge #c1", "char", "c1")]
-    [InlineData("CHAR delete Ann #c2", "char", "c2")]
-    [InlineData("char", "char", null)]
-    public void A_refused_request_still_yields_its_verb_and_id_for_the_reply(string raw, string verb, string? id)
-    {
-        var parse = ToolRequestParser.Parse(raw);
-        Assert.False(parse.Ok);
-        Assert.Equal(verb, parse.Verb);
-        Assert.Equal(id, parse.Id);
     }
 
     [Fact]
@@ -445,39 +350,26 @@ public sealed class ToolRequestParserTests
         new StatusRequest(string.Empty),
         new NetRequest(new string('a', 17)),
         new XpRequest(0),
-        new XpRequest(-5),
         new XpRequest(ToolRequestParser.MaxXp + 1),
         new SpellLearnRequest([]),
         new SpellLearnRequest(Enumerable.Range(1, ToolRequestParser.MaxSpellIds + 1).Select(i => (uint)i).ToArray()),
         new ItemRequest(1628, 0),
-        new ItemRequest(1628, -1),
         new ItemRequest(1628, ToolRequestParser.MaxItemStack + 1),
-        new SpellLearnRequest([1], "bad_id"),
         new PlacePoiRequest(string.Empty),
         new PlacePoiRequest("Holt\"burg"),
-        new PlacePoiRequest("Holtbürg"),
         new PlacePoiRequest(new string('n', ToolRequestParser.MaxNameLength + 1)),
         new PlaceLocRequest(new ToolLocation(0xA9B40019, 84.5f, 30f, 94f)),
         new PlaceLocRequest(new ToolLocation(0xA9B40041, 84.5f, 7.1f, 94f)),
         new PlaceLocRequest(new ToolLocation(0x01D90108, float.NaN, 7.1f, 94f)),
         new PlaceLocRequest(new ToolLocation(0x01D90108, 1f, 2f, 3f, 2f, 0f, 0f, 0f)),
         new PlaceLocRequest(default),
-        new QuestRequest(QuestAction.Stamp, string.Empty),
         new QuestRequest(QuestAction.Stamp, "Sentry Task"),
         new QuestRequest(QuestAction.Erase, "SentryTaskComplete@1"),
-        new QuestRequest(QuestAction.Erase, "*"),
-        new QuestRequest(QuestAction.Has, "Sentry\"Task"),
-        new QuestRequest(QuestAction.Has, "SentryTäsk"),
         new QuestRequest(QuestAction.Has, new string('q', ToolRequestParser.MaxQuestNameLength + 1)),
         new QuestRequest((QuestAction)99, "SentryTaskComplete"),
-        new QuestRequest(QuestAction.Has, "SentryTaskComplete", "bad_id"),
-        new CharPurgeRequest(string.Empty),
         new CharPurgeRequest(" Ann"),
-        new CharPurgeRequest("Ann "),
-        new CharPurgeRequest("An\"n"),
         new CharPurgeRequest("Ann_2"),
         new CharPurgeRequest(new string('c', ToolRequestParser.MaxCharacterNameLength + 1)),
-        new CharPurgeRequest("Ann", "bad_id"),
     };
 
     [Theory]

@@ -73,6 +73,7 @@ public sealed class PaletteOverrideTests(DatSetFixture fixture) : IClassFixture<
         Assert.False(new PaletteOverride(0, [new SubPalette(2, 0, 8)]).TryBuild(id => palettes.GetValueOrDefault(id), out _, out _));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Clothing_table_ranges_are_whole_wire_units_inside_2048_colours()
     {
@@ -101,6 +102,7 @@ public sealed class PaletteOverrideTests(DatSetFixture fixture) : IClassFixture<
         Assert.True(ranges > 1000, $"only {ranges} ranges");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void A_clothing_palette_swap_recolours_exactly_the_indices_in_its_ranges()
     {
@@ -135,6 +137,7 @@ public sealed class PaletteOverrideTests(DatSetFixture fixture) : IClassFixture<
         Assert.True(recoloured > 0, "no texel fell in the swapped ranges; pick another sample");
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void PaletteSet_shade_lookup_matches_retail_formula()
     {
@@ -149,6 +152,7 @@ public sealed class PaletteOverrideTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal(0u, PaletteSets.GetPaletteId(set, double.NaN));
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Dat_palettes_have_2048_opaque_entries()
     {

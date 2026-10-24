@@ -11,6 +11,7 @@ namespace Lifestone.Data.Tests.World;
 /// </summary>
 public sealed class RegionSoundDataTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_end_of_retail_region_has_37_ambient_tables_and_32_terrain_types_and_the_first_table_is_pinned()
     {
@@ -31,6 +32,7 @@ public sealed class RegionSoundDataTests(DatSetFixture fixture) : IClassFixture<
         Assert.False(first.Sounds[8].IsConstant);
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void Every_playable_table_names_a_sound_table_the_dat_holds_and_every_constant_sound_has_a_repeat_interval()
     {
@@ -51,6 +53,7 @@ public sealed class RegionSoundDataTests(DatSetFixture fixture) : IClassFixture<
         }
     }
 
+    [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
     public void The_terrain_lookup_follows_the_scene_slot_to_its_table()
     {
