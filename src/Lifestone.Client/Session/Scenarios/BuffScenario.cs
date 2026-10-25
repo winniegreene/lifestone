@@ -256,8 +256,14 @@ public sealed class BuffScenario : IScenario
         var mana = best?.ManaMin is { } m ? m.ToString(CultureInfo.InvariantCulture) : "n/a";
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{Token(gear, "gear")} {Token(gear, "worn")} buffs={best?.Active ?? 0}/{best?.Wanted ?? _wanted} levels={(best is null ? "n/a" : best.Levels)} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(_forcedLanded ? "yes" : "no")} min_remaining_s={min} transfers={best?.TransfersFired ?? 0}/{best?.TransfersTried ?? 0} revitalizes={best?.Revitalizes ?? 0} fizzles={best?.Fizzles ?? 0} mana_min={mana} cycle_s={Math.Floor(_first?.CycleSeconds ?? 0).ToString("0", CultureInfo.InvariantCulture)} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={_first?.Surpassed ?? 0}{DriverFields()}{SwapVerdict()}");
+            $"{Token(gear, "gear")} {Token(gear, "worn")} buffs={best?.Active ?? 0}/{best?.Wanted ?? _wanted} levels={(best is null ? "n/a" : best.Levels)} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(_forcedLanded ? "yes" : "no")} min_remaining_s={min} transfers={best?.TransfersFired ?? 0}/{best?.TransfersTried ?? 0} revitalizes={best?.Revitalizes ?? 0} fizzles={best?.Fizzles ?? 0} mana_min={mana} cycle_s={Math.Floor(_first?.CycleSeconds ?? 0).ToString("0", CultureInfo.InvariantCulture)} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={_first?.Surpassed ?? 0}{DriverFields()}{SwapVerdict()}{BarsField()}");
     }
+
+    /// <summary>
+    /// <c> bars=&lt;set:n|ok|n/a&gt;</c> when this run has a spell bars step (the mage's leg and journey), else nothing (the fighters', the tests'): the journey's buff station line carries it
+    /// to the gate's report-only <c>bars=</c> (M4 P5b fix FA, review section 2 item 5; a second run sends nothing, <c>bars=ok</c>).
+    /// </summary>
+    private string BarsField() => _bars is null ? string.Empty : " bars=" + _bars.Note;
 
     private string SwapVerdict() => _fighter is null ? string.Empty : " " + (_swap?.Fields ?? "swapped=no swap_s=0.0");
 

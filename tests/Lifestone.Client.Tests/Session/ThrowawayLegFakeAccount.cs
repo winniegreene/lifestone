@@ -157,7 +157,15 @@ internal sealed class ThrowawayLegFakeAccount : IGameSessionView, IActionApi, IT
         return Handle(ActionKind.SelectCharacter, source, "select");
     }
 
-    public ActionHandle CreateCharacter(CharacterCreateIntent intent, ActionSource source) => throw new NotSupportedException("the leg creates through the screens");
+    /// <summary>The characters made through the Action API (M4 D43: only the purge caller; the leg creates the throwaway through the screens).</summary>
+    public List<string> CreatedByApi { get; } = [];
+
+    public ActionHandle CreateCharacter(CharacterCreateIntent intent, ActionSource source)
+    {
+        CreatedByApi.Add(intent.Name);
+        Add(_nextGuid++, intent.Name, pending: false);
+        return Handle(ActionKind.CreateCharacter, source, "create");
+    }
 
     public ActionHandle DeleteCharacter(uint guid, ActionSource source)
     {
@@ -311,6 +319,8 @@ internal sealed class ThrowawayLegFakeAccount : IGameSessionView, IActionApi, IT
     public bool KillSwitch { get; set; }
 
     public bool DryRun { get; set; }
+
+    public string? BusyReason => null;
 
     /// <summary>The purge the leg asks for: the throwaway must be pending deletion, and it leaves the list at the next log off (as ACE sends the list then).</summary>
     public ToolHandle<CharPurgeResult> Purge(IGameSessionView session, string name)

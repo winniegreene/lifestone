@@ -470,6 +470,9 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
     /// </summary>
     public void Step(double now)
     {
+        // M4 P5b (TODO(m4-throwaway-teleport-frame)): the collection a held no-GC window's end left pending (it gives gen 0 its normal budget back), run before this step's clock: the window keeps
+        // collections out of the UI steps, its own closing one included.
+        GamePlayScreen.RunPendingNoGcWindowClose();
         var stepStart = Stopwatch.GetTimestamp();
         _offline?.Step(now);
         Manager.Update(now);

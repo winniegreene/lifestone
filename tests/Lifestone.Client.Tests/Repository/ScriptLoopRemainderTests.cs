@@ -140,7 +140,8 @@ public sealed class ScriptLoopRemainderTests
     {
         var script = Smoke;
 
-        Assert.Equal(6, Regex.Matches(script, @"-FrameOver50 \$fields\.Over50 -FrameJudge \$fields\.Judge").Count); // login-check, login, buff, bsd, death, hunt
+        Assert.Equal(2, Regex.Matches(script, @"-FrameOver50 \$fields\.Over50 -FrameJudge \$fields\.Judge").Count); // login-check, login
+        Assert.Contains("-FrameOver50 $over50 -FrameJudge $judge", script, StringComparison.Ordinal); // the journey steps (M4 P5b G1)
         Assert.Contains("[string] $FrameOver50 = '', [string] $FrameJudge = ''", script, StringComparison.Ordinal);
     }
 
@@ -178,7 +179,7 @@ public sealed class ScriptLoopRemainderTests
         // No parallel step is frame-judged, so a slot's cold cache never touches a judged run.
         var parallel = Regex.Match(smoke, @"\$parallelSteps = @\(([^)]*)\)").Groups[1].Value;
         Assert.NotEmpty(parallel);
-        foreach (var judged in new[] { "play-checks", "record-audio", "login-check", "login", "login-buff", "login-bsd", "login-death", "login-hunt" })
+        foreach (var judged in new[] { "play-checks", "record-audio", "login-check", "login", "journey-mage", "journey-melee", "journey-archer" })
         {
             Assert.DoesNotContain($"'{judged}'", parallel, StringComparison.Ordinal);
         }
@@ -196,6 +197,7 @@ public sealed class ScriptLoopRemainderTests
         Assert.DoesNotContain("'login-death'", sliceCheck, StringComparison.Ordinal);
         Assert.DoesNotContain("'login-bsd'", sliceCheck, StringComparison.Ordinal);
         Assert.DoesNotContain("login-hunt", sliceCheck, StringComparison.Ordinal); // M4 1.2 s5: as login-bsd, it runs only under smoke -Backend require
+        Assert.DoesNotContain("journey-", sliceCheck, StringComparison.Ordinal); // M4 P5b G1: the journeys run only under smoke -Backend require
         Assert.Contains("[ValidateSet('auto')]", sliceCheck, StringComparison.Ordinal);
     }
 

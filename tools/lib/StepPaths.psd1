@@ -39,15 +39,16 @@
         'src/Lifestone.Headless/', 'src/Lifestone.Client/LegalNotices.cs',
         'src/Lifestone.Game/scripts/Main.cs.uid',
         'tools/slice-check.ps1', 'tools/commit.ps1', 'tools/live-gate.ps1', 'tools/lib/GateAreas.psd1', 'tools/hero-video.ps1', 'tools/installer/', 'tools/protocol/', 'tools/research/', 'tools/data/',
-        'tools/lib/StepPaths.psd1', 'tools/lib/TestTimes.psm1'
+        'tools/lib/StepPaths.psd1', 'tools/lib/TestTimes.psm1', 'tools/lib/GateJudge.psm1'
     )
 
     # The steps that need the backend: slice-check never runs them; a change that touches these paths only prints one advisory line.
     Live = @{
         'login-check' = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
         'login'       = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
-        # M4 P4 gate: the two hunts (backend steps on the fighter templates' accounts); they run only at the lead's gate, so slice-check prints the advisory.
-        'login-hunt'  = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
-        'login-hunt-missile' = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
+        # M4 P5b G1: the three journeys (backend steps on the fighters' accounts; they replace the retired buff, den, death and hunt steps); they run only at the lead's gate, so slice-check prints the advisory.
+        'journey-mage' = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
+        'journey-melee' = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
+        'journey-archer' = @('src/Lifestone.Net/', 'src/Lifestone.Client/Session/', 'src/Lifestone.Game/scripts/Session/', 'src/Lifestone.Game/scripts/RetailUi/', 'src/Lifestone.Game/scripts/Audio/', 'src/Lifestone.Game/scripts/PortalSpace/')
     }
 }

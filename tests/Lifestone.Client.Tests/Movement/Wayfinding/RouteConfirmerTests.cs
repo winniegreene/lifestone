@@ -145,4 +145,66 @@ public sealed class RouteConfirmerTests(ITestOutputHelper output)
         Assert.InRange(runner.MaxKeysPerSecond, 1, 19);
         Assert.Equal(0, confirmer.Failure is null ? 0 : 1);
     }
+
+    [Fact]
+    public void An_object_goals_stop_short_is_the_arc_past_its_first_point_within_the_range()
+    {
+        // M4 P5b F1-3: a straight 20 m east to the object: the last 5 m are within a 5 m range; a bend that enters the circle mid-segment.
+        var target = NavPoint.At(Lb, 40f, 20f);
+        Assert.Equal(5f, RouteConfirmer.ArcBeyondRange([W(20f, 20f), W(40f, 20f)], target, 5f), 0.001f);
+        Assert.Equal(0f, RouteConfirmer.ArcBeyondRange([W(20f, 20f), W(40f, 20f)], target, 0f));
+        Assert.Equal(20f, RouteConfirmer.ArcBeyondRange([W(20f, 20f), W(40f, 20f)], target, 30f), 0.001f); // the start is in range: everything after it
+        Assert.Equal(3f + 4f, RouteConfirmer.ArcBeyondRange([W(36f, 0f), W(36f, 20f), W(40f, 20f)], target, 5f), 0.001f); // (36, 17) is 5 m away
+        Assert.Equal(0f, RouteConfirmer.ArcBeyondRange([W(20f, 20f), W(40f, 20f)], target, 5f, roomCell: 0xA9B4013Fu)); // no waypoint in the room: nothing trimmed
+    }
+
+    [Fact]
+    public void An_object_inside_a_static_is_reached_within_its_range_without_a_placement_failure()
+    {
+        // M4 P5b F1-3: the path ends at the object's own point inside a 6 m box (Renald behind his counter); confirming it to the end refused the walk.
+        var block = S1TileKit.FlatWith(Block, S1TileKit.Box(Block, 96f, 96f, 0f, new Vector3(6f, 6f, 3f)));
+        var straight = new F1StraightSource();
+        foreach (var needSight in new[] { false, true })
+        {
+            var world = WorldOf(block);
+            var h = new ActionHarness(offline: true);
+            var weenie = new TestPlayerWeenie();
+            var player = Player(world, At(Block, 96f, 70f, 0f), weenie);
+            var now = world.CurrentTime;
+            using var audit = new MovementAudit(new RecordingMovementSink(), h.R.Bus, () => now, "f1-box-object");
+            var walker = OfflineWalker.FromPhysics(world, player, weenie, NullLogSink.Instance, audit);
+            h.Api.Move.Bind(walker.Controller, walker.Controller.Options.RunByDefault);
+            using var confirmer = new RouteConfirmer(world, HumanSetup);
+            using var runner = new NavRunner(h.Api.Move, new ControllerNavBody(walker.Controller), straight, confirmer, audit, new NavRunnerOptions { Name = "f1-box-object" });
+            runner.Start(NavGoal.ToObject(0x7F000001, NavPoint.At(Lb, 96f, 96f), 5f, needSight), now);
+            var end = now + 60.0;
+            while (!runner.IsDone && now < end)
+            {
+                now += 1.0 / 60.0;
+                walker.Controller.Tick(now);
+                runner.Step(now);
+                h.Tick(1.0 / 60.0);
+            }
+
+            output.WriteLine($"sight={needSight}: {runner.State} {runner.VerdictFields()} at {walker.Position.Origin}; {runner.FailureReason}; refused {runner.LastConfirmFailure}");
+            Assert.Equal(0, runner.ConfirmFailures);
+            Assert.Null(runner.LastConfirmFailure);
+            Assert.Equal(0, runner.Rungs);
+            Assert.InRange(walker.Position.Origin.Y, 90.5f, 91.6f); // stopped at the range's edge, 5 m short of the object, outside the box (93 to 99)
+            // With sight required the arrival test stays: the run's end is the confirmer's own sight verdict there (here the box's top lets it see).
+            var seen = confirmer.InSight(walker.Position, At(Block, 96f, 96f, 0f), out _);
+            Assert.Equal(!needSight || seen ? NavRunState.Arrived : NavRunState.ArrivedWithoutSight, runner.State);
+        }
+    }
+
+    /// <summary>A path source that walks straight from the body to the goal's point (the room graph's last step into an object's spot).</summary>
+    private sealed class F1StraightSource : INavPathSource
+    {
+        public NavMap? Map => null;
+
+        public PathPlanner? Planner => null;
+
+        public NavPath Plan(in CellFrame from, NavGoal goal, NavScars scars) =>
+            new(NavPathStatus.Found, [new NavWaypoint(from, false), new NavWaypoint(NavMap.ToCellFrame(goal.Point), false)], null, []);
+    }
 }

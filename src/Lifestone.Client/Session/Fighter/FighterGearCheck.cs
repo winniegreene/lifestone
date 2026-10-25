@@ -9,7 +9,7 @@ namespace Lifestone.Client.Session.Fighter;
 /// <param name="Total">The pieces of the set.</param>
 /// <param name="SpellsActive">The wearer spells of the worn pieces that are active (in the enchantment registry, or surpassed by a stronger spell of their category).</param>
 /// <param name="SpellsWanted">The distinct wearer spells of the worn pieces; -1 when no spell table was given.</param>
-/// <param name="Silent">The worn pieces with wearer spells of which none is active: out of mana, or never activated (<c>TODO(m4-gear-mana)</c>).</param>
+/// <param name="Silent">The worn pieces with wearer spells of which none is active: out of mana, or never activated (<see cref="GearRecharge"/> charges such a piece and wears it again).</param>
 /// <param name="Short">The pieces not worn (or held, for the bow).</param>
 public sealed record GearReading(int Worn, int Total, int SpellsActive, int SpellsWanted, IReadOnlyList<GearPiece> Silent, IReadOnlyList<GearPiece> Short)
 {

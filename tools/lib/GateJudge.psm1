@@ -115,6 +115,137 @@ function Get-SmokeStepRows {
     return @($rows)
 }
 
+# P5b G2: the journeys' judges. Get-JourneyVerdict is smoke.ps1's own (G1): cut out of that script when the module loads, so the gate judges a headless journey by the SAME done-line rule as the Godot step
+# (a changed rule cannot drift between them). The module refuses to load when the function is not in smoke.ps1.
+$script:SmokeScript = Join-Path (Split-Path -Parent $PSScriptRoot) 'smoke.ps1'
+$smokeText = [IO.File]::ReadAllText($script:SmokeScript)
+$verdictSource = [regex]::Match($smokeText, '(?ms)^function Get-JourneyVerdict.*?^\}[ \t]*\r?$')
+if (-not $verdictSource.Success) { throw "GateJudge.psm1: tools\smoke.ps1 has no function Get-JourneyVerdict (the journeys' judge, P5b G1)" }
+Invoke-Expression $verdictSource.Value
+
+function Get-GateJourneyVerdict {
+    <# A headless journey's verdict: its lines carry no category prefix, so '[logincheck] ' is put in front of the journey lines (journey done / station / frames) and smoke.ps1's Get-JourneyVerdict reads them. Returns its result. #>
+    param([string] $Text, [bool] $FrameContended = $false)
+    $prefixed = [regex]::Replace([string]$Text, '(?m)^(?:\[[^\]\r\n]*\]\s*)*(?=journey (?:done |station=|frames ))', '[logincheck] ')
+    return Get-JourneyVerdict $prefixed $FrameContended
+}
+
+function Get-JourneyDoneLine {
+    <# The 'journey done ok=...' line of a journey's output (headless or Godot), without its prefix; '' when there is none. #>
+    param([string] $Text)
+    $m = [regex]::Match([string]$Text, '(?m)journey done ok=[^\r\n]*')
+    if ($m.Success) { return $m.Value.TrimEnd() }
+    return ''
+}
+
+function Get-JourneyReportOnly {
+    <#
+      The report-only fields of a journey's done line: route_m, rungs, blocked, sightless, vitals_passes, run_s and every keeper* field; n/a when the line carries none. granted too, but only on the melee journey
+      (M4 4.2 J2: teleports, recalls, recovery_places and the mage's and archer's granted became judges, in Get-JourneyVerdict; the done line itself is in the row). Then bars, from the buff station's line
+      (P5b fix FA, review section 2 item 5: the mage's spell bars, set:<n> or ok; n/a when the journey has no such field). Then the window frames of the station lines (J2; judged, shown here beside the others:
+      station:field=x pairs, n/a when no station carries one).
+    #>
+    param([string] $Text)
+    $line = Get-JourneyDoneLine $Text
+    if (-not $line) { return ' [report-only: no journey done line]' }
+    $melee = [regex]::IsMatch($line, '(?:^|\s)name=melee(?:\s|$)')
+    $parts = [System.Collections.Generic.List[string]]::new()
+    foreach ($k in @('route_m', 'rungs', 'blocked', 'sightless', 'granted', 'vitals_passes', 'run_s')) {
+        if ($k -eq 'granted' -and -not $melee) { continue }
+        $m = [regex]::Match($line, '(?:^|\s)' + $k + '=(\S+)')
+        $parts.Add("$k=$(if ($m.Success) { $m.Groups[1].Value } else { 'n/a' })")
+    }
+    $keeper = @([regex]::Matches($line, '(?:^|\s)(keeper\w*=\S+)') | ForEach-Object { $_.Groups[1].Value })
+    $parts.Add($(if ($keeper.Count -gt 0) { $keeper -join ' ' } else { 'keeper=n/a' }))
+    $bars = [regex]::Match([string]$Text, '(?m)journey station=buff [^\r\n]*?(?:^|\s)bars=(\S+)')
+    $parts.Add("bars=$(if ($bars.Success) { $bars.Groups[1].Value } else { 'n/a' })")
+    $windows = @()
+    foreach ($station in [regex]::Matches([string]$Text, '(?m)journey station=(\S+) [^\r\n]*')) {
+        foreach ($w in [regex]::Matches($station.Value, '(?<![\w])((?:attack|loot|vendor)_frame_max_ms)=([\d.]+|n/a)')) { $windows += "$($station.Groups[1].Value):$($w.Groups[1].Value)=$($w.Groups[2].Value)" }
+    }
+    $parts.Add("windows=$(if ($windows.Count) { $windows -join ',' } else { 'n/a' })")
+    return ' [report-only ' + ($parts -join ' ') + ']'
+}
+
+function Get-JourneyComparison {
+    <#
+      -Serial's same-commit comparison: the headless and the Godot done line of one journey, one under the other, then whether the two verdicts agree. A side with no done line says so; the comparison never fails the gate by
+      itself (the headless verdict does, through its own step). $Commit/$GodotCommit are the two gates' commits ('' = unknown): a difference is named, since the comparison is only meant on one commit.
+    #>
+    param([string] $Name, [string] $HeadlessText, [string] $GodotText, [string] $Commit = '', [string] $GodotCommit = '')
+    $h = Get-JourneyDoneLine $HeadlessText
+    $g = Get-JourneyDoneLine $GodotText
+    $hv = if ($h) { (Get-GateJourneyVerdict $HeadlessText).Ok } else { $null }
+    $gv = if ($g) { (Get-JourneyVerdict ([regex]::Replace([string]$GodotText, '(?m)^(?:\[[^\]\r\n]*\]\s*)*(?=journey (?:done |station=|frames ))', '[logincheck] '))).Ok } else { $null }
+    $word = { param($v) if ($null -eq $v) { 'none' } elseif ($v) { 'ok' } else { 'FAIL' } }
+    $same = if ($null -eq $hv -or $null -eq $gv) { 'unknown' } elseif ($hv -eq $gv) { 'yes' } else { 'NO' }
+    $commitNote = if (-not $GodotCommit) { 'unknown' } elseif ($GodotCommit -eq $Commit -or $GodotCommit.StartsWith($Commit) -or $Commit.StartsWith($GodotCommit)) { 'same' } else { "DIFFERENT (headless $Commit, godot $GodotCommit)" }
+    return @(
+        "[gate] compare journey=$Name headless: $(if ($h) { $h } else { 'no journey done line' })",
+        "[gate] compare journey=$Name godot:    $(if ($g) { $g } else { 'no journey done line (no Godot gate folder, or none for this journey)' })",
+        "[gate] compare journey=$Name verdicts headless=$(& $word $hv) godot=$(& $word $gv) agree=$same commit=$commitNote"
+    )
+}
+
+function Get-RecreateVerdict {
+    <#
+      M4 fresh G1 (D44, D45): the verdict of a re-create step, a pure function of its output. The step is the headless build with --fresh-character (`--scenario=fighter-build --account=... --fresh-character` or
+      `--scenario=mage-build --fresh-character`). PASS = exit 0 AND `headless done scenario=<Scenario> ok=1` AND a line with `fresh=(recreated|created)` and `purged=<digits>` (the verdict line
+      `<scenario> ... level=<n> ... fresh=recreated purged=1`, or the log's `verdict ...` line). Text is the step's stdout, ErrText its stderr (the headless log lines go there, the build's own ERROR line
+      among them); Code its exit code. Returns @{ Ok; Detail; Fresh; Purged; Level }. The detail of a PASS names the fields and the level when the line has one (`fresh=recreated purged=1 level=55`);
+      a FAIL names why: no done line, ok=0 (with the build's own failure line), a missing field, or an exit code that is not 0.
+    #>
+    param([string] $Scenario, [int] $Code, [string] $Text, [string] $ErrText = '')
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    if (-not $Scenario) { return @{ Ok = $false; Fresh = ''; Purged = -1; Level = ''; Detail = 'the step has no --scenario=<fighter-build|mage-build> argument, so there is no done line to judge' } }
+    $lines = @(([string]$Text + "`n" + [string]$ErrText) -split '\r?\n')
+    $why = ''
+    foreach ($l in $lines) {   # the build's own failure: the first ERROR log line ("12:03:04.567 ERROR fighter: <why>", or Godot's "Z ERROR [fighter] <why>")
+        $m = [regex]::Match($l, '\bERROR\s+(?:\[[^\]]*\]|[\w.-]+:)\s*(?<msg>\S.*)$')
+        if ($m.Success) { $why = $m.Groups['msg'].Value.Trim(); break }
+    }
+    $whyText = if ($why) { ": $why" } else { ' (no ERROR line in the output)' }
+    $done = $null
+    foreach ($l in $lines) {
+        $m = [regex]::Match($l, '^(?:\[[^\]\r\n]*\]\s*)*headless done scenario=' + [regex]::Escape($Scenario) + ' ok=(?<ok>[01])(?:\s|$)')
+        if ($m.Success) { $done = $m; break }
+    }
+    if ($null -eq $done) {
+        return @{ Ok = $false; Fresh = ''; Purged = -1; Level = ''; Detail = "no `"headless done scenario=$Scenario ok=...`" line (exit $Code)" + $(if ($why) { "; the build's first ERROR line: $why" } else { '' }) }
+    }
+    if ($done.Groups['ok'].Value -ne '1') {
+        return @{ Ok = $false; Fresh = ''; Purged = -1; Level = ''; Detail = "the build failed: headless done scenario=$Scenario ok=0 (exit $Code)$whyText" }
+    }
+    $fresh = ''; $purged = -1; $level = ''
+    foreach ($l in $lines) {
+        $f = [regex]::Match($l, '(?:^|\s)fresh=(?<f>recreated|created)(?=\s|$)')
+        $p = [regex]::Match($l, '(?:^|\s)purged=(?<p>\d+)(?=\s|$)')
+        if ($f.Success -and $p.Success) {
+            $fresh = $f.Groups['f'].Value; $purged = [int]::Parse($p.Groups['p'].Value, $inv)
+            $lv = [regex]::Match($l, '(?:^|\s)level=(?<l>\d+)(?=\s|$)')
+            if ($lv.Success) { $level = $lv.Groups['l'].Value }
+            break
+        }
+    }
+    if (-not $fresh) {
+        $anyFresh = @($lines | Where-Object { $_ -match '(?:^|\s)fresh=(recreated|created)(?=\s|$)' }).Count -gt 0
+        $anyPurged = @($lines | Where-Object { $_ -match '(?:^|\s)purged=\d+(?=\s|$)' }).Count -gt 0
+        $missing = if ($anyFresh -and -not $anyPurged) { 'purged=<n>' } elseif ($anyPurged -and -not $anyFresh) { 'fresh=(recreated|created)' } elseif ($anyFresh -and $anyPurged) { 'fresh=(recreated|created) and purged=<n> on one line' } else { 'fresh=(recreated|created) and purged=<n>' }
+        return @{ Ok = $false; Fresh = ''; Purged = -1; Level = ''; Detail = "headless done scenario=$Scenario ok=1 but the output has no $missing (the build did not report a fresh character; exit $Code)" }
+    }
+    $fields = "fresh=$fresh purged=$purged" + $(if ($level) { " level=$level" } else { '' })
+    if ($Code -ne 0) {
+        return @{ Ok = $false; Fresh = $fresh; Purged = $purged; Level = $level; Detail = "exit $Code although the build reported $fields" }
+    }
+    return @{ Ok = $true; Fresh = $fresh; Purged = $purged; Level = $level; Detail = $fields }
+}
+
+function Get-GateRecreateStamp {
+    <# M4 fresh G1: the path of the stamp that says the re-create of an account failed in this gate. A file in the gate folder, so the steps of one lane, the lanes (separate jobs) and the phases see each other's, as the killed-step stamps do. #>
+    param([string] $LogDir, [string] $Account)
+    return Join-Path $LogDir ("recreate-failed-{0}.stamp" -f $Account)
+}
+
 function Get-GateReleaseWait {
     <#
       P5a F-gate (diagnosis item 6): a step killed by its timeout leaves its headless client in the world, and ACE keeps the character online until its session timeout (60 s) plus the log off (LoginRetryPolicy: 75 s), so
@@ -147,8 +278,22 @@ function Invoke-GateSteps {
         catch { Start-Sleep -Milliseconds 150; try { Add-Content -LiteralPath $GateLog -Value $Line -Encoding utf8 } catch { Write-Warning "gate.log write failed ($($_.Exception.GetType().Name))" } }
     }
     $results = [System.Collections.Generic.List[object]]::new()
+    function AddRows($Step, [object[]] $Rows, [double] $Wall) {
+        foreach ($row in $Rows) {
+            $secs = if ($row.Seconds -gt 0) { $row.Seconds } else { $Wall }
+            $line = '[gate] {0} {1} {2} {3} ({4:0}s)' -f $Step.Lane, $row.Name, $(if ($row.Ok) { 'PASS' } else { 'FAIL' }), $row.Detail, $secs
+            Say $line
+            $results.Add([pscustomobject]@{ Lane = $Step.Lane; Step = $row.Name; PlanName = $Step.Name; Ok = $row.Ok; Detail = $row.Detail; Seconds = $secs; Group = $Step.Group; Run = $Step.Run; FrameOnly = $row.FrameOnly; Over75 = $row.Over75; Line = $line })
+        }
+    }
     foreach ($s in @($LaneSteps)) {
         $account = if ($s.PSObject.Properties['Account'] -and $null -ne $s.Account) { [string]$s.Account } else { '' }
+        # M4 fresh G1 (D44): a journey step is not run when its account's re-create step failed in this gate (a stamp in the gate folder, written below); it is one FAIL row, and the lane's other steps still run.
+        $needs = if ($s.PSObject.Properties['NeedsRecreate'] -and $s.NeedsRecreate) { [string]$s.NeedsRecreate } else { '' }
+        if ($needs -and (Test-Path -LiteralPath (Get-GateRecreateStamp -LogDir $LogDir -Account $needs))) {
+            AddRows $s @(New-GateRow $s.Name $false "not run: the re-create on $needs failed") 0
+            continue
+        }
         $release = Get-GateReleaseWait -LogDir $LogDir -Account $account
         if ($release.Seconds -gt 0) {
             Say ('[gate] {0} {1} WAIT {2:0} s: ACE still holds the character of account "{3}" from the killed step "{4}" (session timeout plus log off); a login now would be refused with 0x0D' -f $s.Lane, $s.Name, $release.Seconds, $account, $release.From)
@@ -213,6 +358,18 @@ function Invoke-GateSteps {
                 }
                 $rows = @(New-GateRow $s.Name ([bool]$ok) $detail)
             }
+            elseif ($s.Kind -eq 'recreate') {
+                # M4 fresh G1 (D44): a character's delete and re-create, judged by Get-RecreateVerdict on the build's output (stdout: the done and verdict lines; stderr: the log, the build's own ERROR line).
+                $scenario = [regex]::Match((@($s.Arguments) -join ' '), '--scenario=([\w-]+)').Groups[1].Value
+                $errText = if (Test-Path -LiteralPath $err) { [string](Get-Content -LiteralPath $err -Raw) } else { '' }
+                $v = Get-RecreateVerdict -Scenario $scenario -Code $code -Text $text -ErrText $errText
+                $rows = @(New-GateRow $s.Name ([bool]$v.Ok) ($v.Detail + $(if (-not $v.Ok) { " log=$([IO.Path]::GetFileName($log)) err=$([IO.Path]::GetFileName($err))" } else { '' })))
+            }
+            elseif ($s.Kind -eq 'headless') {
+                # P5b G2: a headless journey, judged by the done-line rule of the Godot step (smoke.ps1 Get-JourneyVerdict); the exit code is reported, the verdict is the done line.
+                $v = Get-GateJourneyVerdict -Text $text
+                $rows = @(New-GateRow $s.Name ([bool]$v.Ok) ("$(if ($v.Ok) { 'PASS' } else { 'FAIL' }) $($v.Detail) exit=$code" + (Get-JourneyReportOnly -Text $text)))
+            }
             else {
                 $json = Join-Path $s.OutDir 'rows.json'
                 $smokeRows = @()
@@ -223,18 +380,23 @@ function Invoke-GateSteps {
                 $outDir = $s.OutDir
                 $reader = { param($r) $lp = Join-Path $outDir $r.Log; if (Test-Path -LiteralPath $lp) { Get-Content -LiteralPath $lp -Raw } else { '' } }.GetNewClosure()
                 $rows = @(Get-SmokeStepRows -StepName $s.Name -Code $code -SmokeRows $smokeRows -Summary $summary -LogPath $log -ReadLog $reader)
+                # P5b G2: a journey step carries the new judges' fields, REPORT-ONLY in their first gate (they never change the row's verdict).
+                if ($s.Name -match '^journey-(mage|melee|archer)' -and $rows.Count -gt 0) {
+                    $jr = @($smokeRows | Where-Object { $_.Step -like 'journey-*' } | Select-Object -First 1)
+                    $jt = if ($jr.Count -gt 0) { [string](& $reader $jr[0]) } else { '' }
+                    $rows[0].Detail = $rows[0].Detail + (Get-JourneyReportOnly -Text $jt)
+                }
             }
         }
         catch {
             $rows = @(New-GateRow $s.Name $false "the step threw $($_.Exception.GetType().Name)")
         }
-        $wall = $timer.Elapsed.TotalSeconds
-        foreach ($row in $rows) {
-            $secs = if ($row.Seconds -gt 0) { $row.Seconds } else { $wall }
-            $line = '[gate] {0} {1} {2} {3} ({4:0}s)' -f $s.Lane, $row.Name, $(if ($row.Ok) { 'PASS' } else { 'FAIL' }), $row.Detail, $secs
-            Say $line
-            $results.Add([pscustomobject]@{ Lane = $s.Lane; Step = $row.Name; PlanName = $s.Name; Ok = $row.Ok; Detail = $row.Detail; Seconds = $secs; Group = $s.Group; Run = $s.Run; FrameOnly = $row.FrameOnly; Over75 = $row.Over75; Line = $line })
+        # M4 fresh G1 (D44): any failed re-create row (a verdict, a timeout, a throw) stamps its account, so the account's journey step is not run.
+        if ($s.Kind -eq 'recreate' -and @($rows | Where-Object { -not $_.Ok }).Count -gt 0) {
+            $stampAccount = if ($account) { $account } else { [string]$s.Lane }
+            Set-Content -LiteralPath (Get-GateRecreateStamp -LogDir $LogDir -Account $stampAccount) -Value (([pscustomobject]@{ Account = $stampAccount; Step = "$($s.Lane) $($s.Name)"; FailedUtc = [datetime]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture) }) | ConvertTo-Json -Compress) -Encoding utf8
         }
+        AddRows $s $rows $timer.Elapsed.TotalSeconds
     }
     return @($results)
 }
@@ -275,4 +437,4 @@ function Get-MissingGateRows {
     return @($made)
 }
 
-Export-ModuleMember -Function Get-GateReleaseWait, Test-FrameOnlyText, Get-FrameMaxMs, Get-TestCounts, Get-SmokeStepRows, Invoke-GateSteps, Start-GateLaneJob, Receive-GateLaneJob, Get-MissingGateRows
+Export-ModuleMember -Function Get-GateJourneyVerdict, Get-JourneyDoneLine, Get-JourneyReportOnly, Get-JourneyComparison, Get-RecreateVerdict, Get-GateReleaseWait, Test-FrameOnlyText, Get-FrameMaxMs, Get-TestCounts, Get-SmokeStepRows, Invoke-GateSteps, Start-GateLaneJob, Receive-GateLaneJob, Get-MissingGateRows

@@ -2,6 +2,7 @@ using System.Globalization;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Client.Tests;
 using Lifestone.Data.Dat;
 using Lifestone.Net.Session;

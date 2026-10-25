@@ -59,7 +59,8 @@ public sealed class AutomatedAccountRuleTests
     [InlineData("test")]
     [InlineData("test-melee")]
     [InlineData("test-archer")]
-    public void A_login_check_on_any_of_the_three_test_accounts_goes_on_unchanged(string account)
+    [InlineData("test-tools")]
+    public void A_login_check_on_any_of_the_four_test_accounts_goes_on_unchanged(string account)
     {
         string[] args = [$"--account={account}", "--login-check=enter"];
         var session = SessionOptions.Parse(args);
@@ -137,6 +138,41 @@ public sealed class AutomatedAccountRuleTests
     }
 
     [Fact]
+    public void P5b_G0_test_tools_enters_and_creates_only_Lifestone_Throwaway_and_the_main_account_never_does()
+    {
+        // D39: the tools account holds the throwaway and nothing else; the throwaway login check runs there only.
+        Assert.True(AutomatedAccountRule.TryCharacters(TestAccounts.Tools, "Lifestone Throwaway", "Lifestone Throwaway", out var ok));
+        Assert.Null(ok);
+        Assert.True(AutomatedAccountRule.TryCharacters(TestAccounts.Tools, null, null, out _));
+        Assert.True(AutomatedAccountRule.TryCharacters(TestAccounts.Tools, "Lifestone Tools", "Lifestone Tools", out _)); // D43: the purge caller
+        Assert.False(AutomatedAccountRule.TryCharacters(TestAccounts.Tools, "Lifestone Smoke", null, out var wrong));
+        Assert.False(AutomatedAccountRule.TryCharacters(TestAccounts.Tools, null, "Lifestone Smoke", out var created));
+        Assert.False(string.IsNullOrEmpty(wrong));
+        Assert.False(string.IsNullOrEmpty(created));
+        Assert.DoesNotContain(TestAccounts.Tools, wrong!, StringComparison.Ordinal);
+
+        Assert.True(AutomatedAccountRule.TryLoginCheck(TestAccounts.Tools, LoginCheckKind.Throwaway, out _));
+        foreach (var kind in new[] { LoginCheckKind.Enter, LoginCheckKind.AcademyExit, LoginCheckKind.HoltburgLaps, LoginCheckKind.All })
+        {
+            Assert.False(AutomatedAccountRule.TryLoginCheck(TestAccounts.Tools, kind, out _), kind.ToString()); // they create Lifestone Smoke
+        }
+
+        foreach (var account in new string?[] { null, "", TestAccounts.Test })
+        {
+            Assert.False(AutomatedAccountRule.TryLoginCheck(account, LoginCheckKind.Throwaway, out var refusal), account);
+            Assert.False(string.IsNullOrEmpty(refusal));
+            Assert.False(AutomatedAccountRule.TryCharacters(account, "Lifestone Throwaway", null, out _));
+            Assert.False(AutomatedAccountRule.TryCharacters(account, null, "lifestone throwaway", out _));
+        }
+
+        // The refusal names the remedy and lists the four accounts.
+        var session = SessionOptions.Parse(["--play", "--account=alice", "--login-check=enter"]);
+        Assert.False(AutomatedAccountRule.TryApply(session, automated: true, out _, out var refused));
+        Assert.Contains("--account=test-tools", refused, StringComparison.Ordinal);
+        Assert.Contains("test, test-melee, test-archer, test-tools", refused, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void P4_rfixb_R11_the_login_checks_that_create_a_character_refuse_test_melee_and_test_archer()
     {
         foreach (var account in new[] { TestAccounts.Melee, TestAccounts.Archer })
@@ -153,7 +189,7 @@ public sealed class AutomatedAccountRuleTests
             Assert.True(AutomatedAccountRule.TryLoginCheck(account, LoginCheckKind.None, out _));
         }
 
-        foreach (var kind in Enum.GetValues<LoginCheckKind>())
+        foreach (var kind in Enum.GetValues<LoginCheckKind>().Where(k => k != LoginCheckKind.Throwaway))
         {
             Assert.True(AutomatedAccountRule.TryLoginCheck(TestAccounts.Test, kind, out _), kind.ToString());
         }

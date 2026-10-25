@@ -17,19 +17,36 @@ internal readonly record struct StandInPurgeDecision(ToolError? Refusal, Charact
 internal static class StandInCharPurge
 {
     /// <summary>The graduated test characters, which a purge never touches.</summary>
-    internal static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer"];
+    internal static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer", "Lifestone Tools"];
+
+    /// <summary>The journey characters the live gate re-creates (m4-plan D44): an old copy is purged once its new copy is on the account (D45).</summary>
+    internal static IReadOnlyList<string> Recreated { get; } = ["BSD Mage", "Holtburg Brawler", "Holtburg Archer"];
 
     /// <summary>Applies the rules to the stand-in's list: refuses, or picks the pending-deletion character of that name.</summary>
     internal static StandInPurgeDecision Decide(CharPurgeRequest request, string selfName, uint selfGuid, IReadOnlyList<CharacterSlot> characters)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(characters);
+        var recreated = Recreated.Any(r => Same(r, request.Name));
         foreach (var graduated in Graduated)
         {
-            if (Same(graduated, request.Name))
+            if (Same(graduated, request.Name) && (!recreated || !characters.Any(c => Same(c.Name, request.Name) && !c.PendingDeletion)))
             {
+                // D45: a re-created journey character is refused only while the account holds no live copy of it.
                 return Refuse(ToolErrors.Graduated, graduated + " is a graduated test character and stays as it is");
             }
+        }
+
+        if (recreated)
+        {
+            // D45: only the pending copies are candidates (the latest DeleteTime first, then the lowest id); none left is unknown-character.
+            var old = characters.Where(c => Same(c.Name, request.Name) && c.PendingDeletion).OrderByDescending(c => c.DeleteTimeout).ThenBy(c => c.Guid).Cast<CharacterSlot?>().FirstOrDefault();
+            if (old is not { } copy)
+            {
+                return Refuse(ToolErrors.UnknownCharacter, "no old copy of \"" + request.Name + "\" is pending deletion on your account");
+            }
+
+            return copy.Guid == selfGuid ? Refuse(ToolErrors.OwnCharacter, "you are playing " + copy.Name + "; log in as another character to purge it") : new StandInPurgeDecision(null, copy);
         }
 
         var own = "you are playing " + selfName + "; log in as another character to purge it";

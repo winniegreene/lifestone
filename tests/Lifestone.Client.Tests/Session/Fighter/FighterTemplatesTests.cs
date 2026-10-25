@@ -106,7 +106,7 @@ public sealed class FighterTemplatesTests
         Assert.Equal(FighterRole.Bow, kit.ItemOf(kit.LauncherWcid)!.Role);
         Assert.Equal(FighterRole.Ammo, kit.ItemOf(5307)!.Role);
         Assert.Equal(FighterKit.ArcherArrowCount, kit.ItemOf(FighterKit.GreaterFrostArrowWcid)!.Item.Stack);
-        Assert.Equal(250, FighterKit.ArcherArrowCount);
+        Assert.Equal(230, FighterKit.ArcherArrowCount); // 250 until the gear's mana charge needed the Archer's burden (closes TODO(m4-gear-mana))
         Assert.True(kit.ItemOf(FighterKit.GreaterFrostArrowWcid)!.Item.Stack <= kit.ItemOf(FighterKit.GreaterFrostArrowWcid)!.Item.MaxStack);
         Assert.True(kit.TotalBurden < FighterKit.Capacity((int)FighterTemplate.Archer.AttributeAtTarget(FighterTemplate.Strength))); // M4 P5a C5: the kit is granted after the raises, at the Strength the plan buys
         // The Hunter keeps its Shortbow and Arrows, the Brawler has no launcher.
@@ -133,7 +133,8 @@ public sealed class FighterTemplatesTests
         // M4 P5a C1b: the Brawler's and the Archer's kits hold the caster (burden 50) in the pack; the Hunter has no magic and no caster.
         // M4 P5a fix r4 (D28): the template kits carry one side pack (FighterKit.SidePacksFor(0)); the build's kit sizes them from the component lines (both fighters: 3, burden 15 each), so 15 less here.
         // M4 P5a C7 (D28): the kits hold 100 Mana Potions and 50 Stamina Potions (15 burden each, 2,250) and the base kit's two side packs (the two potion lines and the spare): 4,465 + 2,250 + 15 = 6,730 (100 + 50 potions) and 5,710 + 1,050 + 15 = 6,775 (the Archer's 60 + 10: its capacity leaves about 1,100).
-        Assert.Equal((4_860, 6_730, 6_775), (FighterTemplate.Hunter.Kit.TotalBurden, FighterTemplate.Melee.Kit.TotalBurden, FighterTemplate.Archer.Kit.TotalBurden));
+        // The gear's Titan Mana Charge (burden 50, one per kit; closes TODO(m4-gear-mana)): 6,730 + 50 = 6,780 and 6,775 + 50 - 100 = 6,725 (the Archer's 20 fewer Greater Frost Arrows make its room).
+        Assert.Equal((4_860, 6_780, 6_725), (FighterTemplate.Hunter.Kit.TotalBurden, FighterTemplate.Melee.Kit.TotalBurden, FighterTemplate.Archer.Kit.TotalBurden));
         Assert.All(FighterTemplate.All, t => Assert.True(t.Kit.TotalBurden <= FighterKit.Capacity((int)t.AttributeAtTarget(FighterTemplate.Strength)), t.Key)); // M4 P5a C5: the Archer is created with Strength 10 (capacity 1,500); the build grants the kit after the raises (FighterBuildScenario step d), so the plan's Strength is what carries it
     }
 

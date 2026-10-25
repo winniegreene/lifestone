@@ -209,6 +209,41 @@ public sealed class RecallHomeTests
         Assert.Null(RecallHome.ForCharacter(t.View, null, log));
     }
 
+    [Fact]
+    public void Primary_Portal_Recall_48_reuses_the_steps_and_arrives_in_the_den_landblock_M4_P5b_J1()
+    {
+        var t = new C1cRecallRig(null, spell: RecallHome.PrimaryPortalRecallSpell, homeLandblock: RecallHome.DenLandblock) { DestinationCell = 0x01050375 };
+        Assert.Equal(48u, t.Recall.SpellId);
+        Assert.Equal(0x0105u, t.Recall.HomeLandblock);
+        Assert.Equal(RecallStatus.Done, t.RunRecall());
+
+        Assert.Equal(["cast:48", "teleport", "present"], t.Events);
+        Assert.Equal(1, t.Recall.Recalls);
+        Assert.Equal(0u, t.Recall.Refusal);
+        Assert.Equal(0x0105u, t.R.H.State.Self.Position!.Value.CellId >> 16);
+        Assert.Contains(t.R.H.Log.Entries, e => e.Message.Contains("casting Primary Portal Recall (48)", StringComparison.Ordinal));
+
+        // ForCharacter passes the spell and the landblock on (the journey's den travel).
+        var viaName = RecallHome.ForCharacter(t.View, "BSD Mage", t.R.H.Log, RecallHome.DenLandblock, RecallHome.PrimaryPortalRecallSpell)!;
+        Assert.Equal((48u, 0x0105u), (viaName.SpellId, viaName.HomeLandblock));
+        Assert.Equal((1635u, 0xA9B4u), (RecallHome.ForCharacter(t.View, "BSD Mage", t.R.H.Log)!.SpellId, RecallHome.ForCharacter(t.View, "BSD Mage", t.R.H.Log)!.HomeLandblock));
+    }
+
+    [Fact]
+    public void Primary_Portal_Recall_with_no_portal_tied_is_recall_cast_naming_0x04A3_and_the_refusal_is_readable_M4_P5b_J1()
+    {
+        var t = new C1cRecallRig(null, spell: RecallHome.PrimaryPortalRecallSpell, homeLandblock: RecallHome.DenLandblock) { Bound = false, UnboundRefusal = 0x04A3 };
+        Assert.Equal(RecallStatus.Failed, t.RunRecall());
+
+        Assert.Equal("recall:cast", t.Recall.Failure);
+        Assert.Contains("YouMustLinkToPortalToRecall 0x04A3", t.Recall.Detail, StringComparison.Ordinal);
+        Assert.Equal(0x04A3u, t.Recall.Refusal);
+        Assert.Equal(0, t.Recall.Recalls);
+        Assert.DoesNotContain("teleport", t.Events);
+        Assert.Equal("Primary Portal Recall", RecallHome.SpellName(48));
+        Assert.Equal("spell 7", RecallHome.SpellName(7));
+    }
+
     [Theory]
     [InlineData(0x049Eu, "YouMustLinkToLifestoneToRecall")]
     [InlineData(0x049Fu, "YouFailToRecallToLifestone")]

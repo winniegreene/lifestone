@@ -7,6 +7,7 @@ using Lifestone.Client.Session.Credentials;
 using Lifestone.Client.Session.Hosting;
 using Lifestone.Client.Session.Recording;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Data.CharacterCreation;
 using Lifestone.Data.Checkout;
 using Lifestone.Data.Dat;
@@ -106,6 +107,13 @@ internal static class Program
     /// <summary>The default limit of <c>--scenario=hunt</c>: <see cref="HuntQuitAfterOverheadSeconds"/> plus <c>--hunt-seconds</c>.</summary>
     /// <param name="huntSeconds">The hunt's time (<c>--hunt-seconds</c>).</param>
     internal static double HuntQuitAfterSeconds(double huntSeconds) => HuntQuitAfterOverheadSeconds + huntSeconds;
+
+    /// <summary>What <c>--scenario=journey</c> needs besides the plan's expected seconds: the login, the known state (a recovery place and its settle) and the log off.</summary>
+    internal const double JourneyLoginMarginSeconds = 300;
+
+    /// <summary>The default limit of <c>--scenario=journey</c>: the plan's expected seconds (the sum of its stations') plus <see cref="JourneyLoginMarginSeconds"/>.</summary>
+    /// <param name="plan">The journey's plan.</param>
+    internal static double JourneyQuitAfterSeconds(JourneyPlan plan) => plan.ExpectedSeconds + JourneyLoginMarginSeconds;
 
     /// <summary>The account the headless host uses when <c>--account</c> is not given (D10).</summary>
     internal const string DefaultAccount = "test";
@@ -322,6 +330,7 @@ internal static class Program
                 HeadlessScenario.DeathAndRegear => DeathQuitAfterSeconds(options.Death.Seconds, options.Death.FightSeconds),
                 HeadlessScenario.Hunt => HuntQuitAfterSeconds(options.Hunt.Seconds),
                 HeadlessScenario.Wayfind => WayfindScenario.QuitAfterSeconds(options.Wayfind),
+                HeadlessScenario.Journey when options.Journey is { } journeyPlan => JourneyQuitAfterSeconds(journeyPlan),
                 _ => HeadlessRunOptions.DefaultQuitAfterSeconds,
             },
             LifestoneVersion = typeof(Program).Assembly.GetName().Version?.ToString(),
@@ -365,7 +374,7 @@ internal static class Program
                         log.Warn("headless", "--character and --create-character are ignored by --scenario=mage-build (the mage is always the template's character)");
                     }
 
-                    scenario = new MageBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log);
+                    scenario = new MageBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log, freshCharacter: options.FreshCharacter);
                 }
                 else if (options.Scenario == HeadlessScenario.FighterBuild)
                 {
@@ -376,7 +385,7 @@ internal static class Program
 
                     // The components' taper colours are the account's (ACE customises them from the stored account name, as for the gear kit): read here, hashed by FighterComponents and never logged or printed.
                     var withComponents = Lifestone.Client.Session.Fighter.FighterProfile.For(options.Fighter) is not null; // the Hunter has no spells and so no components
-                    scenario = new FighterBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log, template: options.Fighter, spells: withComponents ? SpellTableData.Load(dats).Spells : null, account: withComponents ? LoginName(runtime, runOptions.Session.Account) : null, recreate: options.FighterRecreate);
+                    scenario = new FighterBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log, template: options.Fighter, spells: withComponents ? SpellTableData.Load(dats).Spells : null, account: withComponents ? LoginName(runtime, runOptions.Session.Account) : null, recreate: options.FighterRecreate, freshCharacter: options.FreshCharacter);
                 }
                 else if (options.Scenario == HeadlessScenario.Gear)
                 {
@@ -457,6 +466,16 @@ internal static class Program
 
                     scenario = new WayfindScenario(dats, log, options.Wayfind, options.Fighter?.Name);
                 }
+                else if (options.Scenario == HeadlessScenario.Journey && options.Journey is { } plan)
+                {
+                    if (options.Session.Character is not null || options.CreateCharacter is not null)
+                    {
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=journey (the character is the journey's: " + plan.Character + ")");
+                    }
+
+                    // The kit's taper colours are the account's (the login name, read here, hashed by the kit and never logged or printed), as for --scenario=gear.
+                    scenario = new HeadlessJourneyScenario(plan, options.Arguments, dats, SpellTableData.Load(dats).Spells, log, LoginName(runtime, runOptions.Session.Account), new HeadlessJourneyRunnerHost(dats, log));
+                }
                 else if (options.CreateCharacter is { } create)
                 {
                     scenario = new LoginScenario(options.Session.Character, create, HeadlessCharacter.RetailSkillClasses(dats));
@@ -536,6 +555,16 @@ internal static class Program
             }
 
             output.WriteLine(wayfindRun.DoneLine(result.Ok));
+        }
+
+        if (scenario is HeadlessJourneyScenario journeyRun)
+        {
+            foreach (var line in journeyRun.Lines)
+            {
+                output.WriteLine(line);
+            }
+
+            journeyRun.Dispose();
         }
 
         if (scenario is GearScenario gear)

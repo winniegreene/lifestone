@@ -30,6 +30,32 @@ public sealed class ThrowawayLegScenarioTests
     }
 
     [Fact]
+    public void P5b_G0_D43_on_the_tools_account_the_leg_creates_Lifestone_Tools_once_and_purges_with_it()
+    {
+        var account = new ThrowawayLegFakeAccount(smoke: false);
+        var log = new List<string>();
+        var scenario = new ThrowawayLegScenario(account, requestLogOff: null, log: log.Add, purge: account.Purge, caller: ThrowawayLegScenario.Tools,
+            callerIntent: () => HeadlessCharacter.Intent(ThrowawayLegScenario.Tools, HeadlessCharacterTests.StandInClasses()));
+        var status = ScenarioStatus.Running;
+        for (var elapsed = 0.0; elapsed < 600 && status == ScenarioStatus.Running; elapsed += 0.05)
+        {
+            account.Tick(0.05);
+            status = scenario.Step(account, elapsed);
+        }
+
+        scenario.Dispose();
+        Assert.True(scenario.Failure is null, scenario.Failure);
+        Assert.Equal(ScenarioStatus.Succeeded, status);
+        Assert.Equal([ThrowawayLegScenario.Tools], account.CreatedByApi); // created once, through the Action API
+        Assert.Single(log, l => l.Contains("created once through the Action API", StringComparison.Ordinal)); // logged once
+        Assert.Equal([ThrowawayLegScenario.Throwaway, ThrowawayLegScenario.Tools], account.Entered); // Tools only enters to purge
+        Assert.Equal(1, account.ConfirmedPurges);
+        Assert.Contains(ThrowawayLegScenario.Smoke, account.Finished); // Smoke's name stays the name-taken probe (ACE's check is server-wide)
+        Assert.True(scenario.ListSame);
+        Assert.Contains(scenario.Baseline, c => c.Name == ThrowawayLegScenario.Tools); // the caller is in the baseline: the end list equals it
+    }
+
+    [Fact]
     public void The_whole_leg_creates_uses_deletes_restores_and_purges_and_the_list_ends_as_it_began()
     {
         var account = new ThrowawayLegFakeAccount();

@@ -3,7 +3,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <summary>
 /// The vendor window's frame measure (M4 3.2 s4a; <c>vendor_frame_max_ms</c>): the slowest frame, in milliseconds, from a vendor's open being sent to the visit's end (<see cref="HuntScenario.VendorWindow"/>), over both vendors of the
 /// loop's end (Renald the Elder's sale, Thelnoth Cort's purchase). One call per frame, no allocation, no clock of its own (the engine's delta, which is the previous frame's whole time, is the frame time), after the pattern of
-/// <see cref="LootFrameSampler"/>. Report-only in 3.2 (m4-plan.md section 5, item 3, D11: judged at 4.2).
+/// <see cref="LootFrameSampler"/>. Report-only in 3.2; since M4 4.2 J1 the journey's vendor and vendor-facts stations print it (<see cref="Journey.JourneyWindowSamplers"/>) and smoke judges it (m4-plan.md section 5, item 3, D11: over 75 ms fails, over 50 flags, only uncontended).
 /// </summary>
 /// <remarks>
 /// <para><b>The flag is the previous call's</b> (as the loot sampler's): the delta is the previous frame's whole time, so it is judged against the window as the call before it left it. The frame that applied the open's send does not
@@ -14,7 +14,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// </remarks>
 public sealed class VendorFrameSampler
 {
-    /// <summary>A frame in the window over this many milliseconds is a note in the log (report-only in 3.2; the judge is 4.2's).</summary>
+    /// <summary>A frame in the window over this many milliseconds is a note in the log (the flag; smoke's judge reads the station line, M4 4.2 J1/J2).</summary>
     public const double WarnMs = 50.0;
 
     private bool _open;

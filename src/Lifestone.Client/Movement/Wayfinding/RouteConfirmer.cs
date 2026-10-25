@@ -197,6 +197,77 @@ public sealed class RouteConfirmer : IDisposable
         }
     }
 
+    /// <summary>
+    /// How much of <paramref name="path"/>'s end lies past its first point within <paramref name="range"/> (horizontal) of <paramref name="target"/>, in
+    /// metres of arc: an object goal's stop-short (M4 P5b F1). The runner ends an object run at the first point within the range (with sight required,
+    /// the arrival test is made there), so nothing past it is walked and nothing past it needs to be standable: the object's own point inside a static
+    /// (Renald behind his counter) is never probed. 0 when no point of the path comes within the range but its end. With <paramref name="roomCell"/> (an
+    /// indoor goal's cell) the search starts at the path's first waypoint in that cell, as the runner's arrival waits for the body to be in it (a wall
+    /// between the street and the object is within the range too).
+    /// </summary>
+    /// <param name="path">The path, start first.</param>
+    /// <param name="target">The object's point.</param>
+    /// <param name="range">The object goal's range.</param>
+    /// <param name="roomCell">The goal's indoor cell, or null.</param>
+    public static float ArcBeyondRange(IReadOnlyList<NavWaypoint> path, NavPoint target, float range, uint? roomCell = null)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (path.Count < 2 || range <= 0f)
+        {
+            return 0f;
+        }
+
+        var goal = target.Global;
+        var total = 0f;
+        for (var i = 1; i < path.Count; i++)
+        {
+            total += Vector2.Distance(path[i - 1].Point.Global, path[i].Point.Global);
+        }
+
+        var first = 1;
+        var arc = 0f;
+        if (roomCell is { } room && !LandDefs.IsOutdoorCell(room))
+        {
+            while (first < path.Count && path[first - 1].At.CellId != room)
+            {
+                arc += Vector2.Distance(path[first - 1].Point.Global, path[first].Point.Global);
+                first++;
+            }
+        }
+
+        for (var i = first; i < path.Count; i++)
+        {
+            var a = path[i - 1].Point.Global;
+            var b = path[i].Point.Global;
+            var length = Vector2.Distance(a, b);
+            if (Vector2.Distance(a, goal) <= range)
+            {
+                return MathF.Max(0f, total - arc);
+            }
+
+            if (length > 1e-6f)
+            {
+                // The first t in [0, 1] with |a + t (b - a) - goal| = range (the segment enters the range circle).
+                var d = (b - a) / length;
+                var f = a - goal;
+                var along = -Vector2.Dot(f, d);
+                var square = (along * along) - (f.LengthSquared() - (range * range));
+                if (square >= 0f)
+                {
+                    var t = along - MathF.Sqrt(square);
+                    if (t >= 0f && t <= length)
+                    {
+                        return MathF.Max(0f, total - (arc + t));
+                    }
+                }
+            }
+
+            arc += length;
+        }
+
+        return 0f;
+    }
+
     /// <summary>Confirms the whole of <paramref name="path"/> (but its last <paramref name="stopShortMetres"/>) now (the headless host).</summary>
     public RouteConfirmStatus ConfirmAll(IReadOnlyList<NavWaypoint> path, float stopShortMetres = 0f)
     {

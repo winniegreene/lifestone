@@ -75,6 +75,9 @@ public enum CorpseLoot
 /// <param name="GearDropped">M4 3.1 d1: the listed entries the loops need (<see cref="Lifestone.Client.Session.Mage.DeathDropModel.IsNeeded"/>) (<c>gear_dropped</c>, report-only), or null (<c>n/a</c>).</param>
 /// <param name="DecoysRecovered">M4 3.1 d1: the listed decoys that are in the pack after the trip (<c>decoys_recovered</c>, report-only), or null (<c>n/a</c>).</param>
 /// <param name="PretripHeals">M4 3.1 d1 follow-up F1: the Heal Self casts of the pre-trip recovery (<c>pretrip_heals</c>, report-only; 0 when it did not run).</param>
+/// <param name="Undressed">D37 (M4 P5b): the worn pieces the undress moved to the pack before the wait (<c>undressed</c>, report-only), or null when it did not run (the suffix is then left off the line).</param>
+/// <param name="LieDown">D37: <c>sent</c>, <c>refused:&lt;why&gt;</c> or <c>n/a</c> (<c>lie_down</c>, report-only).</param>
+/// <param name="LieEcho">D37: <c>yes</c>, <c>no</c> or <c>n/a</c>: the server's motion for the player showed Sleeping after the lie-down (<c>lie_echo</c>, report-only).</param>
 /// <param name="GearLeft">M4 3.1 fix (review R2): the listed items the loops need that the trip did not take from the corpse (<c>gear_left</c>, report-only in its first gate: a duplicate, since the regear ran before the trip), or null (<c>n/a</c>: no listing was read).</param>
 public readonly record struct DeathLegMeasures(
     int Died,
@@ -111,7 +114,10 @@ public readonly record struct DeathLegMeasures(
     int? GearDropped = null,
     int? DecoysRecovered = null,
     int PretripHeals = 0,
-    int? GearLeft = null);
+    int? GearLeft = null,
+    int? Undressed = null,
+    string LieDown = DeathLegVerdict.NotApplicable,
+    string LieEcho = DeathLegVerdict.NotApplicable);
 
 /// <summary>
 /// The death leg's verdict (<c>--login-check=bsd-death</c>, M3 3.2 s0), composed from the scenario's failure (or null) and the measures, so it is built and tested without Godot. The line is
@@ -225,7 +231,7 @@ public static class DeathLegVerdict
         var ok = problems.Count == 0;
         var line = string.Create(
             inv,
-            $"bsd-death done ok={(ok ? "true" : "false")} died={measures.Died} suicides={measures.Suicides} vitae={measures.VitaePercent} respawn={RespawnText(measures.Respawn)} corpse={measures.Corpses} purged={measures.Purges} protected={measures.Protected} vitals_pct={Pct(measures.VitalsPercent)} gear_restored={(measures.GearRestored ? "yes" : "no")} worn={measures.Worn} hits_taken={measures.HitsTaken} damage_taken={measures.DamageTaken} evades={measures.Evades} health_min_pct={Pct(measures.HealthMinPercent)} death_s={Seconds(measures.DeathSeconds)} death_frame_max_ms={Pct(measures.DeathFrameMaxMs)} fight_frame_max_ms={Pct(measures.FightFrameMaxMs)} deaths={measures.Deaths} corpses_stale={measures.CorpsesStale} protection={measures.Protection ?? DeathTally.ProtectionNone} vitae_paid={(measures.VitaePaid is { } paid ? paid.ToString(inv) : "n/a")} vitae_after={(measures.VitaeAfter is { } after ? after.ToString(inv) : "n/a")} corpse_looted={CorpseText(measures.CorpseLooted)} items_recovered={measures.ItemsRecovered} trip_s={Pct(measures.TripSeconds)} trip_abort={measures.TripAbort ?? TripAbortNone} rebuffed={measures.Rebuffed ?? RebuffedSkipped} den_kills={measures.DenKills} decoys={Count(measures.Decoys)} decoy_safe={measures.DecoySafe ?? NotApplicable} decoys_dropped={Count(measures.DecoysDropped)} gear_dropped={Count(measures.GearDropped)} decoys_recovered={Count(measures.DecoysRecovered)} pretrip_heals={measures.PretripHeals} gear_left={Count(measures.GearLeft)}{(measures.DeathFrameMaxMs is { } worst && !double.IsNaN(worst) && worst > FrameWarnMs ? FrameOver50Flag : string.Empty)}");
+            $"bsd-death done ok={(ok ? "true" : "false")} died={measures.Died} suicides={measures.Suicides} vitae={measures.VitaePercent} respawn={RespawnText(measures.Respawn)} corpse={measures.Corpses} purged={measures.Purges} protected={measures.Protected} vitals_pct={Pct(measures.VitalsPercent)} gear_restored={(measures.GearRestored ? "yes" : "no")} worn={measures.Worn} hits_taken={measures.HitsTaken} damage_taken={measures.DamageTaken} evades={measures.Evades} health_min_pct={Pct(measures.HealthMinPercent)} death_s={Seconds(measures.DeathSeconds)} death_frame_max_ms={Pct(measures.DeathFrameMaxMs)} fight_frame_max_ms={Pct(measures.FightFrameMaxMs)} deaths={measures.Deaths} corpses_stale={measures.CorpsesStale} protection={measures.Protection ?? DeathTally.ProtectionNone} vitae_paid={(measures.VitaePaid is { } paid ? paid.ToString(inv) : "n/a")} vitae_after={(measures.VitaeAfter is { } after ? after.ToString(inv) : "n/a")} corpse_looted={CorpseText(measures.CorpseLooted)} items_recovered={measures.ItemsRecovered} trip_s={Pct(measures.TripSeconds)} trip_abort={measures.TripAbort ?? TripAbortNone} rebuffed={measures.Rebuffed ?? RebuffedSkipped} den_kills={measures.DenKills} decoys={Count(measures.Decoys)} decoy_safe={measures.DecoySafe ?? NotApplicable} decoys_dropped={Count(measures.DecoysDropped)} gear_dropped={Count(measures.GearDropped)} decoys_recovered={Count(measures.DecoysRecovered)} pretrip_heals={measures.PretripHeals} gear_left={Count(measures.GearLeft)}{(measures.Undressed is { } undressed ? $" undressed={undressed} lie_down={measures.LieDown} lie_echo={measures.LieEcho}" : string.Empty)}{(measures.DeathFrameMaxMs is { } worst && !double.IsNaN(worst) && worst > FrameWarnMs ? FrameOver50Flag : string.Empty)}");
         return new DeathLegOutcome(ok, line, problems);
     }
 

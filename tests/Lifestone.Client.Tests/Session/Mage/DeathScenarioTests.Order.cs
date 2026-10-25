@@ -673,6 +673,27 @@ public sealed partial class DeathScenarioTests
         Assert.Contains(Lines(rig), l => l.StartsWith("decoys: 3 in the pack as the wait among the tuskers begins;", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// M4 4.2 F1: under D37 the mage carries no decoy kit and no unbuff suicide runs, so the count reads 0 and the drop check is not made: in every journey gate it
+    /// logged a <c>NOT SAFE, the needed gear can drop</c> warning over a pack that held no decoy to judge (fresh-r2: <c>decoys=0 decoy_safe=n/a</c>).
+    /// </summary>
+    [Fact]
+    public void With_no_decoy_carried_and_no_unbuff_suicide_the_wait_makes_no_decoy_check_and_warns_nothing()
+    {
+        var rig = TripRig(1);
+        Carry(rig, LootRulesTests.Item(0x80, 10, 5, 0x80000C13, "Not a decoy", 141));
+        var host = new ScriptedHost();
+        var scenario = Ordered(rig, host, Whole);
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.Equal(0, scenario.DecoysCarried);
+        Assert.Equal("0", Token(scenario.VerdictFields(), "decoys"));
+        Assert.Contains(Lines(rig), l => l.StartsWith("decoys: none in the pack as the wait among the tuskers begins", StringComparison.Ordinal));
+        Assert.DoesNotContain(rig.Log.Entries, e => e.Severity == LogSeverity.Warning && e.Message.StartsWith("decoys:", StringComparison.Ordinal));
+        Assert.DoesNotContain(Lines(rig), l => l.StartsWith("decoys: 0 in the pack", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void A_listing_of_decoys_only_is_recovered_and_counted()
     {

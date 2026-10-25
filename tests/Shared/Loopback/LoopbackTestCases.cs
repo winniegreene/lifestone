@@ -54,7 +54,7 @@ public static class LoopbackRun
 
     /// <summary>
     /// As <see cref="SkipReasonNow()"/>, and, when <paramref name="character"/> lives on another test account than <c>test</c> (M4 D31: Holtburg Brawler on
-    /// <c>test-melee</c>, Holtburg Archer on <c>test-archer</c>), also skips when secrets.json has no entry for that account (key names only in the reason).
+    /// <c>test-melee</c>, Holtburg Archer on <c>test-archer</c>, Lifestone Throwaway on <c>test-tools</c>: M4 D39), also skips when secrets.json has no entry for that account (key names only in the reason).
     /// </summary>
     public static string? SkipReasonNow(string? character)
     {

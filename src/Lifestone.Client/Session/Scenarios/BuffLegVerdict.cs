@@ -33,8 +33,10 @@ public sealed record BuffLegScenarioResult(bool ScenarioSucceeded, string? Failu
 /// cast_frame_max_ms= sounds_server= fizzles= misses= surpassed= cast_scripts_expected=[ frame_over_50=yes][ driver=on rebuff_lines= rebuff_s=]</c> (no name, no account). <c>cast_scripts_expected</c> is the casts the passes made
 /// (cycle plus forced, or plus the driver's), to read against <c>cast_scripts</c> (the effects the cast windows saw: cluster-k3 gap 1); <c>frame_over_50=yes</c> is <c>cast_frame_max_ms</c> over <see cref="FrameWarnMs"/>.
 /// <b>With the driver</b> (<c>--buff-auto on</c>, M4 4.1 lane c; DoD 14) there is no forced pass: <c>rebuffed=</c>, <c>buffs=</c>, <c>min_remaining_s=</c> and the rest of the pass fields are the <b>driver's pass</b>,
-/// <c>forced=no</c> is printed (judged at 4.2), and the line ends with <c>driver=on rebuff_lines=&lt;lines the pass cast&gt; rebuff_s=&lt;session seconds from the cycle's end to the pass's end&gt;</c>, both report-only.
-/// The judgement of the driver run is <c>rebuffed=yes</c> from the driver's pass, as the forced run's is from the forced pass.
+/// <c>forced=no</c> is printed, and the line ends with <c>driver=on rebuff_lines=&lt;lines the pass cast&gt; rebuff_s=&lt;session seconds from the cycle's end to the pass's end&gt;</c> (<c>rebuff_s</c> report-only).
+/// The judgement of the driver run is <c>rebuffed=yes</c> from the driver's pass, as the forced run's is from the forced pass, and since M4 4.2 J1 (DoD 14; m4-plan.md section 4.9 row j) that a driver pass ended
+/// (<c>driver=none</c> otherwise), that it cast at least one line (<c>rebuff_lines &gt;= 1</c>) and that no forced pass landed (<c>forced=no</c>). A run without the driver (the fighters' journeys: the forced pass by design,
+/// <c>forced=yes swapped=yes</c>) is judged as before.
 /// </summary>
 /// <remarks>
 /// <para><b>Judged</b> (<c>ok=</c>): what the loopback test asserts (<c>gear=wielded</c>, every wanted line active, <c>rebuffed=yes</c>, with the scenario ended without a failure) and <c>sounds_server&gt;=1</c> (D27, the owner's:
@@ -137,6 +139,25 @@ public static class BuffLegVerdict
             problems.Add(scenario.DriverOn ? "rebuffed=no (the driver's pass was to recast a line while it was still active)" : "rebuffed=no (a recast while still active expected)");
         }
 
+        // M4 4.2 J1 (DoD 14, m4-plan.md section 4.9 row j: forced=no with driver=on): the driver run is the driver's pass alone, and it must have happened and cast.
+        var forcedLanded = scenario.Forced is { Forced: true, Cast: >= 1, RecastWhileActive: >= 1 };
+        if (scenario.DriverOn)
+        {
+            if (scenario.Driver is not { } pass)
+            {
+                problems.Add("driver=none (the driver was on, but no driver pass ended)");
+            }
+            else if (pass.Cast < 1)
+            {
+                problems.Add(string.Create(CultureInfo.InvariantCulture, $"rebuff_lines={pass.Cast} (>= 1 expected: the driver's pass cast no line)"));
+            }
+
+            if (forcedLanded)
+            {
+                problems.Add("forced=yes (no expected with the driver on: a forced pass landed)");
+            }
+        }
+
         if (measures.SoundsServer is not { } server)
         {
             problems.Add("sounds_server=n/a: the run has no server-sound counter (D27 judges >= 1)");
@@ -148,7 +169,6 @@ public static class BuffLegVerdict
 
         var cast = CastOf(scenario.Cycle, scenario.DriverOn ? scenario.Driver : scenario.Forced);
         var later = scenario.DriverOn ? scenario.Driver : scenario.Forced;
-        var forcedLanded = scenario.Forced is { Forced: true, Cast: >= 1, RecastWhileActive: >= 1 };
         var misses = new List<string>();
         if (scenario.Cycle is not null)
         {

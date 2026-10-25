@@ -70,6 +70,28 @@ public sealed class NavMapTests
         Assert.Equal(LandDefs.LandCoordToCellId((0xAA * 8) + 0, (0xB4 * 8) + 0), NavMap.ToCellFrame(over).CellId);
     }
 
+    /// <summary>
+    /// M4 4.2 F1 (DoD 8): a dungeon room's origin lies outside 0-192 m of its landblock (the Black Spawn Den's 0x01050377, where the mage's corpse lay at y -139),
+    /// and the room graph and the sight probe read the goal's local origin in the goal cell's frame. Normalised like ground, the corpse's goal wrapped to
+    /// 0x01040000 [110.02 52.93] and the den plan ran 201 m into the rock in all three journey gates. An indoor point keeps its own landblock and origin; the
+    /// global position is the same either way; an outdoor point still wraps (above).
+    /// </summary>
+    [Fact]
+    public void An_indoor_cell_frame_keeps_its_own_landblock_and_origin_however_far_outside_0_192_it_lies()
+    {
+        var corpse = new CellFrame(0x01050377u, new AcFrame(new Vector3(110.02f, -139.07f, 0.01f), Quaternion.Identity));
+        var p = NavMap.FromCellFrame(corpse);
+        Assert.Equal(0x01050000u, p.LandblockId);
+        Assert.Equal(corpse.Origin, p.Local);
+        Assert.Equal(new NavPoint(0x01050000u, corpse.Origin).Normalized().Global, p.Global); // the same place in global metres
+        Assert.Equal(0x01040000u, new NavPoint(0x01050000u, corpse.Origin).Normalized().LandblockId); // what the old rule made of it
+
+        // Past the east edge too, and a building's room inside 0-192 is unchanged as before.
+        var east = NavMap.FromCellFrame(new CellFrame(0x01050390u, new AcFrame(new Vector3(230f, 40f, -6f), Quaternion.Identity)));
+        Assert.Equal(new NavPoint(0x01050000u, new Vector3(230f, 40f, -6f)), east);
+        Assert.Equal(new NavPoint(0xA9B40000u, new Vector3(140f, 20f, 94f)), NavMap.FromCellFrame(new CellFrame(0xA9B4013Fu, new AcFrame(new Vector3(140f, 20f, 94f), Quaternion.Identity))));
+    }
+
     [Fact]
     public void Neighbours_cross_tile_edges_and_the_byte_carry()
     {

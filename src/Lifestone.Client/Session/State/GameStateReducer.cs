@@ -196,6 +196,12 @@ internal sealed partial class GameStateReducer : IAcSessionSink
             case SessionNotices.SessionOptionSet:
                 ApplySessionOption(notice);
                 break;
+            case SessionNotices.ExpiryLine:
+                ApplyExpiryLine(notice);
+                break;
+            case SessionNotices.DigestParts:
+                // A record of the final state for the replay to compare (SessionReplayer); it changes nothing.
+                break;
             default:
                 throw new InvalidDataException($"local notice code {notice.Code} is reserved for the reducer but not assigned (SessionNotices)");
         }
@@ -223,6 +229,7 @@ internal sealed partial class GameStateReducer : IAcSessionSink
         _state.Time.Reset();
         _parked.Clear();
         _silentToolIds.Clear();
+        _heldExpiryLines.Clear();
         _attempt = 1;
         _bootBalance = 0;
         _characterErrorBalance = 0;

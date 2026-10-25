@@ -38,6 +38,9 @@ public enum FighterRole
 
     /// <summary>A side pack (a retail container weenie) the build grants and fills with the spell components, so the main pack keeps its slots free (M4 P5a C6, D41).</summary>
     SidePack,
+
+    /// <summary>A charged mana stone (a retail Mana Charge) the gear's recharge uses on the player (<see cref="FighterKit.ManaChargeWcid"/>, <see cref="GearRecharge"/>; closes <c>TODO(m4-gear-mana)</c>).</summary>
+    ManaCharge,
 }
 
 /// <summary>One line of the fighter's kit: a <see cref="GearItem"/> (GearKit's record) with its role, its Value and where it goes.</summary>
@@ -166,14 +169,37 @@ public sealed class FighterKit
     /// <summary>What one Mana or Stamina Potion restores (BoostValue, PropertyInt 90, 25).</summary>
     public const int VitalPotionBoost = 25;
 
+    /// <summary>ACE WeenieType 37 ManaStone and ItemType 0x80000 ManaStone.</summary>
+    public const uint WeenieTypeManaStone = 37, ItemTypeManaStone = 0x80000;
+
+    /// <summary>
+    /// The gear's mana stone (closes <c>TODO(m4-gear-mana)</c>): weenie 9060 "Titan Mana Charge" (<c>manachargetitan</c>; ace_world v0.9.296, read-only SELECT 2026-10-24: WeenieType 37 ManaStone, ItemType 0x80000, ItemCurMana 5,000, ItemEfficiency 1,
+    /// ManaStoneDestroyChance 1 (a use always consumes it), EncumbranceVal 50, Value 9,000, no stack, TargetType 0x891F (Creature among its targets, so a use on the player is allowed: <c>Player_Use.cs:138-144</c>, ACE 95ef426d), not bonded; sold by 19 vendors).
+    /// The retail charges are Tiny 100, Small 175, Moderate 350, High 500, Great 1,000, Superb 2,000, Titan 5,000 and Massive 10,000, all of burden 50. One Titan refills the gear when the recharge's trigger fires (<see cref="GearRecharge.RechargeBelow"/>):
+    /// the Brawler's 13 pieces burn about 1,516 mana an hour and the first (Branith's Shirt, 500 at 0.025 a second) is at half after 2.8 hours, about 4,200 short in all; the Archer's 12 worn pieces burn about 1,354 an hour and its first (the Ancient Armored
+    /// Vestment, 800 at 0.033) is at half after 3.4 hours, about 4,600 short. The Massive would double that for the same burden but wastes what the gear cannot take (a used charge is consumed whatever is left).
+    /// </summary>
+    public const uint ManaChargeWcid = 9060;
+
+    /// <summary>The mana one <see cref="ManaChargeWcid"/> holds (PropertyInt 107).</summary>
+    public const int ManaChargeMana = 5_000;
+
+    /// <summary>
+    /// The charges a kit holds: one. The recharge uses at most what the kit holds, and the next build tops a used one up (the kit's grant, as the potions), so one is a recharge per build-verify, about three hours of the gear's burn: a gate burns well under one.
+    /// The Archer's burden has little headroom (<c>FighterComponentsDatTests</c>: the kit with its components and the 2,000 the loot needs against Strength 97's 14,550; its arrows gave 100 for this charge, <see cref="ArcherArrowCount"/>), so a second charge is not carried. Not retail: Lifestone's own sizing.
+    /// </summary>
+    public const int ManaChargeCount = 1;
+
     /// <summary>The arrows the Hunter's kit gives.</summary>
     public const int ArrowCount = 200;
 
     /// <summary>
-    /// The Greater Frost Arrows the Archer's kit gives: 250 (one stack). A gate's missile hunts and the tests need a few dozen: the live Archer shot 17 arrows for 2 kills with the Arrows
-    /// (9 damage), and the Greater Frost Arrow does 14 and the Longbow doubles instead of 1.5 times, so a kill is fewer shots. 250 is inside the weenie's stack limit of 1,000, and 250 x 5 burden = 1,250, inside the capacity of Strength 100 (15,000). It was 500 Arrows for the Shortbow.
+    /// The Greater Frost Arrows the Archer's kit gives: 230 (one stack). A gate's missile hunts and the tests need a few dozen: the live Archer shot 17 arrows for 2 kills with the Arrows
+    /// (9 damage), and the Greater Frost Arrow does 14 and the Longbow doubles instead of 1.5 times, so a kill is fewer shots. 230 is inside the weenie's stack limit of 1,000, and 230 x 5 burden = 1,150. It was 500 Arrows for the Shortbow, then 250 (P4 arch);
+    /// the gear's mana charge (<see cref="ManaChargeWcid"/>, burden 50; closes <c>TODO(m4-gear-mana)</c>) took 20 of them: after P5b's Lifestone Tie components the Archer's kit with its components and the 2,000 the loot needs left 1 of Strength 97's 14,550
+    /// (<c>FighterComponentsDatTests</c>), so the charge needed room, and 20 arrows (100) leave 51. The build tops the stack up every build-verify. Not retail: Lifestone's own sizing.
     /// </summary>
-    public const int ArcherArrowCount = 250;
+    public const int ArcherArrowCount = 230;
 
     /// <summary>The kits the kit gives (separate items).</summary>
     public const int HealingKitCount = 2;
@@ -217,6 +243,8 @@ public sealed class FighterKit
 
     private static FighterItem Potion { get; } = new(new GearItem(PotionWcid, "Potion of Healing", GearKind.Component, WeenieTypeFood, ItemTypeMisc, EquipMask.None, PotionCount, 100, 15), FighterRole.Potion, 170, false);
 
+    private static FighterItem ManaCharge { get; } = new(new GearItem(ManaChargeWcid, "Titan Mana Charge", GearKind.Component, WeenieTypeManaStone, ItemTypeManaStone, EquipMask.None, ManaChargeCount, null, 50), FighterRole.ManaCharge, 9_000, false);
+
     private static FighterItem[] Leather { get; } =
     [
         new(new GearItem(45, "Leather Cap", GearKind.Armour, WeenieTypeClothing, ItemTypeArmor, EquipMask.HeadWear, 1, null, 100), FighterRole.Armour, 1100, true),
@@ -237,14 +265,14 @@ public sealed class FighterKit
     /// "Holtburg Brawler"'s kit: the Hunter's without the Shortbow and the Arrows (no missile weapon at all), with the caster kept in the pack (M4 P5a C1b). M4 P5a C6 (D40): the magic gear (<see cref="FighterGearSet.Brawler"/>: a magic melee weapon, mismatched magic armour and jewelry)
     /// replaces the plain Mace and the leather set, which are not in the kit any more (a character built before keeps them: the build takes a worn plain piece off when the gear needs its place, and the sale rule never sells the Mace).
     /// </summary>
-    public static FighterKit Melee { get; } = new("melee", [.. FighterGearSet.Brawler.KitLines(), HealingKit, Potion, Caster, SidePack, ManaPotions(ManaPotionCount), StaminaPotions(StaminaPotionCount)], FighterGearSet.Brawler);
+    public static FighterKit Melee { get; } = new("melee", [.. FighterGearSet.Brawler.KitLines(), HealingKit, Potion, Caster, SidePack, ManaPotions(ManaPotionCount), StaminaPotions(StaminaPotionCount), ManaCharge], FighterGearSet.Brawler);
 
     /// <summary>
     /// "Holtburg Archer"'s kit (M4 P4 arch): the leather set, the <see cref="LongbowWcid"/> Longbow instead of the Shortbow, <see cref="ArcherArrowCount"/> Greater Frost Arrows
     /// (<see cref="GreaterFrostArrowWcid"/>) instead of the Arrows, the kits, the potions and the caster kept in the pack (M4 P5a C1b); no melee weapon at all. M4 P5a C6 (D40): the magic gear (<see cref="FighterGearSet.Archer"/>: a magic bow kept in the pack, mismatched
     /// magic armour and jewelry) replaces the plain Longbow and the leather set (an older Longbow in a built character's pack stays there as a spare; the hunt's swap wields the kit's bow by its wcid).
     /// </summary>
-    public static FighterKit Archer { get; } = new("archer", [.. FighterGearSet.Archer.KitLines(), GreaterFrostArrows(ArcherArrowCount), HealingKit, Potion, Caster, SidePack, ManaPotions(ArcherManaPotionCount), StaminaPotions(ArcherStaminaPotionCount)], FighterGearSet.Archer);
+    public static FighterKit Archer { get; } = new("archer", [.. FighterGearSet.Archer.KitLines(), GreaterFrostArrows(ArcherArrowCount), HealingKit, Potion, Caster, SidePack, ManaPotions(ArcherManaPotionCount), StaminaPotions(ArcherStaminaPotionCount), ManaCharge], FighterGearSet.Archer);
 
     /// <summary>The template's key (<c>hunter</c>, <c>melee</c>, <c>archer</c>).</summary>
     public string Key { get; }
@@ -321,6 +349,12 @@ public sealed class FighterKit
 
     /// <summary>The Mana and Stamina Potion lines (M4 P5a C7; none in the Hunter's kit).</summary>
     public IEnumerable<FighterItem> VitalPotions => Items.Where(i => i.Role == FighterRole.VitalPotion);
+
+    /// <summary>The wcid of the kit's mana charge (<see cref="ManaChargeWcid"/>; closes <c>TODO(m4-gear-mana)</c>), or 0 when the kit has none (the Hunter's).</summary>
+    public uint ChargeWcid => Items.FirstOrDefault(i => i.Role == FighterRole.ManaCharge)?.Wcid ?? 0;
+
+    /// <summary>The charges the kit holds (its <see cref="FighterRole.ManaCharge"/> line's count; 0 for the Hunter's kit).</summary>
+    public int ManaCharges => Items.FirstOrDefault(i => i.Role == FighterRole.ManaCharge)?.Item.Stack ?? 0;
 
     /// <summary>The side-pack slots the kit's side-pack lines need (one per line, as each line is a stack): the component lines and the two potion lines.</summary>
     public int ComponentSlots => SidePackLines.Count();

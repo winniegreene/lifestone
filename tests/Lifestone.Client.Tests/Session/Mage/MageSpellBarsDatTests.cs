@@ -17,11 +17,11 @@ public sealed class MageSpellBarsDatTests(DatSetFixture fixture) : IClassFixture
         var table = SpellTableData.Load(fixture.Dats).Spells;
         (uint Id, string Name, uint Power, uint LineOne)[] pins =
         [
-            (MageSpellBars.FireVulnerabilityOtherVii, "Inferno's Gift", 325, 21), // Fire Vulnerability Other I
-            (MageSpellBars.FlameBoltVii, "Ilservian's Flame", 300, 27), // Flame Bolt I
-            (MageSpellBars.RevitalizeSelfVii, "Robustification", 300, 1177), // Revitalize Self I
-            (MageSpellBars.StaminaToManaSelfVii, "Meditative Trance", 300, 1676), // Stamina to Mana Self I
-            (MageSpellBars.HealSelfVii, "Adja's Intervention", 300, 6), // Heal Self I
+            (MageSpellBars.FireVulnerabilityOtherVii, "Inferno's Gift", 325, 21), // line one (LineOne): Fire Vulnerability Other I
+            (MageSpellBars.FlameBoltVii, "Ilservian's Flame", 300, 27), // line one (LineOne): Flame Bolt I
+            (MageSpellBars.RevitalizeSelfVii, "Robustification", 300, 1177), // line one (LineOne): Revitalize Self I
+            (MageSpellBars.StaminaToManaSelfVii, "Meditative Trance", 300, 1676), // line one (LineOne): Stamina to Mana Self I
+            (MageSpellBars.HealSelfVii, "Adja's Intervention", 300, 6), // line one (LineOne): Heal Self I
         ];
 
         foreach (var (id, name, power, lineOne) in pins)

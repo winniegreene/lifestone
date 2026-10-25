@@ -285,39 +285,52 @@ public sealed class HuntFollow : IHuntFollow
     }
 
     /// <summary>Gives the body the server's MoveTo and TurnTo of the player (<c>DispatchSmartBoxEvent</c> makes the controller lose control to the server first, 11.4186 0x005595D0, 11.6096 0x0055A210); the rest of the server's motion is left alone.</summary>
-    private void ApplyServerMotions()
+    private void ApplyServerMotions() => ApplyServerMoveTos(_serverMotions, _placed ? _walker : null, ref _actions, _log, LogCategory, "the server moves the player: the hunt's own body follows");
+
+    /// <summary>
+    /// Gives a placed body the server's MoveTo and TurnTo of the player (movement types 6-9: <c>DispatchSmartBoxEvent</c> makes the controller lose control to the server first, 11.4186 0x005595D0,
+    /// 11.6096 0x0055A210, and <c>CPhysics::SetObjectMovement</c> runs it in the physics object's update) and clears <paramref name="motions"/>; the rest of the server's motion is left alone, and nothing is applied
+    /// while <paramref name="walker"/> is null (not placed). Shared by <see cref="HuntFollow"/> and <see cref="HeadlessBody"/> (M4 P5b fix FA, P5b-R1: the journey's headless body follows ACE's walk-to-use).
+    /// </summary>
+    /// <param name="motions">The server's (not autonomous) motions of the player since the last call.</param>
+    /// <param name="walker">The placed body, or null.</param>
+    /// <param name="actions">A scratch buffer for the motion's actions (grown when needed).</param>
+    /// <param name="log">The log.</param>
+    /// <param name="category">The log category.</param>
+    /// <param name="message">The line logged for each MoveTo or TurnTo applied.</param>
+    internal static void ApplyServerMoveTos(List<ObjectMotionChanged> motions, OfflineWalker? walker, ref WireMotionItem[] actions, ILogSink log, string category, string message)
     {
-        if (_serverMotions.Count == 0)
+        if (motions.Count == 0)
         {
             return;
         }
 
-        foreach (var e in _serverMotions)
+        foreach (var e in motions)
         {
             var type = (byte)e.Motion.MovementType;
-            if (type is < 6 or > 9 || !_placed || _walker!.Body is not IPlayerMovementBody body)
+            if (type is < 6 or > 9 || walker?.Body is not IPlayerMovementBody body)
             {
                 continue;
             }
 
-            var count = AvatarWire.CopyActions(e.Motion, _actions);
-            if (count > _actions.Length)
+            var count = AvatarWire.CopyActions(e.Motion, actions);
+            if (count > actions.Length)
             {
-                _actions = new WireMotionItem[count];
-                AvatarWire.CopyActions(e.Motion, _actions);
+                actions = new WireMotionItem[count];
+                AvatarWire.CopyActions(e.Motion, actions);
             }
 
-            var result = body.ApplyServerMovement(AvatarWire.ToMovement(e.Motion), _actions.AsSpan(0, count), e.Autonomous, out var failure);
-            _log.Info(
-                LogCategory,
-                "the server moves the player: the hunt's own body follows",
+            var result = body.ApplyServerMovement(AvatarWire.ToMovement(e.Motion), actions.AsSpan(0, count), e.Autonomous, out var failure);
+            log.Info(
+                category,
+                message,
                 new LogField("type", type),
                 new LogField("target", e.Motion.MoveTo?.TargetGuid is { } target ? $"0x{target:X8}" : "none"),
                 new LogField("result", result.ToString()),
-                new LogField("moving_to", _walker.Physics.IsMovingTo),
+                new LogField("moving_to", walker.Physics.IsMovingTo),
                 new LogField("failure", result == MovementUnpackResult.Applied ? "none" : failure.Message));
         }
 
-        _serverMotions.Clear();
+        motions.Clear();
     }
 }

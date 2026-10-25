@@ -153,6 +153,42 @@ internal sealed class ActionApi : IActionApi, IDisposable
     internal PlayerTools Tools { get; }
 
     /// <inheritdoc/>
+    public string? BusyReason
+    {
+        get
+        {
+            // Index loops and constant strings: callers ask every frame (RecallHome's busy wait), and this must not allocate.
+            for (var i = 0; i < _inFlight.Count; i++)
+            {
+                if (_inFlight[i].State == TrackerState.InFlight && BusyLaneText(_inFlight[i].Lane, held: false) is { } inFlight)
+                {
+                    return inFlight;
+                }
+            }
+
+            for (var i = 0; i < _laneHolds.Count; i++)
+            {
+                if (_laneHolds[i].HoldsLane && BusyLaneText(_laneHolds[i].Lane, held: true) is { } held)
+                {
+                    return held;
+                }
+            }
+
+            return TeleportWait();
+        }
+    }
+
+    /// <summary>The <see cref="BusyReason"/> text for a lane whose actions keep ACE's player busy (Inventory, Heal, Use, Magic), or null for a lane that does not (chat, queries, tools, movement, stats, session).</summary>
+    private static string? BusyLaneText(ActionLane lane, bool held) => lane switch
+    {
+        ActionLane.Inventory => held ? "the Inventory lane holds a move's chain (ACE's pickup motion, the return stance and one more motion length)" : "an item move is in flight",
+        ActionLane.Heal => held ? "the Heal lane holds until the player's Ready after a heal or a potion" : "a heal or a potion is in flight",
+        ActionLane.Use => held ? "the Use lane holds until ACE's UseDone (a container or a vendor)" : "a use is in flight",
+        ActionLane.Magic => held ? "the Magic lane holds until ACE's UseDone ends the cast" : "a cast or a combat-mode change is in flight",
+        _ => null,
+    };
+
+    /// <inheritdoc/>
     public bool KillSwitch
     {
         get => _killSwitch;
@@ -330,6 +366,15 @@ internal sealed class ActionApi : IActionApi, IDisposable
         CheckThread("IActionApi.Drink");
         var handle = new HealHandle(NextId(), ActionKind.Drink, source, "Drink item=" + ActionText.Hex(item), Clock.Now);
         return (HealHandle)Accept(new PotionTracker(handle, item), item == 0 ? Refused("no item to drink") : null);
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle UseManaStone(uint stone, uint target, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.UseManaStone");
+        var handle = NewHandle(ActionKind.UseManaStone, source, "UseManaStone stone=" + ActionText.Hex(stone) + " target=" + ActionText.Hex(target));
+        var problem = stone == 0 ? "no stone to use" : target == 0 ? "no target to use the stone on" : null;
+        return Accept(new ManaStoneTracker(handle, stone, target), problem is null ? null : Refused(problem));
     }
 
     /// <inheritdoc/>

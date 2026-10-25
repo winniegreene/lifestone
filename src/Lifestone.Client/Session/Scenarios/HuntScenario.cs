@@ -5,6 +5,8 @@ using Lifestone.Client.Navigation;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Scenarios.Journey;
+using Lifestone.Client.Session.Vitals;
 using Lifestone.Client.World;
 using Lifestone.Data.Motion;
 using Lifestone.Data.World;
@@ -95,6 +97,16 @@ public sealed partial class HuntScenario : IScenario
     public const int MaxCells = 4;
 
     /// <summary>
+    /// The most cells a hunt on foot (a journey's, over a travel seam that is not <see cref="PlaceTravel"/>) stands in (M4 P5b fix FC-a3): gate round 1's serial archer found the forest emptied by the Godot archer's hunt
+    /// just before and failed after <see cref="MaxCells"/> ("no creature of the table in the band 20-30 within 35 m of the player after 4 cell(s)") with about 92 of its 300 s left. On foot the hunt searches on, bounded by these cells
+    /// and by its own time (<see cref="HuntOptions.Seconds"/>); the seek (<see cref="MaxSeeks"/>) runs at every cell as ever. Not retail: Lifestone's own bound.
+    /// </summary>
+    public const int OnFootMaxCells = 8;
+
+    /// <summary>The cells this hunt may stand in: <see cref="OnFootMaxCells"/> on foot, else <see cref="MaxCells"/>.</summary>
+    public int CellLimit => OnFoot ? OnFootMaxCells : MaxCells;
+
+    /// <summary>
     /// The environment misses in a row (no hit or evade between) after which a missile hunt cancels the attack and walks on (M4 P4 bow): ACE launches a real projectile and
     /// auto-repeats from one MissileAttack, so a trunk between the shooter and the target is hit again and again (the live forest run: 104 arrows, no hit). The shape of M3's
     /// <see cref="FightScenario.MissesBeforeWalking"/>; the count is fixed, not an option.
@@ -140,6 +152,17 @@ public sealed partial class HuntScenario : IScenario
 
     /// <summary>How near the target's last position the kill's corpse must be, in metres (a corpse is created where the creature fell).</summary>
     public const float CorpseRangeMetres = 6f;
+
+    /// <summary>
+    /// M4 P5b fix FA (P5b-R1): in a journey (on foot) a corpse farther than this from the client's body is travelled to first, an object goal of this range through the travel seam
+    /// (<see cref="TravelPurpose.Corpse"/>), then opened; the open is then within ACE's use radius and needs no walk-to-use of its own (live journey 3a: the archer opened from bow range, ACE's
+    /// walk-to-use timed out, UseDone 0 with no ViewContents). The death loop's corpse trip asks for the same range (<see cref="DeathScenario.CorpseTravelRangeMetres"/>);
+    /// TODO(m4-corpse-run-range): a first value until the lead's live journey. Over the default <see cref="PlaceTravel"/> nothing changes: the open is sent from where the player stands.
+    /// </summary>
+    public const double CorpseReachMetres = DeathScenario.CorpseTravelRangeMetres;
+
+    /// <summary>The longest the walk to a corpse may run before the corpse is given up (counted in <c>corpses_refused</c>, never a failure), in seconds. Lifestone's own.</summary>
+    public const double CorpseWalkSeconds = 60;
 
     /// <summary>The longest a precondition the read model has not caught up with is waited for, in seconds.</summary>
     public const double WaitSeconds = 10;
@@ -198,6 +221,24 @@ public sealed partial class HuntScenario : IScenario
     private string _placeNext = string.Empty;
     private TeleportDestination? _placeDestination;
     private bool _placeHome;
+
+    // M4 P5b lane J2a: the travel seam, the stages and the keeper
+    private readonly IJourneyTravel _travel;
+    private readonly HuntStages _stages;
+    private readonly VitalsKeeper? _keeper;
+    private ITravelLeg? _leg;
+    private ITravelLeg? _corpseLeg;
+    private double _corpseLegStart;
+    private TravelMeans _lastMeans = TravelMeans.Place;
+    private bool _placeConfirmed;
+    private bool _placeSoft;
+    private bool _placeSeek;
+    private int _sightless;
+    private uint _sightTarget;
+    private bool _sightLogged;
+    private bool _keeperDrinking;
+    private bool _attackWaitLogged;
+    private int _attackWaits;
     private double _placeStart;
     private bool _leftHome;
     private bool _returned;
@@ -272,6 +313,9 @@ public sealed partial class HuntScenario : IScenario
     {
         None,
         Seek,
+
+        /// <summary>M4 P5b fix FA: in a journey, the travel to a corpse beyond <see cref="CorpseReachMetres"/> before the open.</summary>
+        Approach,
         Opening,
         Opened,
 
@@ -328,6 +372,9 @@ public sealed partial class HuntScenario : IScenario
         _groundHeight = groundHeight;
         ArrivalSeconds = arrivalSeconds;
         _cells = [.. _ground.UsableCells];
+        _travel = options.Travel ?? new PlaceTravel();
+        _stages = options.Stages;
+        _keeper = options.Keeper;
         _holtburg = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
         _holtburgLandblock = _holtburg.Location.Position.CellId >> 16;
     }
@@ -340,6 +387,26 @@ public sealed partial class HuntScenario : IScenario
 
     /// <inheritdoc/>
     public string Name => ScenarioName;
+
+    /// <summary>The travel seam every travel of the hunt goes through (<see cref="HuntOptions.Travel"/>; a <see cref="PlaceTravel"/> by default: today's <c>Tools.Place</c>).</summary>
+    public IJourneyTravel Travel => _travel;
+
+    /// <summary>The stages the hunt runs (<see cref="HuntOptions.Stages"/>).</summary>
+    public HuntStages Stages => _stages;
+
+    /// <summary>The in-fight potions the keeper drank for the hunt (<c>infight_potions=</c>, report-only; 0 with no keeper).</summary>
+    public int InFightPotions => _keeper?.InFightPotions ?? 0;
+
+    /// <summary>The attacks the keeper's <see cref="VitalsKeeper.MayAttack"/> delayed (each run of refusals counted once; 0 with no keeper).</summary>
+    public int AttackWaits => _attackWaits;
+
+    /// <summary>How the last travel moved the player (<see cref="TravelMeans.Place"/> before any).</summary>
+    public TravelMeans LastTravelMeans => _lastMeans;
+
+    /// <summary>True when the travel seam is not today's place (a journey's): the seeks and the shop door go on foot to object goals, and the missile pick's spot is an object goal with sight.</summary>
+    private bool OnFoot => _travel is not PlaceTravel;
+
+    private bool Has(HuntStages stage) => (_stages & stage) != 0;
 
     /// <inheritdoc/>
     public string Stage { get; private set; } = "start";
@@ -448,11 +515,24 @@ public sealed partial class HuntScenario : IScenario
 
     /// <summary>The verdict fields (no character name, no account).</summary>
     public string VerdictFields() =>
-        string.Create(CultureInfo.InvariantCulture, $"fighter={_fighter} {_tally.Fields()} returned={(_returned ? "yes" : "no")}");
+        string.Create(CultureInfo.InvariantCulture, $"fighter={_fighter} {_tally.Fields()} returned={(!Has(HuntStages.Home) ? "n/a" : _returned ? "yes" : "no")}{(_keeper is null ? string.Empty : " infight_potions=" + InFightPotions.ToString(CultureInfo.InvariantCulture))}");
+
+    /// <summary>
+    /// The counts the hunt's verdict judges that <see cref="VerdictFields"/> does not print (M4 4.2 J1: a station prints what it judges), for the journey's hunt station line: <c>looted= loot_skipped= corpses_opened= heals= kit_uses= one_blow_kills=</c>
+    /// (<see cref="HuntLegVerdict.Compose"/> judges <c>looted</c>, <c>heals</c> and <c>one_blow_kills</c>; the others are their context).
+    /// </summary>
+    public string JudgedFields() =>
+        string.Create(CultureInfo.InvariantCulture, $"looted={_tally.Looted} loot_skipped={_tally.LootSkipped} corpses_opened={_corpsesOpened} heals={Heals} kit_uses={KitUses} one_blow_kills={_oneBlowKills}");
+
+    /// <summary>
+    /// The combat-mode watch this hunt runs (M4 4.2 J1, the journey's hunt station: <c>mode_mismatch</c>), or null for none. The hunt starts it with its tally on its first step and disposes it with its subscriptions; the count stays
+    /// readable (<see cref="HuntLegVerdict.FromScenario"/> reads it).
+    /// </summary>
+    public CombatModeWatch? ModeWatch { get; init; }
 
     /// <summary>The run's own facts, beside the verdict: the weapon, the bind, the health (report-only start and end), the cells and the sends.</summary>
     public string DetailFields() =>
-        string.Create(CultureInfo.InvariantCulture, $"weapon={_options.Weapon.ToString().ToLowerInvariant()} bound={(_bound ? "yes" : "no")} potions={_healTally.Potions} heal_failed_rolls={_healTally.FailedRolls} heal_points={_healTally.Points} heal_wasted={_healTally.Wasted} cells={_cellsTried} attacks={_attacks} refused={_refused} busy_retries={_attackBusyTotal} one_blow_kills={_oneBlowKills} restored={(Restored ? "yes" : "no")} stalls={_stalls} charge_retries={_chargeRetriesTotal} corpses_missed={_corpsesMissed} corpses_refused={_corpsesRefused} looted={_tally.Looted} loot_skipped={_tally.LootSkipped} health_start_pct={Pct(_healthBefore)} health_end_pct={Pct(_healthLast)} {VendorFields()}");
+        string.Create(CultureInfo.InvariantCulture, $"weapon={_options.Weapon.ToString().ToLowerInvariant()} bound={(!Has(HuntStages.Bind) ? "n/a" : _bound ? "yes" : "no")} potions={_healTally.Potions} heal_failed_rolls={_healTally.FailedRolls} heal_points={_healTally.Points} heal_wasted={_healTally.Wasted} cells={_cellsTried} attacks={_attacks} refused={_refused} busy_retries={_attackBusyTotal} one_blow_kills={_oneBlowKills} restored={(!Has(HuntStages.Restore) ? "n/a" : Restored ? "yes" : "no")} stalls={_stalls} charge_retries={_chargeRetriesTotal} corpses_missed={_corpsesMissed} corpses_refused={_corpsesRefused} looted={_tally.Looted} loot_skipped={_tally.LootSkipped} health_start_pct={Pct(_healthBefore)} health_end_pct={Pct(_healthLast)} {VendorFields()} sightless={_sightless}");
 
     private static string Pct(double share) => double.IsNaN(share) ? "n/a" : (share * 100).ToString("0", CultureInfo.InvariantCulture);
 
@@ -475,6 +555,12 @@ public sealed partial class HuntScenario : IScenario
             follow.Tick(session, now);
         }
 
+        if (_keeperDrinking && _keeper is { } keeper)
+        {
+            keeper.Step(_clock); // the in-fight potion settles in the keeper's own step (P5a C2)
+            _keeperDrinking = keeper.Busy;
+        }
+
         PollAbandonedOpen(session);
         StepLootDrain(session);
         StepAppraise(session); // M4 3.2 s4a: --appraise-loot (HuntScenario.Vendor.cs)
@@ -486,6 +572,11 @@ public sealed partial class HuntScenario : IScenario
             _subscriptions.Add(session.Events.Subscribe<ObjectMoved>(OnMoved));
             _subscriptions.Add(session.Events.Subscribe<AttackChanged>(OnAttackChanged));
             _subscriptions.Add(session.Events.Subscribe<ChatReceived>(OnChat));
+            if (ModeWatch is { } watch)
+            {
+                watch.Start(session); // judges the state it finds, then every change (M4 4.2 J1)
+                _subscriptions.Add(watch);
+            }
         }
 
         switch (Stage)
@@ -548,15 +639,17 @@ public sealed partial class HuntScenario : IScenario
             case "bind-use":
                 return BindUse(session);
             case "health":
-                return HealthStep(session);
+                return Has(HuntStages.Health) || _afterHeal is not null ? HealthStep(session) : NextAfterHealth(session);
             case "heal-use":
                 return HealUse(session);
             case "heal-wait":
                 return HealthStep(session); // the same look every tick: nothing helps now, regeneration is waited for
             case "swap":
-                return SwapStep(session);
+                return Has(HuntStages.Swap) ? SwapStep(session) : Enter("ground");
             case "ground":
-                return GroundStart(session);
+                return Has(HuntStages.Hunt) ? GroundStart(session) : SkipHunt();
+            case "sight-chosen":
+                return SightChosen(session);
             case "placing":
                 return Placing(session);
             case "acquire-settle":
@@ -582,7 +675,7 @@ public sealed partial class HuntScenario : IScenario
             case "wind-peace":
                 return WindPeace(session);
             case "wind-restore":
-                return WindRestore(session);
+                return Has(HuntStages.Restore) ? WindRestore(session) : Enter("wind-home");
             case "wind-home":
                 return WindHome(session);
             case "logging-off":
@@ -668,7 +761,10 @@ public sealed partial class HuntScenario : IScenario
         _acting = true;
         _wait.Reset();
         _log.Info(LogCategory, $"the hunt is {_options}; ground {_ground.Name}: {_cells.Count} usable cell(s) of {_ground.Cells.Count}");
-        _log.Info(LogCategory, $"recovery: {_options.Recovery}; checked before the first fight and between kills, never during a fight: the retreat at {RetreatShareFor(_options.Weapon) * 100:0}% health ends a fight (TODO(m4-hunt-infight-heal))");
+        _log.Info(LogCategory, _keeper is null
+            ? $"recovery: {_options.Recovery}; checked before the first fight and between kills, never during a fight: the retreat at {RetreatShareFor(_options.Weapon) * 100:0}% health ends a fight (TODO(m4-hunt-infight-heal))"
+            : $"recovery: {_options.Recovery}; checked before the first fight and between kills; in a fight the keeper's in-fight potion (--vitals-infight-potion) drinks with the target out of reach and its MayAttack gates each attack; the retreat at {RetreatShareFor(_options.Weapon) * 100:0}% health ends a fight");
+        LogStages();
         if (_cells.Count == 0)
         {
             return Fail(session, "the ground has no usable cell (TODO(m4-belt-cell-terrain): every cell reads water or steep)");
@@ -681,13 +777,18 @@ public sealed partial class HuntScenario : IScenario
 
     private ScenarioStatus BindStart(IGameSessionView session)
     {
+        if (!Has(HuntStages.Bind))
+        {
+            return Enter("health");
+        }
+
         if (InHoltburg(session))
         {
             _settleUntil = _clock;
             return Enter("bind-settle");
         }
 
-        BeginPlace(session, _holtburg, "bind-settle", home: false);
+        BeginPlace(session, _holtburg, "bind-settle", home: false, TravelPurpose.Bind);
         return ScenarioStatus.Running;
     }
 
@@ -1360,8 +1461,8 @@ public sealed partial class HuntScenario : IScenario
             var destination = new TeleportDestination(name, [], new WorldLocation(name, new CellPosition(cell.CellId, point), HasHeight: true, HeadingDegrees: 0), "hunt ground");
             _cellsTried++;
             _leftHome = true;
-            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"ground: cell {cell}, place loc at ({point.X:0.#}, {point.Y:0.#}, {point.Z:0.#}) (cell {_cellsTried} of at most {MaxCells})"));
-            BeginPlace(session, destination, "acquire-settle", home: false);
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"ground: cell {cell}, place loc at ({point.X:0.#}, {point.Y:0.#}, {point.Z:0.#}) (cell {_cellsTried} of at most {CellLimit})"));
+            BeginPlace(session, destination, "acquire-settle", home: false, TravelPurpose.Cell);
             return ScenarioStatus.Running;
         }
 
@@ -1370,14 +1471,20 @@ public sealed partial class HuntScenario : IScenario
 
     private ScenarioStatus Acquire(IGameSessionView session)
     {
+        var missile = _options.Weapon == HuntWeapon.Missile;
+        var listed = missile ? MissileRange : MeleeRange;
+        if (OnFoot && SearchTimeUp(session))
+        {
+            // FC-a3: the search on foot is bounded by the hunt's own time; a search that found nothing in it fails by the acquire's name, not the time's.
+            return Fail(session, NoCreature(listed) + string.Create(CultureInfo.InvariantCulture, $"; the hunt's {_options.Seconds:0.#} s ran out while it searched ({_seeks} seek(s))"));
+        }
+
         if (TimeOrHealthEnds(session) is { } ended)
         {
             return ended;
         }
 
-        var missile = _options.Weapon == HuntWeapon.Missile;
-        var listed = missile ? MissileRange : MeleeRange;
-        if (missile && !_clearLineTodoLogged)
+        if (missile && !_clearLineTodoLogged && !OnFoot)
         {
             _clearLineTodoLogged = true;
             _log.Warn(LogCategory, "acquire: TODO(m4-missile-clear-line): the missile pick takes the nearest creature with no check of the line to it (M3's sweep, GameFightWalk.HasClearLine, needs the game host's physics world, which the hunt does not hold); a blocked shooter walks on after " + BlockedBeforeWalking.ToString(CultureInfo.InvariantCulture) + " environment misses in a row");
@@ -1385,7 +1492,7 @@ public sealed partial class HuntScenario : IScenario
 
         if (Pick(session, listed, out var guid))
         {
-            return Chosen(session, guid);
+            return missile && OnFoot ? SightGoal(session, guid) : Chosen(session, guid);
         }
 
         if (SeekHeight is not null && _seeks < MaxSeeks && TrySeek(session, missile))
@@ -1393,14 +1500,22 @@ public sealed partial class HuntScenario : IScenario
             return ScenarioStatus.Running;
         }
 
-        if (_cellsTried < MaxCells && _cellIndex + 1 < _cells.Count)
+        if (_cellsTried < CellLimit && _cellIndex + 1 < _cells.Count)
         {
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"acquire: no creature of the table in the band {_ground.MinLevel}-{_ground.MaxLevel} within {listed:0} m of the player; the next cell"));
             return NextCell(session) ?? Fail(session, "acquire: no further cell has a terrain height");
         }
 
-        return Fail(session, string.Create(CultureInfo.InvariantCulture, $"acquire: no creature of the table in the band {_ground.MinLevel}-{_ground.MaxLevel} within {listed:0} m of the player after {_cellsTried} cell(s) ({_ground.Table.Count} creatures are listed; an unlisted creature is never a target)"));
+        return Fail(session, NoCreature(listed));
     }
+
+    /// <summary>The acquire's failure when the search found nothing: the band, the range, the cells stood in and the table's size.</summary>
+    private string NoCreature(float listed) =>
+        string.Create(CultureInfo.InvariantCulture, $"acquire: no creature of the table in the band {_ground.MinLevel}-{_ground.MaxLevel} within {listed:0} m of the player after {_cellsTried} cell(s) ({_ground.Table.Count} creatures are listed; an unlisted creature is never a target)");
+
+    /// <summary>True when the hunt's time ran out with its kills not done and the health over the retreat line (that line keeps its own failure: <see cref="TimeOrHealthEnds"/>).</summary>
+    private bool SearchTimeUp(IGameSessionView session) =>
+        !double.IsNaN(_huntStart) && _clock - _huntStart > _options.Seconds && !KillsDone() && !(HealthShare(session) is { } share && share < RetreatShareFor(_options.Weapon));
 
     /// <summary>
     /// The seek (M4 P4 seek): nothing of the band is in the acquire range, but the client holds every creature ACE sent it (the 3x3 landblocks around the player). The nearest creature of the ground's table in its band,
@@ -1453,6 +1568,12 @@ public sealed partial class HuntScenario : IScenario
                 var heading = AcCoordinates.HeadingOf(goal.X - spot.X, goal.Y - spot.Y);
                 var name = "hunt seek 0x" + cell.CellId.ToString("X8", CultureInfo.InvariantCulture);
                 var destination = new TeleportDestination(name, [], new WorldLocation(name, new CellPosition(cell.CellId, point), HasHeight: true, HeadingDegrees: heading), "hunt seek");
+                if (!_seekTodoLogged && OnFoot)
+                {
+                    _seekTodoLogged = true;
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"seek: on foot through the travel seam to an object goal (the creature within {SeekGoalMetresFor(missile):0} m, with a clear line of sight): closes m4-seek-terrain-only"));
+                }
+
                 if (!_seekTodoLogged)
                 {
                     _seekTodoLogged = true;
@@ -1463,8 +1584,8 @@ public sealed partial class HuntScenario : IScenario
                 _seeks++;
                 _tally.NoteSeek();
                 _leftHome = true;
-                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"seek: '{target.Name}' level {_ground.LevelOf(target.Weenie.WeenieClassId) ?? 0} at {Horizontal(goal, origin):0} m; place loc to {point.X:0.#},{point.Y:0.#} in 0x{cell.CellId:X8} ({distance:0.#} m from it)"));
-                BeginPlace(session, destination, "acquire-settle", home: false);
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"seek: '{target.Name}' level {_ground.LevelOf(target.Weenie.WeenieClassId) ?? 0} at {Horizontal(goal, origin):0} m; {(OnFoot ? "travel" : "place loc")} to {point.X:0.#},{point.Y:0.#} in 0x{cell.CellId:X8} ({distance:0.#} m from it)"));
+                BeginPlace(session, destination, "acquire-settle", home: false, TravelPurpose.Seek, guid, SeekGoalMetresFor(missile), needSight: true);
                 return true;
             }
 
@@ -1619,6 +1740,10 @@ public sealed partial class HuntScenario : IScenario
         }
 
         _activeSince = double.NaN;
+        if (_keeper is { } keeper && KeeperGate(session, keeper) is { } held)
+        {
+            return held;
+        }
 
         _killsAtTarget = _tally.Kills;
         _seqNumber = session.Attack.Number;
@@ -1823,6 +1948,47 @@ public sealed partial class HuntScenario : IScenario
         return guid != 0;
     }
 
+    /// <summary>M4 P5b fix FA (P5b-R1): steps the travel to the corpse; at the arrival the open is sent; a failed or overlong walk gives the corpse up (counted in <c>corpses_refused</c>, never a failure).</summary>
+    private bool StepCorpseApproach(IGameSessionView session)
+    {
+        var leg = _corpseLeg!;
+        var status = leg.Step(session, _clock);
+        if (status == TravelStatus.Running && _clock - _corpseLegStart <= CorpseWalkSeconds)
+        {
+            return true;
+        }
+
+        var why = status switch
+        {
+            TravelStatus.Arrived => null,
+            TravelStatus.Failed => leg.Failure ?? "travel:" + leg.Means.ToString().ToLowerInvariant() + ": failed with no reason (TODO(m4-travel-failure-unnamed))",
+            _ => string.Create(CultureInfo.InvariantCulture, $"travel:{leg.Means.ToString().ToLowerInvariant()}: the walk did not end within {CorpseWalkSeconds:0} s"),
+        };
+        var fields = leg.Fields;
+        var means = leg.Means;
+        leg.Dispose();
+        _corpseLeg = null;
+        if (why is not null)
+        {
+            _corpsesRefused++;
+            _log.Warn(LogCategory, $"corpse: the travel to 0x{_corpseGuid:X8} failed ({why}); the corpse is not opened (counted, not a failure)");
+            _corpse = CorpsePhase.Finished;
+            return false;
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"corpse: at 0x{_corpseGuid:X8} ({Distance(session, _corpseGuid):0.#} m) by {means.ToString().ToLowerInvariant()}{(fields.Length == 0 ? string.Empty : " " + fields)}; opening it"));
+        _pending = session.Actions.OpenContainer(_corpseGuid, ActionSource.Host);
+        _corpse = CorpsePhase.Opening;
+        return true;
+    }
+
+    /// <summary>The corpse's position as the travel's destination (the object goal's point).</summary>
+    private static TeleportDestination CorpseGoal(CellFrame at)
+    {
+        const string Name = "the kill's corpse";
+        return new TeleportDestination(Name, [], new WorldLocation(Name, new CellPosition(at.CellId, at.Frame.Origin), true, 0), "the hunt's corpse on foot (M4 P5b fix FA, P5b-R1)");
+    }
+
     /// <summary>True when the retreat rule (the health share under <see cref="RetreatShare"/>) or the hunt's seconds say the hunt must not wait for the corpse sequence.</summary>
     private bool GuardFires(IGameSessionView session) =>
         (HealthShare(session) is { } share && share < RetreatShareFor(_options.Weapon)) || (!double.IsNaN(_huntStart) && _clock - _huntStart > _options.Seconds);
@@ -1831,6 +1997,8 @@ public sealed partial class HuntScenario : IScenario
     private void AbandonCorpse(IGameSessionView session)
     {
         _log.Warn(LogCategory, "corpse: the retreat rule or the hunt's time came; the corpse sequence is abandoned");
+        _corpseLeg?.Dispose(); // a walk to the corpse stops (no key stays held)
+        _corpseLeg = null;
         if (_corpse is CorpsePhase.Opened or CorpsePhase.Looting)
         {
             _ = session.Actions.CloseContainer(_corpseGuid, ActionSource.Host);
@@ -1909,6 +2077,18 @@ public sealed partial class HuntScenario : IScenario
                 if (FindCorpse(session, out var corpse))
                 {
                     _corpseGuid = corpse;
+                    var away = Distance(session, corpse);
+                    if (OnFoot && session.State.Objects.TryGet(corpse, out var body) && body.Position is { } lies && !(away <= CorpseReachMetres))
+                    {
+                        // P5b-R1: the travel first (an object goal within reach), so the open needs no walk-to-use of ACE's that a headless body might not follow.
+                        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"corpse: 0x{corpse:X8} appeared {_clock - _stageStart:0.00} s after the kill, {away:0.#} m away; travel to it within {CorpseReachMetres:0.#} m before the open"));
+                        _corpseLeg?.Dispose();
+                        _corpseLeg = _travel.GoTo(session, new TravelRequest(CorpseGoal(lies), TravelPurpose.Corpse, corpse, CorpseReachMetres), _clock);
+                        _corpseLegStart = _clock;
+                        _corpse = CorpsePhase.Approach;
+                        return true;
+                    }
+
                     _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"corpse: 0x{corpse:X8} appeared {_clock - _stageStart:0.00} s after the kill; opening it"));
                     _pending = session.Actions.OpenContainer(corpse, ActionSource.Host);
                     _corpse = CorpsePhase.Opening;
@@ -1924,6 +2104,8 @@ public sealed partial class HuntScenario : IScenario
                 }
 
                 return true;
+            case CorpsePhase.Approach:
+                return StepCorpseApproach(session);
             case CorpsePhase.Opening:
                 if (!Settled(out var opened))
                 {
@@ -2123,6 +2305,139 @@ public sealed partial class HuntScenario : IScenario
         return Enter("acquire");
     }
 
+    // ------------------------------------------------------------------------------------------------ the journey's hunt (M4 P5b lane J2a): stages, the sight goal, the keeper
+
+    /// <summary>The limit on one travel leg that is not a place (a run, a recall), in session seconds: the runner's own Blocked and Failed end a leg first (the belt's 1,028 m run took 136 s in P5a S5).</summary>
+    public const double TravelLegSeconds = 900;
+
+    /// <summary>The range of a melee seek's object goal: the runner brings the player within 10 m of the creature with a clear line, and ACE's own melee approach (its 15 m cap) finishes it (M4 P5b 3.2's Yielding).</summary>
+    public const double SeekGoalMetres = 10;
+
+    /// <summary>The distance within which the target counts as in reach for the in-fight potion (the keeper drinks only with the target out of reach): a melee creature's reach and a little.</summary>
+    public const double InFightReachMetres = 5;
+
+    /// <summary>A seek's object goal range: <see cref="SeekGoalMetres"/> for melee, the seek's own <see cref="MissileSeekMetres"/> for the bow (it shoots from there).</summary>
+    private static double SeekGoalMetresFor(bool missile) => missile ? MissileSeekMetres : SeekGoalMetres;
+
+    /// <summary>Says once which stages run and which are skipped (their verdict fields read <c>n/a</c>).</summary>
+    private void LogStages()
+    {
+        if (_stages == HuntStages.All)
+        {
+            return;
+        }
+
+        var skipped = HuntStages.All & ~_stages;
+        _log.Info(LogCategory, $"stages: running {HuntOptions.StagesText(_stages)}; skipped {HuntOptions.StagesText(skipped)}{SkippedFields(skipped)}; travel by {(OnFoot ? "the journey's seam" : "place")}");
+    }
+
+    private static string SkippedFields(HuntStages skipped)
+    {
+        var fields = new List<string>();
+        if ((skipped & HuntStages.Bind) != 0)
+        {
+            fields.Add("bound=n/a");
+        }
+
+        if ((skipped & HuntStages.Restore) != 0)
+        {
+            fields.Add("restored=n/a");
+        }
+
+        if ((skipped & HuntStages.Home) != 0)
+        {
+            fields.Add("returned=n/a");
+        }
+
+        if ((skipped & HuntStages.Vendor) != 0)
+        {
+            fields.Add("sell=n/a buy=n/a");
+        }
+
+        return fields.Count == 0 ? string.Empty : " (" + string.Join(' ', fields) + ")";
+    }
+
+    /// <summary>The hunt stage is skipped: nothing is attacked; the wind-down's restore and home follow their own flags.</summary>
+    private ScenarioStatus SkipHunt()
+    {
+        _winding = true;
+        _step = null;
+        return Enter("wind-restore");
+    }
+
+    /// <summary>
+    /// The missile pick on foot (closes <c>m4-missile-clear-line</c> in a journey): the travel seam brings the player to an object goal with a clear line of sight within the bow's acquire range of the picked creature (no move
+    /// when it already has one), then the fight starts. A failed way skips the target in this cell.
+    /// </summary>
+    private ScenarioStatus SightGoal(IGameSessionView session, uint guid)
+    {
+        if (!session.State.Objects.TryGet(guid, out var target) || target.Position is not { } at)
+        {
+            return Chosen(session, guid);
+        }
+
+        if (!_sightLogged)
+        {
+            _sightLogged = true;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"acquire: the missile pick's spot is an object goal with a clear line of sight within {MissileRange:0} m (the travel seam; closes m4-missile-clear-line as a detection: a pick with no line at the first point in range is skipped; TODO(m4-missile-sight-spot): the runner does not yet walk on to a point with a line)"));
+        }
+
+        _sightTarget = guid;
+        var name = string.Create(CultureInfo.InvariantCulture, $"a clear line to 0x{guid:X8}");
+        var destination = new TeleportDestination(name, [], new WorldLocation(name, new CellPosition(at.CellId, at.Frame.Origin), HasHeight: true, HeadingDegrees: 0), "hunt sight");
+        BeginPlace(session, destination, "sight-chosen", home: false, TravelPurpose.Seek, guid, MissileRange, needSight: true, soft: true);
+        return ScenarioStatus.Running;
+    }
+
+    private ScenarioStatus SightChosen(IGameSessionView session)
+    {
+        var guid = _sightTarget;
+        _sightTarget = 0;
+        if (guid != 0 && session.State.Objects.TryGet(guid, out var o) && o.Health is not <= 0f)
+        {
+            return Chosen(session, guid);
+        }
+
+        _log.Info(LogCategory, $"acquire: 0x{guid:X8} is dead or gone after the way to a clear line; the next");
+        return Enter("acquire");
+    }
+
+    /// <summary>
+    /// The keeper in the fight (M4 P5b contract 6; P5a C2): while an in-fight potion settles the attack waits; under the keeper's in-fight threshold with the target out of reach it drinks; and its
+    /// <see cref="VitalsKeeper.MayAttack"/> gates the attack (a refusal delays it, logged once per run of refusals). Null: the attack goes ahead.
+    /// </summary>
+    private ScenarioStatus? KeeperGate(IGameSessionView session, VitalsKeeper keeper)
+    {
+        if (_keeperDrinking)
+        {
+            return ScenarioStatus.Running;
+        }
+
+        var distance = Distance(session, _target);
+        var inReach = !double.IsNaN(distance) && distance <= InFightReachMetres;
+        if (keeper.TryInFightPotion(inReach))
+        {
+            _keeperDrinking = true;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight: the keeper drinks an in-fight potion, '{_targetName}' 0x{_target:X8} {(double.IsNaN(distance) ? "at an unknown distance" : distance.ToString("0.#", CultureInfo.InvariantCulture) + " m away")}; the attack waits for it"));
+            return ScenarioStatus.Running;
+        }
+
+        if (!keeper.MayAttack(out var why))
+        {
+            if (!_attackWaitLogged)
+            {
+                _attackWaitLogged = true;
+                _attackWaits++;
+                _log.Info(LogCategory, $"fight: the keeper holds the attack on '{_targetName}' 0x{_target:X8}: {why}");
+            }
+
+            return ScenarioStatus.Running;
+        }
+
+        _attackWaitLogged = false;
+        return null;
+    }
+
     // ------------------------------------------------------------------------------------------------ the wind-down
 
     private ScenarioStatus Succeed(IGameSessionView session)
@@ -2215,19 +2530,19 @@ public sealed partial class HuntScenario : IScenario
             _step = null;
         }
 
-        if (!_leftHome && InHoltburg(session))
+        if (!Has(HuntStages.Home) || (!_leftHome && InHoltburg(session)))
         {
             return Home(session);
         }
 
-        BeginPlace(session, _holtburg, "wind-home-done", home: true);
+        BeginPlace(session, _holtburg, "wind-home-done", home: true, TravelPurpose.Home);
         return ScenarioStatus.Running;
     }
 
     private ScenarioStatus Home(IGameSessionView session)
     {
         _returned = InHoltburg(session);
-        _log.Info(LogCategory, "wind-down: " + (_returned ? "back in Holtburg" : "NOT back in Holtburg (returned=no)"));
+        _log.Info(LogCategory, "wind-down: " + (!Has(HuntStages.Home) ? "returned=n/a (the journey's recall-home station returns)" : _returned ? "back in Holtburg" : "NOT back in Holtburg (returned=no)"));
         if (VendorTripBegin(session) is { } trip)
         {
             return trip; // M4 3.2 s4a: the sale at Renald's and the buy at Thelnoth's, then the way home again (HuntScenario.Vendor.cs)
@@ -2244,30 +2559,77 @@ public sealed partial class HuntScenario : IScenario
 
     // ------------------------------------------------------------------------------------------------ teleports
 
-    private void BeginPlace(IGameSessionView session, TeleportDestination destination, string next, bool home)
+    /// <summary>
+    /// Starts a travel through the seam (M4 P5b 3.4; the hunt's one choke point): the request carries the purpose (the seam picks the means) and, for an object goal, the guid, the range and whether a clear line of sight is
+    /// needed. With the default <see cref="PlaceTravel"/> it is today's <c>Tools.Place</c>.
+    /// </summary>
+    private void BeginPlace(IGameSessionView session, TeleportDestination destination, string next, bool home, TravelPurpose purpose, uint objectGuid = 0, double range = 0, bool needSight = false, bool soft = false)
     {
         _placeDestination = destination;
         _placeNext = next;
         _placeHome = home;
+        _placeSoft = soft;
+        _placeSeek = purpose == TravelPurpose.Seek && objectGuid != 0;
+        _sightTarget = _placeSeek && !soft ? objectGuid : _sightTarget;
         _teleportMark = _teleports;
         _placeStart = _clock;
-        _pending = session.Tools.Place(destination, ActionSource.Host);
+        _placeConfirmed = false;
+        _pending = null;
+        EndLeg();
+        _leg = _travel.GoTo(session, new TravelRequest(destination, purpose, objectGuid, range, needSight), _clock);
+        _lastMeans = _leg.Means;
         Enter("placing");
     }
 
+    /// <summary>
+    /// The travel's arrival (the seam's arrival contract, IJourneyTravel.cs): a leg that failed goes down the place-failure path with its failure; a place leg's Arrived means only that the place was Confirmed, and today's check
+    /// (the teleport seen, the player Present in the destination's landblock) decides; a run, a recall or nothing-to-do is authoritative.
+    /// </summary>
     private ScenarioStatus Placing(IGameSessionView session)
     {
-        if (_pending is { Outcome: { } placed })
+        if (_leg is { } leg)
         {
-            _pending = null;
-            if (placed.Kind != ActionOutcomeKind.Confirmed)
+            var status = leg.Step(session, _clock);
+            _lastMeans = leg.Means;
+            if (status == TravelStatus.Failed)
             {
-                return PlaceFailed(session, "sending the player to " + _placeDestination!.Name + ": " + Describe(placed));
+                var why = leg.Failure ?? "travel:" + leg.Means.ToString().ToLowerInvariant() + ": failed with no reason (TODO(m4-travel-failure-unnamed))";
+                var sightless = leg.ArrivedWithoutSight; // P5b-R5: the typed end, not the failure's text
+                EndLeg();
+                return PlaceFailed(session, why, sightless);
             }
+
+            if (status == TravelStatus.Running && leg.Means != TravelMeans.Place)
+            {
+                if (_clock - _placeStart > TravelLegSeconds)
+                {
+                    EndLeg();
+                    return PlaceFailed(session, string.Create(CultureInfo.InvariantCulture, $"travel:{leg.Means.ToString().ToLowerInvariant()}: the leg to {_placeDestination!.Name} did not end within {TravelLegSeconds:0} s"));
+                }
+
+                return ScenarioStatus.Running;
+            }
+
+            if (status == TravelStatus.Arrived)
+            {
+                var means = leg.Means;
+                var fields = leg.Fields;
+                EndLeg();
+                if (means != TravelMeans.Place)
+                {
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"travel: at {_placeDestination!.Name} by {means.ToString().ToLowerInvariant()}{(fields.Length == 0 ? string.Empty : " " + fields)}"));
+                    _settleUntil = _clock + (means == TravelMeans.Recall ? SettleSeconds : 0);
+                    return _placeHome ? Home(session) : Enter(_placeNext);
+                }
+
+                _placeConfirmed = true; // today's check below decides the arrival
+            }
+
+            // A place leg still waiting for its answer falls through to today's check and its time limit.
         }
 
         var landblock = _placeDestination!.Location.Position.CellId >> 16;
-        if (_pending is null && _teleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present && session.State.Self.Position is { } at && (at.CellId >> 16) == landblock)
+        if (_placeConfirmed && _teleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present && session.State.Self.Position is { } at && (at.CellId >> 16) == landblock)
         {
             _settleUntil = _clock + SettleSeconds;
             if (_placeHome)
@@ -2283,8 +2645,45 @@ public sealed partial class HuntScenario : IScenario
             : ScenarioStatus.Running;
     }
 
-    private ScenarioStatus PlaceFailed(IGameSessionView session, string why)
+    private void EndLeg()
     {
+        _leg?.Dispose();
+        _leg = null;
+    }
+
+    /// <summary>The travel failed: <paramref name="sightless"/> is the leg's typed end (<see cref="ITravelLeg.ArrivedWithoutSight"/>, P5b-R5), true for a run that reached its range without the clear line it needed.</summary>
+    private ScenarioStatus PlaceFailed(IGameSessionView session, string why, bool sightless = false)
+    {
+        if (_placeSoft)
+        {
+            // The missile pick's way to a clear line failed: the target is skipped in this cell, as the walk-on rule skips a blocked one (never a failure of the hunt).
+            _placeSoft = false;
+            _log.Warn(LogCategory, $"acquire: the way to a clear line of sight to 0x{_sightTarget:X8} failed ({why}); the target is skipped in this cell");
+            if (_sightTarget != 0 && !_blockedHere.Contains(_sightTarget))
+            {
+                _blockedHere.Add(_sightTarget);
+            }
+
+            _sightTarget = 0;
+            return Enter("acquire");
+        }
+
+        if (_placeSeek && sightless)
+        {
+            // F3-1: a seek that ended within its range but without a clear line (the run's ArrivedWithoutSight) is not a failed travel: the hunt goes on as it does when a missile pick has no clear line,
+            // the target is skipped in this cell and the next is picked (bounded by MaxSeeks and the tried set); only Blocked and Failed legs take the failure path below.
+            _placeSeek = false;
+            _sightless++;
+            _log.Warn(LogCategory, $"acquire: the seek to 0x{_sightTarget:X8} arrived without a clear line ({why}); sightless={_sightless}; the target is skipped in this cell and the hunt goes on");
+            if (_sightTarget != 0 && !_blockedHere.Contains(_sightTarget))
+            {
+                _blockedHere.Add(_sightTarget);
+            }
+
+            _sightTarget = 0;
+            return Enter("acquire");
+        }
+
         if (_vendorPlace)
         {
             _vendorPlace = false;
@@ -2426,6 +2825,9 @@ public sealed partial class HuntScenario : IScenario
         _log.Info(LogCategory, "detail " + DetailFields());
         _tally.Dispose();
         _follow?.Dispose();
+        EndLeg();
+        _corpseLeg?.Dispose();
+        _corpseLeg = null;
         return Failure is null ? ScenarioStatus.Succeeded : ScenarioStatus.Failed;
     }
 
@@ -2457,6 +2859,7 @@ public sealed partial class HuntScenario : IScenario
             Stage = "failed";
             _log.Info(LogCategory, "verdict " + VerdictFields());
             _tally.Dispose();
+            ModeWatch?.Dispose();
             _follow?.Dispose();
             return ScenarioStatus.Failed;
         }

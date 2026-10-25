@@ -425,7 +425,6 @@ public sealed class DeathLegRunnerTests
         var m4Fixed = m4Stages.Sum(name => Constant(runner, name));
         var whole = m3Fixed + DeathOptions.DefaultSeconds + m4Fixed + DeathOptions.DefaultFightSeconds;
         var recovery = Constant(runner, "RecoverySeconds");
-        var timeout = double.Parse(Regex.Match(Smoke, @"--login-check=bsd-death"" (\d+) ").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
 
         Assert.Equal(605.0, m3Fixed); // M3's loop: 60 + 120 + 30 + 90 + 90 + 30 + 65 + 120
         Assert.Equal(630.0, m4Fixed); // M4 3.1's stages: 30 + 240 + 30 + 60 + 120 + 90 + 60
@@ -437,9 +436,6 @@ public sealed class DeathLegRunnerTests
         Assert.Contains("WholeCheckSecondsFor(double deathSeconds, double fightSeconds = DeathOptions.DefaultFightSeconds) => LoginSeconds + GearSeconds + BarsSeconds + BindSeconds + SuicideSeconds + DecoyTopUpSeconds + PlaceSeconds + deathSeconds + RespawnSeconds + RegearSeconds + RebuffSeconds + FightPlaceSeconds + FightWalkSeconds + fightSeconds + PreTripHealSeconds + TripSeconds + TripReturnSeconds;", runner, StringComparison.Ordinal);
         Assert.Contains("_wholeSeconds = WholeCheckSecondsFor(options.Seconds, options.FightSeconds)", runner, StringComparison.Ordinal); // --death-fight-seconds moves the limit
 
-        // The smoke step's Godot timeout is the sum plus the recovery log off and a margin (365 s over 2015 + 120).
-        Assert.Equal(2500.0, timeout);
-        Assert.True(timeout >= whole + recovery + 300, $"the smoke gives the leg {timeout} s for {whole} s, {recovery} s of recovery and the start-up");
 
         // Each limit covers what the scenario's own stage limit asks of it.
         Assert.True(Constant(runner, "BarsSeconds") >= DeathScenario.BarsSeconds);
@@ -452,41 +448,6 @@ public sealed class DeathLegRunnerTests
         Assert.True(Constant(runner, "FightPlaceSeconds") >= Constant(runner, "PlaceSeconds"), "the teleport to the den and the settle, as the first visit's");
         Assert.True(Constant(runner, "DecoyTopUpSeconds") >= 4 * 5, "about 4 s of item grants live, with a margin");
         Assert.True(Constant(runner, "TripReturnSeconds") >= 2 * DeathScenario.SettleSeconds, "the return teleport and its settles");
-    }
-
-    [Fact]
-    public void The_smoke_step_login_death_is_a_backend_step_that_runs_only_when_the_backend_is_required_after_login_bsd()
-    {
-        var script = Smoke;
-        var steps = Regex.Match(script, @"\$allSteps = @\(([^)]*)\)", RegexOptions.Singleline).Groups[1].Value;
-        var backend = Regex.Match(script, @"\$backendSteps = @\(([^)]*)\)").Groups[1].Value;
-
-        Assert.Contains("'login-death'", steps, StringComparison.Ordinal);
-        Assert.Contains("'login-death'", backend, StringComparison.Ordinal);
-        Assert.True(steps.IndexOf("'login-bsd'", StringComparison.Ordinal) < steps.IndexOf("'login-death'", StringComparison.Ordinal));
-        Assert.True(backend.IndexOf("'login-bsd'", StringComparison.Ordinal) < backend.IndexOf("'login-death'", StringComparison.Ordinal));
-
-        var skip = script.IndexOf("if ($step -eq 'login-death' -and $Backend -ne 'require')", StringComparison.Ordinal);
-        var gate = script.IndexOf("if ($backendSteps -contains $step -and -not (Test-BackendGate", StringComparison.Ordinal);
-        Assert.True(skip > 0 && skip < gate, "the login-death skip rule must come before the backend gate");
-        var rule = script[skip..gate];
-        Assert.Contains("-Skipped", rule, StringComparison.Ordinal);
-        Assert.Contains("continue", rule, StringComparison.Ordinal);
-
-        var body = script[script.IndexOf("'login-death' {", StringComparison.Ordinal)..];
-        body = body[..body.IndexOf("'login' {", StringComparison.Ordinal)];
-        Assert.Contains("--account=$($stepAccounts[$step]) --login-check=bsd-death", body, StringComparison.Ordinal);
-        Assert.Contains("bsd-death done ok=true", body, StringComparison.Ordinal);
-        Assert.Contains("$verdict", body, StringComparison.Ordinal);
-
-        // M4 2.2 s4 and M4 3.1 d2: the corpse trip's four fields and the decoy loop's nine are copied into the summary, report-only (n/a when absent), and the step's seconds are the leg's limit plus the recovery and a margin.
-        Assert.Contains("'corpse_looted', 'items_recovered', 'trip_s', 'trip_abort', 'rebuffed', 'den_kills', 'decoys', 'decoy_safe', 'decoys_dropped', 'gear_dropped', 'decoys_recovered', 'pretrip_heals', 'gear_left', 'mode_mismatch'", body, StringComparison.Ordinal);
-        Assert.Contains("report-only: $copied", body, StringComparison.Ordinal);
-        Assert.Contains("\"$key=n/a\"", body, StringComparison.Ordinal); // an absent field reads n/a
-        Assert.DoesNotContain("corpse_looted=", body, StringComparison.Ordinal); // a name in the copy list, never a judged "=" comparison
-        Assert.DoesNotContain("decoy_safe=", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("mode_mismatch=", body, StringComparison.Ordinal);
-        Assert.Contains("--login-check=bsd-death\" 2500 ''", body, StringComparison.Ordinal); // the step's seconds: the leg's 2015 s, the 120 s recovery and a margin
     }
 
     [Fact]

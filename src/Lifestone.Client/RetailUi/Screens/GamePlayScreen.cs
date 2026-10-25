@@ -191,6 +191,15 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
     /// <summary>Report-only: the heap count the window was sized for and the bytes it asked for, and "UNDERSIZED" when the cap cut the request (by the per-heap estimate the window may end early on that many heaps; this machine's 32 heaps held 11 MiB under a 512 MiB request, so the estimate is conservative).</summary>
     public string NoGcWindowSizing => $"heaps {_noGc.Heaps} ({_noGc.HeapSource}), requested {_noGc.RequestedBytes / (1024 * 1024)} MiB{(_noGc.Undersized ? $", UNDERSIZED: {_noGc.Heaps} heaps need more than the {NoGcWindow.CapBytes / (1024 * 1024)} MiB cap by the per-heap estimate, the window may end early; the held or ended-early state is the measurement" : string.Empty)}";
 
+    /// <summary>Report-only (M4 P5b, <c>TODO(m4-throwaway-teleport-frame)</c>): the pause of the gen 0 collection that closed a held window and gave gen 0 its budget back, in milliseconds; NaN until it runs, and when none is due.</summary>
+    public double NoGcWindowClosingMilliseconds => _noGc.ClosingCollectionMilliseconds;
+
+    /// <summary>
+    /// M4 P5b (<c>TODO(m4-throwaway-teleport-frame)</c>): runs the gen 0 collection that a held no-GC window's end left pending, which gives gen 0 its normal budget back. The retail UI layer calls it at the
+    /// start of each step, before the step's clock; nothing is pending on most frames.
+    /// </summary>
+    public static void RunPendingNoGcWindowClose() => NoGcWindow.RunPendingClose();
+
     private readonly NoGcWindow _noGc = new();
     private long _allocStart;
 
@@ -215,8 +224,9 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
     private int _postGc1;
     private int _postGc2;
     private TimeSpan _postPause;
+    private bool _closeAccounted; // M4 P5b: the window's closing collection has been taken out of the watch's count
 
-    /// <summary>Report-only: the first collection after the no-GC window ended ("pending" until one runs; "gen1 6.2 ms, 3 frames after Complete"; "none in N frames").</summary>
+    /// <summary>Report-only: the first collection after the no-GC window ended ("pending" until one runs; "gen1 6.2 ms, 3 frames after Complete"; "none in 900 frames" until one runs after that).</summary>
     public string PostWindowGcReport { get; private set; } = "pending";
 
     private const int PostWindowGcWatchFrames = 900;
@@ -228,27 +238,46 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             return;
         }
 
-        _postWindowFrames++;
         var gc0 = GC.CollectionCount(0);
         var gc1 = GC.CollectionCount(1);
         var gc2 = GC.CollectionCount(2);
         var pause = GC.GetTotalPauseDuration();
+        if (!_closeAccounted && (_noGc.ClosePending || !double.IsNaN(_noGc.ClosingCollectionMilliseconds)))
+        {
+            // M4 P5b: a held window's closing collection runs at the start of a later UI step (NoGcWindow.RunPendingClose); the watch counts from after it, so it reports the next collection, the natural one.
+            _closeAccounted = !_noGc.ClosePending;
+            _postGc0 = gc0;
+            _postGc1 = gc1;
+            _postGc2 = gc2;
+            _postPause = pause;
+            _postWindowFrames = 0;
+            return;
+        }
+
+        _postWindowFrames++;
         if (gc0 != _postGc0 || gc1 != _postGc1 || gc2 != _postGc2)
         {
             var generation = gc2 != _postGc2 ? 2 : gc1 != _postGc1 ? 1 : 0;
             var milliseconds = (pause - _postPause).TotalMilliseconds; // every thread's pause since the last frame's snapshot: the first collection's, as none ran before it
-            PostWindowGcReport = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"gen{generation} {milliseconds:0.0} ms, {_postWindowFrames} frames after Complete");
+            var last = GC.GetGCMemoryInfo(GCKind.Any); // the last collection of the frame (M4 P5b): how much gen 0 held when it began and what it promoted
+            PostWindowGcReport = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"gen{generation} {milliseconds:0.0} ms, {_postWindowFrames} frames after {(_closeAccounted ? "the closing collection" : "Complete")}");
             _postWindowWatching = false;
-            _context.Manager.Services.Log.Info(UiElementManager.Category, $"the in-game shell: first collection after the no-gc window ({NoGcWindowReport}): {PostWindowGcReport} (collections gen0/1/2 {gc0 - _postGc0}/{gc1 - _postGc1}/{gc2 - _postGc2}; TODO(m3-ui-step-gc-margin) closes only if this is under the 12 ms margin)");
+            _context.Manager.Services.Log.Info(UiElementManager.Category, string.Create(System.Globalization.CultureInfo.InvariantCulture, $"the in-game shell: first collection after the no-gc window ({NoGcWindowReport}{ClosingText()}): {PostWindowGcReport} (collections gen0/1/2 {gc0 - _postGc0}/{gc1 - _postGc1}/{gc2 - _postGc2}; the last: gen0 {last.GenerationInfo[0].SizeBeforeBytes / 1048576.0:0.0} MiB before, promoted {last.PromotedBytes / 1048576.0:0.0} MiB; TODO(m3-ui-step-gc-margin) closes only if this is under the 12 ms margin)"));
             return;
         }
 
         _postPause = pause;
-        if (_postWindowFrames >= PostWindowGcWatchFrames)
+        if (_postWindowFrames == PostWindowGcWatchFrames)
         {
+            // M4 P5b (TODO(m4-post-window-gc-log)): the "none" case is logged too, so a live gate can read it, and the watch goes on until the first collection runs (four counter reads a frame). After a
+            // held window that no collection closed, "none" meant gen 0 still had the region's budget, and the collection that ended it was the next arrival's long pause.
             PostWindowGcReport = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"none in {_postWindowFrames} frames");
-            _postWindowWatching = false;
+            _context.Manager.Services.Log.Info(UiElementManager.Category, $"the in-game shell: first collection after the no-gc window ({NoGcWindowReport}{ClosingText()}): {PostWindowGcReport} (still watching)");
         }
+
+        string ClosingText() => double.IsNaN(_noGc.ClosingCollectionMilliseconds)
+            ? string.Empty
+            : string.Create(System.Globalization.CultureInfo.InvariantCulture, $", closed by a gen0 collection of {_noGc.ClosingCollectionMilliseconds:0.0} ms");
     }
 
     private double _buildGcPause;
@@ -425,7 +454,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             UiElementManager.Category,
             _staged is null
                 ? $"the in-game shell was built: root {rootMilliseconds:0.0} ms, wiring {wiringMilliseconds:0.0} ms"
-                : $"the in-game shell was built over {BuildFrames} frames (budget {BuildBudgetMilliseconds:0.0} ms a frame): root {rootMilliseconds:0.0} ms, wiring {wiringMilliseconds:0.0} ms, longest frame {LongestBuildFrameMilliseconds:0.0} ms, longest unit {LongestBuildUnitMilliseconds:0.0} ms (staged unit ended in '{_staged?.LongestUnitPhase}'; wiring unit #{_longestWiringUnitIndex} took {_longestWiringUnit:0.0} ms; staged unit gc {_staged?.LongestUnitGcPauseMilliseconds:0.0} ms {_staged?.LongestUnitGcCollections}; wiring unit gc {LongestWiringUnitGcPauseMilliseconds:0.0} ms; build gc {_buildGcPause:0.0} ms gen0/1/2 {_buildGc0}/{_buildGc1}/{_buildGc2}; no-gc window {NoGcWindowReport} (start {_noGc.StartMilliseconds:0.0} ms, {NoGcWindowSizing}, allocated {(GC.GetAllocatedBytesForCurrentThread() - _allocStart) / 1024} KiB); post-window gc is measured on the frames after this line and logged when it runs; slowest controller {PanelControllers?.LongestControllerName} {PanelControllers?.LongestControllerMilliseconds:0.0} ms), {System.Diagnostics.Stopwatch.GetElapsedTime(_buildStart).TotalMilliseconds:0} ms from the start");
+                : $"the in-game shell was built over {BuildFrames} frames (budget {BuildBudgetMilliseconds:0.0} ms a frame): root {rootMilliseconds:0.0} ms, wiring {wiringMilliseconds:0.0} ms, longest frame {LongestBuildFrameMilliseconds:0.0} ms, longest unit {LongestBuildUnitMilliseconds:0.0} ms (staged unit ended in '{_staged?.LongestUnitPhase}'; wiring unit #{_longestWiringUnitIndex} took {_longestWiringUnit:0.0} ms; staged unit gc {_staged?.LongestUnitGcPauseMilliseconds:0.0} ms {_staged?.LongestUnitGcCollections}; wiring unit gc {LongestWiringUnitGcPauseMilliseconds:0.0} ms; build gc {_buildGcPause:0.0} ms gen0/1/2 {_buildGc0}/{_buildGc1}/{_buildGc2}; no-gc window {NoGcWindowReport} (start {_noGc.StartMilliseconds:0.0} ms, {NoGcWindowSizing}, allocated {(GC.GetAllocatedBytesForCurrentThread() - _allocStart) / 1024} KiB{(_noGc.ClosePending ? ", its closing gen0 collection runs at the next UI step's start" : string.Empty)}); post-window gc is measured on the frames after this line and logged when it runs; slowest controller {PanelControllers?.LongestControllerName} {PanelControllers?.LongestControllerMilliseconds:0.0} ms), {System.Diagnostics.Stopwatch.GetElapsedTime(_buildStart).TotalMilliseconds:0} ms from the start");
         if (_placeholders.Count > 0)
         {
             manager.LogOnce(

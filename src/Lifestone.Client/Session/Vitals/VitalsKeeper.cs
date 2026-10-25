@@ -76,7 +76,7 @@ public sealed class VitalsKeeper
 
     /// <summary>
     /// <see cref="CastOff"/> of a fighter that holds its caster in the pack (M4 P5a C1b): the magic mode needs it wielded and the hand free, which is <see cref="CasterSwap"/>'s work around a whole pass, so the keeper casts nothing itself and says so
-    /// (<c>cast=needs-swap</c>); kits, potions and rest remain. <c>TODO(m4-keeper-swap)</c>: P5b runs the keeper's casts inside a swap at the stations that allow one (the swap API is <see cref="CasterSwap.Begin"/> and <see cref="CasterSwap.Step"/>).
+    /// (<c>cast=needs-swap</c>); kits, potions and rest remain. M4 P5b J3a closed <c>TODO(m4-keeper-swap)</c>: a keeper built with a <see cref="CasterSwap"/> runs its casts inside it (In, the casts, Out) and never reports this; the value stays for a keeper built without one.
     /// </summary>
     public const string NeedsSwap = "needs-swap";
 
@@ -116,6 +116,7 @@ public sealed class VitalsKeeper
     private readonly IReadOnlyDictionary<uint, SpellInfo> _spells;
     private readonly VitalsOptions _options;
     private readonly ILogSink _log;
+    private readonly CasterSwap? _swap;
     private readonly List<uint> _scratch = [];
     private readonly int[] _fizzleRow = new int[4];
     private readonly bool[] _lineAside = new bool[4];
@@ -157,19 +158,30 @@ public sealed class VitalsKeeper
     private Rest _rest;
     private double _restStart;
     private double _now;
+    private SwapPhase _swapPhase;
+    private bool _swappedIn;
 
     /// <summary>A keeper over the session.</summary>
     /// <param name="session">The session view: the read model and the Action API.</param>
     /// <param name="spells">The SpellTable's spells (<c>SpellTableData.Spells</c>): the utility lines' power, school and cost.</param>
     /// <param name="options">The keeper's options.</param>
     /// <param name="log">The log.</param>
-    public VitalsKeeper(IGameSessionView session, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsOptions options, ILogSink log)
+    /// <param name="swap">The fighter's caster swap (<see cref="CasterSwap.ForCharacter"/>), or null: with it the keeper's casts run inside one swap (In, the casts, Out) instead of <c>cast=needs-swap</c> (M4 P5b J3a, closes <c>TODO(m4-keeper-swap)</c>).</param>
+    public VitalsKeeper(IGameSessionView session, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsOptions options, ILogSink log, CasterSwap? swap = null)
     {
+        _swap = swap;
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _spells = spells ?? throw new ArgumentNullException(nameof(spells));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _recovery = options.Recovery;
+    }
+
+    private enum SwapPhase
+    {
+        None,
+        In,
+        Out,
     }
 
     private enum Pending
@@ -214,7 +226,13 @@ public sealed class VitalsKeeper
     public VitalsNeeds Needs { get; private set; }
 
     /// <summary>True while one of the keeper's actions is in flight.</summary>
-    public bool Busy => _pending != Pending.None;
+    public bool Busy => _pending != Pending.None || _swapPhase != SwapPhase.None;
+
+    /// <summary>Caster swaps the keeper began (In halves; M4 P5b J3a).</summary>
+    public int Swaps { get; private set; }
+
+    /// <summary>The reason the last swap half failed (<c>swap:&lt;step&gt;</c>), or null.</summary>
+    public string? SwapFailure { get; private set; }
 
     /// <summary>True while the keeper holds the player sitting or lying down.</summary>
     public bool PostureDown { get; private set; }
@@ -306,7 +324,7 @@ public sealed class VitalsKeeper
                 CultureInfo.InvariantCulture,
                 $"vitals: needs health {below}% (until {_recovery.UntilPercent}%), stamina {Math.Max(_options.StaminaBelowPercent, needs.MinStaminaPercent)}%, mana {needs.MinManaPercent}% and {needs.NextCastMana} for the next cast{(needs.NoManaRest ? " (no mana rest)" : string.Empty)}; now {Shares()}{(vitae > 0 ? $"; vitae {vitae}% (reported, not acted on)" : string.Empty)}"));
         State = VitalsKeeperState.Working;
-        if (_pending == Pending.None && !PostureDown && !_enteredMagic && Met())
+        if (_pending == Pending.None && !PostureDown && !_enteredMagic && !_swappedIn && _swapPhase == SwapPhase.None && Met())
         {
             State = VitalsKeeperState.Ready;
             return true;
@@ -327,6 +345,11 @@ public sealed class VitalsKeeper
         if (_pending != Pending.None && !Settle(now))
         {
             return State;
+        }
+
+        if (_swapPhase != SwapPhase.None)
+        {
+            return StepSwap(now);
         }
 
         if (State is not (VitalsKeeperState.Working or VitalsKeeperState.Resting) || now < _busyUntil)
@@ -524,7 +547,7 @@ public sealed class VitalsKeeper
     /// <summary>The verdict fields (report-only in their first gate): <c>vitals_min=h/s/m heals= kits= potions= rests= rest_s= transfers=</c>, and <c>cast=needs-swap</c> when a fighter holds its caster in the pack and the keeper cast nothing for want of the swap (M4 P5a C1b).</summary>
     public string VerdictFields() => string.Create(
         CultureInfo.InvariantCulture,
-        $"vitals_min={Pct(MinHealthPercent)}/{Pct(MinStaminaPercent)}/{Pct(MinManaPercent)} heals={Heals} kits={Kits} potions={Potions} rests={Rests} rest_s={RestSeconds:0} transfers={Transfers} mana_potions={ManaPotions} stamina_potions={StaminaPotions}{(ReferenceEquals(_castOff, NeedsSwap) ? " cast=needs-swap" : string.Empty)}");
+        $"vitals_min={Pct(MinHealthPercent)}/{Pct(MinStaminaPercent)}/{Pct(MinManaPercent)} heals={Heals} kits={Kits} potions={Potions} rests={Rests} rest_s={RestSeconds:0} transfers={Transfers} mana_potions={ManaPotions} stamina_potions={StaminaPotions}{(ReferenceEquals(_castOff, NeedsSwap) ? " cast=needs-swap" : string.Empty)}{(Swaps > 0 ? $" swaps={Swaps}" : string.Empty)}");
 
     private static string Pct(double value) => double.IsNaN(value) ? "-" : Math.Floor(value).ToString("0", CultureInfo.InvariantCulture);
 
@@ -658,6 +681,11 @@ public sealed class VitalsKeeper
         {
             if (FighterItems.Find(state, _scratch, GearKit.Wand.Wcid, out _, out var wielded) && !wielded)
             {
+                if (_swap is not null)
+                {
+                    return true; // Cast() runs the swap In first (M4 P5b J3a)
+                }
+
                 _castOff = NeedsSwap;
                 _log.Warn(LogCategory, "vitals: the player wields a weapon and holds a caster in the pack (" + refusal + "): the keeper casts nothing until a caster swap runs around the cast (cast=needs-swap, TODO(m4-keeper-swap)); kits, potions and rest remain");
                 return false;
@@ -675,6 +703,15 @@ public sealed class VitalsKeeper
     {
         if (StandFirst())
         {
+            return State;
+        }
+
+        if (_session.State.Self.Qualities.CombatMode != CombatModes.Magic && _swap is not null && !_swappedIn && CombatModeGuard.Check(CombatMode.Magic, _session.State) is { } needsSwap)
+        {
+            _log.Info(LogCategory, "vitals: the caster is in the pack (" + needsSwap + "): swap in once for " + info.Name + " and the casts after it");
+            _swapPhase = SwapPhase.In;
+            Swaps++;
+            _swap.Begin(SwapDirection.In, _now);
             return State;
         }
 
@@ -997,6 +1034,27 @@ public sealed class VitalsKeeper
         return Send(mana ? Pending.ManaPotion : Pending.StaminaPotion, _session.Actions.Drink(guid, ActionSource.Host));
     }
 
+    /// <summary>Steps the caster swap's half in flight (M4 P5b J3a): In done lets the casts go on; Out done lets <see cref="Finish"/> end the pass; a failed half blocks the keeper with <c>swap:&lt;step&gt;</c> (a failed In already restored the weapon).</summary>
+    private VitalsKeeperState StepSwap(double now)
+    {
+        var half = _swapPhase;
+        switch (_swap!.Step(now))
+        {
+            case SwapStatus.Running:
+                return State;
+            case SwapStatus.Done:
+                _swapPhase = SwapPhase.None;
+                _swappedIn = half == SwapPhase.In;
+                _log.Info(LogCategory, $"vitals: caster swap {(half == SwapPhase.In ? "in" : "out")} done ({_swap.Fields})");
+                return State;
+            default:
+                _swapPhase = SwapPhase.None;
+                _swappedIn = false;
+                SwapFailure = _swap.Failure ?? "swap:" + half.ToString().ToLowerInvariant();
+                return Block(SwapFailure, $"the caster swap {half.ToString().ToLowerInvariant()} failed: {_swap.Failure} {_swap.Detail}");
+        }
+    }
+
     private void SettleCast(ActionOutcome outcome)
     {
         var line = (int)_castLine;
@@ -1050,6 +1108,15 @@ public sealed class VitalsKeeper
             return State;
         }
 
+        if (_swappedIn && _swap is not null)
+        {
+            _enteredMagic = false;
+            _log.Info(LogCategory, "vitals: caster swap out after the keeper's casts (peace, the weapon back in hand)");
+            _swapPhase = SwapPhase.Out;
+            _swap.Begin(SwapDirection.Out, now);
+            return State;
+        }
+
         if (_enteredMagic)
         {
             _enteredMagic = false;
@@ -1076,6 +1143,13 @@ public sealed class VitalsKeeper
             _log.Info(LogCategory, "vitals: standing up (the stop key) as the keeper stops");
             _pending = Pending.Stand;
             _handle = _session.Actions.Move.Command(MotionCommands.Ready, true, ActionSource.Automation);
+        }
+
+        if (_swappedIn && _swap is not null && _swapPhase == SwapPhase.None)
+        {
+            _log.Info(LogCategory, "vitals: caster swap out as the keeper stops (the weapon back in hand)");
+            _swapPhase = SwapPhase.Out;
+            _swap.Begin(SwapDirection.Out, _now);
         }
 
         return State;

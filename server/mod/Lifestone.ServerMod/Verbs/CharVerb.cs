@@ -4,7 +4,8 @@
 // ShardDatabaseOfflineTools.PurgeCharacter); Player level, and only a character on the requesting player's own account that is already
 // marked for deletion, never an online one, the requesting player's own or a graduated test character (CharPurgeRules); the purge
 // runs on the shard database's own worker, after a second read of the row; ACE's force-delete (it marks the character deleted itself and
-// boots it) is not used; one machine-readable reply with PurgeCharacter's counts.
+// boots it) is not used; one machine-readable reply with PurgeCharacter's counts. M4 D45: an old copy of a journey character the live gate
+// re-creates (CharPurgeRules.Recreated) may be purged while its new copy is on the account.
 using ACE.Database;
 using ACE.Server.Entity.Actions;
 using ACE.Server.Managers;
@@ -90,7 +91,9 @@ internal static class CharVerb
                 return;
             }
 
-            WorldManager.ActionQueue.EnqueueAction(new ActionEventDelegate(() => OnWorldThread(call, request, caller, target)));
+            // D45: the second check needs the account's live copies of a re-created journey character beside the fresh row (empty for any other name).
+            var live = CharPurgeRules.LiveCopies(request, rows.Select(Describe));
+            WorldManager.ActionQueue.EnqueueAction(new ActionEventDelegate(() => OnWorldThread(call, request, caller, target, live)));
         }
         catch (Exception e)
         {
@@ -99,7 +102,7 @@ internal static class CharVerb
     }
 
     /// <summary>Runs on the world's action queue: ACE's own deletion bookkeeping, then asks the database worker to purge.</summary>
-    private static void OnWorldThread(ToolCall call, CharPurgeRequest request, Caller caller, AccountCharacter target)
+    private static void OnWorldThread(ToolCall call, CharPurgeRequest request, Caller caller, AccountCharacter target, AccountCharacter[] live)
     {
         try
         {
@@ -115,7 +118,7 @@ internal static class CharVerb
             // still show the purged character, and a stale entry whose delay had run out would be saved again by that very method.
             caller.Session.Characters.RemoveAll(c => c.Id == target.Guid);
 
-            DatabaseManager.Shard.GetCharacter(target.Guid, row => PurgeOnShardWorker(call, request, caller, target, row));
+            DatabaseManager.Shard.GetCharacter(target.Guid, row => PurgeOnShardWorker(call, request, caller, target, live, row));
         }
         catch (Exception e)
         {
@@ -124,12 +127,12 @@ internal static class CharVerb
     }
 
     /// <summary>Runs on the shard database's worker: checks the fresh row, purges, verifies, answers.</summary>
-    private static void PurgeOnShardWorker(ToolCall call, CharPurgeRequest request, Caller caller, AccountCharacter target, ShardCharacter? row)
+    private static void PurgeOnShardWorker(ToolCall call, CharPurgeRequest request, Caller caller, AccountCharacter target, AccountCharacter[] live, ShardCharacter? row)
     {
         try
         {
-            // The same rules against the fresh row alone: a row that is gone or on another account is not on the account.
-            AccountCharacter[] fresh = row is not null && row.AccountId == caller.AccountId ? [Describe(row)] : [];
+            // The same rules against the fresh row alone (with the account's live copies of a re-created journey character, D45): a row that is gone or on another account is not on the account.
+            AccountCharacter[] fresh = row is not null && row.AccountId == caller.AccountId ? [Describe(row), .. live] : [.. live];
             var again = CharPurgeRules.Check(request, caller.Name, caller.Guid, fresh);
             if (!again.Allowed)
             {

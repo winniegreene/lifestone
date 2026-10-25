@@ -208,6 +208,8 @@ foreach ($key in $childEnv.Keys) { $godotEnv[$key] = $childEnv[$key] }
 $godotEnv['DOTNET_gcServer'] = if ($WorkstationGC) { '0' } else { '1' }
 # M4 P4 g3fix (TODO(m4-throwaway-teleport-frame)): cap the gen-0 budget at 32 MB (hex bytes) for the Godot process only. The arrival at Holtburg after a teleport allocates a burst of survivors; with server GC's default
 # budget the one gen-0 collection that follows paused 50-58 ms (gc_pause_ms on the slow-frame line, process time 4.6 ms), the frame the 75 ms rule and the offline 50 ms check judge. Not set by WorkstationGC, which has its own budget.
+# M4 P5b: the cap did not cure it. The cause was the shell's no-GC window, whose end left gen 0 the region's budget (up to 512 MiB); NoGcWindow now closes a held window with one gen-0 collection.
+# The cap stays as it is (not measured on its own since).
 if (-not $WorkstationGC) { $godotEnv['DOTNET_GCgen0MaxBudget'] = '2000000' }
 if ($IsolateUserData) {
     $dataRoot = if ($UserDataSlot) { Join-Path $repoRoot "cache\godot\slot-$UserDataSlot" } else { Join-Path $repoRoot 'cache\godot' }

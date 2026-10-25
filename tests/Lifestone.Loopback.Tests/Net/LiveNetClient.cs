@@ -243,14 +243,14 @@ internal sealed class LiveNetClient : IDisposable
         }
     }
 
-    /// <summary>Logs in as the test account. The secrets' bytes are zeroed here; the session zeroes its own copy of the password.</summary>
+    /// <summary>Logs in on the account of this client's character (<see cref="LoopbackAccounts.For"/>; <c>test</c> except for Lifestone Throwaway and the fighters). The secrets' bytes are zeroed here; the session zeroes its own copy of the password.</summary>
     public void Login()
     {
-        Lifestone.Loopback.Tests.Session.LiveCharacter.Release(Console.WriteLine, BackendProbe.TestAccountKey); // a shared session of the account is logged off first (ACE boots a second login)
+        Lifestone.Loopback.Tests.Session.LiveCharacter.Release(Console.WriteLine, LoopbackAccounts.For(_character)); // a shared session of the account is logged off first (ACE boots a second login)
         var secrets = File.ReadAllBytes(BackendProbe.MainCheckoutFiles.SecretsFile);
         try
         {
-            using var credentials = PlayAccounts.Parse(secrets, AccountChoice.FromOption(BackendProbe.TestAccountKey, AccountChoice.Default));
+            using var credentials = PlayAccounts.Parse(secrets, AccountChoice.FromOption(LoopbackAccounts.For(_character), AccountChoice.Default));
             _needles = NetFixtureStore.PasswordNeedles(credentials);
             Session.Login(credentials);
         }

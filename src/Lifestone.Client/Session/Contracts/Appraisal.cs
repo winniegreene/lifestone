@@ -267,6 +267,12 @@ public sealed class Appraisal
     /// <summary>The uses it started with (MaxStructure, PropertyInt 91), or null.</summary>
     public int? MaxUses => Int(AppraisalIds.MaxStructure);
 
+    /// <summary>An item's mana now (ItemCurMana, PropertyInt 107), or null: a magic item, or a charged mana stone (an empty stone has none). ACE sends no update while it burns, so an appraisal is how the client reads it.</summary>
+    public int? ItemMana => Int(AppraisalIds.ManaCurrent);
+
+    /// <summary>An item's mana capacity (ItemMaxMana, PropertyInt 108), or null.</summary>
+    public int? ItemMaxMana => Int(AppraisalIds.ManaMax);
+
     /// <summary>A healing kit's boost (BoostValue, PropertyInt 90), or null.</summary>
     public int? HealingBoost => Int(AppraisalIds.HealingBoost);
 

@@ -52,7 +52,8 @@ public sealed class CharPurgeRulesTests
     [InlineData("HOLTBURG ARCHER")]
     public void The_graduated_test_characters_are_refused_by_name_whatever_the_account_holds(string name)
     {
-        // Even a pending-deletion copy of a graduated name is refused: they are the baseline.
+        // Even a pending-deletion copy of a graduated name is refused: they are the baseline. (BSD Mage, Holtburg Brawler and Holtburg Archer only while
+        // the account holds no live copy of them, which none of these accounts does: M4 D45, A_journey_characters_new_copy_purges_its_old_copies_one_by_one_D45.)
         var pendingSmoke = new AccountCharacter(0x50000009, "Lifestone Smoke", false, 1_700_000_000, false);
         foreach (var account in new[] { Account(), Account(pendingSmoke), Array.Empty<AccountCharacter>() })
         {
@@ -63,7 +64,7 @@ public sealed class CharPurgeRulesTests
             Assert.Contains(CharPurgeRules.Graduated, g => string.Equals(g, name, StringComparison.OrdinalIgnoreCase) && decision.Refusal.Message.StartsWith(g, StringComparison.Ordinal));
         }
 
-        Assert.Equal(["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer"], CharPurgeRules.Graduated);
+        Assert.Equal(["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer", "Lifestone Tools"], CharPurgeRules.Graduated);
     }
 
     [Fact]
@@ -186,10 +187,12 @@ public sealed class CharPurgeRulesTests
     {
         Assert.Null(CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Lifestone Throwaway"), Caller));
         Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Lifestone Smoke"), Caller)!.Code);
-        Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("BSD Mage"), Caller)!.Code);
         Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Holtburg Hunter"), Caller)!.Code);
-        Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Holtburg Brawler"), Caller)!.Code);
-        Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Holtburg Archer"), Caller)!.Code);
+        // M4 D45: the journey characters the gate re-creates need the account's rows (a live copy, then a pending one), even when the caller names itself.
+        Assert.Null(CharPurgeRules.EarlyRefusal(new CharPurgeRequest("BSD Mage"), Caller));
+        Assert.Null(CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Holtburg Brawler"), Caller));
+        Assert.Null(CharPurgeRules.EarlyRefusal(new CharPurgeRequest("holtburg archer"), "Holtburg Archer"));
+        Assert.Equal(ToolErrors.Graduated, CharPurgeRules.EarlyRefusal(new CharPurgeRequest("Lifestone Tools"), Caller)!.Code); // M4 D43: the tools account's purge caller is never purged
         Assert.Throws<ArgumentNullException>(() => CharPurgeRules.EarlyRefusal(null!, Caller));
         Assert.Throws<ArgumentNullException>(() => CharPurgeRules.Check(null!, Caller, CallerGuid, []));
         Assert.Throws<ArgumentNullException>(() => CharPurgeRules.Check(new CharPurgeRequest("a"), Caller, CallerGuid, null!));
@@ -242,6 +245,84 @@ public sealed class CharPurgeRulesTests
         Assert.Throws<ArgumentNullException>(() => CharPurgeRules.WithRestartNote(null!));
     }
 
+    // ------------------------------------------------------------------------------------------ M4 D44, D45: the journey characters' old copies
+
+    private const uint NewCopy = 0x50000020;
+
+    private static readonly AccountCharacter Visible = new(0x50000021, "Holtburg Brawler", IsDeleted: false, DeleteTime: 1_700_000_100, IsOnline: false);
+
+    private static readonly AccountCharacter Expired = new(0x50000019, "Holtburg Brawler", IsDeleted: true, DeleteTime: 1_600_000_000, IsOnline: false);
+
+    [Fact]
+    public void A_journey_characters_new_copy_purges_its_old_copies_one_by_one_D45()
+    {
+        // The gate's re-create: the new Holtburg Brawler (in the world) asks for its own name; the visible pending copy goes first, then the expired one.
+        var self = new AccountCharacter(NewCopy, "Holtburg Brawler", false, 0, true);
+        CharPurgeDecision Purge(params AccountCharacter[] rows) => CharPurgeRules.Check(new CharPurgeRequest("Holtburg Brawler"), "Holtburg Brawler", NewCopy, rows);
+
+        Assert.Equal(Visible, Purge(self, Expired, Visible).Target);
+        Assert.Equal(Expired, Purge(self, Expired).Target);
+
+        // No old copy left: unknown-character ends the repeat; the new copy itself is never the target.
+        var done = Purge(self);
+        Assert.Equal(new ToolError(ToolErrors.UnknownCharacter, "no old copy of \"Holtburg Brawler\" is pending deletion on your account"), done.Refusal);
+        Assert.Equal(["BSD Mage", "Holtburg Brawler", "Holtburg Archer"], CharPurgeRules.Recreated);
+        Assert.All(CharPurgeRules.Recreated, r => Assert.Contains(r, CharPurgeRules.Graduated));
+    }
+
+    [Fact]
+    public void The_last_copy_of_a_journey_character_is_never_purged_D45()
+    {
+        // With no live copy on the account (the new one not created yet, or someone deleted it), a pending copy is graduated and stays restorable.
+        foreach (var rows in new[] { Account(Visible), Account(Expired), Account(Visible with { Name = "BSD Mage" }) })
+        {
+            foreach (var name in new[] { "Holtburg Brawler", "BSD Mage", "Holtburg Archer" })
+            {
+                var decision = Check(name, rows);
+                Assert.Equal(ToolErrors.Graduated, decision.Refusal!.Code);
+                Assert.EndsWith(" is a graduated test character and stays as it is", decision.Refusal.Message, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    [Fact]
+    public void Another_character_on_the_account_may_purge_a_replaced_copy_and_another_accounts_copy_is_never_read_D45()
+    {
+        // Lifestone Loopback on the mage's account, with the new BSD Mage offline: the old copy goes.
+        var live = new AccountCharacter(0x50000030, "BSD Mage", false, 0, false);
+        var old = new AccountCharacter(0x50000031, "BSD Mage", false, 1_700_000_000, false);
+        Assert.Equal(old, Check("bsd mage", Account(live, old)).Target);
+
+        // The live copy alone, or an account that holds no BSD Mage at all (the mage lives on another account): never purged.
+        Assert.Equal(ToolErrors.UnknownCharacter, Check("BSD Mage", Account(live)).Refusal!.Code);
+        Assert.Equal(ToolErrors.Graduated, Check("BSD Mage", Account()).Refusal!.Code);
+    }
+
+    [Theory]
+    [InlineData("Lifestone Smoke")]
+    [InlineData("Lifestone Loopback")]
+    [InlineData("Holtburg Hunter")]
+    [InlineData("Lifestone Tools")]
+    public void The_other_graduated_characters_stay_refused_by_name_with_a_live_copy_and_a_pending_one_D45(string name)
+    {
+        var decision = Check(name, Account(new AccountCharacter(0x50000040, name, false, 0, false), new AccountCharacter(0x50000041, name, false, 1_700_000_000, false)));
+        Assert.Equal(ToolErrors.Graduated, decision.Refusal!.Code);
+        Assert.DoesNotContain(name, CharPurgeRules.Recreated);
+    }
+
+    [Fact]
+    public void The_second_check_sees_the_fresh_row_with_the_accounts_live_copies_D45()
+    {
+        // CharVerb runs the rules again on the fresh row right before the purge; for a journey character it adds the live copies the first lookup saw.
+        var request = new CharPurgeRequest("Holtburg Brawler");
+        var self = new AccountCharacter(NewCopy, "Holtburg Brawler", false, 0, true);
+        var live = CharPurgeRules.LiveCopies(request, [self, Visible, Expired]);
+        Assert.Equal([self], live);
+        Assert.True(CharPurgeRules.Check(request, "Holtburg Brawler", NewCopy, [Visible, .. live]).Allowed);
+        Assert.Equal(ToolErrors.UnknownCharacter, CharPurgeRules.Check(request, "Holtburg Brawler", NewCopy, [.. live]).Refusal!.Code); // the row is gone
+        Assert.Empty(CharPurgeRules.LiveCopies(new CharPurgeRequest("Lifestone Throwaway"), Account(Throwaway with { DeleteTime = 0 })));
+    }
+
     [Fact]
     public void The_offline_stand_in_applies_the_same_rules_with_the_same_words()
     {
@@ -258,6 +339,10 @@ public sealed class CharPurgeRulesTests
             new CharacterSlot(0x50000008, "Pair", 9),
             new CharacterSlot(0x50000009, "Same", 5), // equal times: the lowest id
             new CharacterSlot(0x5000000A, "Same", 5),
+            new CharacterSlot(0x5000000B, "Holtburg Archer", 0), // D45: a journey character's new copy and its old one: the old one goes
+            new CharacterSlot(0x5000000C, "Holtburg Archer", 3),
+            new CharacterSlot(0x5000000D, "Holtburg Brawler", 4), // the old copy alone: graduated, never purged
+            new CharacterSlot(0x5000000E, "BSD Mage", 0), // the new copy alone: nothing old left
         };
         var account = slots.Select(s => new AccountCharacter(s.Guid, s.Name, false, s.PendingDeletion ? s.DeleteTimeout : 0UL, s.Guid == CallerGuid)).ToArray();
         var names = new[] { "Lifestone Smoke", "lifestone loopback", "BSD Mage", "bsd mage", "Holtburg Hunter", "holtburg hunter", "Holtburg Brawler", "holtburg archer", "Pending One", "pending one", "Live One", "Twin", "Nobody", "Lifestone Throwaway", "Pair", "Same" };
@@ -285,11 +370,16 @@ public sealed class CharPurgeRulesTests
 
         // The table reaches every reason and the success.
         Assert.Equal(
-            [ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, null, null, ToolErrors.NotPendingDeletion, null, ToolErrors.UnknownCharacter, ToolErrors.UnknownCharacter, null, null],
+            [ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.UnknownCharacter, ToolErrors.UnknownCharacter, ToolErrors.Graduated, ToolErrors.Graduated, ToolErrors.Graduated, null, null, null, ToolErrors.NotPendingDeletion, null, ToolErrors.UnknownCharacter, ToolErrors.UnknownCharacter, null, null],
             names.Select(n => StandInCharPurge.Decide(new CharPurgeRequest(n), Caller, CallerGuid, slots).Refusal?.Code));
         Assert.Equal(ToolErrors.OwnCharacter, StandInCharPurge.Decide(new CharPurgeRequest("Ann"), "Ann", CallerGuid, slots).Refusal!.Code);
         Assert.Equal(
             CharPurgeRules.Check(new CharPurgeRequest("Ann"), "Ann", CallerGuid, account).Refusal,
             StandInCharPurge.Decide(new CharPurgeRequest("Ann"), "Ann", CallerGuid, slots).Refusal);
+
+        // D45 from the new copy itself: both pick the old copy, and the lists of re-created names agree.
+        Assert.Equal(0x5000000Cu, StandInCharPurge.Decide(new CharPurgeRequest("Holtburg Archer"), "Holtburg Archer", 0x5000000B, slots).Target.Guid);
+        Assert.Equal(0x5000000Cu, CharPurgeRules.Check(new CharPurgeRequest("Holtburg Archer"), "Holtburg Archer", 0x5000000B, account).Target!.Value.Guid);
+        Assert.Equal(CharPurgeRules.Recreated, StandInCharPurge.Recreated);
     }
 }

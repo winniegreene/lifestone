@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using Lifestone.Data.Animation;
 using Lifestone.Data.World;
@@ -68,6 +69,9 @@ public interface INavPathSource
 {
     /// <summary>The lattice the runner clamps its lead point to and scars (null for a path source with no lattice: the rooms).</summary>
     NavMap? Map { get; }
+
+    /// <summary>The outdoor planner the source plans with (the runner gives it the run's creature layer, <see cref="PathPlanner.Creatures"/>), or null for the rooms alone.</summary>
+    PathPlanner? Planner { get; }
 
     /// <summary>Plans from <paramref name="from"/> (the body's position) to <paramref name="goal"/>, avoiding <paramref name="scars"/>.</summary>
     NavPath Plan(in CellFrame from, NavGoal goal, NavScars scars);
@@ -195,17 +199,35 @@ public sealed class IndoorOutdoorPathSource : INavPathSource, INavCellAvoider
     public NavMap? Map => _outdoor.Map;
 
     /// <inheritdoc/>
+    public PathPlanner Planner => _outdoor.Planner;
+
+    /// <summary>
+    /// The failure name of a start inside the rooms from which no room route reaches a door with a lane outside (M4 P5b F1): a room behind a step
+    /// the room graph does not know (Renald's back room 0xA9B40141, TODO(room-steps)) once the physics refused its ways out. Followed by
+    /// <c>:0x&lt;cell&gt;</c>.
+    /// </summary>
+    public const string IndoorStartUnreachable = "indoor-start-unreachable";
+
+    /// <inheritdoc/>
     public NavPath Plan(in CellFrame from, NavGoal goal, NavScars scars)
     {
         ArgumentNullException.ThrowIfNull(goal);
-        if (goal.CellId is not { } toCell || Rooms.RoomFrame(toCell) is null)
-        {
-            return _outdoor.Plan(from, goal, scars);
-        }
-
+        uint? goalRoom = goal.CellId is { } c && Rooms.RoomFrame(c) is not null ? c : null;
         if (!LandDefs.IsOutdoorCell(from.CellId))
         {
-            return RoomPathSource.PlanRooms(Rooms, from, goal);
+            // A start indoors (M4 P5b F1: the outdoor planner refused it as start-blocked): the rooms alone when they join the goal's room, else out
+            // through a door to the outdoor goal, or out and in again to a room the rooms do not join.
+            if (goalRoom is not null && RoomPathSource.PlanRooms(Rooms, from, goal) is { Status: NavPathStatus.Found } inside)
+            {
+                return inside;
+            }
+
+            return PlanOut(from, goal, goalRoom, scars);
+        }
+
+        if (goalRoom is not { } toCell)
+        {
+            return _outdoor.Plan(from, goal, scars);
         }
 
         var result = IndoorOutdoorRoute.Plan(_outdoor.Planner, Rooms, NavMap.FromCellFrame(from), toCell, goal.Point.Local, scars);
@@ -234,6 +256,110 @@ public sealed class IndoorOutdoorPathSource : INavPathSource, INavCellAvoider
 
         return new NavPath(NavPathStatus.Found, points, null, result.CellsEntered);
     }
+
+    /// <summary>
+    /// From a start inside the rooms out through a door (M4 P5b F1; <see cref="IndoorOutdoorRoute"/> walked backwards): for each doorway lane of the
+    /// tile whose door the rooms join and reach from the start, the rooms' doorway pairs to the door, the point inside it, the sill, the lane's points
+    /// out to its outer end, then the outdoor planner's route to an outdoor goal, or <see cref="IndoorOutdoorRoute.Plan"/>'s route in again to a room
+    /// the rooms did not join. The cheapest whole walk wins (a horizon walk only when no whole one). Not retail: Lifestone's own.
+    /// </summary>
+    private NavPath PlanOut(in CellFrame from, NavGoal goal, uint? goalRoom, NavScars scars)
+    {
+        var planner = _outdoor.Planner;
+        var unreachable = string.Create(CultureInfo.InvariantCulture, $"{IndoorStartUnreachable}:0x{from.CellId:X8}");
+        if (Rooms.RoomFrame(from.CellId) is null)
+        {
+            return NavPath.Fail(unreachable + ": the start is not one of the rooms");
+        }
+
+        if (!planner.Map.TryGetTile(Rooms.LandblockId, out var tile))
+        {
+            return NavPath.Fail("no-tile");
+        }
+
+        NavPath? best = null;
+        var bestScore = float.MaxValue;
+        string? lastOutside = null;
+        foreach (var lane in tile.DoorwayLanes)
+        {
+            if (!Rooms.TryExit(lane, out var exit))
+            {
+                continue;
+            }
+
+            var inner = exit.Sill - new Vector3(exit.Outward.X * RoomGraph.InsideStartMetres, exit.Outward.Y * RoomGraph.InsideStartMetres, 0f);
+            if (Rooms.Plan(from.CellId, from.Origin, lane.EntryCellId, inner) is not { } rooms)
+            {
+                continue;
+            }
+
+            var lanePoints = IndoorOutdoorRoute.LanePoints(tile, lane);
+            if (lanePoints.Count < 2)
+            {
+                continue;
+            }
+
+            var points = new List<NavWaypoint> { new(new CellFrame(from.CellId, new AcFrame(from.Origin, Quaternion.Identity)), Doorway: false) };
+            points.AddRange(rooms.Waypoints.Select(w => new NavWaypoint(w, Doorway: true)));
+            points.Add(new NavWaypoint(new CellFrame(lane.EntryCellId, new AcFrame(inner, Quaternion.Identity)), Doorway: true));
+            points.Add(new NavWaypoint(new CellFrame(lane.EntryCellId, new AcFrame(exit.Sill, Quaternion.Identity)), Doorway: true));
+            for (var i = lanePoints.Count - 2; i >= 0; i--)
+            {
+                points.Add(new NavWaypoint(NavMap.ToCellFrame(lanePoints[i]), Doorway: false));
+            }
+
+            var cells = new List<uint>(rooms.Cells);
+            NavPathStatus status;
+            if (goalRoom is { } toCell)
+            {
+                var again = IndoorOutdoorRoute.Plan(planner, Rooms, lanePoints[0], toCell, goal.Point.Local, scars);
+                if (again.Status is not (IndoorOutdoorStatus.Found or IndoorOutdoorStatus.Horizon) || again.Outdoor?.Route is null)
+                {
+                    lastOutside = again.Reason ?? "indoor-outdoor-" + again.Status.ToString().ToLowerInvariant();
+                    continue;
+                }
+
+                points.AddRange(again.Outdoor.Route.Vertices.Skip(1).Select(v => new NavWaypoint(NavMap.ToCellFrame(v), Doorway: false)));
+                status = again.Status == IndoorOutdoorStatus.Found ? NavPathStatus.Found : NavPathStatus.Horizon;
+                if (status == NavPathStatus.Found)
+                {
+                    var laneIn = again.LanePoints.Count - 1;
+                    for (var i = 0; i < again.Inside.Count; i++)
+                    {
+                        points.Add(new NavWaypoint(again.Inside[i], Doorway: i >= laneIn && i < again.Inside.Count - 1));
+                    }
+
+                    cells.AddRange(again.CellsEntered);
+                }
+            }
+            else
+            {
+                var outside = planner.Plan(lanePoints[0], goal, scars);
+                if (outside.Status is not (NavStatus.Found or NavStatus.Horizon) || outside.Route is null)
+                {
+                    lastOutside = outside.Reason ?? "outdoor-" + outside.Status.ToString().ToLowerInvariant();
+                    continue;
+                }
+
+                points.AddRange(outside.Route.Vertices.Skip(1).Select(v => new NavWaypoint(NavMap.ToCellFrame(v), Doorway: false)));
+                status = outside.Status == NavStatus.Found ? NavPathStatus.Found : NavPathStatus.Horizon;
+            }
+
+            var score = status == NavPathStatus.Horizon ? 1e6f : 0f; // a whole route is always better
+            for (var i = 1; i < points.Count; i++)
+            {
+                score += Vector2.Distance(points[i - 1].Point.Global, points[i].Point.Global);
+            }
+
+            if (score < bestScore)
+            {
+                bestScore = score;
+                best = new NavPath(status, points, null, cells);
+            }
+        }
+
+        return best ?? NavPath.Fail(lastOutside ?? unreachable + ": no room route from the start reaches a door with a lane outside");
+    }
 }
 
 /// <summary>The room graph alone as a path source (the den, a shop from inside): the start, the doorway pairs, the goal.</summary>
@@ -259,6 +385,9 @@ public sealed class RoomPathSource : INavPathSource, INavCellAvoider
 
     /// <inheritdoc/>
     public NavMap? Map => null;
+
+    /// <inheritdoc/>
+    public PathPlanner? Planner => null;
 
     /// <inheritdoc/>
     public IReadOnlyCollection<uint> AvoidedCells => _rooms.Avoided;

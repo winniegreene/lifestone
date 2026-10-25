@@ -19,41 +19,447 @@ public sealed class LiveGateRunnerTests
 
     // ------------------------------------------------------------------------------------------ the runner's plan (its dry run)
 
+    // ------------------------------------------------------------------------------------------ P5b G2: the journeys gate
+
+    private static readonly string[] DeletedClasses =
+    [
+        "HealLiveTests", "HealBrawlerLiveTests", "HealArcherLiveTests", "GearLiveTests", "BuffLoopLiveTests", "RebuffLiveTests", "CastLiveTests", "FightLiveTests", "DeathLiveTests",
+        "MageBuildLoopbackTests", "FighterBrawlerBuildLoopbackTests", "FighterArcherBuildLoopbackTests", "FighterBrawlerBuffLiveTests", "FighterArcherBuffLiveTests",
+        "VendorLiveTests", "MeleeLiveTests", "HuntLiveTests", "MissileLiveTests", "ContainerCorpseLiveTests", "AppraiseLiveTests",
+    ];
+
     [Fact]
-    public void The_parallel_plan_has_three_account_lanes_then_a_solo_phase_in_the_briefs_order()
+    public void The_parallel_plan_is_the_journeys_gate_four_lanes_then_a_short_solo_phase_P5b_G2()
     {
         var plan = Plan("-Loopback", "full");
 
         Assert.Contains(plan, l => l.StartsWith("[gate-plan] mode=parallel loopback=full classes=all soak=False", StringComparison.Ordinal));
-        Assert.Contains("[gate-plan] phase PARALLEL (3 lanes at once (at most three Godot), each lane in order)", plan);
+        Assert.Contains("[gate-plan] phase PARALLEL (4 lanes at once (at most three Godot), each lane in order)", plan);
         Assert.Contains("[gate-plan] phase SOLO (one at a time, nothing else running)", plan);
         Assert.Contains(plan, l => l.Contains("backend: server\\start-server.ps1 from the main checkout", StringComparison.Ordinal) && l.Contains("stop-server.ps1 in a finally", StringComparison.Ordinal));
         Assert.Contains(plan, l => l.StartsWith("[gate-plan] done steps=", StringComparison.Ordinal) && l.EndsWith("(nothing was run)", StringComparison.Ordinal));
 
-        // The parallel phase: lanes in the order test, test-melee, test-archer; each lane's loopback first, then its smoke steps.
+        // The four lanes: test (its re-create, its short classes, then the mage's journey), test-melee (its re-create, then the melee journey), test-archer (its re-create, Shortcut's relog class, then the archer's journey), test-tools (headless, no re-create; M4 fresh G1, D44).
         var parallel = Steps(plan, "PARALLEL");
-        Assert.Equal(["test:loopback", "test:smoke", "test-melee:loopback", "test-archer:loopback", "test-archer:smoke"], parallel.Select(s => s.Lane + ":" + s.Name).ToArray());
-        Assert.Contains("--filter \"Category=Loopback&Tier!=Soak&Account=test&Lane!=solo\"", parallel[0].Command, StringComparison.Ordinal);
-        Assert.Contains("--filter \"Category=Loopback&Tier!=Soak&Account=test-melee&Lane!=solo\"", parallel[2].Command, StringComparison.Ordinal);
-        Assert.Contains("--filter \"Category=Loopback&Tier!=Soak&Account=test-archer&Lane!=solo\"", parallel[3].Command, StringComparison.Ordinal);
-        Assert.All(parallel.Where(s => s.Name == "loopback"), s => Assert.Contains("dotnet test tests\\Lifestone.Loopback.Tests --disable-build-servers --no-build", s.Command, StringComparison.Ordinal));
-        Assert.Contains("-Only login-buff,login-death -Backend require -NoBuild", parallel[1].Command, StringComparison.Ordinal);
-        Assert.Contains("-Only login-hunt-missile -Backend require -NoBuild", parallel[4].Command, StringComparison.Ordinal);
+        Assert.Equal(["test:recreate", "test:loopback", "test:smoke", "test-melee:recreate", "test-melee:smoke", "test-archer:recreate", "test-archer:loopback", "test-archer:smoke", "test-tools:loopback"], parallel.Select(s => s.Lane + ":" + s.Name).ToArray());
+        var loopbacks = parallel.Where(s => s.Name == "loopback").ToList();
+        Assert.Contains("--filter \"Category=Loopback&Tier!=Soak&Account=test&(Lane!=solo|FullyQualifiedName~.AcademyExitLoopbackTests.|FullyQualifiedName~.HoltburgLapsLoopbackTests.)\"", loopbacks[0].Command, StringComparison.Ordinal); // AcademyExit's quest facts run in the lane
+        Assert.Contains("--filter \"Category=Loopback&Tier!=Soak&Account=test-archer&Lane!=solo\"", loopbacks[1].Command, StringComparison.Ordinal);
+        Assert.Contains("--filter \"Category=Loopback&Tier!=Soak&Account=test-tools&Lane!=solo\"", loopbacks[2].Command, StringComparison.Ordinal);
+        Assert.All(loopbacks, s => Assert.Contains("dotnet test tests\\Lifestone.Loopback.Tests --disable-build-servers --no-build", s.Command, StringComparison.Ordinal));
+        Assert.DoesNotContain(parallel, s => s.Lane == "test-melee" && s.Name == "loopback"); // every test-melee class is retired into the journey's stations
+        Assert.DoesNotContain(parallel, s => s.Lane == "test-tools" && s.Name == "smoke"); // the tools lane is headless
 
-        // Frame-time fields are reported in the parallel phase (-ContendedFrames), and each lane's Godot runs have a user-data slot of their own.
+        // The journeys: each in its own account's lane, -ContendedFrames (frame fields reported), a user-data slot per Godot lane (three).
         var smokes = parallel.Where(s => s.Name == "smoke").ToList();
+        Assert.Equal(["journey-mage", "journey-melee", "journey-archer"], smokes.Select(s => Regex.Match(s.Command, @"-Only (journey-\w+) -Backend require -NoBuild").Groups[1].Value).ToArray());
         Assert.All(smokes, s => Assert.Contains("-ContendedFrames -UserDataSlot g", s.Command, StringComparison.Ordinal));
-        Assert.Equal(2, smokes.Select(s => Regex.Match(s.Command, @"-UserDataSlot (g\d)").Groups[1].Value).Distinct().Count());
+        Assert.Equal(["g1", "g2", "g3"], smokes.Select(s => Regex.Match(s.Command, @"-UserDataSlot (g\d)").Groups[1].Value).ToArray());
 
-        // The solo phase: the frame judge three runs, one melee hunt, the movement-precision loopback tests, the throwaway's frames three runs, the leak scan; no -ContendedFrames anywhere.
+        // The solo phase: the frame judge three runs, the LivePhaseB walks, the throwaway's frames three runs, the leak scan; no -ContendedFrames, no journey.
         var solo = Steps(plan, "SOLO");
-        Assert.Equal(["frame-judge-1", "frame-judge-2", "frame-judge-3", "melee-hunt", "login-bsd", "movement-loopback", "throwaway-frames-1", "throwaway-frames-2", "throwaway-frames-3", "leak-scan"], solo.Select(s => s.Name).ToArray());
+        Assert.Equal(["frame-judge-1", "frame-judge-2", "frame-judge-3", "live-phase-b", "throwaway-frames-1", "throwaway-frames-2", "throwaway-frames-3", "leak-scan"], solo.Select(s => s.Name).ToArray());
         Assert.All(solo.Take(3), s => Assert.Contains("-Only login-check,login -Backend require", s.Command, StringComparison.Ordinal));
-        Assert.Contains("-Only login-hunt -Backend require", solo[3].Command, StringComparison.Ordinal);
-        Assert.Contains("-Only login-bsd -Backend require", solo[4].Command, StringComparison.Ordinal); // rfix-c: the den fight's walk is solo
-        Assert.Contains("--filter \"Category=Loopback&Tier!=Soak&Lane=solo\"", solo[5].Command, StringComparison.Ordinal);
-        Assert.All(solo.Skip(6).Take(3), s => Assert.Contains("-Only login-throwaway -Backend require", s.Command, StringComparison.Ordinal));
+        Assert.Contains("--filter \"Category=Loopback&Tier!=Soak&Lane=solo&(FullyQualifiedName~.LivePhaseBTests.)\"", solo[3].Command, StringComparison.Ordinal);
+        Assert.All(solo.Skip(4).Take(3), s => Assert.Contains("-Only login-throwaway -Backend require", s.Command, StringComparison.Ordinal));
         Assert.All(solo, s => Assert.DoesNotContain("-ContendedFrames", s.Command, StringComparison.Ordinal));
+
+        // Gone: the solo melee hunt, login-bsd, login-buff, login-death, login-hunt-missile and the solo movement loopback.
+        var all = string.Join("\n", plan);
+        foreach (var gone in new[] { "login-bsd", "login-buff", "login-death", "login-hunt", "melee-hunt", "movement-loopback" })
+        {
+            Assert.DoesNotContain(gone, all, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void The_retired_area_and_the_classes_it_named_are_gone_and_no_plan_names_one_P5b_J6()
+    {
+        var areas = File.ReadAllText(RepositoryFiles.PathOf("tools", "lib", "GateAreas.psd1"));
+        Assert.DoesNotContain("'retired'", areas, StringComparison.Ordinal);
+        Assert.Contains("RetiredFacts = @()", areas, StringComparison.Ordinal); // the three single facts it skipped are deleted too
+
+        // No plan, whatever the selection, names a deleted class (their files are deleted: their coverage is the journeys' stations).
+        foreach (var plan in new[] { Plan("-Loopback", "full"), Plan("-Loopback", "core", "-ChangedPaths", "src/Lifestone.Client/Session/Fighter/HuntGround.cs") })
+        {
+            var commands = string.Join(Environment.NewLine, Steps(plan, "PARALLEL").Concat(Steps(plan, "SOLO")).Where(s => s.Command.Contains("--filter", StringComparison.Ordinal)).Select(s => s.Command));
+            foreach (var deleted in DeletedClasses)
+            {
+                Assert.DoesNotContain(deleted, commands, StringComparison.Ordinal);
+            }
+
+            Assert.DoesNotContain(plan, l => l.StartsWith("[gate-plan] retired:", StringComparison.Ordinal));
+        }
+
+        Assert.Contains(Plan("-Loopback", "full"), l => l.StartsWith("[gate-plan] lane test-melee: no loopback class", StringComparison.Ordinal));
+        Assert.Contains("unknown -Loopback value 'retired'", RunRunner(["-Plan", "-Loopback", "retired"], expectSuccess: false), StringComparison.Ordinal);
+
+        // The core list keeps one sentinel for each lane that still has classes.
+        Assert.Contains("Core = @('LoopbackGateTests', 'HeadlessLoopbackTests', 'LivePhaseBTests', 'InventoryLiveTests', 'ShortcutLiveTests')", areas, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void JourneySolo_moves_a_journey_from_its_lane_into_the_solo_phase_with_judged_frames_P5b_G2()
+    {
+        var one = Plan("-Loopback", "full", "-JourneySolo", "melee");
+        Assert.Contains("[gate-plan] phase PARALLEL (4 lanes at once (at most three Godot), each lane in order)", one); // M4 fresh G1: test-melee stays a lane (its re-create), so a Godot run fewer but the lane count is four
+        Assert.Equal(["test:recreate", "test:loopback", "test:smoke", "test-melee:recreate", "test-archer:recreate", "test-archer:loopback", "test-archer:smoke", "test-tools:loopback"], Steps(one, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray()); // M4 fresh G1: the melee re-create stays at the head of its lane
+        var solo = Steps(one, "SOLO");
+        Assert.Equal(["frame-judge-1", "frame-judge-2", "frame-judge-3", "journey-melee-solo", "live-phase-b", "throwaway-frames-1", "throwaway-frames-2", "throwaway-frames-3", "leak-scan"], solo.Select(s => s.Name).ToArray());
+        Assert.Contains("-Only journey-melee -Backend require -NoBuild", solo[3].Command, StringComparison.Ordinal);
+        Assert.DoesNotContain("-ContendedFrames", solo[3].Command, StringComparison.Ordinal);
+        Assert.DoesNotContain("-UserDataSlot", solo[3].Command, StringComparison.Ordinal);
+        Assert.Contains(one, l => l.Contains("journeys=parallel in their lanes; solo: melee", StringComparison.Ordinal));
+
+        var two = Plan("-Loopback", "full", "-JourneySolo", "archer,mage");
+        Assert.Equal(["journey-mage-solo", "journey-archer-solo"], Steps(two, "SOLO").Where(s => s.Name.StartsWith("journey-", StringComparison.Ordinal)).Select(s => s.Name).ToArray()); // the journeys' own order
+        Assert.Equal(["g1"], Steps(two, "PARALLEL").Where(s => s.Name == "smoke").Select(s => Regex.Match(s.Command, @"-UserDataSlot (g\d)").Groups[1].Value).ToArray()); // only the melee journey stays in a lane, on the first slot
+
+        Assert.Contains("-JourneySolo 'giant': use mage, melee or archer", RunRunner(["-Plan", "-JourneySolo", "giant"], expectSuccess: false), StringComparison.Ordinal);
+        Assert.Contains("-JourneySolo applies to the default (parallel) gate", RunRunner(["-Plan", "-Serial", "-JourneySolo", "mage"], expectSuccess: false), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Serial_is_the_three_journeys_headless_one_after_another_then_the_frame_judge_P5b_G2()
+    {
+        var plan = Plan("-Serial", "-Loopback", "full", "-CompareTo", "g9");
+        var steps = Steps(plan, "SERIAL");
+
+        Assert.Equal(["recreate-mage", "headless-journey-mage", "recreate-melee", "headless-journey-melee", "recreate-archer", "headless-journey-archer", "frame-judge-1", "frame-judge-2", "frame-judge-3", "leak-scan"], steps.Select(s => s.Name).ToArray());
+        foreach (var name in new[] { "mage", "melee", "archer" })
+        {
+            Assert.Contains("dotnet run --disable-build-servers --no-build --project src/Lifestone.Headless -- --scenario=journey --journey=" + name + " (timeout", plan.Single(l => l.Contains("headless-journey-" + name, StringComparison.Ordinal)), StringComparison.Ordinal);
+        }
+
+        Assert.All(steps.Skip(6).Take(3), s => Assert.Contains("-Only login-check,login -Backend require", s.Command, StringComparison.Ordinal));
+        Assert.DoesNotContain(plan, l => l.Contains("phase PARALLEL", StringComparison.Ordinal));
+        Assert.Single(plan, l => l.Contains("phase SETUP", StringComparison.Ordinal)); // the headless projects need the build
+        Assert.DoesNotContain("Lifestone.Loopback.Tests", string.Join("\n", steps.Select(s => s.Command)), StringComparison.Ordinal); // no serial loopback suite, no full smoke
+        Assert.DoesNotContain("-Parallel", string.Join("\n", steps.Select(s => s.Command)), StringComparison.Ordinal);
+        Assert.Contains(plan, l => l.Contains("serial: the three journeys headless", StringComparison.Ordinal) && l.Contains("compare with the Godot verdicts of gate tag g9", StringComparison.Ordinal));
+        Assert.Contains(plan, l => l.Contains("session=n/a (headless journeys, no loopback class)", StringComparison.Ordinal));
+
+        // The same done-line rule as the Godot step (smoke.ps1 Get-JourneyVerdict, cut out of the script at load), the headless row, and the comparison printed side by side.
+        Assert.Contains("(?ms)^function Get-JourneyVerdict.*?^\\}", File.ReadAllText(GateModule), StringComparison.Ordinal);
+        Assert.Contains("elseif ($s.Kind -eq 'headless')", File.ReadAllText(GateModule), StringComparison.Ordinal);
+        Assert.Contains("Get-JourneyComparison -Name $name -HeadlessText $hText -GodotText $gText", Runner, StringComparison.Ordinal);
+        Assert.Contains("-CompareTo applies to -Serial", RunRunner(["-Plan", "-CompareTo", "g9"], expectSuccess: false), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_plan_projects_the_journeys_expected_seconds_and_every_limit_is_twice_its_step_P5b_G2()
+    {
+        var plan = Plan("-Loopback", "full");
+        var projection = plan.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal));
+        Assert.Contains("parallel=1170 s (lane test bounds it; test=1170 test-melee=540 test-archer=560 test-tools=200) solo=810 s total=1980 s about 33 min", projection, StringComparison.Ordinal); // M4 fresh G1: + the mage's 120 s and the fighters' 90 s re-creates
+        Assert.Contains("serial=2320 s", Plan("-Serial", "-Loopback", "full").Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
+
+        int Limit(string lane, string name) => int.Parse(Regex.Match(plan.Single(l => l.Contains("lane=" + lane + " ", StringComparison.Ordinal) && Regex.IsMatch(l, @"step=\d+ " + name + ":")), @"\(timeout (\d+) s\)$").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(2950, Limit("test", "smoke")); // max(2 x 600, smoke 2200 + 300 + the lane's loopback 450); unchanged by the re-create (M4 fresh G1: each step's limit is its own, so the earlier steps spend none of it)
+        Assert.Equal(2200, Limit("test-melee", "smoke")); // max(2 x 450, smoke 1900 + 300 + no loopback)
+        Assert.Equal(2370, Limit("test-archer", "smoke")); // max(2 x 400, smoke 2000 + 300 + loopback 70)
+        Assert.Equal(240, Limit("test", "recreate")); // 2 x 120 (M4 fresh G1, D44: the mage's re-create and build)
+        Assert.Equal(180, Limit("test-melee", "recreate")); // 2 x 90 (P5a measured about 65 s for a fighter's re-create and build)
+        Assert.Equal(180, Limit("test-archer", "recreate"));
+        Assert.Equal(900, Limit("test", "loopback")); // 450 (FC-b3: round 1 timed out at 300 s; the lane runs LivePhaseB and HoltburgLaps, about 7 min)
+        Assert.Equal(140, Limit("test-archer", "loopback")); // 70
+        Assert.Equal(400, Limit("test-tools", "loopback")); // 200 (round 1: 167 s)
+
+        foreach (var key in new[] { "'loopback:test'        = 450", "'journey-mage'         = 600", "'journey-melee'        = 450", "'journey-archer'       = 400", "'loopback:test-archer' = 70", "'loopback:test-tools'  = 200", "'recreate:fighter'     = 90", "'recreate:mage'        = 120" })
+        {
+            Assert.Contains(key, Runner, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void A_journey_row_carries_the_new_judges_report_only_and_a_headless_step_is_judged_by_the_done_line_P5b_G2()
+    {
+        var run = RunPowerShell(Stub("""
+            $done = 'journey done ok=true name=melee stations=3/3 failed=none teleports=1 recalls=1 budget=2 route_m=912.5 run_s=801 rungs=4 blocked=0 sightless=1 vitals_passes=2 recovery_places=0 granted=0 keeper_pass=2'
+            $bad1 = 'journey station=hunt ok=false s=9 why=x'
+            $bad2 = 'journey done ok=false name=melee stations=2/3 failed=hunt teleports=1 recalls=1 budget=2'
+            $ok = New-Stub 'hj-ok' "Write-Output 'noise'; Write-Output 'journey station=hunt ok=true s=9'; Write-Output '$done'" 'headless'
+            $no = New-Stub 'hj-bad' "Write-Output '$bad1'; Write-Output '$bad2'" 'headless'
+            $nl = New-Stub 'hj-none' "Write-Output 'nothing'" 'headless'
+            $rows = @(Invoke-GateSteps -LaneSteps @($ok, $no, $nl) -Root $d -LogDir $d -GateLog (Join-Path $d 'gate.log'))
+            foreach ($r in $rows) { Write-Output ('ROW=' + $r.Step + '|' + $r.Ok + '|' + $r.Detail) }
+            Write-Output ('V1=' + (Get-GateJourneyVerdict "[x] $done").Ok)
+            Write-Output ('REPORT=' + (Get-JourneyReportOnly $done))
+            Write-Output ('NOLINE=' + (Get-JourneyReportOnly 'nothing'))
+            Write-Output ('BARS=' + (Get-JourneyReportOnly ("[journey] journey station=buff ok=true s=39.2 gear=wielded buffs=24/24 driver=on bars=set:3`n[journey] journey station=death ok=true bars=n/a`n" + $done)))
+            Write-Output ('BARSOLD=' + (Get-JourneyReportOnly ("[journey] journey station=buff ok=true s=1.6 gear=n/a buffs=12/12 swapped=yes`n[journey] journey station=death ok=true bars=ok`n" + $done)))
+            $mage = 'journey done ok=true name=mage stations=3/3 failed=none teleports=1 recalls=3 budget=1 route_m=3.2 run_s=1.0 rungs=0 blocked=1 sightless=0 vitals_passes=3 recovery_places=0 granted=0'
+            Write-Output ('MAGE=' + (Get-JourneyReportOnly $mage))
+            Write-Output ('WIN=' + (Get-JourneyReportOnly ("[journey] journey station=hunt ok=true s=9 attack_frame_max_ms=12.3 loot_frame_max_ms=n/a`n[journey] journey station=vendor ok=true vendor_frame_max_ms=20.5`n" + $done)))
+            Write-Output ('GATEJUDGE=' + (Get-GateJourneyVerdict "[x] $mage").Ok + '/' + (Get-GateJourneyVerdict ("[x] " + ($mage -replace 'recalls=3', 'recalls=1'))).Ok + '/' + (Get-GateJourneyVerdict ("[x] journey station=hunt ok=true attack_frame_max_ms=80.0`n[x] $mage")).Ok + '/' + (Get-GateJourneyVerdict ("[x] journey station=hunt ok=true attack_frame_max_ms=80.0`n[x] $mage") $true).Ok)
+            $cmp = @(Get-JourneyComparison -Name melee -HeadlessText $done -GodotText ('[logincheck] ' + $bad1 + "`n[logincheck] " + $bad2) -Commit abc123 -GodotCommit abc123)
+            foreach ($c in $cmp) { Write-Output ('CMP=' + $c) }
+            Write-Output ('CMPDIFF=' + (@(Get-JourneyComparison -Name melee -HeadlessText $done -GodotText '' -Commit abc -GodotCommit def)[2]))
+            """));
+
+        Assert.Contains("ROW=hj-ok|True|PASS journey done ok=true name=melee stations=3/3 failed=none", run, StringComparison.Ordinal);
+        Assert.Contains("exit=0 [report-only route_m=912.5 rungs=4 blocked=0 sightless=1 granted=0 vitals_passes=2 run_s=801 keeper_pass=2 bars=n/a windows=n/a]", run, StringComparison.Ordinal);
+        Assert.Contains("ROW=hj-bad|False|FAIL ", run, StringComparison.Ordinal);
+        Assert.Contains("station(s) ok=false: hunt", run, StringComparison.Ordinal);
+        Assert.Contains("ROW=hj-none|False|FAIL no journey done line", run, StringComparison.Ordinal);
+        Assert.Contains("V1=True", run, StringComparison.Ordinal);
+        Assert.Contains("NOLINE= [report-only: no journey done line]", run, StringComparison.Ordinal);
+        Assert.Contains("BARS= [report-only route_m=912.5 rungs=4 blocked=0 sightless=1 ", run, StringComparison.Ordinal); // fix FA (P5b-R6, review 2.5): the new fields reach the gate row
+        Assert.Contains(" keeper_pass=2 bars=set:3 windows=n/a]", run, StringComparison.Ordinal); // the buff station's bars, not the death station's
+        Assert.Contains("BARSOLD= [report-only ", run, StringComparison.Ordinal);
+        Assert.Contains(" keeper_pass=2 bars=n/a windows=n/a]", run.Split("BARSOLD=")[1], StringComparison.Ordinal); // a buff line without bars= reads n/a (never another station's)
+        // M4 4.2 J2: the judged fields leave the report-only bracket (the melee's granted stays in it, the mage's does not), the window frames join it, and the headless gate row judges the same fields.
+        Assert.Contains("MAGE= [report-only route_m=3.2 rungs=0 blocked=1 sightless=0 vitals_passes=3 run_s=1.0 keeper=n/a bars=n/a windows=n/a]", run, StringComparison.Ordinal);
+        Assert.Contains("WIN= [report-only route_m=912.5 rungs=4 blocked=0 sightless=1 granted=0 vitals_passes=2 run_s=801 keeper_pass=2 bars=n/a windows=hunt:attack_frame_max_ms=12.3,hunt:loot_frame_max_ms=n/a,vendor:vendor_frame_max_ms=20.5]", run, StringComparison.Ordinal);
+        Assert.Contains("GATEJUDGE=True/False/False/True", run, StringComparison.Ordinal); // pass / mage recalls 1 / hunt window 80 ms / the same window contended
+        Assert.Contains("CMP=[gate] compare journey=melee headless: journey done ok=true name=melee", run, StringComparison.Ordinal);
+        Assert.Contains("CMP=[gate] compare journey=melee godot:    journey done ok=false name=melee", run, StringComparison.Ordinal);
+        Assert.Contains("CMP=[gate] compare journey=melee verdicts headless=ok godot=FAIL agree=NO commit=same", run, StringComparison.Ordinal);
+        Assert.Contains("godot=none agree=unknown commit=DIFFERENT (headless abc, godot def)", run, StringComparison.Ordinal);
+
+        // The Godot journey steps get the same report-only fields from their smoke log; a journey step's account is its character's.
+        Assert.Contains("(Get-JourneyReportOnly -Text $jt)", File.ReadAllText(GateModule), StringComparison.Ordinal);
+        Assert.Contains("if ($Name -match '^(headless-)?journey-(?<j>mage|melee|archer)(-solo)?$')", Runner, StringComparison.Ordinal);
+    }
+
+    // ------------------------------------------------------------------------------------------ M4 fresh G1 (D44, D45): the re-create step
+
+    private const string MageRecreateCommand = "dotnet run --disable-build-servers --no-build --project src/Lifestone.Headless -- --scenario=mage-build --fresh-character (timeout 240 s)";
+    private const string MeleeRecreateCommand = "dotnet run --disable-build-servers --no-build --project src/Lifestone.Headless -- --scenario=fighter-build --account=test-melee --fresh-character (timeout 180 s)";
+    private const string ArcherRecreateCommand = "dotnet run --disable-build-servers --no-build --project src/Lifestone.Headless -- --scenario=fighter-build --account=test-archer --fresh-character (timeout 180 s)";
+
+    [Fact]
+    public void Each_journey_lane_starts_with_its_recreate_step_with_the_contract_command_line_and_test_tools_has_none_M4_fresh_G1()
+    {
+        var plan = Plan("-Loopback", "full");
+        var parallel = Steps(plan, "PARALLEL");
+
+        foreach (var lane in new[] { "test", "test-melee", "test-archer" })
+        {
+            Assert.Equal("recreate", parallel.First(s => s.Lane == lane).Name); // the first step of its lane
+            Assert.Single(parallel, s => s.Lane == lane && s.Name == "recreate");
+        }
+
+        // The contract with the headless slice (cache/m4/fresh/facts.md): the mage on the default account, the fighters with --account; the limit is twice the estimate (120 s, 90 s).
+        Assert.Equal(MageRecreateCommand, parallel.Single(s => s.Lane == "test" && s.Name == "recreate").Command);
+        Assert.Equal(MeleeRecreateCommand, parallel.Single(s => s.Lane == "test-melee" && s.Name == "recreate").Command);
+        Assert.Equal(ArcherRecreateCommand, parallel.Single(s => s.Lane == "test-archer" && s.Name == "recreate").Command);
+        Assert.DoesNotContain(parallel, s => s.Lane == "test-tools" && s.Name.StartsWith("recreate", StringComparison.Ordinal)); // Lifestone Throwaway is not re-created
+        Assert.DoesNotContain(Steps(plan, "SOLO"), s => s.Name.StartsWith("recreate", StringComparison.Ordinal));
+        Assert.StartsWith("[gate-plan] mode=", plan[0], StringComparison.Ordinal);
+        Assert.StartsWith("[gate-plan] re-create (M4 D44, D45): each journey lane starts with recreate", plan[1], StringComparison.Ordinal);
+        Assert.DoesNotContain(plan, l => l.Contains("-KeepCharacters:", StringComparison.Ordinal));
+
+        // Each lane's account is the step's account (the killed-step release wait reads it): a lane's recreate is the lane's, -Serial's recreate-<j> is the journey's.
+        var table = Regex.Match(Runner, @"\$script:JourneyAccounts = @\{[^}]*\}").Value;
+        Assert.NotEmpty(table);
+        var run = RunPowerShell(table + "\n" + Function(Runner, "Get-GateStepAccount") + """
+            function A($lane, $name) { Write-Output ('A=' + $lane + '/' + $name + '=' + (Get-GateStepAccount $lane $name)) }
+            A 'test' 'recreate'; A 'test-melee' 'recreate'; A 'test-archer' 'recreate'
+            A 'serial' 'recreate-mage'; A 'serial' 'recreate-melee'; A 'serial' 'recreate-archer'
+            A 'serial' 'headless-journey-melee'; A 'solo' 'journey-archer-solo'; A 'solo' 'frame-judge-1'
+            """);
+        Assert.Equal(
+            ["A=test/recreate=test", "A=test-melee/recreate=test-melee", "A=test-archer/recreate=test-archer", "A=serial/recreate-mage=test", "A=serial/recreate-melee=test-melee", "A=serial/recreate-archer=test-archer",
+             "A=serial/headless-journey-melee=test-melee", "A=solo/journey-archer-solo=test-archer", "A=solo/frame-judge-1=test"],
+            run.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith("A=", StringComparison.Ordinal)).ToArray());
+    }
+
+    [Fact]
+    public void KeepCharacters_drops_every_recreate_step_and_says_so_in_one_line_at_the_start_M4_fresh_G1()
+    {
+        const string Line = "-KeepCharacters: no re-create step; the journeys run on the characters as they are";
+
+        var parallel = Plan("-Loopback", "full", "-KeepCharacters");
+        Assert.Equal("[gate-plan] " + Line, parallel[1]); // right after the mode line
+        Assert.Single(parallel, l => l.Contains("-KeepCharacters:", StringComparison.Ordinal));
+        Assert.Equal(["test:loopback", "test:smoke", "test-melee:smoke", "test-archer:loopback", "test-archer:smoke", "test-tools:loopback"], Steps(parallel, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray());
+        Assert.Contains("parallel=1050 s (lane test bounds it; test=1050 test-melee=450 test-archer=470 test-tools=200) solo=810 s total=1860 s about 31 min", parallel.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
+
+        var serial = Plan("-Serial", "-Loopback", "full", "-KeepCharacters");
+        Assert.Equal("[gate-plan] " + Line, serial[1]);
+        Assert.Equal(["headless-journey-mage", "headless-journey-melee", "headless-journey-archer", "frame-judge-1", "frame-judge-2", "frame-judge-3", "leak-scan"], Steps(serial, "SERIAL").Select(s => s.Name).ToArray());
+        Assert.Contains("serial=2020 s", serial.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
+
+        foreach (var plan in new[] { parallel, serial })
+        {
+            var all = string.Join("\n", plan);
+            Assert.DoesNotContain("recreate", all, StringComparison.Ordinal);
+            Assert.DoesNotContain("--fresh-character", all, StringComparison.Ordinal);
+        }
+
+        // The gate log says it too, at its start (the run itself needs the backend; the line is pinned in the script).
+        Assert.Contains("[switch] $KeepCharacters", Runner, StringComparison.Ordinal);
+        Assert.Contains("$keepLine = '" + Line + "'", Runner, StringComparison.Ordinal);
+        Assert.Contains("if ($KeepCharacters) { Write-Gate \"[gate] $keepLine\" }", Runner, StringComparison.Ordinal);
+        Assert.Contains("recreate-failed-*.stamp", Runner, StringComparison.Ordinal); // an earlier run's failed re-creates do not hold this run
+    }
+
+    [Fact]
+    public void Serial_puts_recreate_before_each_headless_journey_M4_fresh_G1()
+    {
+        var plan = Plan("-Serial", "-Loopback", "full");
+        var steps = Steps(plan, "SERIAL");
+
+        Assert.Equal(["recreate-mage", "headless-journey-mage", "recreate-melee", "headless-journey-melee", "recreate-archer", "headless-journey-archer"], steps.Take(6).Select(s => s.Name).ToArray());
+        Assert.Equal(MageRecreateCommand, steps[0].Command);
+        Assert.Equal(MeleeRecreateCommand, steps[2].Command);
+        Assert.Equal(ArcherRecreateCommand, steps[4].Command);
+        Assert.Single(plan, l => l.Contains("phase SERIAL (each journey headless after its re-create", StringComparison.Ordinal));
+        Assert.StartsWith("[gate-plan] re-create (M4 D44, D45): each journey is preceded by recreate-<name>", plan[1], StringComparison.Ordinal);
+        Assert.Equal(3, steps.Count(s => s.Name.StartsWith("recreate-", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void JourneySolo_keeps_each_recreate_at_the_head_of_its_parallel_lane_and_the_projection_counts_it_M4_fresh_G1()
+    {
+        var melee = Plan("-Loopback", "full", "-JourneySolo", "melee");
+        var parallel = Steps(melee, "PARALLEL");
+        Assert.Equal(["recreate"], parallel.Where(s => s.Lane == "test-melee").Select(s => s.Name).ToArray()); // the lane holds the re-create alone; its journey is in SOLO
+        Assert.Equal(MeleeRecreateCommand, parallel.Single(s => s.Lane == "test-melee").Command);
+        Assert.DoesNotContain(Steps(melee, "SOLO"), s => s.Name.StartsWith("recreate", StringComparison.Ordinal));
+        Assert.Contains("journey-melee-solo", Steps(melee, "SOLO").Select(s => s.Name));
+        Assert.Contains("parallel=1170 s (lane test bounds it; test=1170 test-melee=90 test-archer=560 test-tools=200) solo=1260 s total=2430 s about 40 min", melee.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
+
+        var all = Plan("-Loopback", "full", "-JourneySolo", "mage,melee,archer");
+        Assert.Equal(["test:recreate", "test:loopback", "test-melee:recreate", "test-archer:recreate", "test-archer:loopback", "test-tools:loopback"], Steps(all, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray());
+        Assert.Equal(["journey-mage-solo", "journey-melee-solo", "journey-archer-solo"], Steps(all, "SOLO").Where(s => s.Name.StartsWith("journey-", StringComparison.Ordinal)).Select(s => s.Name).ToArray());
+    }
+
+    [Fact]
+    public void Get_RecreateVerdict_passes_on_exit_0_ok_1_and_a_fresh_purged_line_and_names_why_it_fails_M4_fresh_G1()
+    {
+        var run = RunPowerShell($"Import-Module '{GateModule}' -Force\n" + """
+            $done = 'headless done scenario=fighter-build ok=1 corrections=0 where_max_m=none unmatched=0 recording=none'
+            $verdict = 'fighter-build fighter=built level=55 template=ok kit=ok wielded=ok worn=ok fresh=recreated purged=1'
+            function V($tag, $scenario, $code, $text, $err = '') { $v = Get-RecreateVerdict -Scenario $scenario -Code $code -Text $text -ErrText $err; Write-Output ('V=' + $tag + '|' + $v.Ok + '|' + $v.Detail) }
+            V 'pass' 'fighter-build' 0 "$done`n$verdict"
+            V 'created' 'mage-build' 0 "headless done scenario=mage-build ok=1 corrections=0`nmage-build mage=built template=ok fresh=created purged=0"
+            V 'nolevel' 'fighter-build' 0 "$done`nfighter-build fighter=ready fresh=recreated purged=2"
+            V 'logline' 'fighter-build' 0 "[x] $done" '12:00:00.001 INFO  fighter: verdict fighter=built level=7 fresh=created purged=0'
+            V 'nodone' 'fighter-build' 1 '' '12:03:04.567 ERROR headless: the loopback gate refused the server'
+            V 'ok0' 'fighter-build' 1 "headless done scenario=fighter-build ok=0 corrections=0`nfighter-build fighter=failed level=12" "12:03:05.000 INFO  fighter: starting`n12:03:06.123 ERROR fighter: delete: Refused (code 0x12)"
+            V 'ok0noerror' 'mage-build' 1 'headless done scenario=mage-build ok=0 corrections=0'
+            V 'nofresh' 'fighter-build' 0 "$done`nfighter-build fighter=ready level=55"
+            V 'nopurged' 'fighter-build' 0 "$done`nfighter-build fighter=ready level=55 fresh=recreated"
+            V 'nofreshfield' 'fighter-build' 0 "$done`nfighter-build fighter=ready level=55 purged=1"
+            V 'exit' 'fighter-build' 3 "$done`n$verdict"
+            V 'otherscenario' 'mage-build' 0 "$done`n$verdict"
+            V 'noscenario' '' 0 "$done`n$verdict"
+            """);
+
+        string Row(string tag) => run.Split('\n').Select(l => l.Trim()).Single(l => l.StartsWith("V=" + tag + "|", StringComparison.Ordinal));
+        Assert.Equal("V=pass|True|fresh=recreated purged=1 level=55", Row("pass"));
+        Assert.Equal("V=created|True|fresh=created purged=0", Row("created"));
+        Assert.Equal("V=nolevel|True|fresh=recreated purged=2", Row("nolevel")); // no level on the line: none named
+        Assert.Equal("V=logline|True|fresh=created purged=0 level=7", Row("logline")); // the log's verdict line counts, and a prefixed done line
+        Assert.Equal("V=nodone|False|no \"headless done scenario=fighter-build ok=...\" line (exit 1); the build's first ERROR line: the loopback gate refused the server", Row("nodone"));
+        Assert.Equal("V=ok0|False|the build failed: headless done scenario=fighter-build ok=0 (exit 1): delete: Refused (code 0x12)", Row("ok0")); // the build's own failure line
+        Assert.Equal("V=ok0noerror|False|the build failed: headless done scenario=mage-build ok=0 (exit 1) (no ERROR line in the output)", Row("ok0noerror"));
+        Assert.Contains("|False|headless done scenario=fighter-build ok=1 but the output has no fresh=(recreated|created) and purged=<n> ", Row("nofresh"), StringComparison.Ordinal);
+        Assert.Contains("|False|headless done scenario=fighter-build ok=1 but the output has no purged=<n> ", Row("nopurged"), StringComparison.Ordinal);
+        Assert.Contains("|False|headless done scenario=fighter-build ok=1 but the output has no fresh=(recreated|created) ", Row("nofreshfield"), StringComparison.Ordinal);
+        Assert.Equal("V=exit|False|exit 3 although the build reported fresh=recreated purged=1 level=55", Row("exit"));
+        Assert.StartsWith("V=otherscenario|False|no \"headless done scenario=mage-build ok=...\" line (exit 0)", Row("otherscenario"), StringComparison.Ordinal); // another scenario's done line is not this step's
+        Assert.StartsWith("V=noscenario|False|the step has no --scenario=", Row("noscenario"), StringComparison.Ordinal);
+
+        // Invoke-GateSteps judges Kind 'recreate' with it, and takes the scenario from the step's own arguments.
+        var module = File.ReadAllText(GateModule);
+        Assert.Contains("elseif ($s.Kind -eq 'recreate')", module, StringComparison.Ordinal);
+        Assert.Contains("Get-RecreateVerdict -Scenario $scenario -Code $code -Text $text -ErrText $errText", module, StringComparison.Ordinal);
+        Assert.Contains("'--scenario=([\\w-]+)'", module, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_failed_recreate_makes_its_journey_a_not_run_FAIL_row_without_running_it_and_the_lanes_other_steps_still_run_M4_fresh_G1()
+    {
+        var run = RunPowerShell(Stub("""
+            function Mk($name, $body, $kind, $account, $needs, $scenario) {
+                $x = New-Stub $name $body $kind
+                $x | Add-Member Account $account
+                $x | Add-Member NeedsRecreate $needs
+                if ($scenario) { $x.Arguments = @($x.Arguments) + "--scenario=$scenario" }
+                $x
+            }
+            $passing = "Write-Output 'Failed: 0, Passed: 3, Skipped: 0'"
+            $doneOk = "Write-Output 'headless done scenario=fighter-build ok=1 corrections=0 where_max_m=none unmatched=0 recording=none'; Write-Output 'fighter-build fighter=built level=55 template=ok fresh=recreated purged=1'"
+
+            # 1. The real lane path (Start-Job): the re-create fails (no done line), the loopback step still runs, the journey is one FAIL row and never runs; the lane has no second row for it.
+            $a = Join-Path $d 'a'; New-Item -ItemType Directory -Force -Path $a | Out-Null
+            $steps = @((Mk 'recreate' 'exit 1' 'recreate' 'acct-a' '' 'fighter-build'), (Mk 'loopback' $passing 'test' 'acct-a' '' ''), (Mk 'smoke' ("Set-Content -LiteralPath (Join-Path '$d' 'journey-a-ran.txt') -Value x; " + $passing) 'test' 'acct-a' 'acct-a' ''))
+            $job = Start-GateLaneJob -Lane 'stub' -Steps $steps -Root $d -LogDir $a -GateLog (Join-Path $a 'gate.log')
+            $rows = @(Receive-GateLaneJob -Job $job -Steps $steps)
+            Write-Output ('A_N=' + $rows.Count)
+            foreach ($r in $rows) { Write-Output ('A_ROW=' + $r.Step + '|' + $r.Ok + '|' + $r.Detail) }
+            Write-Output ('A_RAN=' + (Test-Path (Join-Path $d 'journey-a-ran.txt')))
+            Write-Output ('A_LINE=' + (($rows | Where-Object Step -eq 'smoke').Line))
+            Write-Output ('A_STAMP=' + (Test-Path (Join-Path $a 'recreate-failed-acct-a.stamp')))
+
+            # 2. A passing re-create (a done line, a fresh purged line): the journey runs, in the same call.
+            $b = Join-Path $d 'b'; New-Item -ItemType Directory -Force -Path $b | Out-Null
+            $ok = @((Mk 'recreate-b' $doneOk 'recreate' 'acct-b' '' 'fighter-build'), (Mk 'smoke-b' ("Set-Content -LiteralPath (Join-Path '$d' 'journey-b-ran.txt') -Value x; " + $passing) 'test' 'acct-b' 'acct-b' ''))
+            $brows = @(Invoke-GateSteps -LaneSteps $ok -Root $d -LogDir $b -GateLog (Join-Path $b 'gate.log'))
+            foreach ($r in $brows) { Write-Output ('B_ROW=' + $r.Step + '|' + $r.Ok + '|' + $r.Detail) }
+            Write-Output ('B_RAN=' + (Test-Path (Join-Path $d 'journey-b-ran.txt')))
+
+            # 3. The serial and solo paths run one step per call: the stamp in the gate folder carries a re-create that timed out (limit 2 s) to the journey of its account; another account's journey runs.
+            $c = Join-Path $d 'c'; New-Item -ItemType Directory -Force -Path $c | Out-Null
+            $slow = Mk 'recreate-c' 'Start-Sleep -Seconds 120' 'recreate' 'acct-c' '' 'mage-build'
+            $slow.TimeoutSeconds = 2
+            $crow = @(Invoke-GateSteps -LaneSteps @($slow) -Root $d -LogDir $c -GateLog (Join-Path $c 'gate.log'))
+            $jrow = @(Invoke-GateSteps -LaneSteps @((Mk 'smoke-c' ("Set-Content -LiteralPath (Join-Path '$d' 'journey-c-ran.txt') -Value x; " + $passing) 'test' 'acct-c' 'acct-c' '')) -Root $d -LogDir $c -GateLog (Join-Path $c 'gate.log'))
+            $other = @(Invoke-GateSteps -LaneSteps @((Mk 'smoke-d' $passing 'test' 'acct-d' 'acct-d' '')) -Root $d -LogDir $c -GateLog (Join-Path $c 'gate.log'))
+            Write-Output ('C_ROW=' + $crow[0].Step + '|' + $crow[0].Ok + '|' + $crow[0].Detail)
+            Write-Output ('C_JOURNEY=' + $jrow[0].Step + '|' + $jrow[0].Ok + '|' + $jrow[0].Detail)
+            Write-Output ('C_RAN=' + (Test-Path (Join-Path $d 'journey-c-ran.txt')))
+            Write-Output ('C_OTHER=' + $other[0].Ok + '|' + $other[0].Detail)
+            """));
+
+        string Line(string prefix) => run.Split('\n').Select(l => l.Trim()).Single(l => l.StartsWith(prefix, StringComparison.Ordinal));
+        Assert.Equal("A_N=3", Line("A_N=")); // recreate, loopback, smoke: the journey has no second "no result" row
+        Assert.Equal("A_ROW=recreate|False|no \"headless done scenario=fighter-build ok=...\" line (exit 1) log=stub-recreate.log err=stub-recreate.err", Line("A_ROW=recreate|"));
+        Assert.StartsWith("A_ROW=loopback|True|passed=3 failed=0 skipped=0 exit=0", Line("A_ROW=loopback|"), StringComparison.Ordinal); // the lane's other steps still run
+        Assert.Equal("A_ROW=smoke|False|not run: the re-create on acct-a failed", Line("A_ROW=smoke|"));
+        Assert.Equal("A_RAN=False", Line("A_RAN="));
+        Assert.StartsWith("A_LINE=[gate] stub smoke FAIL not run: the re-create on acct-a failed (", Line("A_LINE="), StringComparison.Ordinal);
+        Assert.Equal("A_STAMP=True", Line("A_STAMP="));
+
+        Assert.Equal("B_ROW=recreate-b|True|fresh=recreated purged=1 level=55", Line("B_ROW=recreate-b|"));
+        Assert.StartsWith("B_ROW=smoke-b|True|passed=3 failed=0 skipped=0 exit=0", Line("B_ROW=smoke-b|"), StringComparison.Ordinal);
+        Assert.Equal("B_RAN=True", Line("B_RAN="));
+
+        Assert.StartsWith("C_ROW=recreate-c|False|TIMED OUT: step 'stub recreate-c' ran past its timeout of 2 s", Line("C_ROW="), StringComparison.Ordinal);
+        Assert.Equal("C_JOURNEY=smoke-c|False|not run: the re-create on acct-c failed", Line("C_JOURNEY="));
+        Assert.Equal("C_RAN=False", Line("C_RAN="));
+        Assert.StartsWith("C_OTHER=True|passed=3", Line("C_OTHER="), StringComparison.Ordinal);
+
+        // The module reads the stamp before the release wait (a skipped step waits for nobody) and writes it for any failed re-create row.
+        var module = File.ReadAllText(GateModule);
+        Assert.Contains("if ($needs -and (Test-Path -LiteralPath (Get-GateRecreateStamp -LogDir $LogDir -Account $needs)))", module, StringComparison.Ordinal);
+        Assert.True(module.IndexOf("Get-GateRecreateStamp -LogDir $LogDir -Account $needs", StringComparison.Ordinal) < module.IndexOf("Get-GateReleaseWait -LogDir $LogDir -Account $account", StringComparison.Ordinal));
+        Assert.Contains("if ($s.Kind -eq 'recreate' -and @($rows | Where-Object { -not $_.Ok }).Count -gt 0)", module, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void P5b_G0_the_plan_prints_four_parallel_lanes_and_the_test_tools_lane_is_headless()
+    {
+        var plan = Plan("-Loopback", "full");
+        var parallel = Steps(plan, "PARALLEL");
+
+        Assert.Equal(["test", "test-melee", "test-archer", "test-tools"], parallel.Select(s => s.Lane).Distinct().ToArray()); // four lanes, in lane order
+        Assert.Contains(plan, l => l.Contains("phase PARALLEL (4 lanes at once (at most three Godot)", StringComparison.Ordinal));
+
+        // The tools lane has loopback classes and no smoke (Godot) step; the three Godot lanes are the same three as before.
+        var tools = parallel.Where(s => s.Lane == "test-tools").ToList();
+        Assert.Equal(["loopback"], tools.Select(s => s.Name).ToArray());
+        Assert.DoesNotContain(tools, s => s.Command.Contains("smoke.ps1", StringComparison.Ordinal) || s.Name == "smoke");
+        Assert.Contains("Account=test-tools&Lane!=solo", tools[0].Command, StringComparison.Ordinal);
+        Assert.Equal(["test", "test-melee", "test-archer"], parallel.Where(s => s.Name == "smoke").Select(s => s.Lane).ToArray()); // the three Godot lanes: one journey each (P5b G2)
+
+        // The throwaway's solo frame runs log in on test-tools (smoke's table) and the gate's release wait knows that account.
+        var script = Runner;
+        Assert.Contains("if ($Name -like 'throwaway-frames-*') { return 'test-tools' }", script, StringComparison.Ordinal);
+        Assert.Contains("'loopback:test-tools'  = 200", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -64,32 +470,12 @@ public sealed class LiveGateRunnerTests
         // The smoke steps are named with -Only, so no offline step (G-A's) is in any command; the full smoke is not in the parallel mode.
         Assert.DoesNotContain("-Parallel", all, StringComparison.Ordinal);
         Assert.DoesNotContain("-SoloFrames", all, StringComparison.Ordinal);
-        Assert.Single(Regex.Matches(all, @"-Only login-hunt -Backend"));
-        Assert.Single(Regex.Matches(all, @"-Only login-hunt-missile -Backend"));
+        foreach (var journey in new[] { "journey-mage", "journey-melee", "journey-archer" })
+        {
+            Assert.Single(Regex.Matches(all, "-Only " + journey + " -Backend")); // one journey of each character per gate
+        }
         Assert.Equal(3, Regex.Matches(all, @"-Only login-check,login ").Count); // the frame judge's three runs, no fourth in a full smoke
         Assert.Single(Regex.Matches(all, @"phase SETUP")); // one build before the lanes: three --no-build processes must not race a build
-    }
-
-    [Fact]
-    public void Serial_is_the_old_order_exactly()
-    {
-        var plan = Plan("-Serial", "-Loopback", "full");
-        var steps = Steps(plan, "SERIAL");
-
-        Assert.Equal(["loopback", "frame-judge-1", "frame-judge-2", "frame-judge-3", "full-smoke"], steps.Select(s => s.Name).ToArray());
-        Assert.Contains("dotnet test tests\\Lifestone.Loopback.Tests --disable-build-servers --filter \"Category=Loopback&Tier!=Soak\"", steps[0].Command, StringComparison.Ordinal);
-        Assert.DoesNotContain("--no-build", steps[0].Command, StringComparison.Ordinal);
-        Assert.All(steps.Skip(1).Take(3), s => Assert.Contains("-Only login-check,login -Backend require", s.Command, StringComparison.Ordinal));
-        Assert.Contains("smoke.ps1 -Backend require -SoloFrames -FullScan -ScanDir ", steps[4].Command, StringComparison.Ordinal);
-        Assert.Contains("-Parallel 2 ", steps[4].Command, StringComparison.Ordinal);
-        Assert.DoesNotContain(plan, l => l.Contains("phase PARALLEL", StringComparison.Ordinal));
-        Assert.DoesNotContain(plan, l => l.Contains("phase SETUP", StringComparison.Ordinal));
-
-        // -SkipOffline leaves the Godot-only steps and the test step out of the full smoke (the build stays); the old order without it has no -Skip.
-        Assert.DoesNotContain("-Skip", steps[4].Command, StringComparison.Ordinal);
-        var skipped = Steps(Plan("-Serial", "-SkipOffline", "-Loopback", "full"), "SERIAL")[4].Command;
-        Assert.Contains("-Skip test,cli-help,cli-bad-argument,", skipped, StringComparison.Ordinal);
-        Assert.DoesNotContain("login-", skipped[skipped.IndexOf("-Skip", StringComparison.Ordinal)..], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -116,39 +502,44 @@ public sealed class LiveGateRunnerTests
         // A diff with no loopback area: the fixed list only, each class in the lane of its account (the solo class in the solo phase).
         var plain = Plan("-Loopback", "core", "-ChangedPaths", "docs/readme.md");
         var parallel = Steps(plain, "PARALLEL");
-        Assert.Contains(plain, l => l.Contains("classes=HeadlessLoopbackTests,HoltburgLapsLoopbackTests,InventoryLiveTests,LoopbackGateTests,MeleeLiveTests,MissileLiveTests ", StringComparison.Ordinal));
-        Assert.Contains("(FullyQualifiedName~.HeadlessLoopbackTests.|FullyQualifiedName~.InventoryLiveTests.|FullyQualifiedName~.LoopbackGateTests.)", parallel[0].Command, StringComparison.Ordinal);
-        Assert.Contains("Account=test-melee&Lane!=solo&(FullyQualifiedName~.MeleeLiveTests.)", parallel.Single(s => s.Lane == "test-melee").Command, StringComparison.Ordinal);
-        Assert.Contains("Account=test-archer&Lane!=solo&(FullyQualifiedName~.MissileLiveTests.)", parallel.First(s => s.Lane == "test-archer").Command, StringComparison.Ordinal);
-        Assert.Contains("Lane=solo&(FullyQualifiedName~.HoltburgLapsLoopbackTests.)", Steps(plain, "SOLO").Single(s => s.Name == "movement-loopback").Command, StringComparison.Ordinal);
+        Assert.Contains(plain, l => l.Contains("classes=HeadlessLoopbackTests,InventoryLiveTests,LivePhaseBTests,LoopbackGateTests,ShortcutLiveTests", StringComparison.Ordinal));
+        Assert.Contains("(FullyQualifiedName~.HeadlessLoopbackTests.|FullyQualifiedName~.LivePhaseBTests.|FullyQualifiedName~.LoopbackGateTests.)", parallel.First(s => s.Lane == "test" && s.Name == "loopback").Command, StringComparison.Ordinal);
+        Assert.Contains("(FullyQualifiedName~.InventoryLiveTests.)", parallel.Single(s => s.Lane == "test-tools").Command, StringComparison.Ordinal); // D39: the Throwaway's classes are the tools lane's
+        Assert.DoesNotContain(parallel, s => s.Lane == "test-melee" && s.Name == "loopback"); // the account's classes are retired into the journey
+        Assert.Contains("(FullyQualifiedName~.ShortcutLiveTests.)", parallel.First(s => s.Lane == "test-archer" && s.Name == "loopback").Command, StringComparison.Ordinal);
+        Assert.Contains("Lane=solo&(FullyQualifiedName~.LivePhaseBTests.)", Steps(plain, "SOLO").Single(s => s.Name == "live-phase-b").Command, StringComparison.Ordinal);
 
-        // The fighter folder adds the fighter area's classes (the Brawler's and the Archer's lanes grow); the mage area's classes stay out.
+        // The fighter folder adds the fighter area's class (FighterBuild, the Hunter's); the mage area's folders add nothing to run (its classes are retired).
         var fighter = string.Join("\n", Plan("-Loopback", "core", "-ChangedPaths", "src/Lifestone.Client/Session/Fighter/HuntGround.cs"));
         Assert.Contains("loopback: area fighter touched by src/Lifestone.Client/Session/Fighter/HuntGround.cs", fighter, StringComparison.Ordinal);
-        Assert.Contains("FullyQualifiedName~.HuntLiveTests.", fighter, StringComparison.Ordinal);
-        Assert.Contains("FullyQualifiedName~.FighterArcherBuildLoopbackTests.", fighter, StringComparison.Ordinal);
-        Assert.DoesNotContain("BuffLoopLiveTests", fighter, StringComparison.Ordinal);
+        Assert.Contains("FullyQualifiedName~.FighterBuildLoopbackTests.", fighter, StringComparison.Ordinal);
+        Assert.DoesNotContain("FullyQualifiedName~.FighterArcherBuildLoopbackTests.", fighter, StringComparison.Ordinal);
+        Assert.DoesNotContain("FullyQualifiedName~.BuffLoopLiveTests.", fighter, StringComparison.Ordinal);
 
         // A changed loopback test file selects the classes it declares.
-        var file = string.Join("\n", Plan("-Loopback", "core", "-ChangedPaths", "tests/Lifestone.Loopback.Tests/Session/VendorLiveTests.cs"));
-        Assert.Contains("class VendorLiveTests changed", file, StringComparison.Ordinal);
+        var file = string.Join("\n", Plan("-Loopback", "core", "-ChangedPaths", "tests/Lifestone.Loopback.Tests/Session/ContainerLiveTests.cs"));
+        Assert.Contains("class ContainerLiveTests changed", file, StringComparison.Ordinal);
 
         // A shared file runs everything and says so (the fail-safe, as StepPaths.psd1's Everything).
         var shared = Plan("-Loopback", "core", "-ChangedPaths", "src/Lifestone.Client/Session/GameSession.cs");
         Assert.Contains(shared, l => l.Contains("a shared file changed", StringComparison.Ordinal) && l.Contains("every loopback class runs", StringComparison.Ordinal));
         Assert.Contains(shared, l => l.Contains("loopback=core classes=all", StringComparison.Ordinal));
-        Assert.DoesNotContain(Steps(shared, "PARALLEL"), s => s.Command.Contains("FullyQualifiedName", StringComparison.Ordinal));
+        Assert.DoesNotContain(Steps(shared, "PARALLEL"), s => s.Command.Contains("&(FullyQualifiedName~", StringComparison.Ordinal)); // no class clause: only the retired classes and facts are left out
     }
 
     [Fact]
     public void Loopback_areas_run_those_areas_only_and_an_unknown_value_is_refused_loudly()
     {
-        var mage = Plan("-Loopback", "mage");
-        Assert.Contains(mage, l => l.Contains("loopback=areas classes=BuffLoopLiveTests,CastLiveTests,DeathLiveTests,FightLiveTests,GearLiveTests,HealLiveTests,MageBuildLoopbackTests,RebuffLiveTests ", StringComparison.Ordinal));
-        var lanes = Steps(mage, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray();
+        var servermod = Plan("-Loopback", "servermod");
+        Assert.Contains(servermod, l => l.Contains("loopback=areas classes=", StringComparison.Ordinal));
+        var lanes = Steps(servermod, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray();
         Assert.Contains("test:loopback", lanes);
-        Assert.DoesNotContain("test-melee:loopback", lanes); // no mage class lives on the Brawler's account: the lane has no loopback step
+        Assert.Contains("test-tools:loopback", lanes);
+        Assert.DoesNotContain("test-melee:loopback", lanes);
         Assert.DoesNotContain("test-archer:loopback", lanes);
+
+        // The mage area's classes are all retired: no loopback step runs, the journeys still do.
+        Assert.DoesNotContain(Steps(Plan("-Loopback", "mage"), "PARALLEL"), s => s.Name == "loopback");
 
         var bad = RunRunner(["-Plan", "-Loopback", "bogus"], expectSuccess: false);
         Assert.Contains("unknown -Loopback value 'bogus'", bad, StringComparison.Ordinal);
@@ -210,7 +601,7 @@ public sealed class LiveGateRunnerTests
         }
 
         var areas = File.ReadAllText(RepositoryFiles.PathOf("tools", "lib", "GateAreas.psd1"));
-        Assert.Contains("Core = @('LoopbackGateTests', 'HeadlessLoopbackTests', 'InventoryLiveTests', 'MeleeLiveTests', 'MissileLiveTests', 'HoltburgLapsLoopbackTests')", areas, StringComparison.Ordinal);
+        Assert.Contains("Core = @('LoopbackGateTests', 'HeadlessLoopbackTests', 'LivePhaseBTests', 'InventoryLiveTests', 'ShortcutLiveTests')", areas, StringComparison.Ordinal);
         var map = File.ReadAllText(RepositoryFiles.PathOf("tools", "lib", "StepPaths.psd1"));
         Assert.Contains("'tools/live-gate.ps1'", map, StringComparison.Ordinal); // a change to the runner needs no Godot step in slice-check
     }
@@ -218,7 +609,7 @@ public sealed class LiveGateRunnerTests
     // ------------------------------------------------------------------------------------------ smoke: the step table and the accounts
 
     [Fact]
-    public void Smoke_has_the_missile_hunt_in_every_list_and_each_backend_step_on_its_characters_account()
+    public void Smoke_has_the_journeys_in_every_list_and_each_backend_step_on_its_characters_account()
     {
         var script = Smoke;
         var steps = Regex.Match(script, @"\$allSteps = @\(([^)]*)\)", RegexOptions.Singleline).Groups[1].Value;
@@ -228,29 +619,30 @@ public sealed class LiveGateRunnerTests
 
         foreach (var list in new[] { steps, backend, judged, audio })
         {
-            Assert.True(list.IndexOf("'login-hunt'", StringComparison.Ordinal) < list.IndexOf("'login-hunt-missile'", StringComparison.Ordinal), "login-hunt-missile follows login-hunt");
+            Assert.True(list.IndexOf("'journey-mage'", StringComparison.Ordinal) < list.IndexOf("'journey-melee'", StringComparison.Ordinal), "journey-melee follows journey-mage");
+            Assert.True(list.IndexOf("'journey-melee'", StringComparison.Ordinal) < list.IndexOf("'journey-archer'", StringComparison.Ordinal), "journey-archer follows journey-melee");
         }
 
-        // The account of each backend step: from its character; the fighter templates' accounts for the hunts.
+        // The account of each backend step: from its character; the fighter templates' accounts for the melee and archer journeys.
         var table = script[script.IndexOf("$stepAccounts = [ordered]@{", StringComparison.Ordinal)..];
         table = table[..table.IndexOf("\n}\n", StringComparison.Ordinal)];
         var accounts = Regex.Matches(table, @"^\s+'([a-z-]+)'\s+= '([a-z-]+)'", RegexOptions.Multiline).ToDictionary(m => m.Groups[1].Value, m => m.Groups[2].Value);
-        Assert.Equal(["login-check", "login", "login-throwaway", "login-buff", "login-bsd", "login-death", "login-hunt", "login-hunt-missile"], accounts.Keys.ToArray());
-        Assert.Equal("test-melee", accounts["login-hunt"]);
-        Assert.Equal("test-archer", accounts["login-hunt-missile"]);
-        Assert.All(accounts.Where(a => !a.Key.StartsWith("login-hunt", StringComparison.Ordinal)), a => Assert.Equal("test", a.Value));
+        Assert.Equal(["login-check", "login", "login-throwaway", "journey-mage", "journey-melee", "journey-archer"], accounts.Keys.ToArray());
+        Assert.Equal("test", accounts["journey-mage"]);
+        Assert.Equal("test-melee", accounts["journey-melee"]);
+        Assert.Equal("test-archer", accounts["journey-archer"]);
+        Assert.Equal("test-tools", accounts["login-throwaway"]); // M4 D39: Lifestone Throwaway lives on test-tools
         Assert.Equal(Regex.Matches(backend, "'[a-z-]+'").Select(m => m.Value.Trim('\'')).ToArray(), accounts.Keys.ToArray()); // every backend step has an account, and only those
 
         // No backend step carries the literal --account=test any more: the account comes from the table (play.ps1's login step is the test account by its -Offscreen default).
         var body = script[script.IndexOf("$allSteps = @(", StringComparison.Ordinal)..];
         Assert.DoesNotContain("--account=test ", body.Replace("--account=test-", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
-        Assert.Contains("--hunt-weapon=$($hunt.Weapon)", script, StringComparison.Ordinal);
-        Assert.Contains("'login-hunt-missile' = @{ Weapon = 'missile'; Kills = 2 }", script, StringComparison.Ordinal); // proved live: kills=2 seeks=1
-        Assert.Contains("--play-screenshot=$frameStem", script, StringComparison.Ordinal); // the hunt's review frames, the arrow frame among them
-        Assert.Contains("if ($step -eq 'login-hunt-missile' -and $Backend -ne 'require')", script, StringComparison.Ordinal); // runs only at the lead's gate
+        Assert.Contains("--journey=$($journey.Journey)", script, StringComparison.Ordinal);
+        Assert.Contains("--play-screenshot=$frameStem", script, StringComparison.Ordinal); // the journey's review frames, the station frames among them
+        Assert.Contains("if ($journeySteps.ContainsKey($step) -and $Backend -ne 'require')", script, StringComparison.Ordinal); // runs only at the lead's gate
 
         var map = File.ReadAllText(RepositoryFiles.PathOf("tools", "lib", "StepPaths.psd1"));
-        Assert.Contains("'login-hunt-missile' = @(", map, StringComparison.Ordinal); // slice-check's advisory line names it when a Session folder changes
+        Assert.Contains("'journey-archer' = @(", map, StringComparison.Ordinal); // slice-check's advisory line names it when a Session folder changes
     }
 
     [Fact]
@@ -299,16 +691,16 @@ public sealed class LiveGateRunnerTests
         Assert.Contains("'-ContendedFrames'", batch, StringComparison.Ordinal);
         Assert.Contains("$slots = @('l1', 'l2', 'l3')", batch, StringComparison.Ordinal);
         Assert.Contains("if ($Lanes -and $backendSteps -contains $step)", script, StringComparison.Ordinal);
-        var groups = RunPowerShell("$stepAccounts = [ordered]@{ 'login-check' = 'test'; 'login-buff' = 'test'; 'login-hunt' = 'test-melee'; 'login-hunt-missile' = 'test-archer' }\n" + Function(script, "Get-LaneGroups")
-            + "$g = Get-LaneGroups @('login-hunt-missile', 'login-buff', 'login-check', 'login-hunt')\nforeach ($k in $g.Keys) { Write-Output ('G=' + $k + ':' + ($g[$k] -join '+')) }");
-        Assert.Equal(["G=test:login-check+login-buff", "G=test-melee:login-hunt", "G=test-archer:login-hunt-missile"], groups.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith("G=", StringComparison.Ordinal)).ToArray());
+        var groups = RunPowerShell("$stepAccounts = [ordered]@{ 'login-check' = 'test'; 'journey-mage' = 'test'; 'journey-melee' = 'test-melee'; 'journey-archer' = 'test-archer' }\n" + Function(script, "Get-LaneGroups")
+            + "$g = Get-LaneGroups @('journey-archer', 'journey-mage', 'login-check', 'journey-melee')\nforeach ($k in $g.Keys) { Write-Output ('G=' + $k + ':' + ($g[$k] -join '+')) }");
+        Assert.Equal(["G=test:login-check+journey-mage", "G=test-melee:journey-melee", "G=test-archer:journey-archer"], groups.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith("G=", StringComparison.Ordinal)).ToArray());
     }
 
     [Fact]
     public void The_throwaway_leg_reports_its_frame_figures_as_contended_in_a_lane_and_judges_them_solo()
     {
         var body = Smoke[Smoke.IndexOf("'login-throwaway' {", StringComparison.Ordinal)..];
-        body = body[..body.IndexOf("'login-buff' {", StringComparison.Ordinal)];
+        body = body[..body.IndexOf("{ $journeySteps.ContainsKey($_) } {", StringComparison.Ordinal)];
 
         Assert.Contains("$contended = $legOk -and -not $framesOk -and ($run.Others -gt 0 -or $parallelPhase) -and -not $SoloFrames", body, StringComparison.Ordinal);
         Assert.Contains("($framesOk -or $contended)", body, StringComparison.Ordinal);
@@ -456,16 +848,6 @@ public sealed class LiveGateRunnerTests
     }
 
     [Fact]
-    public void Serial_runs_per_test_sessions_and_says_so_in_the_plan_R10()
-    {
-        var plan = Plan("-Serial", "-Loopback", "full");
-        Assert.Contains(plan, l => l.Contains("session=per-test", StringComparison.Ordinal));
-        Assert.All(Steps(plan, "SERIAL"), s => Assert.Contains("(env LIFESTONE_LOOPBACK_SESSION=per-test)", s.Command, StringComparison.Ordinal));
-        Assert.Contains(Plan("-Loopback", "full"), l => l.Contains("session=shared", StringComparison.Ordinal));
-        Assert.DoesNotContain("LIFESTONE_LOOPBACK_SESSION", string.Join("\n", Steps(Plan("-Loopback", "full"), "PARALLEL").Select(s => s.Command)), StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void A_smoke_exit_a_secret_or_a_missing_summary_fails_the_step_even_when_rows_are_clean_R3()
     {
         var run = RunPowerShell($"Import-Module '{GateModule}' -Force\n" + """
@@ -496,7 +878,7 @@ public sealed class LiveGateRunnerTests
     {
         var plan = Steps(Plan("-Loopback", "full"), "SOLO").Single(s => s.Name == "leak-scan").Command;
         Assert.Contains("-ScanDir <worktree>\\cache\\gate\\gate,<main>\\cache\\gate\\gate", plan, StringComparison.Ordinal);
-        Assert.Contains("-ScanDir ", Steps(Plan("-Serial", "-Loopback", "full"), "SERIAL").Single(s => s.Name == "full-smoke").Command, StringComparison.Ordinal);
+        Assert.Contains("-FullScan -ScanDir <worktree>\\cache\\gate\\gate,<main>\\cache\\gate\\gate", Steps(Plan("-Serial", "-Loopback", "full"), "SERIAL").Single(s => s.Name == "leak-scan").Command, StringComparison.Ordinal); // -Serial closes with the leak scan too
         Assert.Contains("foreach ($extra in $ScanDir)", Smoke, StringComparison.Ordinal);
         Assert.Contains("scanned    = $leaks.Scanned", Smoke, StringComparison.Ordinal);
     }
@@ -680,17 +1062,6 @@ public sealed class LiveGateRunnerTests
     }
 
     [Fact]
-    public void The_fighter_lanes_budget_the_buff_leg_P5a_Fgate()
-    {
-        // Round 2 of the P5a gate: the Archer's lane was killed at 600 s (253 s done + Appraise about 60 s + the buff leg about 700 s needs about 1,015 s) and the Brawler's lane needed about 1,250 s against a limit of 1,040 s.
-        var plan = Plan("-Loopback", "full");
-        int Limit(string lane) => int.Parse(Regex.Match(plan.Single(l => l.StartsWith("[gate-plan] PARALLEL lane=" + lane + " ", StringComparison.Ordinal) && l.Contains(" loopback:", StringComparison.Ordinal)), @"\(timeout (\d+) s\)$").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-        Assert.Equal(1600, Limit("test-melee"));
-        Assert.Equal(1500, Limit("test-archer"));
-        Assert.Contains(plan, l => l.Contains("release: after a step is killed by its timeout the next step on the same account waits up to 80 s", StringComparison.Ordinal));
-    }
-
-    [Fact]
     public void A_step_killed_by_its_timeout_makes_the_next_step_on_that_account_wait_for_ACE_to_release_the_character_and_other_accounts_do_not_P5a_Fgate()
     {
         var run = RunPowerShell(Stub("""
@@ -722,17 +1093,6 @@ public sealed class LiveGateRunnerTests
         Assert.Contains("slow KILLED by its timeout: the next step on account 'acct-a' waits up to 6 s", run, StringComparison.Ordinal);
         Assert.Contains("same WAIT ", run, StringComparison.Ordinal);
         Assert.DoesNotContain("other WAIT", run, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_den_fight_runs_in_the_solo_phase_after_the_melee_hunt_and_the_plan_says_so_rfix_c_5()
-    {
-        var plan = Plan("-Loopback", "full");
-        var lane = Steps(plan, "PARALLEL");
-        Assert.DoesNotContain("login-bsd", string.Join("\n", lane.Select(s => s.Command)), StringComparison.Ordinal);
-        var solo = Steps(plan, "SOLO").Select(s => s.Name).ToList();
-        Assert.Equal(solo.IndexOf("melee-hunt") + 1, solo.IndexOf("login-bsd"));
-        Assert.Contains(plan, l => l.Contains("login-bsd runs in the SOLO phase", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -14,7 +14,7 @@ public sealed class ArenaProfileTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Equal(31, ArenaProfile.Lines.Count);
         Assert.Equal(247, ArenaProfile.Lines.Sum(l => l.Spells.Count));
         // The lines, the fight tab's Fire Vulnerability Other VII and Heal Self VII (M3 4.2 p1), and (M4 P5a, D33 and D36) Harm Self I-VIII and the three travel spells: Lifestone Recall, Primary Portal Tie, Primary Portal Recall.
-        Assert.Equal(247 + 2 + 8 + 3, ArenaProfile.SpellsToLearn.Count);
+        Assert.Equal(247 + 2 + 8 + 4 + 1, ArenaProfile.SpellsToLearn.Count); // M4 P5b J3b: and Lifestone Tie 2644; M4 P5b J7: and Cassius' Ring of Fire 1785
         Assert.Equal(ArenaProfile.SpellsToLearn.Count, ArenaProfile.SpellsToLearn.Distinct().Count());
         Assert.Equal(ArenaProfile.SpellsToLearn, ArenaProfile.Buffs.SpellsToLearn);
         Assert.Equal(30, ArenaProfile.Lines.Count(l => l.Spells.Count == 8));
@@ -73,13 +73,14 @@ public sealed class ArenaProfileTests(DatSetFixture fixture) : IClassFixture<Dat
     [Fact]
     public void The_extras_are_Harm_Self_and_the_three_travel_spells_the_mage_learns_but_the_cycle_never_casts_M4_P5a()
     {
-        Assert.Equal(["Harm Self", "Lifestone Recall", "Primary Portal Tie", "Primary Portal Recall"], ArenaProfile.Extras.Select(l => l.Name));
-        Assert.Equal([ProfileRole.HarmSelf, ProfileRole.Travel, ProfileRole.Travel, ProfileRole.Travel], ArenaProfile.Extras.Select(l => l.Role));
+        Assert.Equal(["Harm Self", "Lifestone Recall", "Primary Portal Tie", "Primary Portal Recall", "Lifestone Tie", "Cassius' Ring of Fire"], ArenaProfile.Extras.Select(l => l.Name)); // M4 P5b J7: and the hero video's ring
+        Assert.Equal([ProfileRole.HarmSelf, ProfileRole.Travel, ProfileRole.Travel, ProfileRole.Travel, ProfileRole.Travel, ProfileRole.WarOption], ArenaProfile.Extras.Select(l => l.Role));
         Assert.Equal([8u, 1167u, 1168u, 1169u, 1170u, 1171u, 2071u, 4309u], ArenaProfile.ExtraNamed("Harm Self")!.Spells.Select(s => s.Id));
         Assert.Equal(2071u, ArenaProfile.ExtraNamed("Harm Self")!.Spells[6].Id); // VII, the level the mage casts at the 0.9 rule
         Assert.Equal(1635u, ArenaProfile.ExtraNamed("Lifestone Recall")!.Spells.Single().Id);
         Assert.Equal(47u, ArenaProfile.ExtraNamed("Primary Portal Tie")!.Spells.Single().Id);
         Assert.Equal(48u, ArenaProfile.ExtraNamed("Primary Portal Recall")!.Spells.Single().Id);
+        Assert.Equal(2644u, ArenaProfile.ExtraNamed("Lifestone Tie")!.Spells.Single().Id); // M4 P5b J3b
         Assert.All(ArenaProfile.Extras, l => Assert.False(l.IsBuff || l.IsManaLine));
         Assert.All(ArenaProfile.Extras.SelectMany(l => l.Spells), s => Assert.Contains(s.Id, ArenaProfile.FightExtras));
         Assert.DoesNotContain(ArenaProfile.Extras.SelectMany(l => l.Spells).Select(s => s.Id), id => ArenaProfile.Spell(id) is not null); // none is a line of Lines
@@ -104,7 +105,8 @@ public sealed class ArenaProfileTests(DatSetFixture fixture) : IClassFixture<Dat
                 var expectedType = line.Name switch
                 {
                     "Harm Self" => SpellType.Boost,
-                    "Primary Portal Tie" => SpellType.PortalLink,
+                    "Primary Portal Tie" or "Lifestone Tie" => SpellType.PortalLink,
+                    "Cassius' Ring of Fire" => SpellType.Projectile,
                     _ => SpellType.PortalRecall,
                 };
                 Assert.True(dat.MetaSpellType == expectedType, $"{s.Name} ({s.Id}): type {dat.MetaSpellType}, line {expectedType}");

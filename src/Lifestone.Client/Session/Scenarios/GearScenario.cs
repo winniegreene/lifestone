@@ -38,7 +38,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <see cref="DecoyGrants"/>); the wield steps never see one (<see cref="GearKind.Decoy"/> is not wielded, and a worn one is no kit piece that holds a slot). The verdict fields keep their meaning, and for a decoy kit <c>kit=&lt;held&gt;/&lt;lines&gt;</c> counts the decoy lines too; <c>gear_steps</c> stays the
 /// wand's and the armour's. A plain kit has no decoy line, so its verdict is what it always was.</para>
 /// <para><b>The first cast</b> (M3 1.4 s2; <see cref="GearCasts"/>). After the gear the scenario casts once: <see cref="IActionApi.SetCombatMode"/> to Magic (ACE answers a cast made in another mode with a bare UseDone,
-/// <c>Player_Magic.cs</c> 84 and 275, and holds the Magic mode only with a wielded caster, <c>Player_Combat.cs</c> 872-880: so the gear comes first), one Creature Enchantment self buff
+/// <c>Player_Magic.cs</c> 84 and 275, and holds the Magic mode only with a wielded caster, <c>Player_Combat.cs</c> 872-880 @95ef426d: so the gear comes first), one Creature Enchantment self buff
 /// through <see cref="IActionApi.Cast(uint, ActionSource)"/> (the highest level of the first profile line whose ACE chance from the read model's current skill is at least <see cref="GearCasts.MinChance"/>:
 /// <c>GetCastingPreCheckStatus</c>, <c>Player_Magic.cs</c> 528-545, <c>SkillCheck.GetMagicSkillChance</c>, <c>SkillCheck.cs</c> 7-22), then Non-combat again. The verdict field
 /// <c>cast=ok|fizzled|failed|n/a</c> is report-only (<c>gear=</c> stays the judged field): <c>ok</c> the enchantment arrived, <c>fizzled</c> a ServerError 0x0402, <c>failed</c> anything else, <c>n/a</c> no cast was
@@ -107,8 +107,9 @@ public sealed class GearScenario : IScenario
     /// <param name="arrivalSeconds">The limit on the arrival.</param>
     /// <param name="endSession">True (the headless host's): log off and quit when done; false: end at <c>done</c> in the world.</param>
     /// <param name="cast">True (the default): cast once after the gear (see the class remarks); false: the cast is off and <c>cast=n/a</c> (a test that casts for itself).</param>
-    public GearScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, bool cast = true)
-        : this(GearKit.Build(spells, account), log, arrivalSeconds, endSession, cast, spells)
+    /// <param name="heroRing">True for the hero mage's gear station only: the kit carries Cassius' Ring of Fire's components (<see cref="GearKit.Build"/>).</param>
+    public GearScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, bool cast = true, bool heroRing = false)
+        : this(GearKit.Build(spells, account, heroRing), log, arrivalSeconds, endSession, cast, spells)
     {
     }
 

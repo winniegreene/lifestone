@@ -52,6 +52,9 @@ public sealed class ThrowawayLegScenario : IScenario, IDisposable
     /// <summary>The graduated test character the leg enters to purge from, and the name it tries to create to see ACE's name-taken answer. It only enters and leaves.</summary>
     public const string Smoke = LoginCheckScenario.DefaultCharacter;
 
+    /// <summary>The purge caller on the tools test account (M4 D43): created once through the Action API when absent, never levelled or reset; it only enters and leaves to purge. <see cref="Smoke"/> stays the name-taken probe (ACE's name check is server-wide).</summary>
+    public const string Tools = "Lifestone Tools";
+
     /// <summary>
     /// A name the client lets through to ACE and ACE refuses: the name of a creature in ACE's world database (<c>creature_name_check</c>, on by default; the world
     /// database's weenie 7 is a Drudge Skulker). The client's only name rules are the length limit and the trim, so it sends this.
@@ -126,14 +129,22 @@ public sealed class ThrowawayLegScenario : IScenario, IDisposable
     private string _leftoverCurrent = string.Empty;
     private string _purgeName = string.Empty;
     private int _purgeCount;
+    private readonly string _caller;
+    private readonly Func<CharacterCreateIntent>? _callerIntent;
+    private bool _callerRequested;
 
     /// <summary>A throwaway leg.</summary>
     /// <param name="screens">The screen-action seam (the game's driver, or a test's fake).</param>
     /// <param name="requestLogOff">How the host asks for a log off (retail's key, Shift+Escape), or null to call <see cref="IActionApi.LogOff"/>; it returns the handle of the log off it asked for, or null when it asked for none.</param>
     /// <param name="log">Where the leg writes what it found (character names allowed), or null.</param>
+    /// <param name="caller">The graduated character that enters and purges (<see cref="Smoke"/> on the test account, <see cref="Tools"/> on the tools account: M4 D43).</param>
+    /// <param name="callerIntent">How the caller is created through the Action API when the account lacks it (logged once), or null to fail instead.</param>
     /// <param name="purge">How the purge is asked for, or null for <see cref="PlayerTools.PurgeCharacter"/> on the session (tests supply their own: <see cref="PlayerTools"/> is bound to a real session).</param>
-    public ThrowawayLegScenario(IThrowawayScreens screens, Func<ActionHandle?>? requestLogOff = null, Action<string>? log = null, Func<IGameSessionView, string, ToolHandle<CharPurgeResult>>? purge = null)
+    public ThrowawayLegScenario(IThrowawayScreens screens, Func<ActionHandle?>? requestLogOff = null, Action<string>? log = null, Func<IGameSessionView, string, ToolHandle<CharPurgeResult>>? purge = null, string caller = Smoke, Func<CharacterCreateIntent>? callerIntent = null)
     {
+        ArgumentException.ThrowIfNullOrEmpty(caller);
+        _caller = caller;
+        _callerIntent = callerIntent;
         ArgumentNullException.ThrowIfNull(screens);
         _screens = screens;
         _requestLogOff = requestLogOff;
@@ -335,6 +346,18 @@ public sealed class ThrowawayLegScenario : IScenario, IDisposable
                 return Login(state, clock);
             case "inspect":
                 return Inspect(session, clock);
+            case "caller-create":
+                if (Poll(session, clock, "creating the purge caller", ListSeconds) is { } creating)
+                {
+                    return creating;
+                }
+
+                if (_pending is not { Outcome.Kind: ActionOutcomeKind.Confirmed })
+                {
+                    return Fail(null, clock, "creating the purge caller: " + Describe(_pending?.Outcome));
+                }
+
+                return FindSlot(state, _caller) is { PendingDeletion: false } ? Go("inspect", clock) : clock - _stageStart > ListSeconds ? Fail(null, clock, "creating the purge caller: it is not on the list") : ScenarioStatus.Running;
 
             // The leftover throwaway of a failed run: deleted if needed, then purged from Smoke.
             case "leftover-select":
@@ -441,9 +464,17 @@ public sealed class ThrowawayLegScenario : IScenario, IDisposable
         }
 
         _log("start list: " + string.Join(", ", all.Select(Describe)));
-        if (FindSlot(state, Smoke) is not { PendingDeletion: false })
+        if (FindSlot(state, _caller) is not { PendingDeletion: false })
         {
-            return Fail(null, clock, $"inspect: the account has no ready '{Smoke}' to enter and purge from");
+            if (_callerIntent is null || _callerRequested)
+            {
+                return Fail(null, clock, $"inspect: the account has no ready '{_caller}' to enter and purge from");
+            }
+
+            _callerRequested = true;
+            _log($"the purge caller '{_caller}' is not on the account: created once through the Action API (never levelled or reset; it only enters and leaves to purge)");
+            _pending = session.Actions.CreateCharacter(_callerIntent(), ActionSource.Host);
+            return Go("caller-create", clock);
         }
 
         // The leg's own characters from an earlier failed run: the throwaway, and a character under the invalid name (only if ACE accepted it).
@@ -457,7 +488,7 @@ public sealed class ThrowawayLegScenario : IScenario, IDisposable
                     _leftoverDeletes.Enqueue(name);
                 }
 
-                _log($"leftover: '{name}' from an earlier run is on the account (pending deletion: {stray.PendingDeletion}); it is deleted if needed, purged from '{Smoke}' and logged");
+                _log($"leftover: '{name}' from an earlier run is on the account (pending deletion: {stray.PendingDeletion}); it is deleted if needed, purged from '{_caller}' and logged");
             }
         }
 
@@ -799,9 +830,9 @@ public sealed class ThrowawayLegScenario : IScenario, IDisposable
 
     private ScenarioStatus EnterSmoke(IGameSessionView session, double clock, string task)
     {
-        if (FindSlot(session.State, Smoke) is not { PendingDeletion: false } smoke)
+        if (FindSlot(session.State, _caller) is not { PendingDeletion: false } smoke)
         {
-            return Fail(session, clock, $"the account has no ready '{Smoke}' to purge from");
+            return Fail(session, clock, $"the account has no ready '{_caller}' to purge from");
         }
 
         _smokeTask = task;

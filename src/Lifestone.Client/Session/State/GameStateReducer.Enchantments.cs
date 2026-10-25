@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Recording;
 using Lifestone.Net.Dispatch;
 using Lifestone.Net.Messages;
 using Lifestone.Net.Types;
@@ -46,7 +47,46 @@ internal sealed partial class GameStateReducer
     /// <summary>The spell id of the vitae (retail's <c>NotifyOfEnchantmentRemoval</c> adds " penalty" to its name).</summary>
     internal const ushort VitaeSpellId = 666;
 
-    /// <summary><c>NotifyOfEnchantmentRemoval</c> (11.6096 0x00569460): "&lt;spell&gt; has expired." for a spell id below 0x8000 that the SpellTable knows.</summary>
+    /// <summary>
+    /// True when this reducer replays a recording (<see cref="SessionReplayer"/>): an expiry line is not added as it is composed but held until the
+    /// next frame, which either is the recording's own <see cref="SessionNotices.ExpiryLine"/> (recordings from M4 P5b F4 on; the held line is dropped and the
+    /// recorded one added) or not (an older recording; the held line is added then, <see cref="FlushExpiryLines"/>). Without a SpellTable a replay composes
+    /// nothing and logs nothing: the recorded line is the replay's only source (TODO(m4-replay-vitae-digest), closed).
+    /// </summary>
+    internal bool ReplaysRecording { get; set; }
+
+    private readonly List<ChatLine> _heldExpiryLines = [];
+
+    /// <summary>Adds the expiry lines a replay held since the last frame (<see cref="ReplaysRecording"/>): the recording did not carry them.</summary>
+    internal void FlushExpiryLines()
+    {
+        if (_heldExpiryLines.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var line in _heldExpiryLines)
+        {
+            AddChat(line);
+        }
+
+        _heldExpiryLines.Clear();
+    }
+
+    /// <summary>The recorded expiry line (<see cref="SessionNotices.ExpiryLine"/>): the lines a replay composed for the same removal give way to it.</summary>
+    private void ApplyExpiryLine(in RecordingNotice notice)
+    {
+        _heldExpiryLines.Clear();
+        AddChat(new ChatLine(_clock.Now, ChatKind.Notice, ExpiryChatType, null, 0, notice.Text ?? string.Empty));
+    }
+
+    /// <summary>
+    /// <c>NotifyOfEnchantmentRemoval</c> (11.6096 0x00569460): "&lt;spell&gt; has expired." for a spell id below 0x8000 that the SpellTable knows. Live, the
+    /// line goes through <see cref="ApplyLocal"/> as a <see cref="SessionNotices.ExpiryLine"/>, so the recording holds it.
+    /// <c>TODO(m4-replay-vitae-digest)</c> closed (M4 P5b F4): the vitae recordings (P5a round 4's, P5b's mage journey of 2026-10-24) replayed off their
+    /// digest in the chat alone: the live client added "Vitae penalty has expired." from the SpellTable, which a recording does not hold, and the replay had
+    /// no table. The line is recorded now; a recording made before it replays with the table (<see cref="SessionReplayer"/>'s <c>spells</c>).
+    /// </summary>
     private void NoteExpiry(ushort spellId)
     {
         if (spellId >= 0x8000)
@@ -55,6 +95,11 @@ internal sealed partial class GameStateReducer
         }
 
         var spell = SpellLookup?.Invoke(spellId);
+        if (spell is null && ReplaysRecording)
+        {
+            return;
+        }
+
         if (spell is null)
         {
             if (!_expiryNameLogged)
@@ -66,7 +111,14 @@ internal sealed partial class GameStateReducer
             return;
         }
 
-        AddChat(new ChatLine(_clock.Now, ChatKind.Notice, ExpiryChatType, null, 0, spell.Name + (spellId == VitaeSpellId ? " penalty" : string.Empty) + " has expired."));
+        var text = spell.Name + (spellId == VitaeSpellId ? " penalty" : string.Empty) + " has expired.";
+        if (ReplaysRecording)
+        {
+            _heldExpiryLines.Add(new ChatLine(_clock.Now, ChatKind.Notice, ExpiryChatType, null, 0, text));
+            return;
+        }
+
+        ApplyLocal(new RecordingNotice(SessionNotices.ExpiryLine, spellId, text));
     }
 
     /// <summary>

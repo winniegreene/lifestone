@@ -319,6 +319,21 @@ public interface IActionApi
     HealHandle Drink(uint item, ActionSource source = ActionSource.Host);
 
     /// <summary>
+    /// Uses a charged mana stone (a Mana Charge) on the player or on one of the player's items (GameAction 0x0035 {stone, target}, retail <c>CM_Inventory::Event_UseWithTargetEvent</c>, 11.6096 0x006AD3E0; closes <c>TODO(m4-gear-mana)</c>).
+    /// ACE (<c>ManaStone.HandleActionUseOnTarget</c>, ACE 95ef426d <c>ManaStone.cs:59-233</c>): on the player the stone's mana goes to every equipped item below its maximum, rationed evenly until the stone is empty or every item full (:121-190), with the line
+    /// "The Mana Stone gives N points of mana to the following items: ...", then "Your items are fully charged." or "You need M more mana ..."; on an item it fills that item (:192-225, "The Mana Stone gives N points of mana to the X."). Then the stone's destroy roll
+    /// (:235-252; a retail charge's ManaStoneDestroyChance is 1, so it is consumed: 0x0024) and UseDone 0. No motion, no busy chain. Lane Heal (one use with a UseDone at a time; it holds nothing after its UseDone).
+    /// <para>Confirmed iff the UseDone came with code 0 and the "gives" line was read or the stone was removed; the detail names the mana given and what is still needed. A UseDone with a code is a <see cref="ActionOutcomeKind.ServerError"/> with it and the line before it
+    /// (0x0036 ActionCancelled with "You have no items equipped that need mana."; 0x04C8 ItemDoesntHaveEnoughMana; 0x04BE YouDoNotOwnThatItem); "The X is already full of mana." before a UseDone 0 is a ServerError too (nothing was given; the stone is kept).
+    /// <b>An empty stone used on an item destroys that item</b> to drain it (:84-113): the caller checks the stone's ItemCurMana (an appraisal) first. 20 s timeout. Refused at once for stone 0 or target 0, and offline.
+    /// The default body throws: a view that cannot send it does not implement it.</para>
+    /// </summary>
+    /// <param name="stone">The charged stone's guid.</param>
+    /// <param name="target">The player's own guid (every equipped item), or an item's.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle UseManaStone(uint stone, uint target, ActionSource source = ActionSource.Host) => throw new NotSupportedException("IActionApi.UseManaStone is not implemented by this view");
+
+    /// <summary>
     /// Merges <paramref name="amount"/> units of one stack the player holds into another stack of the same item (GameAction 0x0054 {from, to, amount}, retail
     /// <c>CM_Inventory::Event_StackableMerge</c>, 11.6096 0x006ACDD0; ACE <c>Player.HandleActionStackableMerge</c>). Lane Inventory. Confirmed when the target's stack size
     /// (GameMessage 0x0197, <see cref="InventoryChangeKind.StackChanged"/>) is the size it had plus <paramref name="amount"/> and the source is gone (the whole stack: ACE's 0x0024 comes
@@ -435,6 +450,15 @@ public interface IActionApi
     /// <see cref="ActionOutcomeKind.DryRun"/>; nothing is sent. Other sources are unaffected.
     /// </summary>
     bool DryRun { get; set; }
+
+    /// <summary>
+    /// Why ACE would answer a new action "You're too busy" (WeenieError 0x001D) now, by this API's own lane rule, or null when nothing holds (M4 P5b fix FC-a1). ACE's busy state is the player's, not a lane's
+    /// (<c>Player.IsBusy</c>, @95ef426d <c>Player_Inventory.cs</c> 759-782: a pickup sets it until the return stance and one more motion length; <c>Player_Magic.cs</c> 375-383 <c>VerifyBusy</c>), while the lanes serialise only their own
+    /// actions: a cast sent while the Inventory lane still holds a corpse pickup's chain was refused 0x001D live (P5b gate round 1, the mage's death station). The reasons, in order: an action of the Inventory, Heal, Use or Magic lane
+    /// in flight; one of those lanes held after its outcome (a move's chain, 1.35 s after a corpse pickup's return stance, a heal's Ready, a container's or a cast's UseDone); the wait after an own teleport until the LoginComplete.
+    /// A caller that must not send into a busy chain (<c>RecallHome</c>) waits on it, bounded; it never retries a refusal.
+    /// </summary>
+    string? BusyReason { get; }
 
     // ---- M4 3.2 h1: the shortcut bar's actions (appended) ----
 

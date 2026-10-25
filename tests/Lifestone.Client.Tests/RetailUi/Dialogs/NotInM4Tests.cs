@@ -3,7 +3,7 @@ using Lifestone.Client.RetailUi.Text;
 
 namespace Lifestone.Client.Tests.RetailUi.Dialogs;
 
-/// <summary>NotInM4 (M4 2.2 s2): the answer for a retail feature a later item of M4 builds (the examine panel is item 3.2's); M3's and M2's keep their own.</summary>
+/// <summary>NotInM4 (M4 2.2 s2): the answer for a retail feature a later item of M4 builds (it was first used for the examine panel, which item 3.2 built; an item list with no examine owner still falls back to it); M3's and M2's keep their own.</summary>
 public sealed class NotInM4Tests
 {
     [Fact]

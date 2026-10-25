@@ -50,7 +50,34 @@ public sealed class HeadlessStreamer : IDisposable
     private readonly Dictionary<LandblockCoord, TileJob> _jobs = [];
     private readonly List<LandblockCoord> _scratch = [];
     private readonly HashSet<LandblockCoord> _waterLogged = [];
+    private readonly bool _ownsCollision = true;
     private bool _disposed;
+
+    /// <summary>
+    /// A tile feeder for a host whose player already owns the collision streamer (the Godot journey host, M4 P5b J5): the tiles are built on
+    /// <paramref name="workers"/> as <paramref name="collision"/> attaches landblocks to <paramref name="world"/>, attached to <paramref name="map"/>
+    /// by <see cref="PumpTiles"/>. The host's player pumps the collision and sets its focus; this class never does either, never disposes the
+    /// streamer nor the pool, and <see cref="FollowRoute"/> only sets the corridor.
+    /// </summary>
+    /// <param name="world">The world the collision is attached to.</param>
+    /// <param name="collision">The player's collision streamer.</param>
+    /// <param name="workers">The host's worker pool.</param>
+    /// <param name="map">The map the tiles are attached to.</param>
+    /// <param name="log">Where it logs.</param>
+    /// <param name="tileOptions">The tile build's options without neighbours (default <see cref="NavBuildOptions.Default"/>).</param>
+    public HeadlessStreamer(PhysicsWorld world, CollisionStreamer collision, WorkerPool workers, NavMap map, ILogSink log, NavBuildOptions? tileOptions = null)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        ArgumentNullException.ThrowIfNull(collision);
+        ArgumentNullException.ThrowIfNull(workers);
+        ArgumentNullException.ThrowIfNull(map);
+        ArgumentNullException.ThrowIfNull(log);
+        (_world, _collision, _workers, _map, _log) = (world, collision, workers, map, log);
+        _ownsCollision = false;
+        _tileOptions = tileOptions ?? NavBuildOptions.Default;
+        _collision.BlockAttached += OnAttached;
+        _collision.BlockReleased += OnReleased;
+    }
 
     /// <summary>A streamer for <paramref name="world"/> (and <paramref name="map"/>, when it is not null).</summary>
     /// <param name="dats">The dats the collision is built from.</param>
@@ -151,7 +178,11 @@ public sealed class HeadlessStreamer : IDisposable
     public bool FollowRoute(NavRunner runner, in CellFrame body)
     {
         ArgumentNullException.ThrowIfNull(runner);
-        SetFocus(body.CellId);
+        if (_ownsCollision)
+        {
+            SetFocus(body.CellId);
+        }
+
         var here = NavMap.FromCellFrame(body).Global;
         var waypoints = runner.Path is { } path ? path.Waypoints.Select(w => w.Point.Global).ToArray() : [];
         var goal = runner.Goal?.Point.Global ?? here;
@@ -262,6 +293,36 @@ public sealed class HeadlessStreamer : IDisposable
         return (dx == 1 && cx < 1) || (dx == -1 && cx > 6) || (dy == 1 && cy < 1) || (dy == -1 && cy > 6);
     }
 
+    /// <summary>
+    /// For the external-collision form: starts the tile builds of the landblocks already attached within <paramref name="radius"/> landblocks of <paramref name="centre"/>
+    /// (the feeder was made after the player's streamer attached them), then <see cref="PumpTiles"/> collects them.
+    /// </summary>
+    /// <param name="centre">The landblock to look round.</param>
+    /// <param name="radius">The Chebyshev radius.</param>
+    public void AdoptAttached(LandblockCoord centre, int radius)
+    {
+        for (var dx = -radius; dx <= radius; dx++)
+        {
+            for (var dy = -radius; dy <= radius; dy++)
+            {
+                if (centre.Offset(dx, dy) is { } coord && _world.GetLandblock(coord) is not null && !_jobs.ContainsKey(coord))
+                {
+                    StartTile(coord, rebuild: false);
+                }
+            }
+        }
+    }
+
+    /// <summary>For the external-collision form: collects the finished tile builds into the map within the frame budget (the host's player pumps the collision itself).</summary>
+    public void PumpTiles()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var start = Stopwatch.GetTimestamp();
+        CollectTiles(waitForAll: false);
+        Sample();
+        PumpMaxMilliseconds = Math.Max(PumpMaxMilliseconds, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+    }
+
     /// <summary>The route's next landblocks: <see cref="CollisionStreamer.SetCorridor"/>.</summary>
     public void SetCorridor(IReadOnlyList<uint> ahead, int keepBehind) => _collision.SetCorridor(ahead, keepBehind);
 
@@ -316,6 +377,37 @@ public sealed class HeadlessStreamer : IDisposable
         return !_jobs.TryGetValue(coord, out var job) || job.Task is null && (job.Done || job.Failed);
     }
 
+    /// <summary>
+    /// True once everything a focus on <paramref name="cellId"/> needs has settled (<see cref="IsSettled"/>) and no tile build is pending, by the
+    /// <see cref="CollisionStreamer"/>'s own ring rule: outdoors, and in an EnvCell that sees outside (D29), the landblock and the eight round it; in an
+    /// EnvCell that does not (a dungeon's, the Black Spawn Den 0x0105), its own landblock only, since the streamer never requests the neighbours
+    /// there (M4 P5b F1: the journey's body waited for them for 120 s after the recall into the den). An EnvCell whose landblock failed to build
+    /// counts as settled; the placement then fails by name.
+    /// </summary>
+    /// <param name="cellId">The focus cell (where the server has the player).</param>
+    public bool IsFocusSettled(uint cellId)
+    {
+        if (!IsSettled(cellId))
+        {
+            return false;
+        }
+
+        var ring = LandDefs.IsEnvCell(cellId) && _world.GetCell(cellId) is not PhysEnvCell { SeenOutside: true } ? 0 : 1;
+        var centre = LandblockCoord.FromId(cellId);
+        for (var dx = -ring; dx <= ring; dx++)
+        {
+            for (var dy = -ring; dy <= ring; dy++)
+            {
+                if (centre.Offset(dx, dy) is { } c && LandDefs.IsOnMap(c) && !IsSettled(c.LandBlockId))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return TilesPending == 0;
+    }
+
     /// <summary>The state line for the log: what is attached and what the pump cost.</summary>
     public string StatsLine() => string.Create(
         CultureInfo.InvariantCulture,
@@ -349,8 +441,11 @@ public sealed class HeadlessStreamer : IDisposable
             job.Cancel?.Cancel();
         }
 
-        _collision.Dispose();
-        _workers.Dispose();
+        if (_ownsCollision)
+        {
+            _collision.Dispose();
+            _workers.Dispose();
+        }
     }
 
     private void Sample()

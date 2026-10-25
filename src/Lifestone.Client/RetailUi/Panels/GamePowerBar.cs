@@ -33,9 +33,8 @@ public enum PowerBarMode
 /// </summary>
 /// <remarks>
 /// <para><b>What drives it.</b> <c>ClientCombatSystem</c> sends the notices: <c>HandleCommenceAttackEvent</c> (11.6096 0x0056BA60) and <c>AttemptStartBuildingAttack</c> (0x0056C850) begin a bar (mode 2 with the advanced UI, mode 1 without
-/// it, where the level goes to the combat window's meter); a jump (mode 3) and the runtime download (mode 4) do too; <c>HidePowerBar</c> (0x0056B5F0) and <c>FinishJump</c> finish it. <b>M3 has no attack and no jump</b>, so nothing
-/// begins the bar in play: the window stays hidden, and its API (<see cref="Begin"/>, <see cref="SetLevel"/>, <see cref="Finish"/>, <see cref="DddStatus"/>) is what the attack action will call
-/// (<c>TODO(m3-melee-attack)</c>) and what the tests and the review frame drive.</para>
+/// it, where the level goes to the combat window's meter); a jump (mode 3) and the runtime download (mode 4) do too; <c>HidePowerBar</c> (0x0056B5F0) and <c>FinishJump</c> finish it. <b>The attack action exists now</b> (M4 1.2): <see cref="AttackPowerDriver"/> begins the bar at a height button's mouse down, raises its level every frame and finishes it; the window stays hidden otherwise.
+/// Its API (<see cref="Begin"/>, <see cref="SetLevel"/>, <see cref="Finish"/>, <see cref="DddStatus"/>) is what the driver calls and what the tests and the review frame drive.</para>
 /// <para><b>BeginPowerbar</b> (0x004DB390): mode 1 does nothing (the combat window owns it); mode 2 uses the melee state when the combat mode is melee (and shows the recklessness field 0x100005EE when the Recklessness skill
 /// is trained or specialized), else state 0x10000044 with the field hidden; mode 3 is state 0x10000042 and mode 4 state 0x10000045, both with the field hidden. Then the mode is remembered, the meter reset to 0 and the window shown.
 /// <b>SetPowerbarLevel</b> (0x004DB1B0) sets the meter only for the mode that began; <b>FinishPowerbar</b> (0x004DB1E0) for that mode forgets it, zeroes the meter and hides the window.</para>

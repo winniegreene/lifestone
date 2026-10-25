@@ -58,13 +58,21 @@ internal sealed record CharPurgeDecision(ToolError? Refusal, AccountCharacter? T
 /// (ShardDatabase.IsCharacterNameAvailable, ShardDatabase.cs:583-595), so an account can hold a pending character and a
 /// live one of the same name; the visible pending one is the one purged, then the latest-deleted of the expired ones (the verb is
 /// repeated until it answers unknown-character to clear stale rows).
+/// <para><b>The journey characters (m4-plan D44, D45).</b> The live gate deletes <see cref="Recreated"/> through the retail screens and
+/// creates them again, and the new copy purges the old ones. For those three names only the guards change: no refusal by name, but a
+/// graduated refusal while the account holds no live copy of the name (only a replaced copy goes, never the last one), then only the
+/// account's pending copies of that name are candidates (none left answers unknown-character); the caller's own row is never one, since a
+/// pending character is never in the world. The other graduated names are still refused by name, even a pending copy.</para>
 /// </remarks>
 internal static class CharPurgeRules
 {
     /// <summary>The graduated test characters, which stay as the baseline and are never purged (m2-log-in §7 decision 13; "BSD Mage", the M3 mage, from m3-plan D11; "Holtburg Hunter", the M4 fighter, from m4-plan D1; "Holtburg Brawler" and "Holtburg Archer", the M4 melee and archer lanes' fighters, from m4-plan D31).</summary>
-    public static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer"];
+    public static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer", "Lifestone Tools"];
 
-    /// <summary>The refusals that need no database read: a graduated name, then the caller's own character; null when neither applies.</summary>
+    /// <summary>The graduated journey characters the live gate re-creates (m4-plan D44: BSD Mage on test, Holtburg Brawler on test-melee, Holtburg Archer on test-archer): an old copy of one is purged once its new copy is on the account (D45).</summary>
+    public static IReadOnlyList<string> Recreated { get; } = ["BSD Mage", "Holtburg Brawler", "Holtburg Archer"];
+
+    /// <summary>The refusals that need no database read: a graduated name, then the caller's own character; null when neither applies, and for a <see cref="Recreated"/> name (D45: the account's rows decide).</summary>
     public static ToolError? EarlyRefusal(CharPurgeRequest request, string callerName)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -72,7 +80,8 @@ internal static class CharPurgeRules
         {
             if (Same(graduated, request.Name))
             {
-                return new ToolError(ToolErrors.Graduated, graduated + " is a graduated test character and stays as it is");
+                // D45: the new copy names its own name to purge the old one; the guid check in Check keeps a character from purging itself.
+                return IsRecreated(request.Name) ? null : GraduatedRefusal(graduated);
             }
         }
 
@@ -95,6 +104,11 @@ internal static class CharPurgeRules
         if (EarlyRefusal(request, callerName) is { } early)
         {
             return new CharPurgeDecision(early, null);
+        }
+
+        if (IsRecreated(request.Name))
+        {
+            return CheckReplacedCopy(request, callerGuid, account);
         }
 
         // The visible pending character first (the one the caller just deleted: the latest DeleteTime), then the expired IsDeleted rows
@@ -125,6 +139,19 @@ internal static class CharPurgeRules
         return target.PendingDeletion
             ? new CharPurgeDecision(null, target)
             : Refuse(ToolErrors.NotPendingDeletion, target.Name + " is not marked for deletion; delete it on the character screen first");
+    }
+
+    /// <summary>
+    /// The live copies of a <see cref="Recreated"/> name on the account (not pending deletion), which the purge's second check needs beside the
+    /// fresh row (D45: a replaced copy goes only while a live copy is on the account); empty for any other name.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <param name="account">The characters of the caller's account.</param>
+    public static AccountCharacter[] LiveCopies(CharPurgeRequest request, IEnumerable<AccountCharacter> account)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(account);
+        return IsRecreated(request.Name) ? [.. account.Where(c => Same(c.Name, request.Name) && !c.PendingDeletion)] : [];
     }
 
     /// <summary>
@@ -161,6 +188,44 @@ internal static class CharPurgeRules
         ArgumentNullException.ThrowIfNull(error);
         return error with { Message = error.Message + RestartNote };
     }
+
+    /// <summary>
+    /// D45's guards for a <see cref="Recreated"/> name: graduated while the account holds no live copy of it, then the pending copies only
+    /// (the visible one first, then the expired ones latest first, as <see cref="Check"/> orders them); unknown-character when none is left.
+    /// </summary>
+    private static CharPurgeDecision CheckReplacedCopy(CharPurgeRequest request, uint callerGuid, IEnumerable<AccountCharacter> account)
+    {
+        var copies = account.Where(c => Same(c.Name, request.Name)).ToList();
+        if (!copies.Any(c => !c.PendingDeletion))
+        {
+            return new CharPurgeDecision(GraduatedRefusal(Graduated.First(g => Same(g, request.Name))), null);
+        }
+
+        var pending = copies
+            .Where(c => c.PendingDeletion)
+            .OrderBy(c => c.PurgeRank)
+            .ThenByDescending(c => c.DeleteTime)
+            .ThenBy(c => c.Guid)
+            .ToList();
+        if (pending.Count == 0)
+        {
+            return Refuse(ToolErrors.UnknownCharacter, "no old copy of \"" + request.Name + "\" is pending deletion on your account");
+        }
+
+        var target = pending[0];
+        if (target.Guid == callerGuid)
+        {
+            return Refuse(ToolErrors.OwnCharacter, "you are playing " + target.Name + "; log in as another character to purge it");
+        }
+
+        return target.IsOnline
+            ? Refuse(ToolErrors.CharacterOnline, target.Name + " is online; only a character that is offline can be purged")
+            : new CharPurgeDecision(null, target);
+    }
+
+    private static bool IsRecreated(string name) => Recreated.Any(r => Same(r, name));
+
+    private static ToolError GraduatedRefusal(string graduated) => new(ToolErrors.Graduated, graduated + " is a graduated test character and stays as it is");
 
     private static CharPurgeDecision Refuse(string code, string message) => new(new ToolError(code, message), null);
 

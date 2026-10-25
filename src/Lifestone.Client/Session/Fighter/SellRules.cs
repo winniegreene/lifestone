@@ -30,6 +30,9 @@ public enum SellDecision
 
     /// <summary>The item's value is under 1, or outside the vendor's least and greatest.</summary>
     Value,
+
+    /// <summary>ACE refuses the item whatever the mask says (retained, or not sellable: <see cref="VendorStock.Unsellable"/>; F3-2).</summary>
+    Unsellable,
 }
 
 /// <summary>
@@ -45,12 +48,13 @@ public enum SellDecision
 /// </remarks>
 public sealed class SellRules
 {
-    /// <summary>The weenie class ids the sale never sells: the healing kits (Handy 628, Adept 629), the restoratives (Potion of Healing 377, Stamina Potion 378, Mana Potion 379, Health Draught 2457, Mana Draught 2460, Stamina Tincture 27326), the templates' Mace 331, Shortbow 307, Longbow 31092, Arrow 300 and Greater Frost Arrow 5307, the caster 8552 and the pyreal 273. Any spell component (ItemType 0x1000) is kept too, by type.</summary>
+    /// <summary>The weenie class ids the sale never sells: the healing kits (Handy 628, Adept 629), the restoratives (Potion of Healing 377, Stamina Potion 378, Mana Potion 379, Health Draught 2457, Mana Draught 2460, Stamina Tincture 27326), the templates' Mace 331, Shortbow 307, Longbow 31092, Arrow 300 and Greater Frost Arrow 5307, the caster 8552, the gear's Titan Mana Charge 9060 (closes TODO(m4-gear-mana)) and the pyreal 273. Any spell component (ItemType 0x1000) is kept too, by type.</summary>
     public static IReadOnlyList<uint> KeptWeenies { get; } =
     [
         FighterKit.HealingKitWcid, 629, FighterKit.PotionWcid, FighterKit.StaminaPotionWcid, FighterKit.ManaPotionWcid, 2457, 2460, 27326, FighterKit.MaceWcid, FighterKit.ShortbowWcid, FighterKit.ArrowWcid, FighterKit.LongbowWcid, FighterKit.GreaterFrostArrowWcid, PyrealWcid,
         .. FighterGearSet.AllWcids, // M4 P5a C6: the fighters' magic gear (worn items are never sold; a spare in the pack is not either)
         8552, // the caster the fighters keep in the pack for the buff pass (GearKit.Wand): the swap needs it
+        FighterKit.ManaChargeWcid, // the gear's mana charge (GearRecharge): the build tops a used one up, and the shopkeeper's mask has no ManaStone bit anyway
     ];
 
     /// <summary>The weenie class id of the pyreal coin stack.</summary>
@@ -139,6 +143,11 @@ public sealed class SellRules
             return SellDecision.Type;
         }
 
+        if (VendorStock.Unsellable(item))
+        {
+            return SellDecision.Unsellable;
+        }
+
         var value = (long)(weenie.Value ?? 0);
         var least = stock is null ? 1 : Math.Max(1, (long)stock.MinValue);
         var greatest = stock is { MaxValue: > 0 } ? stock.MaxValue : LootRules.ShopMaxValue;
@@ -195,6 +204,7 @@ public sealed class SellRules
         SellDecision.Container => "container",
         SellDecision.Type => "type",
         SellDecision.Value => "value",
+        SellDecision.Unsellable => "unsellable",
         _ => "unknown",
     };
 }

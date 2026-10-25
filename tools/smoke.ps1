@@ -84,43 +84,17 @@
                                (Where am I, Add XP 2,500, a Places teleport), logs off, deletes, restores and deletes it, enters 'Lifestone Smoke', purges it and checks the list is as it began;
                                verdict "[logincheck] throwaway done ok=true throwaway=purged name_errors=2 xp=added where_m=<x> place=teleported deletes=2 restores=1 list=same leftover=<yes|no>
                                enter_to_walk_max_ms=<x> teleport_frame_max_ms=<x>" (the two frame figures judged against 50)
-      login-buff               --account=test --login-check=buff --buff-auto=on (M3 2.1 s3; docs/session.md section 30; needs the local backend with BSD Mage built; runs ONLY with -Backend require,
-                               SKIP under auto and start: it changes the character, buffs and burned components): the game enters BSD Mage, re-seats the wand (ACE sends a server sound on a wield, none on a
-                               cast), runs the buff scenario in its own session (the gear, magic mode, the cycle of the 24 buff lines, the re-buff driver's pass in place of the forced one: --buff-auto=on, non-combat) and logs off; about 60 s of cycle at the
-                               live mana rate, a few minutes with the login and the gear (the Godot run gets 900 s); verdict "[logincheck] buff done ok=true gear=wielded worn=<n> cast=<ok|fizzled|failed|n/a> buffs=24/24 rebuffed=yes forced=<yes|no>
-                               min_remaining_s=<s> levels=<..> cycle_s=<s> cast_scripts=<n> cast_sounds=<n> cast_windows=<n> cast_frame_max_ms=<x|n/a> sounds_server=<n> driver=on rebuff_lines=<n> rebuff_s=<s>" (ok judges the gear, the 24 lines,
-                               the re-buff and sounds_server>=1; the cast_* fields and cast= are report-only; with --buff-auto=on there is no forced pass, forced=no is printed, rebuffed= and min_remaining_s= are the driver's
-                               pass's and driver= rebuff_lines= (the lines it cast) and rebuff_s= (session seconds from the cycle's end to the pass's end) are report-only; the step prints the line)
-      login-bsd                --account=test --login-check=bsd-fight (M3 3.1 fd; docs/session.md section 31; needs the local backend with BSD Mage built; runs ONLY with -Backend require, SKIP under
-                               auto and start: it changes the character, experience and burned components): the game enters BSD Mage, tops up the buffs, goes to the Aluvian Black Spawn Den, fights
-                               the Tusker Slaves of the arrival's floor with Flame Bolt until the first kill (--fight-kills, --fight-seconds default 300) and logs off; the Godot run gets 1200 s; verdict
-                               "[logincheck] bsd-fight done ok=true kills=<n> damage_dealt=<n> spells_cast=<n> misses=<n> xp_gained=<n> damage_taken=<n> hits_taken=<n> evades=<n> projectiles=<n>
-                               cast_frame_max_ms=<x|n/a> fight_frame_max_ms=<x|n/a> bsd_min_fps=<x|n/a> fight_s=<s>" (ok judges kills>=1 and damage_dealt>0; every other field is report-only; the step
-                               prints the line and, with --play-screenshot, the bolt, hit and kill frames)
-      login-death              --account=test --login-check=bsd-death (M3 3.2 dd; docs/session.md section 32; needs the local backend with BSD Mage built; runs ONLY with -Backend require, SKIP under
-                               auto and start: it changes the character, a death, vitae and dropped items): the game enters BSD Mage, binds it at Holtburg's lifestone, goes to the Black Spawn Den (a suicide
-                               there first when buffed, then a top-up of the decoys it dropped), is killed by the tuskers (--death-seconds, default 600), respawns at the lifestone with vitae, is regeared (the plain kit),
-                               re-buffed (the buff cycle at Holtburg), goes back to the den and fights (--death-fight-kills 4 within --death-fight-seconds 180), heals, goes for its own corpse and takes back what the death
-                               dropped (the decoys of M4 3.1 D20), returns to Holtburg and logs off; the Godot run gets 2500 s (the leg's own limit is 2015 s with the defaults, plus 120 s to log off after a failure, plus a margin);
-                               verdict "[logincheck] bsd-death done ok=true died=<n> suicides=<n> vitae=<n> respawn=<lifestone|elsewhere|none> corpse=<n> purged=<n> protected=<n> vitals_pct=<x|n/a>
-                               gear_restored=<yes|no> worn=<n> hits_taken=<n> damage_taken=<n> evades=<n> health_min_pct=<x|n/a> death_s=<s> death_frame_max_ms=<x|n/a> fight_frame_max_ms=<x|n/a> deaths=<n> corpses_stale=<n> protection=<dispelled|expired|none> vitae_paid=<xp|n/a> vitae_after=<pct|n/a>
-                               corpse_looted=<yes|partial|no|skipped> items_recovered=<n> trip_s=<s|n/a> trip_abort=<reason|none> rebuffed=<yes, no or skipped> den_kills=<n> decoys=<n|n/a> decoy_safe=<yes|no|n/a> decoys_dropped=<n|n/a>
-                               gear_dropped=<n|n/a> decoys_recovered=<n|n/a> pretrip_heals=<n> gear_left=<n|n/a> mode_mismatch=<n>" (ok judges died=1, respawn=lifestone, gear_restored=yes, hits_taken>=1 and damage_taken>0; every other field is report-only,
-                               and the step copies corpse_looted items_recovered trip_s trip_abort rebuffed den_kills decoys decoy_safe decoys_dropped gear_dropped decoys_recovered pretrip_heals gear_left mode_mismatch into the summary as such
-                               (n/a when absent), judged from 3.1's gate by the lead; the step prints the line and, with --play-screenshot, the hit, dead, corpse, corpse-open, lifestone and decoys frames)
-      login-hunt-missile       --account=test-archer --login-check=hunt --hunt-weapon=missile --hunt-kills=2 --play-screenshot=<OutDir>/frames/login-hunt-missile.png (M4 P4 gate, D31: Holtburg Archer, the Shortbow and
-                               arrows in the low north forest, with seek and the avoided targets: kills=2 seeks=1 proved live; runs ONLY with -Backend require, SKIP under auto and start; the same verdict line, judges and
-                               report-only copies as login-hunt; the review frames are the missile hunt's, the arrow frame among them)
-      login-hunt               --account=test-melee --login-check=hunt --hunt-weapon=melee --hunt-kills=3 --play-screenshot=<OutDir>/frames/login-hunt.png (M4 D31: Holtburg Brawler on the test-melee account since P4; M4 1.2 s5, three kills since M4 3.1 s4 so that looted>=1 is judged over two or more kills; docs/session.md
-                               section 27; needs the local backend with Holtburg Hunter built; runs ONLY with -Backend require, SKIP under auto and start: it changes the character, experience and the belt's
-                               creatures): the game enters Holtburg Hunter, goes to the belt south-west of Holtburg, melees until the third kill (--hunt-seconds default 300: the leg stops itself at
-                               300 s of hunting whatever the count, so the step's 1500 s Godot timeout already covers three kills with the recoveries between them and, since M4 3.2, the shop visits: the leg's own limit is 1200 s with --sell and --buy-kits on, 120 s more for a log off after a failure), heals between the kills by the recovery rule
-                               (--heal, --heal-below and the rest, M4 3.1 s3), goes back to Holtburg and logs off; verdict "[logincheck] hunt done ok=true kills=<n> damage_dealt=<n>
-                               swings=<n> shots=<n> hits=<n> misses=<n> returned=<yes|no> fighter=<..> ... corpses_opened=<n> corpse_items=<n> looted=<n> loot_frame_max_ms=<x|n/a> loot_skipped=<n> heals=<n> kit_uses=<n>
-                               potions=<n> ground=<belt|forest> mode_mismatch=<n> ..." (ok judges kills>=1, damage_dealt>0 and, from 3.1, looted>=1 over two or more kills and loot_frame_max_ms; swings shots hits
-                               misses returned fighter attack_frame_max_ms looted loot_skipped loot_frame_max_ms loot_frame_over_50 are copied into the summary report-only; so are, from M4 3.1 s4, heals kit_uses potions
-                               mode_mismatch from the line and heal_failed_rolls heal_points heal_wasted from the hunt detail line (n/a when the leg printed no such field; heals>=1 is judged from M4 3.2 L2, only over a leg that started under the --heal-below trigger with --heal on: the leg's error line then says 'no heal although the hunt started at N% under the T% trigger', and the verdict reads ok=false);
-                               frame_over_50 as for the other judged live legs; the step prints the line)
+      journey-mage             --account=test --login-check=journey --journey=mage --play-screenshot=<OutDir>/frames/journey-mage.png (M4 P5b G1; the mage's journey on BSD Mage: the Godot journey host, the stations in one
+                               login; replaces login-buff (journey-mage buff station), login-bsd (den-fight) and login-death (death); needs the local backend; runs ONLY with -Backend require, SKIP under auto and start;
+                               muted, 800x600, the Godot run gets 2200 s: the runner's own limit is 2,010 s). Judged by the journey's own done line, "[logincheck] journey done ok=true name=mage stations=<n>/<m> failed=none
+                               teleports=<n> ... budget=<n>" (ok is the scenario's: every station ok or skipped by a precondition, teleports<=budget; the step also reads failed=none, an ok=false station line without skipped=, and
+                               teleports against budget itself). The station frames (<OutDir>/frames/journey-mage-station-<name>.png and the hunt, vendor and fight frames) are the review frames; the
+                               "journey frames station=<n> frame_max_ms=<x>" lines are copied report-only (frame_over_50 is yes when any station's max is over 50; -ContendedFrames reports it, never judges it).
+                               Judged from M4 4.2 J2 (the owner's call): teleports<=1 on every journey, recalls>=2 on the mage, recovery_places=0 on every journey, granted=0 on the mage and the archer (melee's granted stays
+                               report-only); and the window frames on the station lines (attack_frame_max_ms and loot_frame_max_ms on hunt, vendor_frame_max_ms on vendor and vendor-facts): over 75 ms fails, over 50 ms flags
+                               frame_over_50, n/a or absent fails nothing, and with -ContendedFrames (or another Godot run up) they are reported, never judged
+      journey-melee            --account=test-melee --login-check=journey --journey=melee (as journey-mage, on Holtburg Brawler; replaces login-hunt (journey-melee hunt station); the Godot run gets 1900 s: the runner's limit is 1,710 s)
+      journey-archer           --account=test-archer --login-check=journey --journey=archer (as journey-mage, on Holtburg Archer; replaces login-hunt-missile (journey-archer hunt station); the Godot run gets 2000 s: the runner's limit is 1,860 s)
       spell-showcase           --scene=spellviewer --showcase (four entries; must end with exceptions=0)
       golden-viewpoints        --golden-viewpoints (every viewpoint captured)
       fly-path                 --fly-path=holtburg:arwic:<FlySpeed> (DoD 8: no frame over 50 ms; exit 2 if one is)
@@ -141,8 +115,8 @@
     accounts.test entry (checked by key; no value is read). The check sends nothing to the server. The summary always
     shows the backend's state.
 
-    M4 P4 gate (D31, the parallel live gate): each backend step logs in with the account of its character ($stepAccounts: test for Lifestone Smoke, Lifestone Throwaway and BSD Mage; test-melee for the Brawler's login-hunt;
-    test-archer for the Archer's login-hunt-missile), and the readiness probe checks the key of each account the wanted steps need (key names only). -Lanes runs the wanted backend steps of each account at once (a child
+    M4 P4 gate (D31, the parallel live gate): each backend step logs in with the account of its character ($stepAccounts: test for Lifestone Smoke and BSD Mage; test-tools for Lifestone Throwaway (M4 D39); test-melee for the Brawler's journey-melee;
+    test-archer for the Archer's journey-archer; journey-mage runs on test), and the readiness probe checks the key of each account the wanted steps need (key names only). -Lanes runs the wanted backend steps of each account at once (a child
     smoke per account, its steps one after the other, at most three Godot runs, each child with -ContendedFrames); the default is one step at a time. -ContendedFrames: the live steps run beside other Godot runs, so
     -Backend require does not imply -SoloFrames: a frame-time failure with another run up is reported as frames=contended (a PASS). Every Godot run of a step in $audioSteps must log `audio service installed ... muted=true`
     (Get-AudioMuteVerdict): none, or muted=false, fails the step with a named reason (the record-audio step is held to it too: it records the Master bus before the bus's level and the run is muted all the same).
@@ -173,8 +147,8 @@
     frame-over-50-ms, no-frame-over-50-ms-from-the-arrival-to-the-teleport, enter-right-after-character-select, no-frame-over-50-ms-
     from-enter-to-the-arrival-with-a-heavy-player-description and no-ui-step-after-enter-is-over-12-ms; the live legs' frame windows
     (cast_frame_max_ms, fight_frame_max_ms, death_frame_max_ms, enter_to_walk and the teleport windows)) are judged against the machine
-    they ran on (M3 4.2 D42): the steps that run them (play-checks, record-audio, login-check, login, login-buff, login-bsd,
-    login-death, login-hunt) sample the Godot processes on the machine (the step's own excluded). When every failure of such a step is a
+    they ran on (M3 4.2 D42): the steps that run them (play-checks, record-audio, login-check, login, journey-mage,
+    journey-melee, journey-archer) sample the Godot processes on the machine (the step's own excluded). When every failure of such a step is a
     frame-time check and another Godot run was up during the step, the step is reported, not failed: "PASS (frames=contended)" and
     the detail names the checks. With no other run it fails as today. The live legs' rule, settled (M4 1.1 s3): -Backend require implies -SoloFrames, so at the live gate a
     leg's frame judge counts only when no other engine process is up (a leg waits for a quiet machine and a frame-time failure fails); elsewhere a leg that ran
@@ -317,31 +291,29 @@ $DotnetRoot = Find-LifestoneDotnetRoot -DotnetRoot $DotnetRoot
 $dotnetExe = Join-Path $DotnetRoot 'dotnet.exe'
 
 $allSteps = @('build', 'test', 'cli-help', 'cli-bad-argument', 'terrain-golden', 'engine-checks', 'interior-engine-checks',
-    'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death', 'login-hunt', 'login-hunt-missile', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
+    'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'journey-mage', 'journey-melee', 'journey-archer', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
 # The steps that need the local backend (gated by -Backend).
-$backendSteps = @('login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death', 'login-hunt', 'login-hunt-missile')
+$backendSteps = @('login-check', 'login', 'login-throwaway', 'journey-mage', 'journey-melee', 'journey-archer')
 # M4 P4 gate (D31): the test account each backend step logs in with, from the step's character (the fighter templates' accounts for the hunts). The readiness probe checks the key of each account a wanted
 # step needs (by key name only), and -Lanes groups the wanted steps by this value.
 $stepAccounts = [ordered]@{
     'login-check'        = 'test'          # Lifestone Smoke
     'login'              = 'test'          # Lifestone Smoke (tools\play.ps1 -Offscreen)
-    'login-throwaway'    = 'test'          # Lifestone Throwaway
-    'login-buff'         = 'test'          # BSD Mage
-    'login-bsd'          = 'test'          # BSD Mage
-    'login-death'        = 'test'          # BSD Mage
-    'login-hunt'         = 'test-melee'    # Holtburg Brawler (FighterTemplate.Melee)
-    'login-hunt-missile' = 'test-archer'   # Holtburg Archer (FighterTemplate.Archer)
+    'login-throwaway'    = 'test-tools'    # Lifestone Throwaway (M4 D39)
+    'journey-mage'       = 'test'          # BSD Mage (M4 P5b G1)
+    'journey-melee'      = 'test-melee'    # Holtburg Brawler (FighterTemplate.Melee)
+    'journey-archer'     = 'test-archer'   # Holtburg Archer (FighterTemplate.Archer)
 }
-# The two hunts share one step body: the account, the weapon, the kills and the Godot timeout of each. The melee hunt is three kills (looted>=1 is judged over two or more, HuntLegVerdict.LootJudgeMinKills);
-# the missile hunt is two (proved live with seek and the avoided targets: kills=2 seeks=1; the forest band is sparse, a third kill is not reliable).
-$huntSteps = @{
-    'login-hunt'         = @{ Weapon = 'melee'; Kills = 3 }
-    'login-hunt-missile' = @{ Weapon = 'missile'; Kills = 2 }
+# The journey steps (M4 P5b G1): the journey name and the Godot timeout of each (J5's handoff: the runner's own limit is WholeSecondsFor(plan) = 60 + 1.5 x expected + 300: mage 2,010 s, melee 1,710, archer 1,860).
+$journeySteps = @{
+    'journey-mage'   = @{ Journey = 'mage'; Seconds = 2200 }
+    'journey-melee'  = @{ Journey = 'melee'; Seconds = 1900 }
+    'journey-archer' = @{ Journey = 'archer'; Seconds = 2000 }
 }
 # The steps whose Godot run installs the audio service (play mode: the portal view, M2 D8): their log must say `audio service installed ... muted=true` (Get-AudioMuteVerdict, Invoke-Godot).
-$audioSteps = @('portal-space', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'login-buff', 'login-bsd', 'login-death', 'login-hunt', 'login-hunt-missile')
+$audioSteps = @('portal-space', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'journey-mage', 'journey-melee', 'journey-archer')
 # The steps whose verdict judges frame time: a failure of one of their frame-time checks is judged against the machine (D42, the help above).
-$frameJudgedSteps = @('play-checks', 'record-audio', 'login-check', 'login', 'login-buff', 'login-bsd', 'login-death', 'login-hunt', 'login-hunt-missile')
+$frameJudgedSteps = @('play-checks', 'record-audio', 'login-check', 'login', 'journey-mage', 'journey-melee', 'journey-archer')
 # The frame-time checks of the play checks (PlayChecks.cs: the ones that compare a frame or a UI step with FrameLimitMilliseconds / MaxUiStepMilliseconds).
 $frameTimeChecks = @(
     'an-unhidden-object-and-the-player-pass-through-intermediate-alpha-and-end-opaque-with-no-frame-over-50-ms',
@@ -546,7 +518,7 @@ function Get-FrameVerdict {
 
 function Get-LiveFrameVerdict {
     <#
-      D42 for the live steps (login-check, login, login-buff, login-bsd, login-death, login-hunt): their frame windows are judged in the game and reach the log as
+      D42 for the live steps (login-check, login, journey-mage, journey-melee, journey-archer): their frame windows are judged in the game and reach the log as
       ERROR lines: 'frame over 50 ms between Enter and walking', 'frame over 50 ms around a server teleport' and a leg's 'the ... leg failed ... why=...'
       whose reasons are all '<window>_frame_max_ms=<x> (at most 75 expected)'. Contended when there is at least one ERROR line and every one of them is such a
       line, another Godot run was up and -SoloFrames is off. Conservative on purpose (a failure with no ERROR line, or any other ERROR, stays a failure).
@@ -640,6 +612,67 @@ function Get-FrameFlags([string] $Text, [string] $Prefix) {
     $maxima = @([regex]::Matches($line.Value, '(?<![\w])([a-z_]*frame_max_ms)=([\d.]+|n/a)') | ForEach-Object { "$($_.Groups[1].Value)=$($_.Groups[2].Value)" })
     $flag = if ($over) { 'yes' } else { 'no' }
     return @{ Over50 = $over; Suffix = ('; frame_over_50=' + $flag + $(if ($maxima.Count) { ' ' + ($maxima -join ' ') } else { '' })) }
+}
+
+function Get-JourneyVerdict([string] $Text, [bool] $FrameContended = $false) {
+    <#
+      M4 P5b G1: the judge of a journey step, from the Godot journey's own lines: '[logincheck] journey done ok=true name=<n> stations=<k>/<m> failed=none teleports=<t> ... budget=<b> ...' with
+      teleports<=budget, and no '[logincheck] journey station=<n> ok=false' line without skipped= (a skip by a precondition is not a failure). Returns @{ Ok; Detail; Frames; FramesSeen; FrameMax;
+      Windows; WindowsSeen; WindowMax; WindowOver50 }; Frames is the report-only 'journey frames station=<n> frame_max_ms=<x>' lines folded to 'station:x' pairs.
+      M4 4.2 J2 (the owner's call of 2026-10-25: P5b's report-only fields become judges, from the first gate after theirs), on the done line: teleports<=1 on every journey (besides teleports<=budget),
+      recalls>=2 on the mage journey (name=mage), recovery_places=0 on every journey, granted=0 on the mage and archer journeys (the melee journey's granted stays report-only: its vendor-facts
+      station grants a sale item when the pack holds no loot, by design). A missing or non-numeric judged field fails by name. route_m, rungs, blocked, sightless, vitals_passes and run_s stay report-only.
+      The window frames (m4-plan.md section 5, the frame rule), on the station lines: attack_frame_max_ms and loot_frame_max_ms (the hunt station), vendor_frame_max_ms (the vendor and vendor-facts stations);
+      'n/a' (the headless host) or an absent field fails nothing. Over 75 ms fails the step and over 50 ms flags it (WindowOver50), unless $FrameContended (another Godot run was up or the run is a parallel
+      phase, and -SoloFrames is off): then they are reported, never judged (the Detail names them as contended). Windows is the 'station:field=x' pairs; WindowMax the largest number seen.
+    #>
+    $done = [regex]::Match($Text, '\[logincheck\] (journey done ok=[^\r\n]*)')
+    if (-not $done.Success) { return @{ Ok = $false; Detail = 'no journey done line'; Frames = ''; FramesSeen = $false; FrameMax = 0.0; Windows = ''; WindowsSeen = $false; WindowMax = 0.0; WindowOver50 = $false } }
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $line = $done.Groups[1].Value
+    $why = @()
+    if ($line -notmatch '^journey done ok=true ') { $why += 'done ok is not true' }
+    if ($line -notmatch ' failed=none(\s|$)') { $why += 'a station failed' }
+    if ($line -match ' teleports=(\d+) ' -and $line -match ' budget=(\d+)(\s|$)') {
+        $t = [int]([regex]::Match($line, ' teleports=(\d+)').Groups[1].Value); $b = [int]([regex]::Match($line, ' budget=(\d+)').Groups[1].Value)
+        if ($t -gt $b) { $why += "teleports $t over budget $b" }
+        elseif ($t -gt 1) { $why += "teleports $t over 1" }
+    } else { $why += 'no teleports/budget on the done line' }
+    $journeyName = [regex]::Match($line, ' name=(\S+)').Groups[1].Value
+    $field = { param([string] $k) $m = [regex]::Match($line, '(?:^|\s)' + $k + '=(\d+)(?=\s|$)'); if ($m.Success) { [int]$m.Groups[1].Value } else { $null } }
+    if ($journeyName -eq 'mage') {
+        $recalls = & $field 'recalls'
+        if ($null -eq $recalls) { $why += 'recalls n/a under 2 (mage)' } elseif ($recalls -lt 2) { $why += "recalls $recalls under 2 (mage)" }
+    }
+    $places = & $field 'recovery_places'
+    if ($null -eq $places) { $why += 'recovery_places n/a, not 0' } elseif ($places -ne 0) { $why += "recovery_places $places not 0" }
+    if ($journeyName -eq 'mage' -or $journeyName -eq 'archer') {
+        $granted = & $field 'granted'
+        if ($null -eq $granted) { $why += "granted n/a, not 0 ($journeyName)" } elseif ($granted -ne 0) { $why += "granted $granted not 0 ($journeyName)" }
+    }
+    $bad = @([regex]::Matches($Text, '\[logincheck\] journey station=(\S+) ok=false[^\r\n]*') | Where-Object { $_.Value -notmatch ' skipped=' } | ForEach-Object { $_.Groups[1].Value })
+    if ($bad.Count) { $why += "station(s) ok=false: $($bad -join ',')" }
+    $pairs = @(); $max = 0.0; $seen = $false
+    foreach ($m in [regex]::Matches($Text, '\[logincheck\] journey frames station=(\S+) [^\r\n]*?frame_max_ms=([\d.]+|n/a)')) {
+        $pairs += "$($m.Groups[1].Value):$($m.Groups[2].Value)"
+        if ($m.Groups[2].Value -ne 'n/a') { $seen = $true; $max = [math]::Max($max, [double]::Parse($m.Groups[2].Value, $inv)) }
+    }
+    $windows = @(); $windowMax = 0.0; $windowSeen = $false; $over75 = @(); $over50 = $false
+    foreach ($station in [regex]::Matches($Text, '\[logincheck\] journey station=(\S+) [^\r\n]*')) {
+        foreach ($w in [regex]::Matches($station.Value, '(?<![\w])((?:attack|loot|vendor)_frame_max_ms)=([\d.]+|n/a)')) {
+            $windows += "$($station.Groups[1].Value):$($w.Groups[1].Value)=$($w.Groups[2].Value)"
+            if ($w.Groups[2].Value -eq 'n/a') { continue }
+            $x = [double]::Parse($w.Groups[2].Value, $inv)
+            $windowSeen = $true; $windowMax = [math]::Max($windowMax, $x)
+            if ($x -gt 50.0) { $over50 = $true }
+            if ($x -gt 75.0) { $over75 += "$($station.Groups[1].Value) $($w.Groups[1].Value)=$($w.Groups[2].Value)" }
+        }
+    }
+    $contendedNote = ''
+    if ($over75.Count -and -not $FrameContended) { $why += "window frame over 75 ms: $($over75 -join ', ')" }
+    elseif ($over75.Count) { $contendedNote = "; window frames=contended: $($over75 -join ', ') over 75 ms (reported, not judged)" }
+    $detail = $line + $(if ($why.Count) { '; ' + ($why -join '; ') } else { '' }) + $contendedNote
+    return @{ Ok = ($why.Count -eq 0); Detail = $detail; Frames = ($pairs -join ' '); FramesSeen = $seen; FrameMax = $max; Windows = ($windows -join ' '); WindowsSeen = $windowSeen; WindowMax = $windowMax; WindowOver50 = $over50 }
 }
 
 function Get-FrameFields {
@@ -1255,6 +1288,8 @@ function Invoke-LaneBatch {
     param([string[]] $Steps, [hashtable] $Numbers)
     $groups = Get-LaneGroups $Steps
     if ($groups.Count -lt 2) { return @{} }
+    # M4 P5b G0 (D39): four test accounts exist, and the throwaway's account (test-tools) runs a Godot step here too; -Lanes keeps its three Godot runs and three slots, so it refuses four groups.
+    if ($groups.Count -gt 3) { throw "-Lanes runs at most three accounts' Godot steps at once (this selection spans $($groups.Count): $($groups.Keys -join ', ')); drop login-throwaway or run the steps without -Lanes" }
     $dir = Join-Path $OutDir 'lanes'
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     $running = [System.Collections.Generic.List[object]]::new()
@@ -1346,29 +1381,9 @@ try {
             Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it creates and purges a character on the test account; runs only with -Backend require (this is -Backend $Backend)" -Skipped
             continue
         }
-        if ($step -eq 'login-buff' -and $Backend -ne 'require') {
-            # It changes BSD Mage (buffs on, components burned) and runs for about 22 minutes: only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
-            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it buffs BSD Mage on the test account (a cycle at the live mana rate, about 60 s, a few minutes in all); runs only with -Backend require (this is -Backend $Backend)" -Skipped
-            continue
-        }
-        if ($step -eq 'login-bsd' -and $Backend -ne 'require') {
-            # It fights in the Black Spawn Den as BSD Mage (experience gained, components burned by the top-up): only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
-            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it fights as BSD Mage on the test account (a buff top-up, the den, the first kill; about 5 minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
-            continue
-        }
-        if ($step -eq 'login-death' -and $Backend -ne 'require') {
-            # It kills BSD Mage (a death, vitae, dropped items, a re-gear): only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
-            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it kills BSD Mage on the test account (a bind, the den, a death, the respawn and the re-gear; about 10 minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
-            continue
-        }
-        if ($step -eq 'login-hunt' -and $Backend -ne 'require') {
-            # It fights in Holtburg's belt as Holtburg Hunter (experience gained, the creatures killed): only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
-            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it hunts as Holtburg Brawler on the test-melee account (the Low B belt, melee kills; a few minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
-            continue
-        }
-        if ($step -eq 'login-hunt-missile' -and $Backend -ne 'require') {
-            # It shoots in the low north forest as Holtburg Archer (experience gained, arrows spent, the creatures killed): only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
-            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it hunts as Holtburg Archer on the test-archer account (the low north forest, two missile kills; a few minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
+        if ($journeySteps.ContainsKey($step) -and $Backend -ne 'require') {
+            # A journey logs in as a levelled character and walks the whole route (buffs, fights, loot, vendors, deaths, mod teleports): only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
+            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it runs the $($journeySteps[$step].Journey) journey on the $($stepAccounts[$step]) account (the whole route, about 20 to 35 minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
             continue
         }
         if ($backendSteps -contains $step -and -not (Test-BackendGate $step $timer)) { continue }
@@ -1620,8 +1635,8 @@ try {
                 Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $live.Note) $run.Log $live.Errors $live.PassNote -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
             }
             'login-throwaway' {
-                # --login-check=throwaway (docs/session.md section 28): creates 'Lifestone Throwaway' on the test account through the retail screens, uses the tools panel, deletes, restores,
-                # deletes, purges it from 'Lifestone Smoke' and checks the account's list is as it began. The test account only; the game reads its password from secrets.json itself.
+                # --login-check=throwaway (docs/session.md section 28): creates 'Lifestone Throwaway' on the test-tools account (M4 D39) through the retail screens, uses the tools panel, deletes, restores,
+                # deletes, purges it from 'Lifestone Smoke' and checks the account's list is as it began. The tools account only; the game reads its password from secrets.json itself.
                 # 840 s = the runner's own 600 s limit + 120 s of recovery + start-up and shutdown with margin (docs/session.md section 28).
                 $run = Invoke-Godot $step "--account=$($stepAccounts[$step]) --login-check=throwaway" 840 '' $defaultSize
                 $verdict = if ($run.Text -match '\[logincheck\] (throwaway done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
@@ -1639,76 +1654,23 @@ try {
                 if ($legOk -and -not $framesOk -and -not $contended) { $note = '; enter_to_walk_max_ms or teleport_frame_max_ms over 50 ms (frame-only failure: the gate judges it over three runs, two of three fail)' }
                 Add-Result $step ($legOk -and ($framesOk -or $contended)) $run.Code $timer.Elapsed.TotalSeconds ($verdict + $note) $run.Log (Get-ErrorCount $run.Text) $(if ($contended) { 'frames=contended' } else { '' })
             }
-            'login-buff' {
-                # --login-check=buff (docs/session.md section 30): the game enters BSD Mage on the test account, re-seats the wand, runs the buff scenario in its own session (gear, magic mode, the cycle of the
-                # profile's 24 buff lines, then the re-buff driver's own pass from the margin of the shortest line: --buff-auto=on, M4 4.1 DoD 14, no forced pass) and logs off. The test account only; the game reads its password from secrets.json itself. 900 s: a whole cycle at the live mana rate took
-                # 56 s of session time on the real server (BuffLoopLiveTests, M3 2.1 fix B; ACE's Mana Conversion makes a cast cost far less than the ceiling), so the login, the gear and the cycle fit in a few
-                # minutes; 900 s leaves room for a slow wait for regeneration. The runner's own limit (BuffLegRunner.WholeCheckSeconds) must stay under it so the leg logs off before it reports a failure.
-                $run = Invoke-Godot $step "--account=$($stepAccounts[$step]) --login-check=buff --buff-auto=on" 900 '' $defaultSize
-                $verdict = if ($run.Text -match '\[logincheck\] (buff done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
-                $flags = Get-FrameFlags $run.Text 'buff'
-                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] buff done ok=true ') $run
-                $fields = Get-FrameFields $flags $run
-                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' }) -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
-            }
-            'login-bsd' {
-                # --login-check=bsd-fight (docs/session.md section 31): the game enters BSD Mage on the test account, tops up the buffs, goes to the Black Spawn Den and fights the tuskers of the arrival's floor
-                # with Flame Bolt until the first kill, then logs off. The test account only; the game reads its password from secrets.json itself. 1200 s: the leg stops itself at 750 s (login 60, gear 120, top-up
-                # 240, teleport 30, the fight's 300) and may take 120 s more to log off after a failure; FightLegRunner.WholeCheckSeconds must stay under this so the leg logs off before it reports a failure.
-                $run = Invoke-Godot $step "--account=$($stepAccounts[$step]) --login-check=bsd-fight" 1200 '' $defaultSize
-                $verdict = if ($run.Text -match '\[logincheck\] (bsd-fight done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
-                $flags = Get-FrameFlags $run.Text 'bsd-fight'
-                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] bsd-fight done ok=true ') $run
-                $fields = Get-FrameFields $flags $run
-                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' }) -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
-            }
-            'login-death' {
-                # --login-check=bsd-death (docs/session.md section 32): the game enters BSD Mage on the test account, binds it at Holtburg's lifestone, goes to the Black Spawn Den (a suicide first when any
-                # enchantment but the vitae is active, then a top-up of the decoys that suicide dropped), is killed by the tuskers, respawns at the lifestone, is regeared, re-buffed, fights at the den, heals,
-                # recovers its corpse and returns, then logs off (M4 3.1 D20). The test account only; the game reads its password from secrets.json itself.
-                # 2500 s: the leg stops itself at 2015 s with the defaults (DeathLegRunner.WholeCheckSecondsFor: M3's 1205 s = login 60, gear 120, bars 30, bind 90, suicide and respawn 90, the den 30, the wait 600,
-                # the respawn 65, the re-gear 120; and M4 3.1's 810 s = the decoy top-up 30, the rebuff 240, the teleport to the den 30, the walk 60, the fight 180, the pre-trip heal 120, the trip 90, the return 60)
-                # and may take 120 s more to log off after a failure; the step's seconds are that sum plus the recovery plus a margin of about 365 s (a test pins timeout >= sum + 120 + 300), so the leg logs
-                # off before it reports a failure. The real run is far shorter (the death wait is about 20 s of its 600 s).
-                # corpse_looted items_recovered trip_s trip_abort (M4 2.2 s1) and rebuffed den_kills decoys decoy_safe decoys_dropped gear_dropped decoys_recovered pretrip_heals gear_left mode_mismatch (M4 3.1 d2; gear_left from the 3.1 fix slice) are
-                # copied below, report-only: they never fail the step (the lead judges them at 3.1's gate; n/a when a field is absent).
-                $run = Invoke-Godot $step "--account=$($stepAccounts[$step]) --login-check=bsd-death" 2500 '' $defaultSize
-                $verdict = if ($run.Text -match '\[logincheck\] (bsd-death done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
-                $flags = Get-FrameFlags $run.Text 'bsd-death'
-                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] bsd-death done ok=true ') $run
-                $fields = Get-FrameFields $flags $run
-                # Report-only (M4 2.2 s1, M4 3.1 d2): the corpse trip's counters and the decoy loop's fields, copied into the summary (never judged here).
-                $copied = @(foreach ($key in 'corpse_looted', 'items_recovered', 'trip_s', 'trip_abort', 'rebuffed', 'den_kills', 'decoys', 'decoy_safe', 'decoys_dropped', 'gear_dropped', 'decoys_recovered', 'pretrip_heals', 'gear_left', 'mode_mismatch') { if ($verdict -match "(?<![\w])$key=([^\s]+)") { "$key=$($Matches[1])" } else { "$key=n/a" } }) -join ' '
-                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + "; report-only: $copied" + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' }) -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
-            }
-            { $_ -in 'login-hunt', 'login-hunt-missile' } {
-                # M4 P4 gate (D31): one body for the two hunts; $stepAccounts gives each its account (login-hunt: test-melee, Holtburg Brawler; login-hunt-missile: test-archer, Holtburg Archer) and $huntSteps its weapon
-                # and kills. The step also saves the hunt's review frames (--play-screenshot: the melee frames, or the missile hunt's arrow frame), so the gate needs no second hunt run for them.
-                # Below: --login-check=hunt (M4 1.2; docs/session.md section 27): the game enters the hunting character (Holtburg Hunter before D31) on the step's test account, goes to the belt south-west of Holtburg and melees until the kills are made
-                # (one kill at 1.2, three from M4 3.1 s4: see --hunt-kills below), then goes back and logs off. The test account only; the game reads its password from secrets.json itself. 1500 s (1200 s until M4 3.2 added the shop visits): the leg stops itself at --hunt-seconds (default 300) after
-                # its login, gear and teleport, and may take 120 s more to log off after a failure. The leg judges kills>=1 damage_dealt>0 swings>=1 (M4 1.3: HuntLegVerdict; the missile hunt shots>=1 hits>=1); the step passes on its ok=true.
-                # attack_frame_max_ms (M4 1.3 s2: the slowest frame from an attack's send to its run's Done) is copied below, report-only: it never fails the step in 1.3 (D11, judged from item 2.1).
-                # looted loot_skipped loot_frame_max_ms loot_frame_over_50 (M4 2.2 s0: the loot of the kill's corpse; loot_frame_max_ms is the slowest frame from the corpse's open to its close) are copied the same way,
-                # report-only in 2.2 (judged from 3.1): they never fail the step. loot_frame_over_50 is printed by the leg only when the loot window had a frame over 50 ms, so its absence reads "no".
-                # M4 3.1 s4: --hunt-kills=3 (looted>=1 is judged over two or more kills, HuntLegVerdict.LootJudgeMinKills; the leg stops itself at --hunt-seconds 300 whatever the count, so the 1200 s above already
-                # covers three kills and the recoveries between them: 300 s of hunting, the arrival, the gear and the log off). heals kit_uses potions mode_mismatch (the verdict line) and heal_failed_rolls heal_points
-                # heal_wasted (the hunt detail line) are copied report-only below, n/a when the leg printed no such field (heals>=1 is judged at 3.2's gate; mode_mismatch is lane g's CombatModeWatch).
-                $hunt = $huntSteps[$step]
+            { $journeySteps.ContainsKey($_) } {
+                # M4 P5b G1: --login-check=journey --journey=<name> (J5's Godot host over J1's scenario): one login, the stations in order, the journey's own verdict. Replaces login-buff, login-bsd, login-death, login-hunt and login-hunt-missile.
+                # The Godot run gets $journeySteps[$step].Seconds (the runner's WholeSecondsFor(plan) plus a margin); the account is the step's ($stepAccounts); the review frames go to <OutDir>/frames (J5: <stem>-station-<name>.png and the in-station frames).
+                $journey = $journeySteps[$step]
                 $frameStem = [IO.Path]::GetRelativePath($repoRoot, (Join-Path (Join-Path $OutDir 'frames') "$step.png")).Replace([string][char]92, '/')
                 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir 'frames') | Out-Null
-                $run = Invoke-Godot $step "--account=$($stepAccounts[$step]) --login-check=hunt --hunt-weapon=$($hunt.Weapon) --hunt-kills=$($hunt.Kills) --play-screenshot=$frameStem" 1500 '' $defaultSize
-                $verdict = if ($run.Text -match '\[logincheck\] (hunt done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
-                $flags = Get-FrameFlags $run.Text 'hunt'
-                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $run.Text -match '\[logincheck\] hunt done ok=true ') $run
-                $fields = Get-FrameFields $flags $run
-                # Report-only: the leg's own counters, copied into the summary (never judged here).
-                $copied = @(foreach ($key in 'swings', 'shots', 'hits', 'misses', 'returned', 'fighter', 'attack_frame_max_ms', 'looted', 'loot_skipped', 'loot_frame_max_ms', 'sold', 'bought', 'pyreals', 'appraised', 'vendor_frame_max_ms') { if ($verdict -match "(?<![\w])$key=([^\s]+)") { "$key=$($Matches[1])" } else { "$key=n/a" } }) -join ' '
-                $copied += ' loot_frame_over_50=' + $(if ($verdict -match '(?<![\w])loot_frame_over_50=yes') { 'yes' } else { 'no' })
-                $healCopied = @(foreach ($key in 'heals', 'kit_uses', 'potions', 'mode_mismatch') { if ($verdict -match "(?<![\w])$key=([^\s]+)") { "$key=$($Matches[1])" } else { "$key=n/a" } }) -join ' '
-                $huntDetail = if ($run.Text -match '\[logincheck\] (hunt detail[^\r\n]*)') { $Matches[1] } else { '' }
-                $healDetail = @(foreach ($key in 'heal_failed_rolls', 'heal_points', 'heal_wasted') { if ($huntDetail -match "(?<![\w])$key=([^\s]+)") { "$key=$($Matches[1])" } else { "$key=n/a" } }) -join ' '
-                $copied += " $healCopied $healDetail"
-                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + $flags.Suffix + "; report-only: $copied" + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($flags.Over50) { 'frame over 50 ms' } else { '' }) -FrameOver50 $fields.Over50 -FrameJudge $fields.Judge
+                $run = Invoke-Godot $step "--account=$($stepAccounts[$step]) --login-check=journey --journey=$($journey.Journey) --play-screenshot=$frameStem" $journey.Seconds '' $defaultSize
+                # M4 4.2 J2: the window frames (attack, loot, vendor) are judged by the frame rule (over 75 ms fails, over 50 ms flags) unless the run is contended: another Godot run up or a parallel phase, -SoloFrames off (Resolve-LiveFrames' rule).
+                $windowsContended = ($run.Others -gt 0 -or $parallelPhase) -and -not $SoloFrames
+                $judged = Get-JourneyVerdict $run.Text $windowsContended
+                $verdict = $judged.Detail
+                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $judged.Ok) $run
+                $over50 = if ($judged.FramesSeen -or $judged.WindowsSeen) { if ($judged.FrameMax -gt 50.0 -or $judged.WindowOver50) { 'yes' } else { 'no' } } else { 'n/a' }
+                $judge = if ($run.Others -gt 0) { 'contended' } else { 'counted' }
+                # Report-only (a new judge: M4 P5b G1): the per-station frame figures, never judged here; -ContendedFrames / -Lanes reports them and the step passes on its journey verdict alone.
+                # Judged (M4 4.2 J2): the window frames, shown beside them ('windows: station:field=x ...'; n/a on the headless host or in a log from before J1), judged inside Get-JourneyVerdict.
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + "; report-only: frame_over_50=$over50 $($judged.Frames); windows (judged over 75 ms unless contended): $(if ($judged.Windows) { $judged.Windows } else { 'n/a' })" + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($over50 -eq 'yes') { 'frame over 50 ms' } else { '' }) -FrameOver50 $over50 -FrameJudge $judge
             }
             'login' {
                 # The player's own entry point (tools\play.ps1) on the test account (-Offscreen makes it the test account and refuses any other). The backend is the

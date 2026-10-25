@@ -404,7 +404,8 @@ public sealed class DynamicLightsTests
         CellFrame? player = At(1f, 1f);
         Span<ObjectLight> set = stackalloc ObjectLight[ObjectLightSets.MaxLights];
         IReadOnlyList<CellLight> statics = [Static(0.2f)];
-        for (var i = 0; i < 50; i++)
+        // The warm-up is long enough for tiered JIT to leave tier 0 (the test once measured 4,584 bytes under the full suite's load, a first-call cost); the tier is not changed (M4 D28).
+        for (var i = 0; i < 2000; i++)
         {
             Tick(list, frame, viewer, player, statics, set, i);
         }
@@ -433,7 +434,7 @@ public sealed class DynamicLightsTests
         var set = NewSet();
         var viewer = new AvatarViewer(At(96f, 90f, 12f));
         set.Create(BoltAt(Bolt, At(96f, 96f, 10f), Vector3.Zero), 0); // hovering: the advance itself is the measure
-        var now = Run(set, viewer, 0, 100);
+        var now = Run(set, viewer, 0, 2000); // the warm-up is long enough for tiered JIT to settle (see A_thousand_ticks_allocate_nothing)
         var before = GC.GetAllocatedBytesForCurrentThread();
         Run(set, viewer, now, 1000);
         var bytes = GC.GetAllocatedBytesForCurrentThread() - before;

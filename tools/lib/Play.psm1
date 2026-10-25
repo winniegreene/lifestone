@@ -16,9 +16,9 @@ $script:AccountPattern = '^[A-Za-z0-9][A-Za-z0-9_.-]{0,49}$'
 $script:CharacterPattern = "^[A-Za-z][A-Za-z' -]{0,63}$"
 # The game options play.ps1 owns: -GameArgs may not carry them (an --account there would get round the rule for automated runs).
 $script:OwnedOptions = @('--play', '--account', '--character', '--server')
-# Automated runs (-Offscreen) use only these three test accounts (M4 D31; the owner's play account is never used by an agent or a test).
+# Automated runs (-Offscreen) use only these four test accounts (M4 D31 and D39; the owner's play account is never used by an agent or a test).
 # The same list is Lifestone.Client.Session.Credentials.TestAccounts.Keys (a test pins that they agree).
-$script:AutomatedAccounts = @('test', 'test-melee', 'test-archer')
+$script:AutomatedAccounts = @('test', 'test-melee', 'test-archer', 'test-tools')
 
 function Get-PlayBackendPlan {
     <#
@@ -99,7 +99,7 @@ function Get-PlayGameOptions {
     .DESCRIPTION
         The rules:
           - -Account names an entry of secrets.json's accounts; its value is never echoed back in a problem.
-          - With -Offscreen (an automated run) the account is one of the three test accounts (test, test-melee, test-archer): the play account is the owner's.
+          - With -Offscreen (an automated run) the account is one of the four test accounts (test, test-melee, test-archer, test-tools): the play account is the owner's.
           - -Character is a character name; a name with spaces is quoted so godot.ps1's argument splitting keeps it whole.
           - -Server (127.0.0.1:<acePort> from server\versions.json, Get-PlayServerEndpoint) becomes --server=; empty leaves the game's compiled default.
           - -Audio is refused with -Offscreen (an automated run is silent, M2 D8).

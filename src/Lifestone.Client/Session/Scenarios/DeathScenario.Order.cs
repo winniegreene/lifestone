@@ -532,6 +532,14 @@ public sealed partial class DeathScenario
         }
 
         _decoysAtDeath = held;
+        if (held == 0 && _suicides == 0)
+        {
+            // M4 4.2 F1: no decoy is carried (D37: the undressed, lying mage dies once and carries no kit) and no unbuff suicide ran that could have dropped one, so the
+            // check has nothing to judge: its NOT SAFE line was noise in every journey gate (decoys=0 decoy_safe=n/a).
+            _log.Info(LogCategory, "decoys: none in the pack as the wait among the tuskers begins (no decoy kit carried, D37; no unbuff suicide ran): no decoy check");
+            return;
+        }
+
         var check = DecoyKit.Check(session.State, session.State.Self.Qualities.Level);
         if (check.Made && check.Verdict.Survives)
         {

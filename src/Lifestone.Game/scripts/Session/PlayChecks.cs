@@ -199,11 +199,13 @@ public sealed partial class PlayChecks : Node
     private string _shellBuildGc = "n/a"; // report-only: the shell build's GC pause and collections (GamePlayScreen.BuildGc)
     private bool _shellStaged;
     private string _shellPostWindowGc = "n/a"; // report-only (M4 1.1 fix R2): the first collection after the no-GC window ended (GamePlayScreen.PostWindowGcReport)
+    private double _shellWindowClosingMs = double.NaN; // report-only (M4 P5b): the gen 0 collection that closed a held window (GamePlayScreen.NoGcWindowClosingMilliseconds)
     private ulong _arrivedAtMs;
     private long _slowFrames;
     private double _teleportMaxFrameMs;
     private long _teleportSlowFrames;
     private readonly PipelineCompilationWatch _pipelines = new();
+    private readonly GcFrameWatch _gcWatch = new(); // M4 P5b (TODO(m4-throwaway-teleport-frame)): stepped at each frame's start (StepGcWatch), so its interval is the one the delta measures
     private readonly List<FadeWatch> _fadeWatches = [new("player", 0, true), new("object", ApparitionGuid, false)]; // D63: what the materialise fade does on screen, frame by frame
     private bool _fadeFrameTaken;
     private bool _effectWindowOpen; // M3 1.3 s0: the frames from the one the server's F755 was applied in to ten frames after the wait ended (reported, not judged)
@@ -235,6 +237,14 @@ public sealed partial class PlayChecks : Node
     public override void _Ready() => _ = RunAsync();
 
     /// <inheritdoc/>
+    public override void _EnterTree() => GetTree().ProcessFrame += StepGcWatch;
+
+    /// <inheritdoc/>
+    public override void _ExitTree() => GetTree().ProcessFrame -= StepGcWatch;
+
+    private void StepGcWatch() => _gcWatch.Step();
+
+    /// <inheritdoc/>
     public override void _Process(double delta)
     {
         // The shell is watched every frame too: from the frame it exists, no frame may show the world without it painted, and the tunnel must be
@@ -264,6 +274,7 @@ public sealed partial class PlayChecks : Node
             if (_shellStaged)
             {
                 _shellPostWindowGc = shellScreen.PostWindowGcReport;
+                _shellWindowClosingMs = shellScreen.NoGcWindowClosingMilliseconds;
             }
 
             _shellRootShown |= shellScreen.Root is { IsShown: true };
@@ -426,6 +437,21 @@ public sealed partial class PlayChecks : Node
                 if (ms > FrameLimitMilliseconds)
                 {
                     _teleportSlowFrames++;
+                    // M4 P5b (TODO(m4-throwaway-teleport-frame)): what the frame held, as the live legs' lines say it (this run's twin of the throwaway's Holtburg arrival frame).
+                    var gc = _gcWatch.Last;
+                    Log.Info(
+                        LogCategory,
+                        "a frame over 50 ms after the server teleport (reported, not judged here)",
+                        [
+                            ("ms", ms),
+                            ("stage", _mode.Flow.Stage),
+                            ("teleports", _mode.Flow.Teleports),
+                            ("tunnel", _portal?.Director.Machine.TunnelVisible),
+                            ("process_ms_previous_frame", Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000.0),
+                            ("render_setup_cpu_ms", RenderingServer.GetFrameSetupTimeCpu()),
+                            .. gc.Fields(),
+                            .. gc.LastCollectionFields(),
+                        ]);
                 }
             }
             else
@@ -1351,7 +1377,7 @@ public sealed partial class PlayChecks : Node
         Check(
             "no-ui-step-after-enter-is-over-12-ms",
             (_uiStepWindowOpen && _uiStepMaxMs <= MaxUiStepMilliseconds) || _framesDirectory is not null,
-            $"worst_ui_step_ms={_uiStepMaxMs:0.0} limit={MaxUiStepMilliseconds:0} shell_build_frames={_shellBuildFrames} shell_longest_frame_ms={_shellBuildLongestFrameMs:0.0} shell_longest_unit_ms={_shellBuildLongestUnitMs:0.0} shell_staged={_shellStaged} shell_gc_pause_ms_gen012={_shellBuildGc} shell_post_window_gc={_shellPostWindowGc}{(_framesDirectory is not null ? " (REPORTED, NOT JUDGED: a --play-frames run is not a timing run)" : string.Empty)}");
+            $"worst_ui_step_ms={_uiStepMaxMs:0.0} limit={MaxUiStepMilliseconds:0} shell_build_frames={_shellBuildFrames} shell_longest_frame_ms={_shellBuildLongestFrameMs:0.0} shell_longest_unit_ms={_shellBuildLongestUnitMs:0.0} shell_staged={_shellStaged} shell_gc_pause_ms_gen012={_shellBuildGc} shell_post_window_gc={_shellPostWindowGc} shell_window_closing_gc_ms={_shellWindowClosingMs:0.0}{(_framesDirectory is not null ? " (REPORTED, NOT JUDGED: a --play-frames run is not a timing run)" : string.Empty)}");
 
         // The arrival's first frame used to compile a canvas pipeline (15 to 80 ms; docs/session.md section 27): CanvasWarmUp draws that item at start-up, so none compiles from Enter on.
         Check(

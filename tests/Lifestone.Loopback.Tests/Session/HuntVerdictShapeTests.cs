@@ -6,10 +6,12 @@ namespace Lifestone.Loopback.Tests.Session;
 
 /// <summary>
 /// Not a live test (no backend, no login): the loopback hunt tests read the hunt's verdict line with a regex, and that regex went stale twice (the bow slice added <c>blocked=</c>, the seek slice <c>seeks=</c>; P4 proof run). What this
-/// proves: the regex of <see cref="HuntLiveTests"/> matches the line <see cref="HuntScenario.VerdictFields"/> prints today, field for field, and the measures a loopback test builds by name carry <c>blocked</c> and <c>seeks</c> into the game's verdict line.
+/// proves: the regex of the hunt loopback tests (retired into the melee and archer journeys, M4 P5b J6) matches the line <see cref="HuntScenario.VerdictFields"/> prints today, field for field, and the measures a loopback test builds by name carry <c>blocked</c> and <c>seeks</c> into the game's verdict line.
 /// </summary>
 public sealed class HuntVerdictShapeTests
 {
+    private static readonly System.Text.RegularExpressions.Regex Verdict = new(@"^fighter=ok kills=\d+ swings=\d+ shots=\d+ hits=\d+ misses=\d+ blocked=\d+ seeks=\d+ damage_dealt=-?\d+ damage_taken=-?\d+ hits_taken=\d+ evades=\d+ xp_gained=-?\d+ returned=(yes|no)$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     [Fact]
     public void The_loopback_regex_matches_the_scenarios_own_verdict_line_with_blocked_and_seeks()
     {
@@ -17,7 +19,7 @@ public sealed class HuntVerdictShapeTests
         var line = scenario.VerdictFields();
 
         Assert.Contains(" blocked=0 seeks=0 ", line, StringComparison.Ordinal);
-        Assert.Matches(HuntLiveTests.Verdict, line);
+        Assert.Matches(Verdict, line);
     }
 
     [Fact]

@@ -186,9 +186,17 @@ public sealed class NavMap
     public bool LineOfSight(NavPoint a, NavPoint b, int minClearance = 1) =>
         Sight(a.Global, b.Global, minClearance, NavFlags.None, [], [], 0);
 
-    /// <summary>The point of a retail position: its landblock and its origin, normalised into the landblock that holds it.</summary>
+    /// <summary>
+    /// The point of a retail position: its landblock and its origin. An outdoor position is normalised into the landblock that holds it (an origin past the edge
+    /// is the neighbour's ground). An indoor one (an EnvCell) is not: a room's origin is in its own landblock's frame whatever its value, and a dungeon's rooms
+    /// lie outside 0-192 m (the Black Spawn Den's 0x01050377 at y -139), so the room graph and the sight probe, which read <see cref="NavPoint.Local"/> in the
+    /// goal cell's frame, need it as it came. Normalising it put the den corpse's goal at 0x01040000 [110.02 52.93], 192 m from the corpse in the room's frame,
+    /// and the plan ran 201 m into the rock (M4 4.2 F1, DoD 8). <see cref="NavPoint.Global"/> is the same either way.
+    /// </summary>
     public static NavPoint FromCellFrame(in CellFrame frame) =>
-        new NavPoint(frame.CellId & 0xFFFF0000u, frame.Origin).Normalized();
+        LandDefs.IsEnvCell(frame.CellId)
+            ? new NavPoint(frame.CellId & 0xFFFF0000u, frame.Origin)
+            : new NavPoint(frame.CellId & 0xFFFF0000u, frame.Origin).Normalized();
 
     /// <summary>
     /// The retail position of a point: the outdoor land cell under it (<see cref="LandDefs.LandCoordToCellId"/>), its

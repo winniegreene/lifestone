@@ -109,6 +109,9 @@ public sealed class LoopbackLockTests : IDisposable
         Assert.NotNull(second);
         Assert.Null(failure1);
         Assert.Null(failure2);
+        using var tools = LoopbackLock.TryAcquire(Path.Combine(_root, "cache", "loopback-test-tools.lock"), TimeSpan.Zero, out var failure3); // the fourth account holds its own lock beside the other two
+        Assert.NotNull(tools);
+        Assert.Null(failure3);
         Assert.Null(LoopbackLock.TryAcquire(melee, TimeSpan.FromMilliseconds(300), out var busy));
         Assert.Contains("one test account", busy, StringComparison.Ordinal);
     }
@@ -119,6 +122,7 @@ public sealed class LoopbackLockTests : IDisposable
         Assert.Equal(Path.Combine(RepositoryFiles.MainCheckout, "cache", "loopback-test.lock"), LoopbackLock.DefaultPath);
         Assert.Equal(Path.Combine(RepositoryFiles.MainCheckout, "cache", "loopback-test-melee.lock"), LoopbackLock.PathFor("test-melee"));
         Assert.Equal(Path.Combine(RepositoryFiles.MainCheckout, "cache", "loopback-test-archer.lock"), LoopbackLock.PathFor("test-archer"));
+        Assert.Equal(Path.Combine(RepositoryFiles.MainCheckout, "cache", "loopback-test-tools.lock"), LoopbackLock.PathFor("test-tools")); // M4 D39: the tools lane's own lock
         Assert.Throws<ArgumentException>(() => LoopbackLock.PathFor("../x"));
         Assert.True(File.Exists(Path.Combine(RepositoryFiles.MainCheckout, "Lifestone.slnx")));
         Assert.StartsWith(RepositoryFiles.MainCheckout, RepositoryFiles.Root, StringComparison.OrdinalIgnoreCase);

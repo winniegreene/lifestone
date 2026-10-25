@@ -56,6 +56,43 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("'exhaustive' { Invoke-TestRun 'exhaustive' $exhaustiveFilter $exhaustiveMinimum | Out-Null }", script, StringComparison.Ordinal);
     }
 
+    // ------------------------------------------------------------------------------------------ D46: G-A before a live gate
+
+    [Fact]
+    public void Gate_is_the_build_and_both_test_tiers_with_no_godot_step_and_refuses_the_smoke_D46()
+    {
+        var script = SliceCheck;
+
+        Assert.Contains("[switch] $Gate", script, StringComparison.Ordinal);
+        Assert.Contains("$Stages = @('build', 'test', 'exhaustive')", script, StringComparison.Ordinal);
+        Assert.Contains("if ($Gate -and $buildOk) { Write-OfflineAdvisory }", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("Invoke-Smoke", Function(script, "Write-OfflineAdvisory"), StringComparison.Ordinal); // it names the steps, never runs them
+
+        // The refusals are thrown before anything runs (no build, no dotnet, no Godot).
+        var path = RepositoryFiles.PathOf("tools", "slice-check.ps1");
+        foreach (var (extra, named) in new[] { ("-Smoke", "-Smoke"), ("-Steps play-checks", "-Steps"), ("-Changed", "-Changed"), ("-Stages build", "-Stages") })
+        {
+            var run = RunPowerShell($"try {{ & '{path}' -Gate {extra} }} catch {{ Write-Output ('REFUSED=' + $_.Exception.Message) }}");
+            Assert.Contains("REFUSED=-Gate is G-A before a live gate", run, StringComparison.Ordinal);
+            Assert.Contains("takes no " + named, run, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Gate_names_the_offline_steps_the_diff_selects_and_none_for_a_docs_and_tests_diff_D46()
+    {
+        var tools = RepositoryFiles.PathOf("tools");
+        var functions = Function(SliceCheck, "Resolve-ChangedSteps") + "\n" + Function(SliceCheck, "Write-OfflineAdvisory").Replace("$PSScriptRoot", "'" + tools + "'", StringComparison.Ordinal) + "\n"
+            + "function Write-Stage([string] $stage, [string] $outcome, [string] $detail, [double] $seconds) { Write-Output (\"LINE=$stage $outcome $detail\") }\n$Base = 'master'\n";
+
+        string Advisory(params string[] files) => RunPowerShell(functions + "function Get-ChangedFiles { @(" + string.Join(",", files.Select(f => "'" + f + "'")) + ") }\nWrite-OfflineAdvisory");
+
+        var session = Advisory("src/Lifestone.Client/Session/Scenarios/MageBuildScenario.cs", "docs/milestones/m4-plan.md");
+        Assert.Contains("LINE=offline SKIP 3 step(s) the diff against master selects: play-checks,record-audio,shell-frames; G-A runs no Godot step", session, StringComparison.Ordinal);
+        Assert.Contains("LINE=offline SKIP the diff against master selects no backend-free step", Advisory("docs/milestones/m4-plan.md", "tests/Lifestone.Client.Tests/Repository/SliceCheckAndSmokeTests.cs", "tools/slice-check.ps1", "server/mod/Lifestone.ServerMod/Core/CharPurgeRules.cs"), StringComparison.Ordinal);
+        Assert.Contains("so every step", Advisory("tools/an-unmapped-tool.ps1"), StringComparison.Ordinal); // the fail-safe: a path no rule matches selects every step, and says so
+    }
+
     // ------------------------------------------------------------------------------------------ C6: per-test timings
 
     [Fact]
@@ -130,51 +167,170 @@ public sealed class SliceCheckAndSmokeTests
     }
 
     [Fact]
-    public void The_smoke_step_login_hunt_is_a_judged_backend_step_after_login_death_that_skips_unless_the_backend_is_required()
+    public void The_journey_steps_are_judged_backend_steps_that_skip_unless_the_backend_is_required_and_the_retired_live_steps_are_gone()
     {
-        // M4 1.2 s5: login-hunt on login-bsd's pattern (it changes Holtburg Hunter: experience and the belt's creatures), the melee leg; M4 3.1 s4: three kills, so looted>=1 is judged over two or more.
+        // M4 P5b G1: journey-mage / journey-melee / journey-archer replace login-buff, login-bsd, login-death, login-hunt and login-hunt-missile.
         var script = Smoke;
         var steps = Regex.Match(script, @"\$allSteps = @\(([^)]*)\)", RegexOptions.Singleline).Groups[1].Value;
         var backend = Regex.Match(script, @"\$backendSteps = @\(([^)]*)\)").Groups[1].Value;
         var judged = Regex.Match(script, @"\$frameJudgedSteps = @\(([^)]*)\)").Groups[1].Value;
+        var audio = Regex.Match(script, @"\$audioSteps = @\(([^)]*)\)").Groups[1].Value;
 
-        foreach (var list in new[] { steps, backend, judged })
+        foreach (var list in new[] { steps, backend, audio })
         {
-            Assert.Contains("'login-hunt'", list, StringComparison.Ordinal);
-            Assert.True(list.IndexOf("'login-death'", StringComparison.Ordinal) < list.IndexOf("'login-hunt'", StringComparison.Ordinal), "login-hunt comes after login-death");
+            Assert.Contains("'login-throwaway', 'journey-mage', 'journey-melee', 'journey-archer'", list, StringComparison.Ordinal);
         }
 
+        Assert.Contains("'journey-mage', 'journey-melee', 'journey-archer'", judged, StringComparison.Ordinal);
+        foreach (var retired in new[] { "login-buff", "login-bsd", "login-death", "login-hunt", "login-hunt-missile" })
+        {
+            foreach (var list in new[] { steps, backend, judged, audio })
+            {
+                Assert.DoesNotContain($"'{retired}'", list, StringComparison.Ordinal);
+            }
+
+            Assert.DoesNotContain($"if ($step -eq '{retired}'", script, StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("$huntSteps", script, StringComparison.Ordinal);
+
         // The skip under -Backend auto (and start) comes before the backend gate and records a SKIP.
-        var skip = script.IndexOf("if ($step -eq 'login-hunt' -and $Backend -ne 'require')", StringComparison.Ordinal);
+        var skip = script.IndexOf("if ($journeySteps.ContainsKey($step) -and $Backend -ne 'require')", StringComparison.Ordinal);
         var gate = script.IndexOf("if ($backendSteps -contains $step -and -not (Test-BackendGate", StringComparison.Ordinal);
-        Assert.True(skip > 0 && skip < gate, "the login-hunt skip rule must come before the backend gate");
+        Assert.True(skip > 0 && skip < gate, "the journey skip rule must come before the backend gate");
         Assert.Contains("-Skipped", script[skip..gate], StringComparison.Ordinal);
         Assert.Contains("continue", script[skip..gate], StringComparison.Ordinal);
 
-        // M4 P4 gate (D31): one body for the two hunts; the table gives each its weapon and kills (the melee hunt is three kills), $stepAccounts its account (test-melee, test-archer).
-        var body = script[script.IndexOf("{ $_ -in 'login-hunt', 'login-hunt-missile' } {", StringComparison.Ordinal)..];
+        // The table: journey name and Godot timeout (J5: the runner's own limits are 2,010 / 1,710 / 1,860 s).
+        Assert.Contains("'journey-mage'   = @{ Journey = 'mage'; Seconds = 2200 }", script, StringComparison.Ordinal);
+        Assert.Contains("'journey-melee'  = @{ Journey = 'melee'; Seconds = 1900 }", script, StringComparison.Ordinal);
+        Assert.Contains("'journey-archer' = @{ Journey = 'archer'; Seconds = 2000 }", script, StringComparison.Ordinal);
+
+        // The body: the account from the table, the journey option, the frames into <OutDir>/frames, the journey's own verdict, the frame fields report-only.
+        var body = script[script.IndexOf("{ $journeySteps.ContainsKey($_) } {", StringComparison.Ordinal)..];
         body = body[..body.IndexOf("'login' {", StringComparison.Ordinal)];
-        Assert.Contains("--account=$($stepAccounts[$step]) --login-check=hunt --hunt-weapon=$($hunt.Weapon) --hunt-kills=$($hunt.Kills)", body, StringComparison.Ordinal);
-        Assert.Contains("'login-hunt'         = @{ Weapon = 'melee'; Kills = 3 }", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("--hunt-kills=1", body, StringComparison.Ordinal); // a one-kill leg is never judged on looted (HuntLegVerdict.LootJudgeMinKills)
-        Assert.Contains("hunt done ok=true", body, StringComparison.Ordinal); // the step passes on the leg's own verdict
-        Assert.Contains("'swings', 'shots', 'hits', 'misses', 'returned', 'fighter', 'attack_frame_max_ms'", body, StringComparison.Ordinal); // copied, report-only (attack_frame_max_ms from 1.3 s3)
-        Assert.Contains("-FrameOver50 $fields.Over50 -FrameJudge $fields.Judge", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("attack_frame_max_ms=", body, StringComparison.Ordinal); // a field name in the copy list, never a judged "=" comparison
+        Assert.Contains("--account=$($stepAccounts[$step]) --login-check=journey --journey=$($journey.Journey) --play-screenshot=$frameStem", body, StringComparison.Ordinal);
+        Assert.Contains("$journey.Seconds '' $defaultSize", body, StringComparison.Ordinal);
+        Assert.Contains("(Join-Path $OutDir 'frames')", body, StringComparison.Ordinal);
+        Assert.Contains("Get-JourneyVerdict $run.Text $windowsContended", body, StringComparison.Ordinal); // M4 4.2 J2: the window frames are judged unless contended
+        Assert.Contains("$windowsContended = ($run.Others -gt 0 -or $parallelPhase) -and -not $SoloFrames", body, StringComparison.Ordinal);
+        Assert.Contains("windows (judged over 75 ms unless contended)", body, StringComparison.Ordinal);
+        Assert.Contains("Resolve-LiveFrames ($run.Code -eq 0 -and $judged.Ok) $run", body, StringComparison.Ordinal); // -ContendedFrames reports the frame fields as login-hunt-missile did
+        Assert.Contains("-FrameOver50 $over50 -FrameJudge $judge", body, StringComparison.Ordinal);
+    }
 
-        // M4 2.2 s4: the loot of the kill's corpse is copied beside it, report-only (judged from 3.1): looted, loot_skipped and loot_frame_max_ms by key, loot_frame_over_50 by its presence in the verdict (the leg prints it only when over).
-        Assert.Contains("'looted', 'loot_skipped', 'loot_frame_max_ms'", body, StringComparison.Ordinal);
-        Assert.Contains("loot_frame_over_50=yes", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("looted=", body, StringComparison.Ordinal); // a name in the copy list, never a judged comparison
+    [Fact]
+    public void The_journey_verdict_reads_the_done_line_every_station_line_and_the_teleport_budget()
+    {
+        var script = Smoke;
+        string[] lines0 =
+        [
+            "[logincheck] journey station=buff ok=true s=60.0",
+            "[logincheck] journey station=vendor ok=false s=0.0 skipped=precondition:no_vendor",
+            "[logincheck] journey frames station=buff frame_max_ms=31.5 frames=900",
+            "[logincheck] journey done ok=true name=mage stations=5/6 failed=none teleports=1 recalls=2 budget=3 route_m=900.0 run_s=1000.0 recovery_places=0 granted=0",
+        ];
+        var run = RunPowerShell(Function(script, "Get-JourneyVerdict")
+            + "$ok = @(" + string.Join(",", lines0.Select(l => "'" + l + "'")) + ") -join \"`n\"\n"
+            + "$a = Get-JourneyVerdict $ok\nWrite-Output ('A=' + $a.Ok + ' ' + $a.Frames + ' ' + $a.FrameMax)\n"
+            + "$b = Get-JourneyVerdict ($ok -replace 'teleports=1', 'teleports=4')\nWrite-Output ('B=' + $b.Ok)\n"
+            + "$c = Get-JourneyVerdict ($ok -replace 'station=buff ok=true', 'station=buff ok=false' -replace 'failed=none', 'failed=buff')\nWrite-Output ('C=' + $c.Ok)\n"
+            + "$d = Get-JourneyVerdict 'nothing'\nWrite-Output ('D=' + $d.Ok + ' ' + $d.Detail)\n"
+            + "$e = Get-JourneyVerdict ($ok -replace 'done ok=true', 'done ok=false')\nWrite-Output ('E=' + $e.Ok)\n");
 
-        // M4 3.1 s4: the recovery fields and lane g's mode_mismatch are copied report-only, n/a when the line lacks them: the verdict line's by key, the detail line's by key from the hunt detail line.
-        Assert.Contains("'heals', 'kit_uses', 'potions', 'mode_mismatch'", body, StringComparison.Ordinal);
-        Assert.Contains("'heal_failed_rolls', 'heal_points', 'heal_wasted'", body, StringComparison.Ordinal);
-        Assert.Contains(@"\[logincheck\] (hunt detail[^\r\n]*)", body, StringComparison.Ordinal);
-        Assert.Contains("$copied += \" $healCopied $healDetail\"", body, StringComparison.Ordinal);
-        Assert.Contains("\"$key=n/a\"", body, StringComparison.Ordinal);
-        Assert.Contains("1500 '' $defaultSize", body, StringComparison.Ordinal); // the Godot timeout of the leg: the 1200 s whole check (3.2-R15: with the shop visits) and the 120 s recovery log off, rounded up
-        Assert.Contains("'sold', 'bought', 'pyreals', 'appraised', 'vendor_frame_max_ms'", body, StringComparison.Ordinal); // 3.2-R17: DoD 12's pyreals=<delta> shows in the summary (report-only)
+        var lines = run.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 1 && l[1] == '=').ToArray();
+        Assert.Equal(["A=True buff:31.5 31.5", "B=False", "C=False", "D=False no journey done line", "E=False"], lines);
+    }
+
+    private static string JourneyDone(string name, string fields, int budget = 1) =>
+        $"[logincheck] journey done ok=true name={name} stations=9/9 failed=none budget={budget} route_m=500.0 run_s=900.0 rungs=1 blocked=0 sightless=2 vitals_passes=3 {fields}";
+
+    // Runs Get-JourneyVerdict over each (name, text, contended) and prints "<name>=<Ok>|<WindowOver50>|<WindowsSeen>|<Windows>|<Detail>".
+    private static Dictionary<string, string> JudgeJourneys(params (string Name, string Text, bool Contended)[] cases)
+    {
+        var script = Function(Smoke, "Get-JourneyVerdict");
+        foreach (var (name, text, contended) in cases)
+        {
+            var literal = "@(" + string.Join(",", text.Split('\n').Select(l => "'" + l + "'")) + ") -join \"`n\"";
+            script += $"$v = Get-JourneyVerdict ({literal}) ${(contended ? "true" : "false")}\n"
+                + $"Write-Output ('{name}=' + $v.Ok + '|' + $v.WindowOver50 + '|' + $v.WindowsSeen + '|' + $v.Windows + '|' + $v.Detail)\n";
+        }
+
+        var output = RunPowerShell(script);
+        return output.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Contains('=', StringComparison.Ordinal) && l.Contains('|', StringComparison.Ordinal))
+            .ToDictionary(l => l[..l.IndexOf('=', StringComparison.Ordinal)], l => l[(l.IndexOf('=', StringComparison.Ordinal) + 1)..]);
+    }
+
+    [Fact]
+    public void The_journey_verdict_judges_the_done_line_fields_the_owner_promoted_M4_4_2_J2()
+    {
+        // teleports<=1 on every journey, recalls>=2 on the mage, recovery_places=0 on every journey, granted=0 on the mage and the archer; the melee's granted and the other fields stay report-only.
+        var got = JudgeJourneys(
+            ("magepass", JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0"), false),
+            ("magerecalls", JourneyDone("mage", "teleports=1 recalls=1 recovery_places=0 granted=0"), false),
+            ("magerecallsgone", JourneyDone("mage", "teleports=1 recovery_places=0 granted=0"), false),
+            ("mageteleports", JourneyDone("mage", "teleports=2 recalls=3 recovery_places=0 granted=0", budget: 2), false),
+            ("mageplaces", JourneyDone("mage", "teleports=1 recalls=3 recovery_places=1 granted=0"), false),
+            ("magegranted", JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=2"), false),
+            ("archerpass", JourneyDone("archer", "teleports=1 recalls=1 recovery_places=0 granted=0"), false),
+            ("archergranted", JourneyDone("archer", "teleports=1 recalls=1 recovery_places=0 granted=1"), false),
+            ("archernorecalls", JourneyDone("archer", "teleports=0 recalls=0 recovery_places=0 granted=0"), false),
+            ("meleegranted", JourneyDone("melee", "teleports=1 recalls=1 recovery_places=0 granted=1"), false),
+            ("meleeplaces", JourneyDone("melee", "teleports=1 recalls=1 recovery_places=2 granted=1"), false),
+            ("meleeteleports", JourneyDone("melee", "teleports=2 recalls=1 recovery_places=0 granted=1", budget: 3), false),
+            ("overbudget", JourneyDone("archer", "teleports=3 recalls=1 recovery_places=0 granted=0", budget: 2), false));
+
+        Assert.StartsWith("True|", got["magepass"], StringComparison.Ordinal);
+        Assert.StartsWith("False|", got["magerecalls"], StringComparison.Ordinal);
+        Assert.Contains("; recalls 1 under 2 (mage)", got["magerecalls"], StringComparison.Ordinal);
+        Assert.Contains("; recalls n/a under 2 (mage)", got["magerecallsgone"], StringComparison.Ordinal);
+        Assert.StartsWith("False|", got["mageteleports"], StringComparison.Ordinal);
+        Assert.Contains("; teleports 2 over 1", got["mageteleports"], StringComparison.Ordinal);
+        Assert.Contains("; recovery_places 1 not 0", got["mageplaces"], StringComparison.Ordinal);
+        Assert.Contains("; granted 2 not 0 (mage)", got["magegranted"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["archerpass"], StringComparison.Ordinal);
+        Assert.Contains("; granted 1 not 0 (archer)", got["archergranted"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["archernorecalls"], StringComparison.Ordinal); // recalls is judged on the mage only
+        Assert.StartsWith("True|", got["meleegranted"], StringComparison.Ordinal); // the melee's granted stays report-only (vendor-facts grants a sale item by design)
+        Assert.Contains("; recovery_places 2 not 0", got["meleeplaces"], StringComparison.Ordinal);
+        Assert.Contains("; teleports 2 over 1", got["meleeteleports"], StringComparison.Ordinal);
+        Assert.Contains("; teleports 3 over budget 2", got["overbudget"], StringComparison.Ordinal);
+        Assert.DoesNotContain("; teleports 3 over 1", got["overbudget"], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_journey_verdict_judges_the_window_frames_over_75_ms_and_flags_over_50_unless_contended_M4_4_2_J2()
+    {
+        var done = JourneyDone("melee", "teleports=1 recalls=1 recovery_places=0 granted=0");
+        string Log(string hunt, string vendor, string facts) =>
+            "[logincheck] journey station=hunt ok=true s=9.0 " + hunt + "\n[logincheck] journey station=vendor ok=true s=3.0 " + vendor
+            + "\n[logincheck] journey station=vendor-facts ok=true s=3.0 " + facts + "\n" + done;
+        var quiet = Log("attack_frame_max_ms=12.3 loot_frame_max_ms=9.0", "vendor_frame_max_ms=20.0", "vendor_frame_max_ms=21.5");
+        var flagged = Log("attack_frame_max_ms=62.0 loot_frame_max_ms=9.0", "vendor_frame_max_ms=20.0", "vendor_frame_max_ms=21.5");
+        var over = Log("attack_frame_max_ms=75.1 loot_frame_max_ms=9.0", "vendor_frame_max_ms=20.0", "vendor_frame_max_ms=21.5");
+        var exactly75 = Log("attack_frame_max_ms=75.0 loot_frame_max_ms=9.0", "vendor_frame_max_ms=20.0", "vendor_frame_max_ms=21.5");
+        var lootOver = Log("attack_frame_max_ms=12.0 loot_frame_max_ms=90.4", "vendor_frame_max_ms=20.0", "vendor_frame_max_ms=21.5");
+        var factsOver = Log("attack_frame_max_ms=12.0 loot_frame_max_ms=9.0", "vendor_frame_max_ms=20.0", "vendor_frame_max_ms=88.8");
+        var na = Log("attack_frame_max_ms=n/a loot_frame_max_ms=n/a", "vendor_frame_max_ms=n/a", "vendor_frame_max_ms=n/a");
+        var absent = Log("kills=3", "sold=1", "sold=1"); // a log from before J1
+        var got = JudgeJourneys(
+            ("quiet", quiet, false), ("flagged", flagged, false), ("over", over, false), ("exactly75", exactly75, false), ("lootover", lootOver, false),
+            ("factsover", factsOver, false), ("overcontended", over, true), ("flaggedcontended", flagged, true), ("na", na, false), ("absent", absent, false));
+
+        Assert.StartsWith("True|False|True|hunt:attack_frame_max_ms=12.3 hunt:loot_frame_max_ms=9.0 vendor:vendor_frame_max_ms=20.0 vendor-facts:vendor_frame_max_ms=21.5|", got["quiet"], StringComparison.Ordinal);
+        Assert.StartsWith("True|True|True|", got["flagged"], StringComparison.Ordinal); // over 50 flags, never fails
+        Assert.StartsWith("False|True|True|", got["over"], StringComparison.Ordinal);
+        Assert.Contains("; window frame over 75 ms: hunt attack_frame_max_ms=75.1", got["over"], StringComparison.Ordinal);
+        Assert.StartsWith("True|True|", got["exactly75"], StringComparison.Ordinal); // the rule is "over 75"
+        Assert.Contains("; window frame over 75 ms: hunt loot_frame_max_ms=90.4", got["lootover"], StringComparison.Ordinal);
+        Assert.Contains("; window frame over 75 ms: vendor-facts vendor_frame_max_ms=88.8", got["factsover"], StringComparison.Ordinal);
+        Assert.StartsWith("True|True|True|", got["overcontended"], StringComparison.Ordinal); // contended: reported, never judged
+        Assert.Contains("; window frames=contended: hunt attack_frame_max_ms=75.1 over 75 ms (reported, not judged)", got["overcontended"], StringComparison.Ordinal);
+        Assert.DoesNotContain("window frame over 75 ms", got["overcontended"], StringComparison.Ordinal);
+        Assert.StartsWith("True|True|True|", got["flaggedcontended"], StringComparison.Ordinal);
+        Assert.DoesNotContain("contended", got["flaggedcontended"], StringComparison.Ordinal);
+        Assert.StartsWith("True|False|False|hunt:attack_frame_max_ms=n/a hunt:loot_frame_max_ms=n/a vendor:vendor_frame_max_ms=n/a vendor-facts:vendor_frame_max_ms=n/a|", got["na"], StringComparison.Ordinal); // the headless host
+        Assert.StartsWith("True|False|False||", got["absent"], StringComparison.Ordinal); // reported as absent, fails nothing
     }
 
     [Fact]
@@ -200,6 +356,10 @@ public sealed class SliceCheckAndSmokeTests
         var needGodot = allSteps.Where(s => s is not ("build" or "test" or "stray-output") && !backend.Contains(s)).ToList();
         Assert.Equal(needGodot.Order(StringComparer.Ordinal), keys.Order(StringComparer.Ordinal));
         Assert.DoesNotContain("login-buff", map, StringComparison.Ordinal);
+        Assert.DoesNotContain("login-hunt", map, StringComparison.Ordinal);
+        Assert.Contains("'journey-mage' = @(", map, StringComparison.Ordinal); // slice-check's advisory line names the journeys when a Session folder changes
+        Assert.Contains("'journey-melee' = @(", map, StringComparison.Ordinal);
+        Assert.Contains("'journey-archer' = @(", map, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -525,10 +685,4 @@ public sealed class SliceCheckAndSmokeTests
         throw new InvalidOperationException("neither pwsh nor powershell is installed");
     }
 
-    [Fact]
-    public void M4_2_2_fix2_R11_the_death_step_help_names_all_four_corpse_looted_values()
-    {
-        Assert.Contains("corpse_looted=<yes|partial|no|skipped>", Smoke, StringComparison.Ordinal);
-        Assert.DoesNotContain("<yes|no|skipped>", Smoke, StringComparison.Ordinal); // the third value the fix slice's R2 added (DeathLegVerdict.CorpseLoot.Partial)
-    }
 }

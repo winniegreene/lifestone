@@ -1,9 +1,12 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Navigation;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Tools;
 using Lifestone.Data.CharacterCreation;
+using Lifestone.Data.World.Data;
+using Lifestone.Net.Session;
 using Lifestone.ServerTools;
 
 namespace Lifestone.Client.Session.Scenarios;
@@ -17,9 +20,15 @@ namespace Lifestone.Client.Session.Scenarios;
 /// </summary>
 /// <remarks>
 /// <para><b>Stages</b> (<see cref="Stage"/>): <c>login</c>, <c>choosing</c>, <c>creating</c> (only when the name is absent), <c>entering</c>,
-/// <c>arriving</c>, <c>status</c> (the access level must be Player, owner decision D11), <c>building</c>, <c>logging-off</c>,
+/// <c>arriving</c>, <c>status</c> (the access level must be Player, owner decision D11), <c>building</c>, <c>refilling</c> and <c>purging</c> (both only with <c>freshCharacter</c>), <c>placing</c> (the fresh character), <c>logging-off</c>,
 /// <c>quitting</c>, <c>done</c>. The scenario never selects, deletes or enters another character; an absent name with no free slot
 /// fails the run (<see cref="CharacterListState.SlotCount"/>).</para>
+/// <para><b>Fresh character</b> (<c>freshCharacter</c>, <c>--fresh-character</c>, M4 fresh B1, owner decisions D44 and D45): the live gate's re-create, on <see cref="FighterBuildScenario"/>'s pattern. The BSD Mage, when the list shows it live, is never entered: it is deleted from the character list through
+/// the retail delete (stage <c>recreate-delete</c>), the build waits for the list to show that guid pending (<c>recreate-verify</c>), creates the template's character and builds it as usual; with no live copy it only creates it. After the build has ended met, <c>refilling</c> fills the vitals by ACE's own
+/// level-up rule (<see cref="FreshRefill"/>: the build grants its experience first, so its raises lifted the maxima over the current values; M4 fresh F1, the item's gate round 1 finding), then <c>purging</c> asks the server mod to purge
+/// the old copies of the name (<see cref="FreshPurge"/>), so a failed build leaves the old copy restorable; a re-created character whose old copy was not purged fails the run. A fresh character starts outside Holtburg, so <c>placing</c> then teleports it to Holtburg's point of interest
+/// (as the fighter build does) before the log off. The verdict gains <c>fresh=recreated|created purged=&lt;n&gt; refill=none|level-up:&lt;a&gt;-&gt;&lt;b&gt;|failed</c> (the gate's judge reads <c>fresh=</c> and <c>purged=</c> on the same line). The refill is one level-up: <b>a fresh mage ends one level above the template's
+/// (127), its extra experience unspent</b> (owner decisions D44, D45; the template's level check is <c>&gt;=</c>, so the journey's embedded build-verify accepts it). Only the session-ending (headless) build takes it.</para>
 /// <para><b>Building</b>, in this order, each only if still needed: (a) the mod's <c>xp</c> for exactly
 /// <see cref="XpTableData.XpForLevel"/>(126) minus <see cref="PlayerQualities.TotalExperience"/> (never when the mage is at or past it:
 /// the loops' kills may have taken it further); (b) <see cref="IActionApi.TrainSkill"/> for each of <see cref="MageTemplate.TrainedLater"/>
@@ -47,12 +56,16 @@ public sealed class MageBuildScenario : IScenario
     /// <summary>How long a precondition the read model has not caught up with is waited for, in seconds on the session clock.</summary>
     public const double SettleSeconds = 5;
 
+    /// <summary>How long the teleport to Holtburg may take, in seconds on the session clock (M4 fresh B1: the fresh character's placing).</summary>
+    public const double PlaceSeconds = 30;
+
     /// <summary>The mod verbs the build uses (the experience grant and the spellbook), which the status stage requires the mod to report.</summary>
     internal static readonly string[] RequiredVerbs = [ToolVerbs.Xp, ToolVerbs.Spell + " " + ToolVerbs.SpellLearn];
 
     /// <summary>The most spell ids one <c>spell learn</c> carries.</summary>
     public const int SpellChunk = PlayerTools.MaxSpellIds;
 
+    private readonly bool _endSession;
     private readonly XpTableData _table;
     private readonly IReadOnlyList<uint> _retailClasses;
     private readonly ILogSink _log;
@@ -62,6 +75,16 @@ public sealed class MageBuildScenario : IScenario
     private InFlight? _inFlight;
     private ToolHandle<ToolStatus>? _status;
     private bool _createTried;
+    private readonly bool _fresh;
+    private bool _freshDecided;
+    private string? _freshHow;
+    private uint _oldGuid;
+    private bool _purged;
+    private readonly FreshPurge? _purge;
+    private readonly FreshRefill? _refill;
+    private readonly TeleportDestination _holtburg;
+    private readonly uint _holtburgLandblock;
+    private double _placeStart = double.NaN;
     private bool _xpSent;
     private int _spellChunk;
     private int _spellsKnown;
@@ -77,8 +100,17 @@ public sealed class MageBuildScenario : IScenario
     /// <param name="retailClasses"><see cref="HeadlessCharacter.RetailSkillClasses"/> of the dats (for the creation).</param>
     /// <param name="log">Where the scenario logs.</param>
     /// <param name="arrivalSeconds">The limit on the arrival.</param>
-    public MageBuildScenario(XpTableData table, IReadOnlyList<uint> retailClasses, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds)
+    /// <param name="endSession">True (the headless host's): log in, build, log off and quit. False (M4 P5b J3b, the journey's <c>build-verify</c> station): the session already holds the character in the world, so the scenario skips the login, never logs off and ends at <c>done</c> in the world, as the hunt does.</param>
+    /// <param name="freshCharacter">M4 fresh B1 (owner decisions D44, D45): delete the BSD Mage's live character from the character list (never entering it), create the template's and build it, purge the old copies of the name with the mod, then place it in Holtburg; the verdict gains <c>fresh=recreated|created purged=&lt;n&gt; refill=none|level-up:&lt;a&gt;-&gt;&lt;b&gt;|failed</c> (M4 fresh F1: one level-up refills the vitals before the purge, so the mage ends at level 127). Only with <paramref name="endSession"/>.</param>
+    public MageBuildScenario(XpTableData table, IReadOnlyList<uint> retailClasses, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, bool freshCharacter = false)
     {
+        _endSession = endSession;
+        _fresh = freshCharacter;
+        if (freshCharacter && !endSession)
+        {
+            throw new ArgumentException("--fresh-character needs the character list: it is for the session-ending (headless) build, not the journey's embedded one", nameof(freshCharacter));
+        }
+
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(retailClasses);
         ArgumentNullException.ThrowIfNull(log);
@@ -92,6 +124,13 @@ public sealed class MageBuildScenario : IScenario
         _retailClasses = [.. retailClasses];
         _log = log;
         ArrivalSeconds = arrivalSeconds;
+        _holtburg = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
+        _holtburgLandblock = _holtburg.Location.Position.CellId >> 16;
+        if (freshCharacter)
+        {
+            _purge = new FreshPurge(MageTemplate.CharacterName, log, LogCategory);
+            _refill = new FreshRefill(table, log, LogCategory);
+        }
     }
 
     /// <inheritdoc/>
@@ -144,9 +183,11 @@ public sealed class MageBuildScenario : IScenario
             template += " template_short=" + ShortField(check);
         }
 
+        // M4 fresh B1: fresh=recreated|created purged=<n> (fresh=none before the run decided; the gate's pass needs recreated or created). M4 fresh F1: refill=none|level-up:<a>-><b>|failed last (none until the refilling stage has ended).
+        var fresh = _fresh ? string.Create(CultureInfo.InvariantCulture, $" fresh={_freshHow ?? "none"} purged={_purge?.Purged ?? 0} refill={_refill?.Field ?? "none"}") : string.Empty;
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"mage={state} level={_level} {template} spells={SpellsAccounted}/{ArenaProfile.SpellsToLearn.Count} built_steps={BuiltSteps}");
+            $"mage={state} level={_level} {template} spells={SpellsAccounted}/{ArenaProfile.SpellsToLearn.Count} built_steps={BuiltSteps}{fresh}");
     }
 
     /// <summary>
@@ -177,6 +218,24 @@ public sealed class MageBuildScenario : IScenario
         switch (Stage)
         {
             case "start":
+                if (_fresh && session.State.Phase == SessionPhase.InWorld && session.State.Self.Guid != 0)
+                {
+                    return Fail(session, "start: --fresh-character deletes the live character from the character list, but the session is already in the world (M4 fresh B1: a host that logged in itself cannot re-create)");
+                }
+
+                if (session.State.Phase == SessionPhase.InWorld && session.State.Self.Guid != 0)
+                {
+                    // Already in the world (a host that logged in itself, the journey, or the offline stand-in): nothing to log in. The build acts on the BSD Mage and nobody else.
+                    if (session.State.Self.Name is { } already && !string.Equals(already, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+                    }
+
+                    EnteredGuid = session.State.Self.Guid;
+                    _arrivalStart = session.Clock.Now;
+                    return Go("arriving");
+                }
+
                 _pending = actions.Login(ActionSource.Host);
                 return Go("login");
 
@@ -258,13 +317,55 @@ public sealed class MageBuildScenario : IScenario
                         }
                     }
 
+                    if (_fresh && !reported.Verbs.Contains(FreshPurge.RequiredVerb, StringComparer.Ordinal))
+                    {
+                        return Fail(session, $"status: the server mod does not report the '{FreshPurge.RequiredVerb}' verb the fresh character's purge uses (a stale mod: server setup -ModOnly)");
+                    }
+
                     return Go("building");
                 }
 
                 break;
 
+            case "recreate-delete":
+                if (Settled(out var deleteOutcome))
+                {
+                    if (deleteOutcome.Kind != ActionOutcomeKind.Confirmed)
+                    {
+                        return Fail(session, "fresh-character: deleting the old character through the client's retail character delete", deleteOutcome);
+                    }
+
+                    return Go("recreate-verify");
+                }
+
+                break;
+
+            case "recreate-verify":
+                foreach (var listed in session.State.Characters.Entries)
+                {
+                    if (listed.Guid == _oldGuid && listed.PendingDeletion)
+                    {
+                        _freshHow = "recreated";
+                        _createTried = false;
+                        Created = false;
+                        _log.Warn(LogCategory, "fresh=recreated: the old " + MageTemplate.CharacterName + " is listed as pending deletion (restorable until the new copy has been built and purges it); creating the template's character");
+                        return Go("choosing");
+                    }
+                }
+
+                return Waiting(session, "the server has not listed the old character as pending deletion");
+
             case "building":
                 return Build(session);
+
+            case "refilling":
+                return Refilling(session);
+
+            case "purging":
+                return Purging(session);
+
+            case "placing":
+                return Placing(session);
 
             case "logging-off":
                 if (Settled(out var loggedOff))
@@ -312,7 +413,22 @@ public sealed class MageBuildScenario : IScenario
             {
                 if (c.PendingDeletion)
                 {
+                    if (_fresh)
+                    {
+                        continue; // M4 fresh B1: a pending row of the name is an old copy; the new copy purges it
+                    }
+
                     return Fail(session, "choosing: the mage is pending deletion (restore it first)");
+                }
+
+                if (_fresh && !_freshDecided)
+                {
+                    // M4 fresh B1 (D44): the live copy is never entered. It is deleted from the list through the retail delete, and the new copy purges it once built (D45).
+                    _freshDecided = true;
+                    _oldGuid = c.Guid;
+                    _log.Warn(LogCategory, "fresh-character: deleting the live " + MageTemplate.CharacterName + " from the character list through the retail character delete (it is not entered); the new copy purges it after the build");
+                    _pending = session.Actions.DeleteCharacter(c.Guid, ActionSource.Host);
+                    return Go("recreate-delete");
                 }
 
                 EnteredGuid = c.Guid;
@@ -335,6 +451,12 @@ public sealed class MageBuildScenario : IScenario
         }
 
         _createTried = true;
+        if (_fresh && !_freshDecided)
+        {
+            _freshDecided = true;
+            _freshHow = "created"; // M4 fresh B1: no live copy was listed, so there is nothing to delete
+        }
+
         _log.Info(LogCategory, "absent; creating " + MageTemplate.CharacterName + " with the template's creation intent");
         _pending = session.Actions.CreateCharacter(MageTemplate.CreationIntent(MageTemplate.CharacterName, _retailClasses), ActionSource.Host);
         return Go("creating");
@@ -499,10 +621,129 @@ public sealed class MageBuildScenario : IScenario
             return Fail(session, "the build ended short of the template: " + check.Summary);
         }
 
+        if (_purge is not null && !_purged)
+        {
+            // M4 fresh B1 (D45): the old copies are purged only once the build has ended met, so a failed build leaves the old copy restorable. M4 fresh F1: the vitals are refilled first (the build's raises lifted the maxima over the current values).
+            _log.Info(LogCategory, "the build ended met; refilling the vitals by a level-up, then purging the old copies of " + MageTemplate.CharacterName + " with the server mod");
+            return Go("refilling");
+        }
+
+        return Finish(session);
+    }
+
+    private ScenarioStatus Finish(IGameSessionView session)
+    {
         _finished = true;
-        _pending = actions.LogOff(ActionSource.Host);
+        if (!_endSession)
+        {
+            _log.Info(LogCategory, "verdict " + VerdictFields());
+            return Go("done", ScenarioStatus.Succeeded);
+        }
+
+        _pending = session.Actions.LogOff(ActionSource.Host);
         return Go("logging-off");
     }
+
+    /// <summary>
+    /// M4 fresh F1: fills the vitals after the build by ACE's own level-up rule (<see cref="FreshRefill"/>: one grant of exactly the experience to the next level, only when a vital is below its maximum, never twice). The name check comes before the grant. Runs after the build has ended met and before the purge.
+    /// </summary>
+    private ScenarioStatus Refilling(IGameSessionView session)
+    {
+        if (session.State.Self.Name is not { } name)
+        {
+            return Waiting(session, "the entered character's name is not known");
+        }
+
+        if (!string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+        {
+            return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+        }
+
+        switch (_refill!.Poll(session, out var failure))
+        {
+            case FreshRefillProgress.Asking:
+                return ScenarioStatus.Running;
+            case FreshRefillProgress.Failed:
+                return Fail(session, failure!);
+            default:
+                Snapshot(session.State.Self.Qualities); // the verdict's level= is the refilled character's (the template's plus the one level-up)
+                if (_refill.Granted > 0)
+                {
+                    _steps.Add(string.Create(CultureInfo.InvariantCulture, $"refill xp {_refill.Granted:N0} (a level-up: {_refill.Field})")); // recorded, not a built step: BuiltSteps counts the template's
+                }
+
+                _log.Info(LogCategory, "the vitals are full (refill=" + _refill.Field + "); purging the old copies of " + MageTemplate.CharacterName + " with the server mod");
+                return Go("purging");
+        }
+    }
+
+    /// <summary>
+    /// M4 fresh B1 (D45): asks the mod to purge the old copies of the BSD Mage's name until it answers <c>unknown-character</c> (<see cref="FreshPurge"/>). The name check comes before every ask. A re-created character whose old copy was not purged fails the run;
+    /// a fresh character then starts outside Holtburg, so it is teleported there before the log off.
+    /// </summary>
+    private ScenarioStatus Purging(IGameSessionView session)
+    {
+        if (session.State.Self.Name is not { } name)
+        {
+            return Waiting(session, "the entered character's name is not known");
+        }
+
+        if (!string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+        {
+            return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+        }
+
+        switch (_purge!.Poll(session, out var failure))
+        {
+            case FreshPurgeProgress.Asking:
+                return ScenarioStatus.Running;
+            case FreshPurgeProgress.Failed:
+                return Fail(session, failure!);
+            default:
+                if (_freshHow == "recreated" && _purge.Purged == 0)
+                {
+                    return Fail(session, "purge: the old copy was not purged (the mod answered unknown-character for the first ask, though the retail delete left the old " + MageTemplate.CharacterName + " pending deletion)");
+                }
+
+                _purged = true;
+                if (!InHoltburg(session))
+                {
+                    _placeStart = session.Clock.Now;
+                    var label = "place to Holtburg (" + _holtburg.Name + ")";
+                    _log.Info(LogCategory, label);
+                    _steps.Add(label);
+                    _pending = session.Tools.Place(_holtburg, ActionSource.Host);
+                    return Go("placing");
+                }
+
+                return Finish(session);
+        }
+    }
+
+    private ScenarioStatus Placing(IGameSessionView session)
+    {
+        if (_pending is { Outcome: { } placed })
+        {
+            _pending = null;
+            if (placed.Kind != ActionOutcomeKind.Confirmed)
+            {
+                return Fail(session, "placing the mage in Holtburg", placed);
+            }
+        }
+
+        if (_pending is null && session.State.Self.Travel == SelfTravel.Present && InHoltburg(session))
+        {
+            _log.Info(LogCategory, "the mage stands in Holtburg");
+            return Finish(session);
+        }
+
+        return session.Clock.Now - _placeStart > PlaceSeconds
+            ? Fail(session, string.Create(CultureInfo.InvariantCulture, $"placing: the player was not present in Holtburg within {PlaceSeconds:0.#} s (travel {session.State.Self.Travel})"))
+            : ScenarioStatus.Running;
+    }
+
+    private bool InHoltburg(IGameSessionView session) =>
+        session.State.Self.Position is { } at && (at.CellId >> 16) == _holtburgLandblock;
 
     private string? TallySpells(ToolHandle<SpellLearnResult> handle, int asked)
     {

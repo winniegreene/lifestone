@@ -20,9 +20,14 @@ namespace Lifestone.Client.Session.Scenarios;
 /// </summary>
 /// <remarks>
 /// <para><b>Stages</b> (<see cref="Stage"/>): <c>login</c>, <c>choosing</c>, <c>creating</c> (only when the name is absent), <c>entering</c>, <c>arriving</c>,
-/// <c>status</c> (the access level must be Player, D11, and the mod must report <c>xp</c> and <c>item</c>), <c>building</c>, <c>placing</c>,
-/// <c>logging-off</c>, <c>quitting</c>, <c>done</c>. The scenario never selects, deletes or enters another character; an absent name with no free slot fails the
+/// <c>status</c> (the access level must be Player, D11, and the mod must report <c>xp</c> and <c>item</c>), <c>building</c>, <c>refilling</c> and <c>purging</c> (only with <c>freshCharacter</c>), <c>placing</c>,
+/// <c>logging-off</c>, <c>quitting</c>, <c>done</c>; <c>recreate-logoff</c>, <c>recreate-delete</c> and <c>recreate-verify</c> are the re-creation's (<c>recreate</c>, or <c>freshCharacter</c> without the first). The scenario never selects, deletes or enters another character; an absent name with no free slot fails the
 /// run, and the entered character's name is checked against the template's before every step that acts on it (<see cref="NameCheck"/>).</para>
+/// <para><b>Fresh character</b> (<c>freshCharacter</c>, <c>--fresh-character</c>, M4 fresh B1, owner decisions D44 and D45): the live gate's re-create. The template's live character, when the list shows it, is never entered: it is deleted from the character list through the retail delete,
+/// the build waits for the list to show that guid pending, creates the template's character and builds it as usual; with no live copy it only creates it. After the build has ended met, and before the placing, <see cref="FreshRefill"/> fills the vitals by ACE's own level-up rule (the build grants its experience first, so its raises lifted
+/// the maxima over the current values; M4 fresh F1, the item's gate round 1 finding), then <see cref="FreshPurge"/> asks the server mod to purge the old copies of the name
+/// (the one just deleted and any older pending or expired ones) until the verb answers <c>unknown-character</c>, so a failed build leaves the old copy restorable. A re-created character whose old copy was not purged fails the run. The verdict gains <c>fresh=recreated|created purged=&lt;n&gt; refill=none|level-up:&lt;a&gt;-&gt;&lt;b&gt;|failed</c>
+/// (the gate's judge reads <c>fresh=</c> and <c>purged=</c> on the same line). The refill is one level-up: <b>a fresh Brawler or Archer ends one level above its template's (56), its extra experience unspent</b> (owner decisions D44, D45; the template's level check is <c>&gt;=</c>, so the journey's embedded build-verify accepts it).</para>
 /// <para><b>Building</b>, in this order, each only if still needed: (a) the mod's <c>xp</c> for exactly <see cref="XpTableData.XpForLevel"/>(<see cref="FighterTemplate.Level"/>: 40 for the Hunter, 55 for the Brawler and the Archer since M4 P5a, D33 and D38) minus
 /// <see cref="PlayerQualities.TotalExperience"/> (never when the fighter is at or past it, except that the shortfall of the plan's remaining raises is granted too); (b) <see cref="IActionApi.TrainSkill"/> for each template skill
 /// the read model shows untrained, with <see cref="TrainCredits"/> (<c>TODO(m4-healing-minlevel)</c>: s0 found Healing has MinLevel 2 in the SkillTable; the
@@ -33,7 +38,8 @@ namespace Lifestone.Client.Session.Scenarios;
 /// stack, so the two healing kits are two grants; a stack line is topped up by the missing count, and a top-up is not merged: the count is what is judged; with a SpellTable and an account the kit also holds the spell components of the profile's spells,
 /// <see cref="FighterComponents"/>, so a rerun grants exactly what casts have burned since: the build only adds, and <c>kit=</c> names a short component as <c>Name:held/needed</c>);
 /// (e) the Mace wielded and the five leather pieces worn by <see cref="IActionApi.Wield"/> on <see cref="GearScenario"/>'s pattern (a worn piece that is not a
-/// kit line and covers the slots goes to the pack first); (f) <see cref="PlayerTools.Place"/> to Holtburg's point of interest when the player is not in its
+/// kit line and covers the slots goes to the pack first); (e3) only when asked (<c>rechargeGear</c>: the journey's build-verify), the magic gear's mana, appraised and recharged with the kit's mana charge when a piece runs low (<see cref="GearRecharge"/>;
+/// it runs alone until it ends, never fails the build, and its fields <c>gear_mana_min= recharged=</c> follow <c>spells_active=</c>); (f) <see cref="PlayerTools.Place"/> to Holtburg's point of interest when the player is not in its
 /// landblock (no bind: item 1.2's hunt binds). Every action waits for its outcome; anything but Confirmed fails the run naming the step and the outcome.
 /// A precondition the read model has not caught up with is waited for <see cref="SettleSeconds"/> on the session clock per reason, then fails by name;
 /// nothing is ever sent twice.</para>
@@ -88,6 +94,7 @@ public sealed class FighterBuildScenario : IScenario
         _ => throw new ArgumentOutOfRangeException(nameof(skillId), skillId, "TODO(m4-template-skill): a magic skill the verdict has no short name for"),
     };
 
+    private readonly bool _endSession;
     private readonly FighterTemplate _template;
     private readonly XpTableData _table;
     private readonly IReadOnlyList<uint> _retailClasses;
@@ -101,6 +108,7 @@ public sealed class FighterBuildScenario : IScenario
     private readonly FighterProfile? _profile;
     private readonly FighterKit _gear;
     private readonly IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? _spellInfos;
+    private readonly GearRecharge? _recharge;
     private GearReading? _gearReading;
     private int _pack = -1;
     private bool _gearNoted;
@@ -110,6 +118,12 @@ public sealed class FighterBuildScenario : IScenario
     private bool _createTried;
     private readonly bool _recreate;
     private bool _recreated;
+    private readonly bool _fresh;
+    private bool _freshDecided;
+    private string? _freshHow;
+    private bool _purged;
+    private readonly FreshPurge? _purge;
+    private readonly FreshRefill? _refill;
     private string? _mismatch;
     private uint _oldGuid;
     private bool _xpSent;
@@ -138,14 +152,34 @@ public sealed class FighterBuildScenario : IScenario
     /// is also granted the spell components its spells burn (<see cref="FighterComponents"/>, in the formula that account casts; the name is hashed and never stored or logged). Given neither, the kit has no components and a TODO is logged.
     /// </param>
     /// <param name="account">The account's name (see <paramref name="spells"/>).</param>
+    /// <param name="endSession">True (the headless host's): log in, build, place in Holtburg, log off and quit. False (M4 P5b J3b, the journey's <c>build-verify</c> station): the session already holds the character in the world, so the scenario skips the login, never places (the journey puts the character where the station needs it) and never logs off, and ends at <c>done</c> in the world. Not with <paramref name="recreate"/>.</param>
+    /// <param name="rechargeGear">True (the journey's <c>build-verify</c> station; closes <c>TODO(m4-gear-mana)</c>): after the kit is worn and packed, appraise the magic gear's mana and use the kit's mana charge when a piece runs low (<see cref="GearRecharge"/>, step (e3)); the verdict adds <c>gear_mana_min= recharged=</c>. For a template with gear only; report-only, it never fails the build.</param>
     /// <param name="recreate">M4 P5a C5 (owner decision D40): when the entered character's innate attributes differ from the template's, delete it through the client's retail character delete (ACE frees the name once it is pending deletion), wait for the list to show it pending, create the template's character and build that; the mod's purge is never used. Without it a mismatch fails the build (<c>template=mismatch:...</c>) before anything is bought. For the Brawler and the Archer only.</param>
-    public FighterBuildScenario(XpTableData table, IReadOnlyList<uint> retailClasses, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, FighterTemplate? template = null, IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? spells = null, string? account = null, bool recreate = false)
+    /// <param name="freshCharacter">M4 fresh B1 (owner decisions D44, D45): delete the template's live character from the character list (never entering it), create the template's and build it, then refill the vitals by one level-up (M4 fresh F1: the character ends one level above the template's) and purge the old copies of the name with the mod before the placing; the verdict gains <c>fresh=recreated|created purged=&lt;n&gt; refill=none|level-up:&lt;a&gt;-&gt;&lt;b&gt;|failed</c>. For the Brawler and the Archer only, with <paramref name="endSession"/> and not with <paramref name="recreate"/>.</param>
+    public FighterBuildScenario(XpTableData table, IReadOnlyList<uint> retailClasses, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, FighterTemplate? template = null, IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? spells = null, string? account = null, bool recreate = false, bool endSession = true, bool rechargeGear = false, bool freshCharacter = false)
     {
+        _endSession = endSession;
         _template = template ?? FighterTemplate.Hunter;
         _recreate = recreate;
+        _fresh = freshCharacter;
         if (recreate && _template.Key == FighterTemplate.Hunter.Key)
         {
             throw new ArgumentException("--fighter-recreate is for the Brawler and the Archer only (test-melee, test-archer); the Hunter is never re-created", nameof(recreate));
+        }
+
+        if (freshCharacter && _template.Key == FighterTemplate.Hunter.Key)
+        {
+            throw new ArgumentException("--fresh-character is for the Brawler and the Archer only (test-melee, test-archer); the Hunter is never re-created", nameof(freshCharacter));
+        }
+
+        if (freshCharacter && recreate)
+        {
+            throw new ArgumentException("--fresh-character and --fighter-recreate exclude each other: the first deletes the live character whatever it is, the second only when its attributes differ", nameof(freshCharacter));
+        }
+
+        if (freshCharacter && !endSession)
+        {
+            throw new ArgumentException("--fresh-character needs the character list: it is for the session-ending (headless) build, not the journey's embedded one", nameof(freshCharacter));
         }
 
         ArgumentNullException.ThrowIfNull(table);
@@ -177,9 +211,20 @@ public sealed class FighterBuildScenario : IScenario
         }
 
         _spellInfos = spells;
+        if (rechargeGear && _template.Kit.Gear is { } gearSet && _gear.ChargeWcid != 0)
+        {
+            _recharge = new GearRecharge(gearSet, _gear.ChargeWcid, _gear.ManaCharges, spells, log, LogCategory, _steps.Add);
+        }
+
         _table = table;
         _retailClasses = [.. retailClasses];
         _log = log;
+        if (freshCharacter)
+        {
+            _purge = new FreshPurge(_template.Name, log, LogCategory);
+            _refill = new FreshRefill(table, log, LogCategory);
+        }
+
         ArrivalSeconds = arrivalSeconds;
         _holtburg = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
         _holtburgLandblock = _holtburg.Location.Position.CellId >> 16;
@@ -245,10 +290,14 @@ public sealed class FighterBuildScenario : IScenario
 
         var magic = _profile is null ? string.Empty : string.Create(CultureInfo.InvariantCulture, $" magic={_magic} spells={SpellsAccounted}/{_profile.SpellsToLearn.Count}");
         var recreated = _recreated ? " recreated=yes old=pending-deletion" : string.Empty;
+        // M4 fresh B1: fresh=recreated|created purged=<n> (fresh=none before the run decided; the gate's pass needs recreated or created). M4 fresh F1: refill=none|level-up:<a>-><b>|failed last (none until the refilling stage has ended).
+        var fresh = _fresh ? string.Create(CultureInfo.InvariantCulture, $" fresh={_freshHow ?? "none"} purged={_purge?.Purged ?? 0} refill={_refill?.Field ?? "none"}") : string.Empty;
         // M4 P5a C6: the gear (report-only in its first gate): gear=<in place>/<pieces> gear_magic=on|off|n/a spells_active=<active>/<wanted> pack=<main-pack items>/102.
         var gear = _template.Kit.Gear is null ? string.Empty : _gearReading is { } g ? string.Create(CultureInfo.InvariantCulture, $" gear={g.Worn}/{g.Total} gear_magic={g.Magic} spells_active={g.SpellsField}") : " gear=not_entered";
         var pack = _pack < 0 || _template.Kit.Gear is null ? string.Empty : string.Create(CultureInfo.InvariantCulture, $" pack={_pack}/{GearKit.PackCapacity}");
-        return string.Create(CultureInfo.InvariantCulture, $"fighter={state} level={_level} {template} kit={_kit} wielded={_wielded} worn={_worn}{magic}{gear}{pack}{recreated}");
+        // The gear's mana (closes TODO(m4-gear-mana); report-only in its first gate): gear_mana_min=<the lowest piece's percent after the recharge> recharged=<charges used>[:<problem>], only when the caller asked for the recharge.
+        var mana = _recharge?.VerdictFields() ?? string.Empty;
+        return string.Create(CultureInfo.InvariantCulture, $"fighter={state} level={_level} {template} kit={_kit} wielded={_wielded} worn={_worn}{magic}{gear}{mana}{pack}{recreated}{fresh}");
     }
 
     /// <summary>
@@ -278,6 +327,24 @@ public sealed class FighterBuildScenario : IScenario
         switch (Stage)
         {
             case "start":
+                if (_fresh && session.State.Phase == SessionPhase.InWorld && session.State.Self.Guid != 0)
+                {
+                    return Fail(session, "start: --fresh-character deletes the live character from the character list, but the session is already in the world (M4 fresh B1: a host that logged in itself cannot re-create)");
+                }
+
+                if (session.State.Phase == SessionPhase.InWorld && session.State.Self.Guid != 0)
+                {
+                    // Already in the world (a host that logged in itself, the journey, or the offline stand-in): nothing to log in. The build acts on the template's character and nobody else.
+                    if (WrongCharacter(session) is { } wrong)
+                    {
+                        return wrong;
+                    }
+
+                    EnteredGuid = session.State.Self.Guid;
+                    _arrivalStart = session.Clock.Now;
+                    return Go("arriving");
+                }
+
                 _pending = actions.Login(ActionSource.Host);
                 return Go("login");
 
@@ -357,7 +424,7 @@ public sealed class FighterBuildScenario : IScenario
                 {
                     if (deleteOutcome.Kind != ActionOutcomeKind.Confirmed)
                     {
-                        return Fail(session, "recreate: deleting the old character through the client's retail character delete", deleteOutcome);
+                        return Fail(session, (_fresh ? "fresh-character" : "recreate") + ": deleting the old character through the client's retail character delete", deleteOutcome);
                     }
 
                     return Go("recreate-verify");
@@ -370,9 +437,16 @@ public sealed class FighterBuildScenario : IScenario
                 {
                     if (listed.Guid == _oldGuid && listed.PendingDeletion)
                     {
-                        _recreated = true;
                         _createTried = false;
                         Created = false;
+                        if (_fresh)
+                        {
+                            _freshHow = "recreated";
+                            _log.Warn(LogCategory, "fresh=recreated: the old " + _template.Name + " is listed as pending deletion (restorable until the new copy has been built and purges it); creating the template's character");
+                            return Go("choosing");
+                        }
+
+                        _recreated = true;
                         _log.Warn(LogCategory, "recreated=yes old=pending-deletion: the old " + _template.Name + " is listed as pending deletion (restorable in ACE's window); creating the template's character");
                         return Go("choosing");
                     }
@@ -385,6 +459,12 @@ public sealed class FighterBuildScenario : IScenario
 
             case "building":
                 return Build(session);
+
+            case "refilling":
+                return Refilling(session);
+
+            case "purging":
+                return Purging(session);
 
             case "placing":
                 return Placing(session);
@@ -435,12 +515,22 @@ public sealed class FighterBuildScenario : IScenario
             {
                 if (c.PendingDeletion)
                 {
-                    if (_recreate)
+                    if (_recreate || _fresh)
                     {
-                        continue; // M4 P5a C5: a re-creating run ignores the old character that is pending deletion
+                        continue; // M4 P5a C5, M4 fresh B1: a re-creating run ignores the old character that is pending deletion
                     }
 
                     return Fail(session, "choosing: the fighter is pending deletion (restore it first)");
+                }
+
+                if (_fresh && !_freshDecided)
+                {
+                    // M4 fresh B1 (D44): the live copy is never entered. It is deleted from the list through the retail delete (the same as C5's, without the log off), and the new copy purges it once built (D45).
+                    _freshDecided = true;
+                    _oldGuid = c.Guid;
+                    _log.Warn(LogCategory, "fresh-character: deleting the live " + _template.Name + " from the character list through the retail character delete (it is not entered); the new copy purges it after the build");
+                    _pending = session.Actions.DeleteCharacter(c.Guid, ActionSource.Host);
+                    return Go("recreate-delete");
                 }
 
                 EnteredGuid = c.Guid;
@@ -463,6 +553,12 @@ public sealed class FighterBuildScenario : IScenario
         }
 
         _createTried = true;
+        if (_fresh && !_freshDecided)
+        {
+            _freshDecided = true;
+            _freshHow = "created"; // M4 fresh B1: no live copy was listed, so there is nothing to delete
+        }
+
         _log.Info(LogCategory, "absent; creating " + _template.Name + " with the template's creation intent");
         _pending = session.Actions.CreateCharacter(_template.CreationIntent(_template.Name, _retailClasses), ActionSource.Host);
         return Go("creating");
@@ -491,6 +587,11 @@ public sealed class FighterBuildScenario : IScenario
             {
                 return Fail(session, $"status: the server mod does not report the '{verb}' verb the build uses (a stale mod: server setup -ModOnly)");
             }
+        }
+
+        if (_fresh && !reported.Verbs.Contains(FreshPurge.RequiredVerb, StringComparer.Ordinal))
+        {
+            return Fail(session, $"status: the server mod does not report the '{FreshPurge.RequiredVerb}' verb the fresh character's purge uses (a stale mod: server setup -ModOnly)");
         }
 
         return Go("building");
@@ -543,17 +644,23 @@ public sealed class FighterBuildScenario : IScenario
             return wrong;
         }
 
+        // (e3), running: the gear's recharge has the stage to itself until it ends, so (d) tops a charge it used up only afterwards.
+        if (_recharge is { InProgress: true } recharging)
+        {
+            return recharging.Step(session) ?? ScenarioStatus.Running;
+        }
+
         var actions = session.Actions;
 
         // M4 P5a C5 (owner decision D40): a character created with another attribute split than the template's gets nothing bought on top.
         _mismatch = InnateMismatch(q);
         if (_mismatch is not null)
         {
-            if (!_recreate || _recreated)
+            if (_fresh || !_recreate || _recreated)
             {
                 return Fail(
                     session,
-                    "building: the character's innate (creation) attributes differ from the " + _template.Name + " template (" + _mismatch + (_recreated ? "; the re-created character is wrong too" : "; run with --fighter-recreate to delete it and create the template's") + "); nothing is bought on top");
+                    "building: the character's innate (creation) attributes differ from the " + _template.Name + " template (" + _mismatch + (_recreated || _fresh ? "; the re-created character is wrong too" : "; run with --fighter-recreate to delete it and create the template's") + "); nothing is bought on top");
             }
 
             _oldGuid = EnteredGuid;
@@ -702,6 +809,12 @@ public sealed class FighterBuildScenario : IScenario
             return packed;
         }
 
+        // (e3) the gear's mana (closes TODO(m4-gear-mana)): appraised, and the kit's charge used when a piece runs low; only when the caller asked (the journey's build-verify). It never fails the build.
+        if (_recharge?.Step(session) is { } charging)
+        {
+            return charging;
+        }
+
         // (f) Holtburg.
         Snapshot(session);
         if (_check is { AllMet: false } check)
@@ -709,7 +822,30 @@ public sealed class FighterBuildScenario : IScenario
             return Fail(session, "the build ended short of the template: " + check.Summary);
         }
 
-        if (!InHoltburg(session))
+        if (_purge is not null && !_purged)
+        {
+            // M4 fresh B1 (D45): the old copies are purged only once the build has ended met (the same checks as the end of the run), so a failed build leaves the old copy restorable. M4 fresh F1: the vitals are refilled first (the build's raises lifted the maxima over the current values).
+            if (EndChecks(session) is { } notMet)
+            {
+                return notMet;
+            }
+
+            _log.Info(LogCategory, "the build ended met; refilling the vitals by a level-up, then purging the old copies of " + _template.Name + " with the server mod");
+            return Go("refilling");
+        }
+
+        return PlaceOrFinish(session);
+    }
+
+    private ScenarioStatus PlaceOrFinish(IGameSessionView session)
+    {
+        if (!_endSession && !InHoltburg(session))
+        {
+            // A journey's station never places by itself (P5b contract 5): the journey put the character where the station's needs say.
+            _log.Warn(LogCategory, "the fighter is not in Holtburg; an embedded build does not place (the journey's travel does)");
+        }
+
+        if (_endSession && !InHoltburg(session))
         {
             _placeStart = session.Clock.Now;
             _wait.Reset();
@@ -721,6 +857,60 @@ public sealed class FighterBuildScenario : IScenario
         }
 
         return Finish(session);
+    }
+
+    /// <summary>
+    /// M4 fresh F1: fills the vitals after the build by ACE's own level-up rule (<see cref="FreshRefill"/>: one grant of exactly the experience to the next level, only when a vital is below its maximum, never twice). The name check comes before the grant. Runs after the build has ended met and before the purge.
+    /// </summary>
+    private ScenarioStatus Refilling(IGameSessionView session)
+    {
+        if (WrongCharacter(session) is { } wrong)
+        {
+            return wrong;
+        }
+
+        switch (_refill!.Poll(session, out var failure))
+        {
+            case FreshRefillProgress.Asking:
+                return ScenarioStatus.Running;
+            case FreshRefillProgress.Failed:
+                return Fail(session, failure!);
+            default:
+                if (_refill.Granted > 0)
+                {
+                    _steps.Add(string.Create(CultureInfo.InvariantCulture, $"refill xp {_refill.Granted:N0} (a level-up: {_refill.Field})"));
+                }
+
+                _log.Info(LogCategory, "the vitals are full (refill=" + _refill.Field + "); purging the old copies of " + _template.Name + " with the server mod");
+                return Go("purging");
+        }
+    }
+
+    /// <summary>
+    /// M4 fresh B1 (D45): asks the mod to purge the old copies of the template's name until it answers <c>unknown-character</c> (<see cref="FreshPurge"/>). The name check comes before every ask. A re-created character whose old copy was not purged fails the run.
+    /// </summary>
+    private ScenarioStatus Purging(IGameSessionView session)
+    {
+        if (WrongCharacter(session) is { } wrong)
+        {
+            return wrong;
+        }
+
+        switch (_purge!.Poll(session, out var failure))
+        {
+            case FreshPurgeProgress.Asking:
+                return ScenarioStatus.Running;
+            case FreshPurgeProgress.Failed:
+                return Fail(session, failure!);
+            default:
+                if (_freshHow == "recreated" && _purge.Purged == 0)
+                {
+                    return Fail(session, "purge: the old copy was not purged (the mod answered unknown-character for the first ask, though the retail delete left the old " + _template.Name + " pending deletion)");
+                }
+
+                _purged = true;
+                return PlaceOrFinish(session);
+        }
     }
 
     private string? TallySpells(ToolHandle<SpellLearnResult> handle, int asked)
@@ -774,6 +964,30 @@ public sealed class FighterBuildScenario : IScenario
 
     private ScenarioStatus Finish(IGameSessionView session)
     {
+        if (EndChecks(session) is { } notMet)
+        {
+            return notMet;
+        }
+
+        _finished = true;
+        if (BuiltSteps == 0)
+        {
+            _log.Info(LogCategory, "nothing to add: the fighter already has its level, its stats, its magic and its kit");
+        }
+
+        if (!_endSession)
+        {
+            _log.Info(LogCategory, "verdict " + VerdictFields());
+            return Go("done", ScenarioStatus.Succeeded);
+        }
+
+        _pending = session.Actions.LogOff(ActionSource.Host);
+        return Go("logging-off");
+    }
+
+    /// <summary>The checks the build must pass to finish (the kit, the gear, the caster, the launcher), or the failure; null when it may finish. Changes nothing, so M4 fresh B1 runs it before the purge as well.</summary>
+    private ScenarioStatus? EndChecks(IGameSessionView session)
+    {
         Snapshot(session);
         if (_kit != "ok" || _wielded != _template.WieldedWeaponWcid || _worn != _template.Kit.Worn.Count(i => i.Role == FighterRole.Armour))
         {
@@ -796,14 +1010,7 @@ public sealed class FighterBuildScenario : IScenario
             return Fail(session, $"the build ended with {stillWielded} still wielded: ACE refuses the Mace while a launcher is");
         }
 
-        _finished = true;
-        if (BuiltSteps == 0)
-        {
-            _log.Info(LogCategory, "nothing to add: the fighter already has its level, its stats, its magic and its kit");
-        }
-
-        _pending = session.Actions.LogOff(ActionSource.Host);
-        return Go("logging-off");
+        return null;
     }
 
     // ------------------------------------------------------------------------------------------------ the kit
@@ -1099,7 +1306,7 @@ public sealed class FighterBuildScenario : IScenario
 
     /// <summary>
     /// The end checks of the gear and the pack: every piece in place (a named list otherwise), the main pack inside <see cref="GearKit.PackCapacity"/> minus <see cref="FighterKit.MainPackHeadroom"/> (the loot, a bought kit and the caster swap's unwield need the slots: a full pack
-    /// refused all of them in live round 2), and the silent pieces named as <c>TODO(m4-gear-mana)</c> (a worn piece none of whose wearer spells is active: its mana ran out or it never activated; nothing recharges the items yet). Null when the build may finish.
+    /// refused all of them in live round 2), and the silent pieces named (a worn piece none of whose wearer spells is active: its mana ran out or it never activated; the journey's build-verify recharges the gear and wears such a piece again, <see cref="GearRecharge"/>). Null when the build may finish.
     /// </summary>
     private ScenarioStatus? FinishGear(IGameSessionView session)
     {
@@ -1123,7 +1330,7 @@ public sealed class FighterBuildScenario : IScenario
             _gearNoted = true;
             foreach (var piece in reading.Silent)
             {
-                _log.Warn(LogCategory, $"TODO(m4-gear-mana): the {piece.Name} (weenie {piece.Wcid}) is worn but none of its wearer spells is active: its mana ({piece.ItemMana}, {piece.ManaHours:0.#} h at its rate) ran out or it never activated; nothing recharges gear yet (mana stones or a re-grant come later)");
+                _log.Warn(LogCategory, $"the {piece.Name} (weenie {piece.Wcid}) is worn but none of its wearer spells is active: its mana ({piece.ItemMana} full, {piece.ManaHours:0.#} h at its rate) ran out or it never activated; {(_recharge is null ? "this build does not recharge the gear (the journey's build-verify does: GearRecharge)" : "the recharge did not wake it (see the gear mana lines)")}");
             }
 
             _log.Info(LogCategory, $"gear: {reading.Worn}/{reading.Total} in place, gear_magic={reading.Magic}, spells_active={reading.SpellsField}, pack={_pack}/{GearKit.PackCapacity}");

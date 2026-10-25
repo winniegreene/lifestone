@@ -1967,7 +1967,7 @@ one place for the slices' notes; the sections above name the behaviour where it 
   Before (master): longest unit 8.5 ms, worst_ui_step 9.9 to 12.4 ms (one run failed the 12 ms rule). After: longest unit 2.4 ms, worst_ui_step 7.6 ms, GC 0.
   Live probe (the lead, solo, `smoke.ps1 -Only login-check,login -Backend require -SoloFrames`, one sample each): before, login-check's shell longest frame
   4.5 ms and longest unit 2.1 ms, login's longest frame 9.8 ms and longest unit 8.9 ms with a GC in it; after, login-check 4.6 ms and 2.2 ms, login 4.3 ms and
-  2.4 ms, build gc 0/0/0, the no-GC window held (10,310 and 14,436 KiB allocated). `TODO(m3-ui-step-gc-margin)` stays open: its closure waits on the post-window number (the first collection after the window ends: pause, generation and frames after `Complete`, in the log line "first collection after the no-gc window" and the play-check detail `shell_post_window_gc`); it closes only if that collection is also under the 12 ms margin. The window is sized from the GC heap count (`NoGcWindow`: 32 MiB a heap, 240 MiB at least, 512 MiB at most, so it holds up to 16 heaps and says UNDERSIZED beyond that).
+  2.4 ms, build gc 0/0/0, the no-GC window held (10,310 and 14,436 KiB allocated). `TODO(m3-ui-step-gc-margin)` stays open: its closure waits on the post-window number (the first collection after the window ends: pause, generation and frames after `Complete`, in the log line "first collection after the no-gc window" and the play-check detail `shell_post_window_gc`); it closes only if that collection is also under the 12 ms margin. The window is sized from the GC heap count (`NoGcWindow`: 32 MiB a heap, 240 MiB at least, 512 MiB at most, so it holds up to 16 heaps and says UNDERSIZED beyond that). **M4 P5b (`TODO(m4-throwaway-teleport-frame)`):** `GC.EndNoGCRegion` leaves gen 0 the region's budget, so after a held window the next collection waited for up to 512 MiB of allocation and promoted everything since the build: the 57-95 ms pause at the next arrival (the throwaway's Holtburg teleport, every journey's first). The owner of a held window now leaves one gen-0 collection pending at its end, which `RetailUiLayer.Step` runs before the next step's clock (the window keeps collections out of the UI steps, its own closing one included; `closed by a gen0 collection of <ms>` on the first-collection line), and the post-window watch counts from after it, logs "none in 900 frames (still watching)" and goes on to the first collection, with its gen-0 size and promoted bytes.
 - **Engine notes (fix B).** `RenderingServer.GlobalShaderParameterGetList()` logs an engine ERROR outside the editor: never call it.
   `DynamicLightTable.Declare` adds the sampler without asking.
 - **The hero video's live takes (h).** The capture, edit and measure scripts for the M3 hero video are under `cache/m3/4-2/hero`; see
@@ -2622,8 +2622,8 @@ and its stack down by one. A break is recorded in `Anomalies` and printed `check
 The verdict is `harm-heal done ok=true|false [why=] heals= kits= potions= harms= fizzles= health_min_pct= swapped=yes|no kit_lost= busy=
 health_end_pct= s= kit_points= potion_points= potion_stack=<before>-><after> transfers= resist= checks=ok|<n>` (the host adds `granted=`; the last six fields are
 new and report-only in their first gate except `checks`). `heals` counts the kits, potions and Heal Self casts that raised the health, both the
-script's own and the keeper's. The live facts are `HealBrawlerLiveTests` (test-melee), `HealArcherLiveTests` (test-archer) and
-`HealLiveTests.BSD_Mage_harms_itself` (test, which needs the mage build's Harm Self). The belt hunt's heal leg (`HunterLeg`) is retired from
+script's own and the keeper's. The live proof is the `harm-heal` station (`HarmHealStation`) of each journey: mage (test), melee (test-melee), archer (test-archer); its verdict
+fields `heals potions swapped checks` are the judges (the loopback classes were deleted in P5b J6). The belt hunt's heal leg (`HunterLeg`) is retired from
 the heal facts.
 
 **The fighters' buff leg (C4).** `--scenario=buff` runs on `test` (BSD Mage, unchanged: gear, bars, cycle, forced pass) and on `test-melee` and `test-archer`
@@ -2636,8 +2636,8 @@ peace, the caster to the pack, the weapon and the arrows back); log off; quit. T
 in runs the Out half first, then logs off. The verdict keeps the mage's fields (`gear=n/a worn=n/a` for a fighter); `buffs=12/12` counts the profile's buff lines;
 the line ends `swapped=yes|no swap_s=<s>`, with `swap_why=swap:<step>` after a failure (a refused caster reads `swapped=yes` with the reason, the weapon having moved and
 come back). `IBuffProfile.TransfersAhead` (true for `FighterProfile`, false for the mage) lets the cycle cast Stamina to Mana Self before a buff when the mana left
-after it would be under the cost of the strongest transfer the chance rule allows; the mage's rule would reach 25 and stall under the transfer's cost. The live classes
-are `FighterBrawlerBuffLiveTests` and `FighterArcherBuffLiveTests` (area `fighter` in `tools/lib/GateAreas.psd1`). A pass first took about 700 s of waits for mana; with the
+after it would be under the cost of the strongest transfer the chance rule allows; the mage's rule would reach 25 and stall under the transfer's cost. The live proof is the `buff` station
+of the melee and archer journeys (`buffs=12/12 rebuffed=yes forced=yes`); the loopback classes were deleted in P5b J6. A pass first took about 700 s of waits for mana; with the
 mana order below it takes 18 s (round 6).
 
 **The fighters' creation, the spending floor and the re-creation (D40, C5).** Each template has its own creation attributes (Aluvian, 330 points, each 10 to 100;
@@ -2669,8 +2669,8 @@ the item equips either way. Creature and Life spells go on the wearer, Item spel
 Focus / 3 (`FighterGearDatTests` pins it). A piece whose ItemDifficulty is above the character's Arcane Lore fails the build by name. The verdict gains, after `worn=` and `magic=`,
 `gear=n/n gear_magic=on|off|n/a spells_active=a/w pack=n/102` (report-only in its first gate; `gear_magic` is named so as not to clash with `magic=trained:...`): `gear` counts the
 pieces worn, wielded or (the bow) held; `spells_active` counts the worn pieces' wearer spells present in the enchantment registry or surpassed by a stronger spell of their category.
-Live (round 3): the Brawler `gear=13/13 spells_active=38/38`, the Archer `30/30`. `TODO(m4-gear-mana)`: a worn piece with no active wearer spell is logged by name, and nothing
-recharges it. **The side packs:** ACE refuses any pick-up or unwield into a full main pack (`Container.cs:527`, the main pack's `ItemCapacity` 102; side packs do not count), and
+Live (round 3): the Brawler `gear=13/13 spells_active=38/38`, the Archer `30/30`. A worn piece with no active wearer spell is logged by name; the journey's build-verify
+recharges the gear (section 41, the gear's mana; `TODO(m4-gear-mana)` closed). **The side packs:** ACE refuses any pick-up or unwield into a full main pack (`Container.cs:527`, the main pack's `ItemCapacity` 102; side packs do not count), and
 the caster swap's unwield of the weapon needs one free main-pack slot. The round 2 gate found it: the 40 component stacks of F-abil on an old character with about 55 loot items. So
 the kits carry two "Pack" (136); the build moves the component stacks into them (`PackStep`) and fails `pack-full` when the main pack holds more than 72 of 102 after the kit; the
 hunt's loot stops after two consecutive "Unable to put X into container" refusals (`why=pack-full`, `TODO(m4-hunt-pack-full)`).
@@ -2687,7 +2687,7 @@ fighters keep 13 unspent credits each. A rerun on an existing character trains a
 (+85 and +100) were not taken, and 31196 and 31197 are ACE's own copies. The stacks: Brawler 100 Mana and 50 Stamina, Archer 60 Mana and 10 Stamina, in the side packs
 (`FighterRole.VitalPotion`, so they take no main-pack slot; a rerun grants only the missing count and merges); the Archer's capacity (14,550) leaves 1,138 after the kit and the
 loot room, which `FighterComponentsDatTests` asserts. The kits' burdens are 6,730 (Brawler) and 6,775 (Archer). **The fighters' order** (`VitalsOptions.FighterOrder`, set by
-`BuffScenario` for a fighter and by `HealLiveTests` for a caster swap): for mana, a Mana Potion first (under the station's next need); then Stamina to Mana Self only when stamina is at
+`BuffScenario` for a fighter and by the harm-heal station for a caster swap): for mana, a Mana Potion first (under the station's next need); then Stamina to Mana Self only when stamina is at
 `--vitals-stamina-until` (80%) or more, with no potion left, at most `VitalsKeeper.FighterTransferCap` (2) casts a pass, named in the log; then a rest in peace. Revitalize Self serves
 stamina alone, never mana; stamina takes a Stamina Potion first (under `--vitals-stamina-below`, on to `--vitals-stamina-until`), then Revitalize Self only when none is left, then a rest.
 ACE gives mana no stance factor (`Creature_Vitals.cs`, `GetStanceMod`), so sitting or lying does not speed it: a fighter regenerates about 1 mana a 5 s tick, so 115 mana is about
@@ -2706,3 +2706,131 @@ logs `WAIT n s` in `gate.log` and sleeps the remainder; accounts `none` (build, 
 `EnterWorldTracker` now sees only the final error, so `LoginRetryPolicy`'s 75 s wait works for the game and the headless host (before, the first 0x0D ended it). **D42:** the death
 loop's vitae grant may cross a level (the owner); it is logged `vitae_level_crossed=yes level=a->b` and is still exactly the clearing amount; the stage still fails when the
 `XpTable` cannot name the level. The test that refused a crossing was replaced by one that grants across a level, logs the crossing and never grants more than clears.
+
+## 41. Journeys and stations (M4 P5b; D36, D37, D43)
+
+**The journey.** A journey is one character's whole day in the world, as a list of stations run in order: `JourneyScenario` over a `JourneyPlan`
+(`JourneyPlans.Mage`, `Melee`, `Archer`; the three gate journeys, and `JourneyPlans.Hero` for the hero hook, which is not in the gate). Its stages are
+logged once each: login (skipped in the world), known-state (the character is present, in Holtburg, in peace; a place here is `recovery_place=1` and is
+never budgeted), then per station `travel:<name>`, `vitals:<name>`, `station:<name>`, `recover:<name>` after a failure, and `logoff`. The gate runs
+`smoke -Only journey-mage` (on `test`), `journey-melee` (`test-melee`) and `journey-archer` (`test-archer`); each step is judged by its done line (section 5, README).
+
+**Stations.** `IStation` is one stop: it knows its needs (`StationNeeds`), runs, and returns its verdict fields. `ScenarioStation` wraps an existing
+scenario (Gear, Buff, Hunt, Vendor, the den fight, the death) with its options set by the plan; `ScriptLeg` runs a script station (the harm-heal
+script, the cast facts, the kit-refused check) through the client's `LiveLeg`. `JourneyStations.Create` builds one station per kind of `StationKinds`
+(18 kinds: build-verify, gear, buff, cast-facts, kit-refused, harm-heal, bind, den-travel, den-fight, death, recall-home, hunt, vendor, vendor-facts,
+appraise-items, appraise-vendor, chests, shortcuts). Stations per plan, with Lifestone's own expected seconds (the lead tunes them): mage build-verify 30,
+gear 60, buff 200, cast-facts 120, kit-refused 20, harm-heal 90, bind 60, den-travel 60, den-fight 150, death 280, recall-home 30 (1,100 in all); melee
+build-verify 30, buff 120, bind 60, hunt 300, harm-heal 90, recall-home 30, vendor 180, chests 90 (900); archer build-verify 30, buff 120, bind 60, hunt 320,
+appraise-items 40, harm-heal 90, recall-home 30, appraise-vendor 90, vendor 150, shortcuts 70 (1,000). The journey's limit in the headless host is the plan's
+expected seconds plus 300 s (mage 1,400, melee 1,200, archer 1,300); every limit in the gate is twice its step.
+
+**The travel seam (`IJourneyTravel`).** Every trip a station makes goes through the seam, with a purpose: `Bind` (the lifestone), `Ground` (the belt,
+forest or the den), `Corpse`, `Home` (Holtburg), `Spot` (a fight's place), `Seek`, `Cell`, `Vendor`. `PlaceTravel` is today's place (a teleport to a
+point, checked by the landblock). `JourneyTravel` decides the means: Home is Lifestone Recall (1635; the fighters cast it over the `CasterSwap`);
+Ground to the den is Primary Portal Recall (48) when the mage's portal is known tied, else the budgeted place to the den's arrival; Ground to the belt
+or the forest is the budgeted place; Seek, Cell, Vendor, Corpse, Spot and Bind use the host's runner (none: `travel:run:no-runner`). Over the budget a
+place fails `travel:place:over-budget` with a WARN line (not an ERROR). The tolerance is 5 m (Lifestone's own). The **arrival contract**: a place keeps
+its teleport and landblock check; a run, a recall or a nothing-to-do is authoritative (the caller trusts it); a leg on foot is bounded at 900 s
+(`HuntScenario.TravelLegSeconds`). The hunt, the death and the fight (DenExit) go through the seam (`HuntOptions.Travel`, `DeathOptions.Travel`,
+`FightOptions.Travel`), so the same rules hold in every station.
+
+**Facts the journeys rest on (W0, live on all three characters).** The ties are not in the player description, so a journey cannot read a link from
+it. `Lifestone Recall` (1635) reads the character's linked lifestone (ACE's LinkedLifestone), which only the spell **Lifestone Tie** (2644) sets at a
+lifestone (`WorldObject_Magic.cs:966-976`); without it the cast is refused (0x049E). The builds therefore learn 2644 and the kits carry its components
+(J3b). Bind is Use on the lifestone (the respawn point). The mage's **Primary Portal Tie** (47) links at 3 m in front of the den's portal (the portal's
+guid 0x71B90000, cell 0x1B90002C); after **Primary Portal Recall** (48) the mage arrives inside the den (0x01050375), so a tied journey reaches the den by
+recall and its den-travel station walks no portal (`teleports=0 recalls>=2`). The untied answer (0x04A3) was not seen live, because the mage was tied
+in the probe. Lying down (the death's undress and lie-down, D37) needed its own cause: see below.
+
+**Off the lifestone (M4 4.2 FS).** A Lifestone Recall arrives at the linked lifestone's own location (`WorldObject_Magic.cs:1087-1095`), inside its
+cylinder, and Lifestone's player does not collide with server objects (`TODO(d25-server-object-host)`, docs/physics.md "Other objects"), so the client
+stays there where retail's would place itself out. The mage's journey ended so and logged off; on the Soak tier's next login ACE created the mage there
+(`Player_Networking.cs:224`, `SendSelf`) and only then placed it out of the lifestone (`WorldObject.cs:209-220`: `enter_world`, `SyncLocation`), 2.22 m
+north, with no message to the client: the where-am-I check failed (server (81.33, 14.02), client (81.33, 11.80)). With the lifestone as a physics object,
+Lifestone's own placement lands on ACE's spot to the centimetre (`LifestonePlacementTests`). Until a host keeps physics objects for server objects, the
+recall-home station walks to the lifestone's known point (84, 7.7) when it arrives within 2.5 m of a lifestone (`stepped_off=yes`, after the recall's
+fields), so no journey logs off inside one; elsewhere than Holtburg it fails, named.
+
+**The three plans and the hero plans.** The mage (BSD Mage on `test`), the melee (Holtburg Brawler on `test-melee`) and the archer (Holtburg Archer on
+`test-archer`) each run the station list above. The hero plans (`--journey=hero-archer|hero-brawler|hero-mage`) are the same stations with the showpieces
+and the camera (J7): `--journey-shots` takes the station frames (`JourneyLegRunner.StationShots.cs`: the hunt's combat and power-bar frames, the fight's
+bolt, hit and kill, the death's frames its trigger allows (the corpse and decoy frames need UI the journey does not drive), the buff's mid-cast frame, named `<stem>-<station>-<slot>.png`) and the showpiece bursts
+(`ShowpieceWatch`: frost arrow, mace hit, portal recall and arrival, Cassius' Ring of Fire 1785, which the mage learns for the hero fight). The camera is
+retail's chase camera only, with the rotation a hero shot uses. Hero runs are not judged by the gate.
+
+**One death (D37).** `DeathStages.All` is Gear, Bind, Den, Death, Regear, Vitae, Corpse, Rebuff, Fight: the mage dies once (`deaths=1`, was two) and the
+journey's death station never uses an unbuff suicide (`suicides=0`). The `death-mode` stage undresses (the equipment to the pack) and `death-wait` lies
+down (`MotionCommand` Sleeping through `IActionApi.Move`) once the walk stops; the report-only fields are `undressed= lie_down= lie_echo=`. The lie-down
+was not sent on the wire at first: the walker had been in the Magic stance (a cast's TurnTo carried it), so the retail motion refused Sleeping
+(`CantLieDownInCombat`). The walker's stance sync is a named gap to close (not yet a TODO in the code). The death's composed fight after the respawn is
+the den walk, which both journey hosts now offer.
+
+**The two hosts and one leg planner.** `--scenario=journey --journey=mage|melee|archer` runs in the headless host (the account is the journey's; another
+account is refused); `--login-check=journey` runs it in the Godot play (`GodotJourneyRunnerHost`, the player's body as the walker, sources by cell). The
+hosts share one planner and one leg: `JourneyLegPlanner` (the goal, the source with the indoor exit route, arrival, the failure name, moved) and
+`JourneyRunLeg` over `IJourneyLegBody`. They differ only in the body (`HeadlessBody` or the player) and where collision and tiles come from. Before
+the Godot host's first leg it waits for the settle gate (`JourneySettleGate`, 120 s; `docs/wayfinding.md`, the journeys' planner).
+
+**Verdict lines.** A station prints `journey station=<name> ok=<bool> s=<seconds> <fields> [why=<reason>] [skipped=precondition:<x>] [caused_by=<station>]`;
+a skipped station after an earlier failure reads `skipped=`, so `ok` means every station was ok or skipped after a failure, all were reported, and the
+teleports are within the budget. The done line is `journey done ok= name= stations=n/m failed=<names|none> teleports= recalls= budget= route_m= run_s=
+vitals_passes= recovery_places= granted= recovery_place= recovery=`. `Get-JourneyVerdict` in `tools/smoke.ps1` judges the done line (`ok=true`,
+`failed=none`, `teleports` within the budget, no `ok=false` station without `skipped=`). The fields `route_m`, `rungs`, `teleports`, `recalls`, `granted`,
+`recovery_places`, `vitals_passes`, `run_s` and the keeper's fields are report-only in the first gate. `recovery=suicide` appears only in the mage's den
+when the way home fails; the other characters use one recovery place (outside the budget, judged 0 from the second gate).
+
+**The gear's mana (closes `TODO(m4-gear-mana)`).** The fighters keep their magic gear over many gates, and each piece's own mana burns while its spells are
+active (ACE `Player_Tick.cs:623-659`; at 0 the spells are removed). Retail's remedy is a mana stone, so the Brawler's and the Archer's kits carry one Titan
+Mana Charge (ace_world 9060: 5,000 mana, burden 50, Value 9,000, sold by 19 vendors), granted by the mod's `item` verb and topped up by the build as the
+potions are. The fighter's build-verify (and only it: `FighterBuildScenario(rechargeGear: true)`, step (e3), after the kit is worn and packed) runs
+`GearRecharge`: it appraises every worn piece of the set, the Archer's bow in the pack and the held charges (`IActionApi.Identify`; ItemCurMana and
+ItemMaxMana, PropertyInt 107 and 108, are assessment properties, and ACE sends nothing while the mana burns). When a piece is under half its maximum it uses
+a charge (`IActionApi.UseManaStone`, GameAction 0x0035 {stone, target}): on the player when a worn piece is low (ACE pours it over every equipped item below
+its maximum, rationed evenly, `ManaStone.cs:121-190`), on the bow when only the bow is; then it appraises again, and uses another while a piece is low and
+the kit's charges last. Only a stone with mana is used (an empty stone used on an item destroys the item). ACE casts an item's spells only on wield
+(`Player_Inventory.cs:313-315`), so a piece whose spells were removed at 0 is taken off and worn again in the same place after its charge
+(`TODO(m4-gear-mana-reactivate)`: whether retail re-cast them by itself is unread). The step never fails the build; the verdict adds
+`gear_mana_min=<lowest piece's percent after the step>|unread recharged=<charges used>[:no-charge|:refused|:unread]` after `spells_active=`, report-only in its
+first gate. One charge covers about three hours of the gear's burn (the trigger fires about 4,200 short for the Brawler and 4,600 for the Archer). Tests: `GearRechargeTests` (a scripted ACE: the burn, the ration, the re-wear),
+`ManaStoneTrackerTests`, and `FighterBuildScenarioTests`' recharge cases.
+
+**Limits.** The live gate's ExpectedSeconds and the projection are in section 5 of `docs/milestones/m4-plan.md`. Open TODOs from the journeys are
+section 9 there (`m4-journey-buffed`, `m4-journey-ground-height`, `j4-kit-account`, `j4-station-kind`, `j4-hunt-character`, `chest-use-range`,
+`renald-front-room-point`, `m4-vendor-issellable-wire`, `m4-death-walkless-wait`, `m4-lie-down-controller`, `m4-travel-failure-unnamed`).
+
+## 42. Fresh characters each live gate (M4, after P5b; D44-D46)
+
+**The re-create.** Leftover state broke several of P5b's gate rounds with no bug behind it (a fighter left in a back room or a cellar, a full
+pack, used-up kits and potions, the mage's den-portal tie already set), so every live gate now starts its journeys from new characters (D44).
+`--fresh-character` on the builds (`--scenario=fighter-build --account=test-melee|test-archer`, `--scenario=mage-build` on `test`; refused for
+the Hunter, any other account or scenario, and with `--fighter-recreate`) logs in, deletes the journey character from the character list
+through retail's delete without entering it, waits for the list to show it pending, creates the template's character, enters it and builds
+it as the idempotent build always does. Only after the build has ended met does the new copy purge the old ones (`Session/Scenarios/FreshPurge.cs`):
+`char purge "<its own name>"` until the verb answers `unknown-character`, so the copy just deleted and any older pending or expired rows go,
+and a failed build leaves the old copy restorable. The mage is then placed in Holtburg (a fresh character starts outside it); the fighter's
+build already places. The verdict gains `fresh=recreated|created purged=<n> refill=...`, and a re-created character whose old copy was not purged fails.
+
+**The refill (`Session/Scenarios/FreshRefill.cs`, gate round 1's finding).** ACE refills the vitals only on a level-up (@95ef426d
+`Player_Xp.cs` `CheckForLevelup` calls `SetMaxVitals`), and the build's raises come after its one level-up, so a fresh character
+used to start its journey with its current vitals at the creation values (the mage at health 6/205). In fresh mode the build's last step,
+before the purge, grants exactly the experience to the next level when any vital is below its maximum, and waits (10 s) for the level and
+every vital at its maximum (`refill=level-up:<a>-><b>`, or `none`). The gate characters therefore end one level above their templates
+(the mage 127, the fighters 56); the extra experience stays unspent.
+
+**The swap's busy wait.** The fighters' caster swap waits while `IActionApi.BusyReason` names a busy chain (a potion's Ready on the
+Heal lane, a move's chain) before each step, at most 15 s (`swap:busy-wait`), as the recall does (P5b FC-a1): the fresh Brawler's
+unwield right after the vitals keeper's Mana Potions had been refused.
+
+**The purge rule (D45).** For `BSD Mage`, `Holtburg Brawler` and `Holtburg Archer` only (`CharPurgeRules.Recreated`), the mod's purge refuses
+as graduated while the account holds no live copy of the name, so the last copy never goes; it decides `own-character` by id rather than by
+name, so the new copy may name itself; and it takes only the pending copies. The other graduated names stay refused by name, even pending.
+The stand-in (`StandInCharPurge`) applies the same rule, and one table runs through both.
+
+**The gate.** `tools\live-gate.ps1` puts a `recreate` step at the head of each journey lane (in `-Serial`, `recreate-<name>` before each
+headless journey), judged by `GateJudge.psm1`'s `Get-RecreateVerdict`: exit 0, `headless done scenario=<s> ok=1`, and the fresh and purged
+fields. A journey whose re-create failed is not run (one named FAIL row). `-KeepCharacters` skips the step and says so once.
+
+**G-A (D46).** Before a live gate, `slice-check -Gate`: the build, the default tests and the Exhaustive tier, no Godot step, and one line
+naming the offline steps the diff selects; the offline smoke runs once per item at its end (`-Changed`, or `-Smoke` at a wave's last item
+and the milestone end).

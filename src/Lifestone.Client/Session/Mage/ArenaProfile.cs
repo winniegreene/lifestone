@@ -388,7 +388,7 @@ public static class ArenaProfile
 
     /// <summary>
     /// The mage's lines that are no buff and no fight line (M4 P5a, owner decisions D33 and D36): Harm Self I-VIII (Life Magic, the heal test's way of getting hurt; the mage's Life Magic casts the whole line at the 0.9 chance rule), and the three
-    /// travel spells Lifestone Recall (1635), Primary Portal Tie (47) and Primary Portal Recall (48), Item Enchantment, no duration. Ids, names, powers and schools are the SpellTable's (<c>ArenaProfileTests</c> pins them). They are not in <see cref="Lines"/>
+    /// travel spells Lifestone Recall (1635), Primary Portal Tie (47) and Primary Portal Recall (48), Item Enchantment, no duration, and (M4 P5b J3b, W0) Lifestone Tie (2644): the only spell that sets ACE's LinkedLifestone, which Lifestone Recall reads (WorldObject_Magic.cs:966-976 and :1087-1093 at 95ef426d). Ids, names, powers and schools are the SpellTable's (<c>ArenaProfileTests</c> pins them). They are not in <see cref="Lines"/>
     /// (the buff cycle, the gear loops and the spell bars walk those); the build learns them through <see cref="FightExtras"/>.
     /// </summary>
     public static IReadOnlyList<ProfileLine> Extras { get; } =
@@ -408,15 +408,25 @@ public static class ArenaProfile
             S(47, "Primary Portal Tie", 150, 0)),
         L("Primary Portal Recall", "Primary Portal Recall", MagicSchool.ItemEnchantment, ProfileRole.Travel,
             S(48, "Primary Portal Recall", 100, 0)),
+        L("Lifestone Tie", "Lifestone Tie", MagicSchool.ItemEnchantment, ProfileRole.Travel,
+            S(2644, "Lifestone Tie", 100, 0)),
+        L("Cassius' Ring of Fire", "Cassius' Ring of Fire", MagicSchool.WarMagic, ProfileRole.WarOption,
+            S(RingOfFireId, "Cassius' Ring of Fire", 200, 0)),
     ];
 
     /// <summary>
+    /// Cassius' Ring of Fire (M4 P5b J7, the hero video, owner decision D32): a War Magic projectile ring of power 200 (the SpellTable: nine projectiles around the caster, components 110 x2, 19, 67, 34, 46, 63, 58 before the account's taper
+    /// randomisation). The build learns it with the other extras; <see cref="GearKit.KitFightSpells"/> adds its components to the kit. It is no line of the buff cycle and no war loop's choice: only the hero journey casts it.
+    /// </summary>
+    public const uint RingOfFireId = 1785;
+
+    /// <summary>
     /// Fire Vulnerability Other VII ("Inferno's Gift") and Heal Self VII ("Adja's Intervention"): the fight tab's spells that are no profile line (M3 4.2 p1); then, from M4 P5a, every spell of <see cref="Extras"/> (Harm Self I-VII, Lifestone Recall,
-    /// Primary Portal Tie, Primary Portal Recall); the build learns them after the lines.
+    /// Primary Portal Tie, Primary Portal Recall, Lifestone Tie); the build learns them after the lines.
     /// </summary>
     public static IReadOnlyList<uint> FightExtras { get; } = [2170, 2073, .. Extras.SelectMany(l => l.Spells).Select(s => s.Id)];
 
-    /// <summary>The extra line named <paramref name="name"/> ("Harm Self", "Lifestone Recall", "Primary Portal Tie", "Primary Portal Recall"), or null.</summary>
+    /// <summary>The extra line named <paramref name="name"/> ("Harm Self", "Lifestone Recall", "Primary Portal Tie", "Primary Portal Recall", "Lifestone Tie"), or null.</summary>
     public static ProfileLine? ExtraNamed(string name) => Extras.FirstOrDefault(l => l.Name == name);
 
     /// <summary>The mage's buff profile (<see cref="IBuffProfile"/>): the lines, the cycle's casting order (Focus, Willpower and Creature Enchantment Mastery first) and the spells the build learns.</summary>

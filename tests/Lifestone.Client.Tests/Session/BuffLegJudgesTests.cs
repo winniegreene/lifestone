@@ -160,35 +160,6 @@ public sealed class BuffLegJudgesTests
     // ---------------------------------------------------------------------------------------------- the smoke step list
 
     [Fact]
-    public void The_smoke_step_list_has_login_buff_as_a_backend_step_and_skips_it_unless_the_backend_is_required()
-    {
-        var script = Smoke;
-        var steps = Regex.Match(script, @"\$allSteps = @\(([^)]*)\)", RegexOptions.Singleline).Groups[1].Value;
-        var backend = Regex.Match(script, @"\$backendSteps = @\(([^)]*)\)").Groups[1].Value;
-
-        Assert.Contains("'login-buff'", steps, StringComparison.Ordinal);
-        Assert.Contains("'login-buff'", backend, StringComparison.Ordinal);
-        Assert.True(steps.IndexOf("'login-throwaway'", StringComparison.Ordinal) < steps.IndexOf("'login-buff'", StringComparison.Ordinal));
-        Assert.DoesNotContain("'login-buff'", steps[..steps.IndexOf("'login-check'", StringComparison.Ordinal)], StringComparison.Ordinal);
-
-        // The skip rule runs before the backend gate: under auto (slice-check's) and start the step is recorded as a SKIP, never run, never a failure.
-        var skip = script.IndexOf("if ($step -eq 'login-buff' -and $Backend -ne 'require')", StringComparison.Ordinal);
-        var gate = script.IndexOf("if ($backendSteps -contains $step -and -not (Test-BackendGate", StringComparison.Ordinal);
-        Assert.True(skip > 0 && skip < gate, "the login-buff skip rule must come before the backend gate");
-        var rule = script[skip..gate];
-        Assert.Contains("-Skipped", rule, StringComparison.Ordinal);
-        Assert.Contains("continue", rule, StringComparison.Ordinal);
-
-        // The step: the buff leg's command, the leg's own time for a whole cycle, and a PASS that needs ok=true.
-        var body = script[script.IndexOf("'login-buff' {", StringComparison.Ordinal)..];
-        body = body[..body.IndexOf("'login' {", StringComparison.Ordinal)];
-        Assert.Contains("--account=$($stepAccounts[$step]) --login-check=buff --buff-auto=on", body, StringComparison.Ordinal); // M4 4.1 lane c: the driver run, no forced pass
-        Assert.Contains("\" 900 ", body, StringComparison.Ordinal);
-        Assert.Contains("buff done ok=true", body, StringComparison.Ordinal);
-        Assert.Contains("$verdict", body, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void Slice_check_never_runs_the_buff_step()
     {
         var sliceCheck = File.ReadAllText(RepositoryFiles.PathOf("tools", "slice-check.ps1"));

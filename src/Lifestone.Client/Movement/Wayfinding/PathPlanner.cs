@@ -19,8 +19,11 @@ namespace Lifestone.Client.Movement.Wayfinding;
 /// drop exceeds the step-up; <see cref="NavMap"/>'s step rules block the rest. Every addend is non-negative, so the
 /// octile distance stays admissible and open flat ground costs exactly the octile distance.</para>
 /// <para><b>Pulled.</b> The node path is pulled to vertices by the lattice line of sight (<see cref="NavMap.LineOfSight"/>
-/// at clearance <see cref="PullMinClearance"/>, never crossing water, slope or a scar the node path kept off), each vertex with
-/// its node's z.</para>
+/// at clearance <see cref="PullMinClearance"/>, never crossing water, slope or a scar the node path kept off, nor more of the creature layer
+/// than the node path between), each vertex with its node's z; then straightened: a vertex goes when the vertex kept before it sees the one
+/// after it by the same rule (nav-natural-steering: long straight runs over open ground, a vertex only at a real corner).</para>
+/// <para><b>Creatures.</b> <see cref="Creatures"/>, the run's creature layer, is stamped per plan (never into the tile): a step into a disc
+/// costs <see cref="NavCreatures.CostPerMetre"/> more per metre, the goal's own creature left out (nav-creature-avoid).</para>
 /// <para><b>Far goals.</b> A goal beyond the attached tiles is planned to a horizon goal: the open node on the attached
 /// area's outer edge, reachable on the coarse graph, nearest the straight line from the start to the goal
 /// (<see cref="NavStatus.Horizon"/>). The runner's contract: run the horizon route, and once the map's
@@ -61,6 +64,21 @@ public sealed class PathPlanner
 
     /// <summary>The runner replans when the body is this far off the route (<see cref="NavRoute.DistanceFrom"/>). Not retail: Lifestone's own (design 3.1).</summary>
     public const float OffRouteMetres = 3f;
+
+    /// <summary>The most passes of the straightening (each drops the vertices the kept one before sees past). Not retail: Lifestone's own.</summary>
+    public const int StraightenPasses = 4;
+
+    /// <summary>
+    /// The clearance in nodes a straightened shortcut keeps (one more than the pull's): a small static's collision can reach past its stamp, and a long
+    /// line beside one is what the physics refuses (the forest run's 0x02000246 in 0xA3B4). Not retail: Lifestone's own.
+    /// </summary>
+    public const int StraightenMinClearance = PullMinClearance + 1;
+
+    /// <summary>
+    /// How much more of the creature layer's cost (in metres of edge cost) a pulled segment may cross than the node path between its ends did:
+    /// the lattice's rounding, so a segment never cuts deeper into a creature's disc than the search went. Not retail: Lifestone's own.
+    /// </summary>
+    public const float CreaturePullSlack = 0.5f;
 
     /// <summary>
     /// How far, in nodes, a blocked start may move to an open node (a body brushing a static stands on its stamp, which
@@ -112,6 +130,14 @@ public sealed class PathPlanner
     private bool[] _scarStart = new bool[8];
     private int _scarCount;
 
+    private NavCreature[] _creatures = new NavCreature[8];
+    private int _creatureCount;
+    private float[] _creatureCost = [];
+    private int[] _creatureStamp = [];
+    private int _creatureGen;
+    private float[] _creaturePrefix = new float[1024];
+    private int[] _vIdx = new int[64];
+
     // The current plan's goal.
     private int _goalNode;
     private int _goalGx;
@@ -136,6 +162,12 @@ public sealed class PathPlanner
     /// <summary>The map planned over.</summary>
     public NavMap Map => _map;
 
+    /// <summary>The run's creature layer (nav-creature-avoid), read at each plan; null or empty plans over terrain and statics alone.</summary>
+    public NavCreatures? Creatures { get; set; }
+
+    /// <summary>The creatures the last plan stamped (the goal's own left out).</summary>
+    public int CreaturesStamped => _creatureCount;
+
     /// <summary>
     /// Plans a route from <paramref name="from"/> to <paramref name="goal"/> over the attached tiles, avoiding the live
     /// <paramref name="scars"/>. Never throws for an unplannable route: the result names it.
@@ -147,6 +179,7 @@ public sealed class PathPlanner
         EnsureCapacity();
         var startG = from.Global;
         SnapshotScars(scars, startG);
+        StampCreatures(goal);
 
         if (!_map.TryNode(startG, out int start))
         {
@@ -247,6 +280,7 @@ public sealed class PathPlanner
         Reconstruct();
         bool exactGoal = !horizon && !_objectGoal;
         Pull(startG, goalG, exactGoal);
+        Straighten(startG, goalG, exactGoal);
         LastPullMilliseconds = Stopwatch.GetElapsedTime(t1).TotalMilliseconds;
         var xy = new Vector2[_vCount];
         var z = new float[_vCount];
@@ -392,6 +426,66 @@ public sealed class PathPlanner
 
         return false;
     }
+
+    // ---- creatures ----
+
+    /// <summary>Stamps the creature layer's cost on the nodes of every disc (the goal's own creature left out); per plan, never into a tile.</summary>
+    private void StampCreatures(NavGoal goal)
+    {
+        _creatureCount = 0;
+        if (Creatures is not { Count: > 0 } layer)
+        {
+            return;
+        }
+
+        if (_creatureCost.Length < _state.Length)
+        {
+            _creatureCost = new float[_state.Length];
+            _creatureStamp = new int[_state.Length];
+            _creatureGen = 0;
+        }
+
+        int gen = NextGen(ref _creatureGen, _creatureStamp);
+        int n = layer.CopyTo(ref _creatures);
+        uint ignore = goal.Guid ?? 0;
+        for (int k = 0; k < n; k++)
+        {
+            var c = _creatures[k];
+            if ((ignore != 0 && c.Guid == ignore) || c.Radius <= 0f)
+            {
+                continue;
+            }
+
+            _creatures[_creatureCount++] = c;
+            int x0 = (int)MathF.Floor(c.Centre.X - c.Radius);
+            int x1 = (int)MathF.Floor(c.Centre.X + c.Radius);
+            int y0 = (int)MathF.Floor(c.Centre.Y - c.Radius);
+            int y1 = (int)MathF.Floor(c.Centre.Y + c.Radius);
+            for (int gy = y0; gy <= y1; gy++)
+            {
+                for (int gx = x0; gx <= x1; gx++)
+                {
+                    float cost = NavCreatures.CostPerMetre(Vector2.Distance(new Vector2(gx + 0.5f, gy + 0.5f), c.Centre), c.Radius);
+                    if (cost <= 0f || !_map.TryNodeG(gx, gy, out int node))
+                    {
+                        continue;
+                    }
+
+                    if (_creatureStamp[node] != gen)
+                    {
+                        _creatureStamp[node] = gen;
+                        _creatureCost[node] = 0f;
+                    }
+
+                    _creatureCost[node] += cost;
+                }
+            }
+        }
+    }
+
+    /// <summary>The creature layer's extra cost per metre on <paramref name="node"/> this plan (0 off every disc).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private float CreatureCost(int node) => _creatureCount > 0 && _creatureStamp[node] == _creatureGen ? _creatureCost[node] : 0f;
 
     // ---- goals ----
 
@@ -737,6 +831,11 @@ public sealed class PathPlanner
                 }
 
                 float ng = gn + StepCost(tile, j, d, zn - zt);
+                if (_creatureCount > 0)
+                {
+                    ng += (d < 4 ? 1f : Sqrt2) * CreatureCost(nb);
+                }
+
                 if (ms.Seen == gen && ng >= ms.G)
                 {
                     continue;
@@ -780,6 +879,11 @@ public sealed class PathPlanner
 
             int ts = nb / NavMap.NodesPerTile;
             float ng = gn + StepCost(_map.TileOfSlot(ts), nb - (ts * NavMap.NodesPerTile), d, _map.Z(node) - _map.Z(nb));
+            if (_creatureCount > 0)
+            {
+                ng += (d < 4 ? 1f : Sqrt2) * CreatureCost(nb);
+            }
+
             if (ms.Seen == gen && ng >= ms.G)
             {
                 continue;
@@ -895,15 +999,28 @@ public sealed class PathPlanner
             _slopePrefix = new int[_path.Length];
         }
 
+        if (_creaturePrefix.Length < _pathCount)
+        {
+            _creaturePrefix = new float[_path.Length];
+        }
+
         int water = 0;
         int slope = 0;
+        float exposure = 0f;
         for (int k = 0; k < _pathCount; k++)
         {
             var flags = _map.Flags(_path[k]);
             water += (flags & NavFlags.Water) != 0 ? 1 : 0;
             slope += (flags & NavFlags.Slope) != 0 ? 1 : 0;
+            if (k > 0 && _creatureCount > 0)
+            {
+                bool diagonal = _map.NodeGx(_path[k]) != _map.NodeGx(_path[k - 1]) && _map.NodeGy(_path[k]) != _map.NodeGy(_path[k - 1]);
+                exposure += (diagonal ? Sqrt2 : 1f) * CreatureCost(_path[k]);
+            }
+
             _waterPrefix[k] = water;
             _slopePrefix[k] = slope;
+            _creaturePrefix[k] = exposure;
         }
     }
 
@@ -912,12 +1029,12 @@ public sealed class PathPlanner
     {
         _vCount = 0;
         int last = _pathCount - 1;
-        AddVertex(startG, _map.Z(_path[0]));
+        AddVertex(startG, _map.Z(_path[0]), 0);
         if (last == 0)
         {
             if (exactGoal && goalG != startG)
             {
-                AddVertex(goalG, _map.Z(_path[0]));
+                AddVertex(goalG, _map.Z(_path[0]), 0);
             }
 
             return;
@@ -964,8 +1081,44 @@ public sealed class PathPlanner
                 best = lo;
             }
 
-            AddVertex(PathPoint(best, startG, goalG, exactGoal), _map.Z(_path[best]));
+            AddVertex(PathPoint(best, startG, goalG, exactGoal), _map.Z(_path[best]), best);
             i = best;
+        }
+    }
+
+    /// <summary>
+    /// Straightening (nav-natural-steering): a pulled vertex goes when the vertex kept before it sees the vertex after it (<see cref="Visible"/>, the
+    /// pull's own rule at <see cref="StraightenMinClearance"/>), repeated up to <see cref="StraightenPasses"/> times. The pull's gallop stops at the first point it cannot see, and the
+    /// lattice's sight is not monotone along a winding node path, so the pull leaves vertices a straight run does not need.
+    /// </summary>
+    private void Straighten(Vector2 startG, Vector2 goalG, bool exactGoal)
+    {
+        for (int pass = 0; pass < StraightenPasses && _vCount > 2; pass++)
+        {
+            int kept = 1;
+            for (int v = 1; v < _vCount - 1; v++)
+            {
+                if (Visible(_vIdx[kept - 1], _vIdx[v + 1], startG, goalG, exactGoal, StraightenMinClearance))
+                {
+                    continue;
+                }
+
+                _vxy[kept] = _vxy[v];
+                _vz[kept] = _vz[v];
+                _vIdx[kept] = _vIdx[v];
+                kept++;
+            }
+
+            _vxy[kept] = _vxy[_vCount - 1];
+            _vz[kept] = _vz[_vCount - 1];
+            _vIdx[kept] = _vIdx[_vCount - 1];
+            kept++;
+            bool changed = kept != _vCount;
+            _vCount = kept;
+            if (!changed)
+            {
+                break;
+            }
         }
     }
 
@@ -979,7 +1132,7 @@ public sealed class PathPlanner
         return exactGoal && k == _pathCount - 1 ? goalG : _map.NodeCentre(_path[k]);
     }
 
-    private bool Visible(int i, int j, Vector2 startG, Vector2 goalG, bool exactGoal)
+    private bool Visible(int i, int j, Vector2 startG, Vector2 goalG, bool exactGoal, int minClearance = PullMinClearance)
     {
         // The pull may cross water or slope only where the node path between the two points did.
         var avoid = NavFlags.None;
@@ -993,26 +1146,47 @@ public sealed class PathPlanner
             avoid |= NavFlags.Slope;
         }
 
-        return _map.Sight(
-            PathPoint(i, startG, goalG, exactGoal),
-            PathPoint(j, startG, goalG, exactGoal),
-            PullMinClearance,
-            avoid,
-            _scars,
-            _scarStart,
-            _scarCount);
+        var a = PathPoint(i, startG, goalG, exactGoal);
+        var b = PathPoint(j, startG, goalG, exactGoal);
+        if (!_map.Sight(a, b, minClearance, avoid, _scars, _scarStart, _scarCount))
+        {
+            return false;
+        }
+
+        // Nor more of the creature layer than the node path between (nav-creature-avoid): a segment never cuts deeper into a disc than the search went.
+        return _creatureCount == 0 || LineExposure(a, b) <= _creaturePrefix[j] - _creaturePrefix[i] + CreaturePullSlack;
     }
 
-    private void AddVertex(Vector2 xy, float z)
+    /// <summary>The creature layer's stamped cost along the straight line from <paramref name="a"/> to <paramref name="b"/>, sampled as the lattice's sight is.</summary>
+    private float LineExposure(Vector2 a, Vector2 b)
+    {
+        float len = Vector2.Distance(a, b);
+        int n = Math.Max(1, (int)MathF.Ceiling(len / NavMap.SightSampleMetres));
+        float step = len / n;
+        float sum = 0f;
+        for (int s = 1; s <= n; s++)
+        {
+            if (_map.TryNode(Vector2.Lerp(a, b, (float)s / n), out int node))
+            {
+                sum += CreatureCost(node) * step;
+            }
+        }
+
+        return sum;
+    }
+
+    private void AddVertex(Vector2 xy, float z, int pathIndex)
     {
         if (_vCount == _vxy.Length)
         {
             Array.Resize(ref _vxy, _vxy.Length * 2);
             Array.Resize(ref _vz, _vz.Length * 2);
+            Array.Resize(ref _vIdx, _vIdx.Length * 2);
         }
 
         _vxy[_vCount] = xy;
         _vz[_vCount] = z;
+        _vIdx[_vCount] = pathIndex;
         _vCount++;
     }
 

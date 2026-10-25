@@ -158,6 +158,10 @@ public sealed class NavRunnerDatTests(DatSetFixture fixture, ITestOutputHelper o
         Assert.Equal(0, runner.Rungs);
         Assert.Equal(BeltCell, visited[^1]);
         Assert.True(runner.RouteMetres > length * 0.95f);
+
+        // nav-natural-steering: the straight run turns at the route's corners (P5a's pursuit sent 950 MoveToStates on this walk, 7 a second: docs/wayfinding.md).
+        Assert.InRange(runner.Turns, 1, 80);
+        Assert.InRange(runner.KeyChangesPerMinute, 0, 70);
     }
 
     [RequiresDatsFact]
@@ -203,6 +207,33 @@ public sealed class NavRunnerDatTests(DatSetFixture fixture, ITestOutputHelper o
         Assert.Equal(DenWalk.Tour.Count, legs.Count);
         Assert.Equal(DenWalk.Tour.Count, audit.Plans - audit.Replans);
         Assert.Equal(0, audit.LadderRungs);
+    }
+
+    /// <summary>
+    /// M4 4.2 F1 (DoD 8): the death station's corpse trip in the den, run by the explore-mode walker at the mage's run rate with the physics confirming the path:
+    /// from where the fresh-r2 den fight ended (0x0105036F, (100.08, -140.87)) to the corpse's object goal at 2.0 m in 0x01050377 at (110.02, -139.07), the goal
+    /// built from the corpse's retail position by <see cref="NavMap.FromCellFrame"/> as the leg planner builds it. Live, the normalised goal planned 201 m and the
+    /// probe refused segment 6 three times; here the run arrives within the range in a few metres with no refusal and no rung.
+    /// </summary>
+    [RequiresDatsFact]
+    public void The_walker_reaches_the_mages_corpse_in_the_den_from_the_den_fights_end_in_a_short_confirmed_run()
+    {
+        var coord = new LandblockCoord(1, 5);
+        var graph = DenRooms.GraphOf(LandblockCellSet.Load(new CellStructureLibrary(Dats), coord));
+        var world = new PhysicsWorld();
+        world.Attach(new LandblockCollisionBuilder(Dats).Build(coord));
+        var start = new CellFrame(0x0105036Fu, new AcFrame(new Vector3(100.08f, -140.87f, 0f), Quaternion.Identity));
+        var corpse = new CellFrame(0x01050377u, new AcFrame(new Vector3(110.02f, -139.07f, 0.01f), Quaternion.Identity));
+        var goal = NavGoal.ToObject(0x800012C1, NavMap.FromCellFrame(corpse), (float)DeathScenario.CorpseTravelRangeMetres, needSight: false, corpse.CellId);
+
+        var (runner, visited, _) = Walk(world, new RoomPathSource(graph), start, goal, 60, "den-corpse", MageRunSkill);
+
+        Assert.True(runner.State == NavRunState.Arrived, runner.FailureReason);
+        Assert.Equal(0, runner.Rungs);
+        Assert.Null(runner.LastConfirmFailure);
+        Assert.InRange(runner.RouteMetres, 5f, 30f); // live: a 201 m plan that never ran a metre
+        Assert.Equal(0x0105u, visited[^1] >> 16);
+        output.WriteLine("cells " + string.Join(" ", visited.Select(c => c.ToString("X8", System.Globalization.CultureInfo.InvariantCulture))));
     }
 
     /// <summary>Holtburg and its eight neighbours' collision, and Holtburg's tile.</summary>

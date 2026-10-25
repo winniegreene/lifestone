@@ -65,7 +65,7 @@ public sealed class DeathCorpseOptionsTests
         Assert.Equal(DeathStages.Death | DeathStages.Corpse | DeathStages.Regear, DeathOptions.ParseStages("death,corpse,regear", out var problem));
         Assert.Null(problem);
         Assert.Equal(DeathStages.All, DeathOptions.ParseStages("all", out _));
-        Assert.Equal(DeathStages.Gear | DeathStages.Bind | DeathStages.Den | DeathStages.Unbuff | DeathStages.Death | DeathStages.Regear | DeathStages.Vitae | DeathStages.Rebuff | DeathStages.Fight, DeathStages.All & ~DeathStages.Corpse);
+        Assert.Equal(DeathStages.Gear | DeathStages.Bind | DeathStages.Den | DeathStages.Death | DeathStages.Regear | DeathStages.Vitae | DeathStages.Rebuff | DeathStages.Fight, DeathStages.All & ~DeathStages.Corpse); // D37 (M4 P5b): the unbuff suicide is not in All
         DeathOptions.ParseStages("trip", out var bad);
         Assert.Contains("corpse", bad, StringComparison.Ordinal);
     }

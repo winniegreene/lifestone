@@ -354,7 +354,7 @@ public sealed partial class SessionHost : Node
 
     private void Start(GameServices services)
     {
-        // An automated run (a login check, or any run that ends by itself) signs in to one of the three test accounts (TestAccounts: test, test-melee, test-archer) and nothing else: the owner's play account is never
+        // An automated run (a login check, or any run that ends by itself) signs in to one of the four test accounts (TestAccounts: test, test-melee, test-archer, test-tools) and nothing else: the owner's play account is never
         // used by automation, and --login-check=enter creates a character on its account (AutomatedAccountRule; tools\play.ps1 and the headless host agree).
         var automated = services.Options.IsAutomated || services.Options.Play.LoginCheck != LoginCheckKind.None;
         if (!AutomatedAccountRule.TryApply(services.Options.Session, automated, out var sessionOptions, out var accountRefusal))

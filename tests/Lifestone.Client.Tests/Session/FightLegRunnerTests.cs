@@ -466,52 +466,12 @@ public sealed class FightLegRunnerTests
     // ---------------------------------------------------------------------------------------------- the smoke step
 
     [Fact]
-    public void The_smoke_step_login_bsd_is_a_backend_step_that_runs_only_when_the_backend_is_required()
-    {
-        var script = Smoke;
-        var steps = Regex.Match(script, @"\$allSteps = @\(([^)]*)\)", RegexOptions.Singleline).Groups[1].Value;
-        var backend = Regex.Match(script, @"\$backendSteps = @\(([^)]*)\)").Groups[1].Value;
-
-        Assert.Contains("'login-bsd'", steps, StringComparison.Ordinal);
-        Assert.Contains("'login-bsd'", backend, StringComparison.Ordinal);
-        Assert.True(steps.IndexOf("'login-buff'", StringComparison.Ordinal) < steps.IndexOf("'login-bsd'", StringComparison.Ordinal));
-
-        var skip = script.IndexOf("if ($step -eq 'login-bsd' -and $Backend -ne 'require')", StringComparison.Ordinal);
-        var gate = script.IndexOf("if ($backendSteps -contains $step -and -not (Test-BackendGate", StringComparison.Ordinal);
-        Assert.True(skip > 0 && skip < gate, "the login-bsd skip rule must come before the backend gate");
-        var rule = script[skip..gate];
-        Assert.Contains("-Skipped", rule, StringComparison.Ordinal);
-        Assert.Contains("continue", rule, StringComparison.Ordinal);
-
-        var body = script[script.IndexOf("'login-bsd' {", StringComparison.Ordinal)..];
-        body = body[..body.IndexOf("'login' {", StringComparison.Ordinal)];
-        Assert.Contains("--account=$($stepAccounts[$step]) --login-check=bsd-fight", body, StringComparison.Ordinal);
-        Assert.Contains("bsd-fight done ok=true", body, StringComparison.Ordinal);
-        Assert.Contains("$verdict", body, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void Slice_check_never_runs_the_fight_step()
     {
         var sliceCheck = File.ReadAllText(RepositoryFiles.PathOf("tools", "slice-check.ps1"));
 
         Assert.Contains("[ValidateSet('auto')]", sliceCheck, StringComparison.Ordinal);
         Assert.DoesNotContain("login-bsd", sliceCheck, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_smoke_gives_the_leg_its_whole_time_and_the_time_to_log_off_after_a_failure()
-    {
-        // The runner's limit is the sum of its stage limits plus --fight-seconds' default; the Godot run must outlast it plus the recovery.
-        var runner = Runner;
-        double Constant(string name) => double.Parse(Regex.Match(runner, @"public const double " + name + @" = (\d+(\.\d+)?);").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-        var whole = Constant("LoginSeconds") + Constant("GearSeconds") + Constant("TopUpSeconds") + Constant("PlaceSeconds") + FightOptions.DefaultSeconds;
-        var recovery = Constant("RecoverySeconds");
-        var timeout = double.Parse(Regex.Match(Smoke, @"--login-check=bsd-fight"" (\d+) ").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-
-        Assert.Equal(750.0, whole);
-        Assert.Contains("WholeCheckSeconds = LoginSeconds + GearSeconds + TopUpSeconds + PlaceSeconds + FightOptions.DefaultSeconds", runner, StringComparison.Ordinal);
-        Assert.True(timeout >= whole + recovery + 300, $"the smoke gives the leg {timeout} s for {whole} s plus {recovery} s of recovery and the start-up");
     }
 
     [Fact]

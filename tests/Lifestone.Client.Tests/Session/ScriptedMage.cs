@@ -1,7 +1,11 @@
+using Lifestone.Client.Navigation;
+using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.CharacterCreation;
+using Lifestone.Data.World.Data;
 using Lifestone.Net.Messages;
+using Lifestone.Net.Types;
 using Lifestone.ServerTools;
 using Lifestone.Tests.Shared.Net;
 
@@ -24,14 +28,26 @@ internal sealed class ScriptedMage
     internal const ushort CreationBonusRanks = 5;
     internal const uint CreationBonusXp = 526;
 
+    /// <summary>The current value every vital had in the description before M4 fresh F1 (the builds never read it); it stays until a level-up sets the vitals to their maxima.</summary>
+    internal const uint DefaultVital = 10;
+
+    /// <summary>A current value at or above any maximum the template reaches, for <see cref="FullVitals"/>.</summary>
+    internal const uint FullVital = 1_000_000;
+
     private readonly XpTableData _table;
     private readonly ScriptedAceSession _server;
     private readonly uint[] _attributeRanks = new uint[6];
     private readonly uint[] _attributeExperience = new uint[6];
     private readonly uint[] _vitalRanks = new uint[3];
     private readonly uint[] _vitalExperience = new uint[3];
+    private readonly uint[] _vitalCurrent = [DefaultVital, DefaultVital, DefaultVital];
     private readonly SortedDictionary<uint, SkillState> _skills = [];
+    private readonly TeleportDestination _holtburg = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
     private byte _sequence;
+    private uint _oldGuid;
+    private bool _teleportDue;
+    private ushort _teleportStamp = 5;
+    private ushort _positionStamp = 30;
 
     private ScriptedMage(XpTableData table, ScriptedAceSession server, string name)
     {
@@ -71,19 +87,29 @@ internal sealed class ScriptedMage
     /// <summary>Stat actions to drop silently, as ACE drops a refused one (kind and id).</summary>
     public HashSet<(MageStatKind Kind, uint Id)> Dropped { get; } = [];
 
-    /// <summary>The experience amounts asked of the <c>xp</c> verb.</summary>
+    /// <summary>The experience amounts asked of the <c>xp</c> verb (a refused grant is listed too).</summary>
     public List<long> XpAsked { get; } = [];
+
+    /// <summary>How many <c>xp</c> grants the model answers before it refuses every later one (M4 fresh F1: 1 lets the build's grant through and refuses the refill's). Never, by default.</summary>
+    public int XpGrantsBeforeRefusal { get; set; } = int.MaxValue;
+
+    /// <summary>True plays a server whose level-ups do not refill the vitals (ACE's <c>SetMaxVitals</c> not run), so the refill stage's grant levels the character up and the vitals stay as they were (M4 fresh F1).</summary>
+    public bool SkipRefill { get; set; }
+
+    /// <summary>True plays a character whose vitals are already at a value at or above any maximum, whatever the raises do (M4 fresh F1: the refill stage finds nothing to grant).</summary>
+    public bool FullVitals { get; set; }
 
     /// <summary>The number of ids in each <c>spell learn</c> request.</summary>
     public List<int> LearnSizes { get; } = [];
 
-    public static XpTableData SyntheticTable()
+    /// <summary>The synthetic XpTable; <paramref name="levels"/> is the level cap (the real table's 275 by default; M4 fresh F1: a table that ends at the template's level names no level for the refill's level-up).</summary>
+    public static XpTableData SyntheticTable(int levels = 275)
     {
         using var stream = new MemoryStream();
         using (var w = new BinaryWriter(stream))
         {
             w.Write(XpTableData.DataId);
-            int[] counts = [190, 196, 208, 226, 275];
+            int[] counts = [190, 196, 208, 226, levels];
             foreach (var c in counts)
             {
                 w.Write((uint)c);
@@ -116,16 +142,47 @@ internal sealed class ScriptedMage
     public static ScriptedMage Fresh(XpTableData table, ScriptedAceSession server, string name)
     {
         var mage = new ScriptedMage(table, server, name);
+        mage.InitSkills();
+        return mage;
+    }
+
+    private void InitSkills()
+    {
         foreach (var skill in SkillIds())
         {
             var target = MageTemplate.Targets.FirstOrDefault(t => t.Kind == MageStatKind.Skill && t.Id == skill);
             var cls = MageTemplate.TrainedLater.Contains(skill) ? HeadlessCharacter.UntrainedSkill
                 : target is { Specialized: true } ? HeadlessCharacter.SpecializedSkill : HeadlessCharacter.TrainedSkill;
             // ACE's PlayerFactory gives a creation-trained skill 5 ranks and 526 XP (TrainSkill with applyCreationBonusXP, Player_Skills.cs:182-186).
-            mage._skills[skill] = MageTemplate.CreationTrained.Contains(skill) ? new SkillState(CreationBonusRanks, cls, CreationBonusXp) : new SkillState(0, cls, 0);
+            _skills[skill] = MageTemplate.CreationTrained.Contains(skill) ? new SkillState(CreationBonusRanks, cls, CreationBonusXp) : new SkillState(0, cls, 0);
         }
+    }
 
+    /// <summary>
+    /// A character that meets the template (<see cref="Ready"/>) and that the retail delete replaces (M4 fresh B1): when the server lists a new live character of its name, the model starts over as a fresh character (the template's creation, no experience, no spells, outside Holtburg).
+    /// </summary>
+    public static ScriptedMage Replaceable(XpTableData table, ScriptedAceSession server, string name)
+    {
+        var mage = Ready(table, server, name);
+        mage._oldGuid = server.Characters.First(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase) && c.DeleteField == 0).Guid;
         return mage;
+    }
+
+    private void BecomeFresh()
+    {
+        Array.Clear(_attributeRanks);
+        Array.Clear(_attributeExperience);
+        Array.Clear(_vitalRanks);
+        Array.Clear(_vitalExperience);
+        Array.Fill(_vitalCurrent, DefaultVital);
+        _skills.Clear();
+        Known.Clear();
+        Total = 0;
+        Available = 0;
+        Level = 1;
+        Credits = 0;
+        _oldGuid = 0;
+        InitSkills();
     }
 
     /// <summary>A character that meets the template exactly (level of the table's level 126, every stat at its target, every skill of the plan at its class, every spell known).</summary>
@@ -194,13 +251,18 @@ internal sealed class ScriptedMage
 
     private AcePlayerDescription Describe()
     {
+        if (_oldGuid != 0 && _server.Characters.Any(c => string.Equals(c.Name, Name, StringComparison.OrdinalIgnoreCase) && c.DeleteField == 0 && c.Guid != _oldGuid))
+        {
+            BecomeFresh(); // the old character was deleted and a new one of the name created
+        }
+
         var baseline = AcePlayerDescription.NewCharacter(Name);
         return baseline with
         {
             Ints = [.. baseline.Ints.Where(p => p.Key is not (CreditsKey or LevelKey)), (CreditsKey, Credits), (LevelKey, Level)],
             Int64s = [(TotalExperienceKey, Total), (AvailableExperienceKey, Available)],
             Attributes = [.. Enumerable.Range(0, 6).Select(i => (_attributeRanks[i], MageTemplate.CreationValue((uint)i + 1), _attributeExperience[i]))],
-            Vitals = [.. Enumerable.Range(0, 3).Select(i => (_vitalRanks[i], 0u, _vitalExperience[i], 10u))],
+            Vitals = [.. Enumerable.Range(0, 3).Select(i => (_vitalRanks[i], 0u, _vitalExperience[i], CurrentOf(i)))],
             Skills = [.. _skills.Select(s => new AceSkill(s.Key, s.Value.Ranks, s.Value.Class, s.Value.Experience, 0))],
             Spells = [.. Known.Select(id => (int)id)],
         };
@@ -218,6 +280,42 @@ internal sealed class ScriptedMage
     }
 
     private void Send(byte[] body) => _server.Inject(body);
+
+    private uint CurrentOf(int vital) => FullVitals ? FullVital : _vitalCurrent[vital];
+
+    /// <summary>
+    /// A vital's maximum as the client computes it from the description this model sends (<see cref="PlayerQualities.TryGetVitalLevels"/>: start 0 plus the ranks plus the formula over the attributes' creation values and ranks, no enchantments, no gear), so the model can
+    /// set a current value to the very maximum the client will compare it with: health half of Endurance rounded up, stamina Endurance, mana Self.
+    /// </summary>
+    private uint VitalMax(int vital)
+    {
+        uint Attribute(uint id) => MageTemplate.CreationValue(id) + _attributeRanks[id - 1];
+        var bonus = vital switch
+        {
+            0 => (Attribute(PlayerQualities.EnduranceAttributeId) + 1) / 2,
+            1 => Attribute(PlayerQualities.EnduranceAttributeId),
+            _ => Attribute(PlayerQualities.SelfAttributeId),
+        };
+        return _vitalRanks[vital] + bonus;
+    }
+
+    /// <summary>
+    /// ACE's <c>Player.SetMaxVitals</c> (Player_Vitals.cs 112-124, run by Player_Xp.cs <c>CheckForLevelup</c> after the level update): each vital's current value becomes its maximum AT THAT MOMENT and the three 0x02E9 updates (health 2, stamina 4, mana 6) are sent. Raises
+    /// that come after lift the maximum and leave the current value (<c>HandleActionRaiseAttribute</c>, <c>HandleActionRaiseVital</c>), which is what the fresh build leaves and the refill stage mends (M4 fresh F1). <see cref="SkipRefill"/> plays a server that does not run it.
+    /// </summary>
+    private void SetMaxVitals()
+    {
+        if (SkipRefill)
+        {
+            return;
+        }
+
+        for (var i = 0; i < 3; i++)
+        {
+            _vitalCurrent[i] = VitalMax(i);
+            Send(AceWireWriters.PrivateUpdateAttribute2ndLevel(++_sequence, (uint)(2 * i + 2), CurrentOf(i)));
+        }
+    }
 
     /// <summary>ACE's told refusal of a raise past the list's end (Player_Attributes.cs:86-91, Player_Skills.cs:87-92).</summary>
     private void Refuse(string stat) => Send(AceWireWriters.ServerMessage($"Your attempt to raise {stat} has failed.", 0));
@@ -264,7 +362,7 @@ internal sealed class ScriptedMage
                 _vitalRanks[v] = (uint)RankFor(_table.VitalXpList, _vitalExperience[v]);
                 Available -= amount;
                 Send(AceWireWriters.PrivateUpdatePropertyInt64(++_sequence, AvailableExperienceKey, Available));
-                Send(AceWireWriters.PrivateUpdateVital(++_sequence, id, _vitalRanks[v], 0, _vitalExperience[v], 10));
+                Send(AceWireWriters.PrivateUpdateVital(++_sequence, id, _vitalRanks[v], 0, _vitalExperience[v], CurrentOf(v))); // ACE's raise leaves the current value as it was (Player_Vitals.cs HandleActionRaiseVital sends the update only)
                 break;
             case GameActionTypes.RaiseSkill when _skills.TryGetValue(id, out var s):
                 if (Dropped.Contains((MageStatKind.Skill, id)) || amount == 0 || amount > Available || s.Class < HeadlessCharacter.TrainedSkill)
@@ -309,6 +407,12 @@ internal sealed class ScriptedMage
         {
             case XpRequest xp:
                 XpAsked.Add(xp.Amount);
+                if (XpAsked.Count > XpGrantsBeforeRefusal)
+                {
+                    var refusal = new ToolError(ToolErrors.Failed, "the experience grant was refused");
+                    return ToolsWire.Reply(ToolReply.Failure(request.Id, ToolVerbs.Xp, refusal), refusal.Message);
+                }
+
                 var oldLevel = Level;
                 Total += xp.Amount;
                 Available += xp.Amount;
@@ -322,6 +426,11 @@ internal sealed class ScriptedMage
                 Send(AceWireWriters.PrivateUpdatePropertyInt64(++_sequence, AvailableExperienceKey, Available));
                 Send(AceWireWriters.PrivateUpdatePropertyInt(++_sequence, LevelKey, Level));
                 Send(AceWireWriters.PrivateUpdatePropertyInt(++_sequence, CreditsKey, Credits));
+                if (Level > oldLevel)
+                {
+                    SetMaxVitals();
+                }
+
                 var data = new XpData(xp.Amount, xp.Amount, Total, Available, Level);
                 return ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Xp, data), data.Describe());
             case SpellLearnRequest learn:
@@ -340,8 +449,32 @@ internal sealed class ScriptedMage
 
                 var spells = SpellLearnData.Of(outcomes);
                 return ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Spell, spells), spells.Describe());
+            case PlacePoiRequest poi when poi.Name.Contains("Holtburg", StringComparison.OrdinalIgnoreCase):
+                var at = _holtburg.Location.Position;
+                var placed = new PlaceData("poi", poi.Name, ToolsWire.FormatCell(at.CellId), at.Local.X, at.Local.Y, at.Local.Z, 1f, 0f, 0f, 0f);
+                _teleportDue = true;
+                PlacedInHoltburg++;
+                return ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.PlacePoi, placed), placed.Describe());
             default:
                 return null;
         }
+    }
+
+    /// <summary>The <c>place poi</c> requests for Holtburg the model answered (M4 fresh B1: a fresh character is placed there before its log off).</summary>
+    public int PlacedInHoltburg { get; private set; }
+
+    /// <summary>Answers what the session sent that no hook answers: the teleport after the place's reply (M4 fresh B1). Call once per step of the run; it does nothing in a run that places nobody.</summary>
+    public void Pump()
+    {
+        if (!_teleportDue || _server.PlayerGuid is not { } player)
+        {
+            return;
+        }
+
+        _teleportDue = false;
+        var at = _holtburg.Location.Position;
+        Send(AceWireWriters.PlayerTeleport(++_teleportStamp));
+        Send(AceWireWriters.UpdatePosition(player, new AcePosition(at.CellId, at.Local.X, at.Local.Y, at.Local.Z), true, new AceUpdatePositionSequences(1, ++_positionStamp, _teleportStamp, 1)));
+        Send(AceWireWriters.SetState(player, (uint)(PhysicsState.Gravity | PhysicsState.EdgeSlide), 1, (ushort)(40 + _teleportStamp)));
     }
 }

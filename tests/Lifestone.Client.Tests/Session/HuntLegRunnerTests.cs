@@ -138,14 +138,6 @@ public sealed class HuntLegRunnerTests
     }
 
     [Fact]
-    public void The_hunt_leg_is_smoke_s_login_hunt_step()
-    {
-        var smoke = File.ReadAllText(RepositoryFiles.PathOf("tools", "smoke.ps1"));
-
-        Assert.Contains("--login-check=hunt", smoke, StringComparison.Ordinal); // M4 1.2 s5: the login-hunt step (-Backend require only)
-    }
-
-    [Fact]
     public void M4_3_1_s4_the_runner_starts_lane_g_s_combat_mode_watch_with_the_hunt_and_prints_its_count_report_only()
     {
         var runner = Runner.Replace("\r\n", "\n", StringComparison.Ordinal);

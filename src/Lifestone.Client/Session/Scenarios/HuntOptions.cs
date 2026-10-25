@@ -1,6 +1,8 @@
 using System.Globalization;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Scenarios.Journey;
+using Lifestone.Client.Session.Vitals;
 
 namespace Lifestone.Client.Session.Scenarios;
 
@@ -22,6 +24,44 @@ public enum HuntGroundChoice
 
     /// <summary>The Low North Forest Mix west of Holtburg (<see cref="HuntGround.LowNorthForestMix"/>): levels 30 to 40.</summary>
     Forest,
+}
+
+/// <summary>
+/// The hunt's stages (M4 P5b 3.4, lane J2a): flags, not rewrites. <see cref="All"/> is today's order (<c>--scenario=hunt</c>); a journey runs <c>Swap | Hunt | Restore</c> on the ground and <see cref="Vendor"/> as its own station
+/// from Holtburg's lifestone. A skipped stage is logged once and its verdict fields read <c>n/a</c>.
+/// </summary>
+[Flags]
+public enum HuntStages
+{
+    /// <summary>No stage (the scenario checks the character and ends).</summary>
+    None = 0,
+
+    /// <summary>The bind at Holtburg's lifestone (the travel there and the Use); skipped: <c>bound=n/a</c>.</summary>
+    Bind = 1,
+
+    /// <summary>The recovery before the first fight (between kills it is the hunt's own); skipped: <c>health_start_pct=n/a</c>.</summary>
+    Health = 2,
+
+    /// <summary>The missile weapon swap (the launcher and the ammunition wielded); a melee hunt has none.</summary>
+    Swap = 4,
+
+    /// <summary>The ground, the acquire, the fights and the loot; skipped: <c>kills=0</c>, nothing is attacked.</summary>
+    Hunt = 8,
+
+    /// <summary>The template's weapon state again after the hunt; skipped: <c>restored=n/a</c>.</summary>
+    Restore = 16,
+
+    /// <summary>The travel home to Holtburg after the hunt (and after the shops); skipped: <c>returned=n/a</c>.</summary>
+    Home = 32,
+
+    /// <summary>The shops: the sale at Renald's and the purchase at Thelnoth's (when <c>--sell</c> or <c>--buy-kits</c> want them); skipped: <c>sell=n/a buy=n/a</c>.</summary>
+    Vendor = 64,
+
+    /// <summary>Every stage in today's order: the default.</summary>
+    All = Bind | Health | Swap | Hunt | Restore | Home | Vendor,
+
+    /// <summary>The journey's hunt station on the ground.</summary>
+    Ground = Swap | Hunt | Restore,
 }
 
 /// <summary>The hunt loop's options (<c>--hunt-*</c>, M4 1.2 s4a), parsed from the command line like <see cref="FightOptions"/>.</summary>
@@ -111,6 +151,21 @@ public sealed record HuntOptions
     /// <summary>Every problem found, one line each, values never repeated.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
 
+    /// <summary>The stages the hunt runs (M4 P5b, lane J2a; default <see cref="HuntStages.All"/>, today's order). Not a command-line option: a journey's station sets it.</summary>
+    public HuntStages Stages { get; init; } = HuntStages.All;
+
+    /// <summary>
+    /// The travel seam (M4 P5b 3.4) every one of the hunt's travels goes through; null (the default) is a fresh <see cref="PlaceTravel"/> per scenario, today's <c>Tools.Place</c>. A journey injects its own
+    /// (on foot, a recall, the budgeted teleport).
+    /// </summary>
+    public IJourneyTravel? Travel { get; init; }
+
+    /// <summary>
+    /// The vitals keeper (M4 P5a C2) the hunt asks before an attack (<see cref="VitalsKeeper.MayAttack"/>) and for the in-fight potion (<see cref="VitalsKeeper.TryInFightPotion"/>); null (the default) is today's hunt, whose
+    /// recovery runs between kills only.
+    /// </summary>
+    public VitalsKeeper? Keeper { get; init; }
+
     /// <summary>Reads the hunt's options out of the parsed arguments.</summary>
     public static HuntOptions FromArguments(IEnumerable<CommandLineArgument> args)
     {
@@ -196,5 +251,26 @@ public sealed record HuntOptions
     }
 
     /// <inheritdoc/>
-    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"kills={Kills} seconds={Seconds} weapon={Weapon.ToString().ToLowerInvariant()} ground={Ground.ToString().ToLowerInvariant()} {Loot} {Recovery} sell={(Sell ? "on" : "off")} buy_kits={BuyKits} appraise_loot={(AppraiseLoot ? "on" : "off")}");
+    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"kills={Kills} seconds={Seconds} weapon={Weapon.ToString().ToLowerInvariant()} ground={Ground.ToString().ToLowerInvariant()} {Loot} {Recovery} sell={(Sell ? "on" : "off")} buy_kits={BuyKits} appraise_loot={(AppraiseLoot ? "on" : "off")}{(Stages == HuntStages.All ? string.Empty : " stages=" + StagesText(Stages))}");
+
+    /// <summary>The stages as the log spells them: <c>swap|hunt|restore</c>, <c>none</c>.</summary>
+    /// <param name="stages">The stages.</param>
+    public static string StagesText(HuntStages stages)
+    {
+        if (stages == HuntStages.None)
+        {
+            return "none";
+        }
+
+        var names = new List<string>();
+        foreach (var stage in (HuntStages[])[HuntStages.Bind, HuntStages.Health, HuntStages.Swap, HuntStages.Hunt, HuntStages.Restore, HuntStages.Home, HuntStages.Vendor])
+        {
+            if ((stages & stage) != 0)
+            {
+                names.Add(stage.ToString().ToLowerInvariant());
+            }
+        }
+
+        return string.Join('|', names);
+    }
 }

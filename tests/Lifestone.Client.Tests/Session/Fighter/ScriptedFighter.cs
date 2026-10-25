@@ -37,6 +37,7 @@ internal sealed class ScriptedFighter
     private readonly uint[] _attributeExperience = new uint[6];
     private readonly uint[] _vitalRanks = new uint[3];
     private readonly uint[] _vitalExperience = new uint[3];
+    private readonly uint[] _vitalCurrent = [ScriptedMage.DefaultVital, ScriptedMage.DefaultVital, ScriptedMage.DefaultVital];
     private readonly SortedDictionary<uint, SkillState> _skills = [];
     private readonly List<PackItem> _items = [];
     private readonly TeleportDestination _holtburg = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
@@ -126,7 +127,17 @@ internal sealed class ScriptedFighter
 
     public bool InHoltburg { get; set; }
 
+    /// <summary>The experience amounts asked of the <c>xp</c> verb (a refused grant is listed too).</summary>
     public List<long> XpAsked { get; } = [];
+
+    /// <summary>How many <c>xp</c> grants the model answers before it refuses every later one (M4 fresh F1: 1 lets the build's grant through and refuses the refill's). Never, by default.</summary>
+    public int XpGrantsBeforeRefusal { get; set; } = int.MaxValue;
+
+    /// <summary>True plays a server whose level-ups do not refill the vitals (ACE's <c>SetMaxVitals</c> not run), so the refill stage's grant levels the character up and the vitals stay as they were (M4 fresh F1).</summary>
+    public bool SkipRefill { get; set; }
+
+    /// <summary>True plays a character whose vitals are already at a value at or above any maximum, whatever the raises do (M4 fresh F1: the refill stage finds nothing to grant).</summary>
+    public bool FullVitals { get; set; }
 
     public List<uint> ItemWcidsAsked { get; } = [];
 
@@ -145,6 +156,46 @@ internal sealed class ScriptedFighter
 
     /// <summary>The StackableMerges the rig applied (M4 P5a fix r4).</summary>
     public int MergesSeen { get; private set; }
+
+    /// <summary>True to answer appraisals (GameAction 0x00C8) with the item's mana (the gear's recharge; closes TODO(m4-gear-mana)); off by default, as a rig that answers them itself (<c>HuntScriptRig</c>) shares this fighter.</summary>
+    public bool Appraises { get; set; }
+
+    /// <summary>The appraisals the rig answered (with <see cref="Appraises"/>), by guid, in order.</summary>
+    public List<uint> Identified { get; } = [];
+
+    /// <summary>The mana stone uses the rig played (GameAction 0x0035): the stone and the target.</summary>
+    public List<(uint Stone, uint Target)> StoneUses { get; } = [];
+
+    private readonly Dictionary<uint, int?> _mana = [];
+
+    /// <summary>
+    /// The item's ItemCurMana as the server holds it: what <see cref="SetMana"/> left, else a fresh item's (the gear piece's <see cref="GearPiece.ItemMana"/>, the charge's <see cref="FighterKit.ManaChargeMana"/>), else none.
+    /// </summary>
+    public int? ManaOf(uint guid)
+    {
+        if (_mana.TryGetValue(guid, out var set))
+        {
+            return set;
+        }
+
+        var wcid = _items.First(i => i.Guid == guid).Kind.Wcid;
+        return FighterGearSet.Brawler.PieceOf(wcid)?.ItemMana ?? FighterGearSet.Archer.PieceOf(wcid)?.ItemMana ?? (wcid == FighterKit.ManaChargeWcid ? FighterKit.ManaChargeMana : null);
+    }
+
+    /// <summary>The item's ItemMaxMana: a gear piece's full mana; null for anything else (a retail charge has none: the world database's 9060).</summary>
+    public int? MaxManaOf(uint guid)
+    {
+        var wcid = _items.First(i => i.Guid == guid).Kind.Wcid;
+        return FighterGearSet.Brawler.PieceOf(wcid)?.ItemMana ?? FighterGearSet.Archer.PieceOf(wcid)?.ItemMana;
+    }
+
+    /// <summary>Sets the ItemCurMana of the first held item of <paramref name="wcid"/> (null: none, an empty stone); returns its guid.</summary>
+    public uint SetMana(uint wcid, int? mana)
+    {
+        var guid = _items.First(i => i.Kind.Wcid == wcid).Guid;
+        _mana[guid] = mana;
+        return guid;
+    }
 
     private readonly Dictionary<uint, byte> _stackSequences = [];
 
@@ -203,12 +254,23 @@ internal sealed class ScriptedFighter
         return fighter;
     }
 
+    /// <summary>
+    /// A built fighter (<see cref="Ready"/>) that the retail delete replaces (M4 fresh B1): like <see cref="OldSplit"/>, when the server lists a new live character of its name the model starts over as a fresh character with the template's creation attributes.
+    /// </summary>
+    public static ScriptedFighter Replaceable(XpTableData table, ScriptedAceSession server, string name)
+    {
+        var fighter = Built(table, server, name, BuildState.Ready);
+        fighter._oldGuid = server.Characters.First(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase) && c.DeleteField == 0).Guid;
+        return fighter;
+    }
+
     private void BecomeFresh()
     {
         Array.Clear(_attributeRanks);
         Array.Clear(_attributeExperience);
         Array.Clear(_vitalRanks);
         Array.Clear(_vitalExperience);
+        Array.Fill(_vitalCurrent, ScriptedMage.DefaultVital);
         _skills.Clear();
         _items.Clear();
         Known.Clear();
@@ -431,7 +493,7 @@ internal sealed class ScriptedFighter
             Ints = [.. baseline.Ints.Where(p => p.Key is not (CreditsKey or LevelKey)), (CreditsKey, Credits), (LevelKey, Level)],
             Int64s = [(TotalExperienceKey, Total), (AvailableExperienceKey, Available)],
             Attributes = [.. Enumerable.Range(0, 6).Select(i => (_attributeRanks[i], _creation[(uint)i + 1], _attributeExperience[i]))],
-            Vitals = [.. Enumerable.Range(0, 3).Select(i => (_vitalRanks[i], 0u, _vitalExperience[i], 10u))],
+            Vitals = [.. Enumerable.Range(0, 3).Select(i => (_vitalRanks[i], 0u, _vitalExperience[i], CurrentOf(i)))],
             Skills = [.. _skills.Select(s => new AceSkill(s.Key, s.Value.Ranks, s.Value.Class, s.Value.Experience, 0))],
             Spells = [.. Known.Select(id => (int)id)],
             Inventory = [.. _items.Where(i => i.Location == 0 && i.Container == 0).Select(i => (i.Guid, i.Kind.ItemType == FighterKit.ItemTypeContainer ? 1u : 0u))],
@@ -469,6 +531,42 @@ internal sealed class ScriptedFighter
     }
 
     private void Send(byte[] body) => _server.Inject(body);
+
+    private uint CurrentOf(int vital) => FullVitals ? ScriptedMage.FullVital : _vitalCurrent[vital];
+
+    /// <summary>
+    /// A vital's maximum as the client computes it from the description this model sends (<see cref="PlayerQualities.TryGetVitalLevels"/>: start 0 plus the ranks plus the formula over the attributes' creation values and ranks, no enchantments, no gear), so the model can
+    /// set a current value to the very maximum the client will compare it with: health half of Endurance rounded up, stamina Endurance, mana Self.
+    /// </summary>
+    private uint VitalMax(int vital)
+    {
+        uint Attribute(uint id) => _creation[id] + _attributeRanks[id - 1];
+        var bonus = vital switch
+        {
+            0 => (Attribute(PlayerQualities.EnduranceAttributeId) + 1) / 2,
+            1 => Attribute(PlayerQualities.EnduranceAttributeId),
+            _ => Attribute(PlayerQualities.SelfAttributeId),
+        };
+        return _vitalRanks[vital] + bonus;
+    }
+
+    /// <summary>
+    /// ACE's <c>Player.SetMaxVitals</c> (Player_Vitals.cs 112-124, run by Player_Xp.cs <c>CheckForLevelup</c> after the level update): each vital's current value becomes its maximum AT THAT MOMENT and the three 0x02E9 updates (health 2, stamina 4, mana 6) are sent. Raises
+    /// that come after lift the maximum and leave the current value (<c>HandleActionRaiseAttribute</c>, <c>HandleActionRaiseVital</c>), which is what the fresh build leaves and the refill stage mends (M4 fresh F1). <see cref="SkipRefill"/> plays a server that does not run it.
+    /// </summary>
+    private void SetMaxVitals()
+    {
+        if (SkipRefill)
+        {
+            return;
+        }
+
+        for (var i = 0; i < 3; i++)
+        {
+            _vitalCurrent[i] = VitalMax(i);
+            Send(AceWireWriters.PrivateUpdateAttribute2ndLevel(++_sequence, (uint)(2 * i + 2), CurrentOf(i)));
+        }
+    }
 
     private void Refuse(string stat) => Send(AceWireWriters.ServerMessage($"Your attempt to raise {stat} has failed.", 0));
 
@@ -514,7 +612,7 @@ internal sealed class ScriptedFighter
                 _vitalRanks[v] = (uint)RankFor(_table.VitalXpList, _vitalExperience[v]);
                 Available -= amount;
                 Send(AceWireWriters.PrivateUpdatePropertyInt64(++_sequence, AvailableExperienceKey, Available));
-                Send(AceWireWriters.PrivateUpdateVital(++_sequence, id, _vitalRanks[v], 0, _vitalExperience[v], 10));
+                Send(AceWireWriters.PrivateUpdateVital(++_sequence, id, _vitalRanks[v], 0, _vitalExperience[v], CurrentOf(v))); // ACE's raise leaves the current value as it was (Player_Vitals.cs HandleActionRaiseVital sends the update only)
                 break;
             case GameActionTypes.RaiseSkill when _skills.TryGetValue(id, out var s):
                 if (amount == 0 || amount > Available || s.Class < HeadlessCharacter.TrainedSkill)
@@ -559,6 +657,12 @@ internal sealed class ScriptedFighter
         {
             case XpRequest xp:
                 XpAsked.Add(xp.Amount);
+                if (XpAsked.Count > XpGrantsBeforeRefusal)
+                {
+                    var refusal = new ToolError(ToolErrors.Failed, "the experience grant was refused");
+                    return ToolsWire.Reply(ToolReply.Failure(request.Id, ToolVerbs.Xp, refusal), refusal.Message);
+                }
+
                 var oldLevel = Level;
                 Total += xp.Amount;
                 Available += xp.Amount;
@@ -572,6 +676,11 @@ internal sealed class ScriptedFighter
                 Send(AceWireWriters.PrivateUpdatePropertyInt64(++_sequence, AvailableExperienceKey, Available));
                 Send(AceWireWriters.PrivateUpdatePropertyInt(++_sequence, LevelKey, Level));
                 Send(AceWireWriters.PrivateUpdatePropertyInt(++_sequence, CreditsKey, Credits));
+                if (Level > oldLevel)
+                {
+                    SetMaxVitals();
+                }
+
                 var data = new XpData(xp.Amount, xp.Amount, Total, Available, Level);
                 return ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Xp, data), data.Describe());
             case SpellLearnRequest learn:
@@ -713,6 +822,108 @@ internal sealed class ScriptedFighter
                 _items[index] = _items[index] with { Location = 0, Container = second == Player ? 0 : second };
                 Send(AceM3Writers.PutObjInContainer(Player, ++_eventSequence, first, second, third, 0));
             }
+            else if (type == GameActionTypes.IdentifyObject && Appraises)
+            {
+                // ACE's appraisal of a held item: ItemCurMana and ItemMaxMana are assessment properties (AppraiseInfo.cs:350-358).
+                Identified.Add(first);
+                var ints = new Dictionary<uint, int>();
+                if (ManaOf(first) is { } cur)
+                {
+                    ints[AppraisalIds.ManaCurrent] = cur;
+                }
+
+                if (MaxManaOf(first) is { } max)
+                {
+                    ints[AppraisalIds.ManaMax] = max;
+                }
+
+                Send(AceVendorWriters.IdentifyResponse(Player, ++_eventSequence, first, new AceAppraisal { Success = true, Ints = ints }));
+            }
+            else if (type == GameActionTypes.UseWithTarget && _items[index].Kind.Wcid == FighterKit.ManaChargeWcid)
+            {
+                UseStone(index, second); // a healing kit's use is the hunt rig's (HuntScriptRig.UseKit)
+            }
         }
+    }
+
+    /// <summary>
+    /// ACE's <c>ManaStone.HandleActionUseOnTarget</c> for a charged stone (ACE 95ef426d <c>ManaStone.cs:119-233</c>): on the player, the mana rationed evenly over the equipped items below their maximum until the stone is empty or they are full (:121-162),
+    /// the line, the destroy roll of a retail charge (chance 1: the stone is removed, 0x0024, and "The Mana Stone is destroyed.") and UseDone 0; with nothing to charge, "You have no items equipped that need mana." and UseDone 0x0036. On an item, the item
+    /// filled (:192-225). An empty stone on the player is UseDone 0x0036 (:84-87).
+    /// </summary>
+    private void UseStone(int index, uint target)
+    {
+        var stone = _items[index].Guid;
+        StoneUses.Add((stone, target));
+        if (ManaOf(stone) is not > 0)
+        {
+            Send(AceWireWriters.UseDone(Player, ++_eventSequence, 0x0036));
+            return;
+        }
+
+        var left = ManaOf(stone)!.Value;
+        string line;
+        if (target == Player)
+        {
+            var needing = _items.Where(i => i.Location != 0 && MaxManaOf(i.Guid) is not null && ManaOf(i.Guid) < MaxManaOf(i.Guid)).Select(i => i.Guid).ToList();
+            var given = new Dictionary<uint, int>();
+            while (left > 0)
+            {
+                var now = needing.Where(g => ManaOf(g) < MaxManaOf(g)).ToList();
+                if (now.Count < 1)
+                {
+                    break;
+                }
+
+                var ration = Math.Max(left / now.Count, 1);
+                foreach (var g in now)
+                {
+                    var add = Math.Min(ration, MaxManaOf(g)!.Value - ManaOf(g)!.Value);
+                    left -= add;
+                    _mana[g] = ManaOf(g) + add;
+                    given[g] = given.GetValueOrDefault(g) + add;
+                    if (left <= 0)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (given.Count < 1)
+            {
+                Send(AceWireWriters.ServerMessage("You have no items equipped that need mana.", 0));
+                Send(AceWireWriters.UseDone(Player, ++_eventSequence, 0x0036));
+                return;
+            }
+
+            var more = needing.Sum(g => MaxManaOf(g)!.Value - ManaOf(g)!.Value);
+            line = string.Create(CultureInfo.InvariantCulture, $"The Mana Stone gives {given.Values.Sum():N0} points of mana to the following items: {string.Join(", ", given.Keys.Select(g => _items.First(i => i.Guid == g).Kind.Name))}.{(more > 0 ? "\nYou need " + more.ToString("N0", CultureInfo.InvariantCulture) + " more mana to fully charge your items." : "\nYour items are fully charged.")}");
+        }
+        else
+        {
+            var item = _items.First(i => i.Guid == target);
+            var cur = ManaOf(target) ?? 0;
+            if (MaxManaOf(target) is not { } max || cur >= max)
+            {
+                Send(AceWireWriters.ServerMessage($"The {item.Kind.Name} is already full of mana.", 0));
+                Send(AceWireWriters.UseDone(Player, ++_eventSequence, 0));
+                return;
+            }
+
+            var pour = Math.Min(max - cur, left);
+            _mana[target] = cur + pour;
+            line = string.Create(CultureInfo.InvariantCulture, $"The Mana Stone gives {pour:N0} points of mana to the {item.Kind.Name}.");
+        }
+
+        Send(AceWireWriters.ServerMessage(line, 0));
+        _items.RemoveAt(index);
+        if (index < _itemsAnnounced)
+        {
+            _itemsAnnounced--;
+        }
+
+        Send(AceM3Writers.InventoryRemoveObject(stone));
+        Send(AceWireWriters.ServerMessage("The Mana Stone is destroyed.", 0));
+        Send(AceWireWriters.UseDone(Player, ++_eventSequence, 0));
     }
 }

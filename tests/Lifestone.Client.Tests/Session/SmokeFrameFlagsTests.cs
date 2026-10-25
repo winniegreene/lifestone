@@ -47,7 +47,8 @@ public sealed class SmokeFrameFlagsTests
 
         // Each of the steps passes the flag as the pass note, so the summary reads PASS (frame over 50 ms) and the detail carries the maxima. M4 2.2 s4: the hunt and the death steps also copy their report-only fields between the
         // suffix and the note ("; report-only: $copied"), so the pattern allows that segment and counts four steps (bsd-fight, buff, death, hunt) where it counted three before the hunt's copy joined the death's.
-        Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(script, @"\(\$verdict \+ \$flags\.Suffix \+ (?:""; report-only: \$copied"" \+ )?\$live\.Note\).*elseif \(\$flags\.Over50\) \{ 'frame over 50 ms' \}").Count);
+        Assert.Empty(System.Text.RegularExpressions.Regex.Matches(script, @"\(\$verdict \+ \$flags\.Suffix \+ (?:""; report-only: \$copied"" \+ )?\$live\.Note\).*elseif \(\$flags\.Over50\) \{ 'frame over 50 ms' \}")); // M4 P5b G1: the buff, bsd, death and hunt steps are gone
+        Assert.Contains("elseif ($over50 -eq 'yes') { 'frame over 50 ms' }", script, StringComparison.Ordinal); // the journey steps pass the flag the same way
     }
 
     private static (bool Over50, string Suffix) Flags(string prefix, string text)

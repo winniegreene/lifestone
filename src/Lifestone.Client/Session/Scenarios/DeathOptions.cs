@@ -1,5 +1,6 @@
 using System.Globalization;
 using Lifestone.Client.Options;
+using Lifestone.Client.Session.Scenarios.Journey;
 
 namespace Lifestone.Client.Session.Scenarios;
 
@@ -19,7 +20,10 @@ public enum DeathStages
     /// <summary>The teleport to the Black Spawn Den's arrival and the settle on its floor.</summary>
     Den = 4,
 
-    /// <summary>D33: a suicide in the den when any enchantment but the vitae is active, so the mage meets the tuskers unbuffed.</summary>
+    /// <summary>
+    /// D33, retired by D37 (M4 P5b, the owner's decision): a suicide in the den when any enchantment but the vitae is active. Not in <see cref="All"/> any more: the mage dies once, undressed and lying down among the tuskers
+    /// (<see cref="DeathScenario"/>'s <c>undress</c> and lie-down), so no host runs it; the stage stays only for an explicit <c>--death-stages=unbuff</c> and the tests that name it.
+    /// </summary>
     Unbuff = 8,
 
     /// <summary>The walk to the nearest tusker cell and the wait for the tuskers' death of the player, the respawn and the vitals.</summary>
@@ -52,8 +56,8 @@ public enum DeathStages
     /// </summary>
     Fight = 512,
 
-    /// <summary>Everything (the headless host's, and the game's bsd-death leg).</summary>
-    All = Gear | Bind | Den | Unbuff | Death | Regear | Vitae | Corpse | Rebuff | Fight,
+    /// <summary>Everything (the headless host's, and the game's bsd-death leg); since D37 (M4 P5b) without the <see cref="Unbuff"/> suicide: one death a run.</summary>
+    All = Gear | Bind | Den | Death | Regear | Vitae | Corpse | Rebuff | Fight,
 }
 
 /// <summary>
@@ -141,6 +145,26 @@ public sealed record DeathOptions
 
     /// <summary>The default of <see cref="FightManaFloorPercent"/>.</summary>
     public const double DefaultFightManaFloorPercent = 70;
+
+    /// <summary>
+    /// M4 P5b (3.4): the travel seam the death loop's places go through (the bind <see cref="TravelPurpose.Bind"/>, the den <see cref="TravelPurpose.Ground"/>, the composed fight's way back to the den after the respawn
+    /// <see cref="TravelPurpose.Ground"/>, the corpse trip <see cref="TravelPurpose.Corpse"/>, the way home and the den exit <see cref="TravelPurpose.Home"/>), or null for today's <c>Tools.Place</c> (a fresh
+    /// <see cref="PlaceTravel"/>), so every existing run is unchanged. A journey injects its own. Not on the command line.
+    /// </summary>
+    public IJourneyTravel? Travel { get; init; }
+
+    /// <summary>
+    /// M4 P5b (3.4): the stage the run begins at (an embedded run: the journey's death station begins at <see cref="DeathStages.Death"/>, after the den fight), or null for the first enabled one. One of
+    /// <see cref="DeathStages.Gear"/>, <see cref="DeathStages.Bind"/>, <see cref="DeathStages.Den"/>, <see cref="DeathStages.Death"/> or <see cref="DeathStages.Regear"/>; the stages before it are skipped (the login too:
+    /// a run that starts past the gear waits only for the player's description). Not on the command line.
+    /// </summary>
+    public DeathStages? StartAt { get; init; }
+
+    /// <summary>
+    /// M4 P5b (3.4): true (the default, every existing run) leaves the den on a failure (<see cref="DenExit"/>) before the run ends; false (a journey) ends Failed where the player stands, in the world (no exit; no log off when
+    /// <c>endSession</c> is false). The composed fight inherits it, and with it false the fight also stays in the den at its end (the corpse trip follows on foot).
+    /// </summary>
+    public bool LeaveOnFailure { get; init; } = true;
 
     /// <summary>Every problem found while parsing, one line each.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
@@ -300,5 +324,5 @@ public sealed record DeathOptions
     }
 
     /// <summary>The options as the run logs them, in invariant culture.</summary>
-    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"seconds={Seconds}{(StopAfterHits ? " stop_after_hits=yes" : string.Empty)}{(RecoverCorpse ? string.Empty : " recover_corpse=off")}{(Decoys ? string.Empty : " decoys=off")}{(Rebuff ? string.Empty : " rebuff=off")}{(Fight ? string.Empty : " fight=off")}{(FightKills == DefaultFightKills ? string.Empty : " fight_kills=" + FightKills)}{(FightSeconds == DefaultFightSeconds ? string.Empty : " fight_seconds=" + FightSeconds)}{(RecoverMinHealthPercent == DefaultRecoverMinHealthPercent ? string.Empty : " recover_min_health=" + RecoverMinHealthPercent)}{(Stages is { } stages ? " stages=" + stages.ToString().Replace(", ", "+", StringComparison.Ordinal).ToLowerInvariant() : string.Empty)}");
+    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"seconds={Seconds}{(StopAfterHits ? " stop_after_hits=yes" : string.Empty)}{(RecoverCorpse ? string.Empty : " recover_corpse=off")}{(Decoys ? string.Empty : " decoys=off")}{(Rebuff ? string.Empty : " rebuff=off")}{(Fight ? string.Empty : " fight=off")}{(FightKills == DefaultFightKills ? string.Empty : " fight_kills=" + FightKills)}{(FightSeconds == DefaultFightSeconds ? string.Empty : " fight_seconds=" + FightSeconds)}{(RecoverMinHealthPercent == DefaultRecoverMinHealthPercent ? string.Empty : " recover_min_health=" + RecoverMinHealthPercent)}{(Stages is { } stages ? " stages=" + stages.ToString().Replace(", ", "+", StringComparison.Ordinal).ToLowerInvariant() : string.Empty)}{(StartAt is { } at ? " start_at=" + at.ToString().ToLowerInvariant() : string.Empty)}{(LeaveOnFailure ? string.Empty : " leave_on_failure=no")}{(Travel is null or PlaceTravel ? string.Empty : " travel=journey")}");
 }

@@ -159,4 +159,69 @@ public sealed class HeadlessFighterOptionsTests
         Assert.StartsWith("--fighter-recreate: only --scenario=fighter-build on the Brawler (test-melee) or the Archer (test-archer) takes it", error, StringComparison.Ordinal);
         Assert.False(o.FighterRecreate);
     }
+
+    // ------------------------------------------------------------------------------------------------ M4 fresh B1: --fresh-character (D44, D45)
+
+    [Fact]
+    public void The_fresh_character_option_is_registered_and_defaults_off_M4_fresh_B1()
+    {
+        Assert.Contains(Lifestone.Client.Options.OptionCatalog.Headless().Options, o => o.Name == "--fresh-character");
+        Assert.False(HeadlessOptions.Parse(["--scenario=fighter-build", "--account=test-melee"]).FreshCharacter);
+        Assert.False(HeadlessOptions.Parse(["--scenario=mage-build"]).FreshCharacter);
+    }
+
+    [Theory]
+    [InlineData("--scenario=fighter-build", "--account=test-melee")]
+    [InlineData("--scenario=fighter-build", "--account=test-archer")]
+    [InlineData("--scenario=mage-build")]
+    [InlineData("--scenario=mage-build", "--account=test")]
+    public void The_fresh_character_option_is_taken_by_the_brawler_the_archer_and_the_mage_builds_M4_fresh_B1(params string[] arguments)
+    {
+        var o = HeadlessOptions.Parse([.. arguments, "--fresh-character"]);
+        Assert.Empty(o.Errors);
+        Assert.True(o.FreshCharacter);
+        Assert.False(o.FighterRecreate);
+        Assert.False(HeadlessOptions.Parse([.. arguments, "--fresh-character=off"]).FreshCharacter);
+        Assert.True(HeadlessOptions.Parse([.. arguments, "--fresh-character=on"]).FreshCharacter);
+    }
+
+    [Theory]
+    [InlineData("--scenario=fighter-build")]
+    [InlineData("--scenario=fighter-build", "--account=test")]
+    [InlineData("--scenario=hunt", "--account=test-melee")]
+    [InlineData("--scenario=login", "--account=test-archer")]
+    [InlineData("--scenario=login")]
+    [InlineData("--scenario=gear")]
+    [InlineData("--scenario=buff", "--account=test-melee")]
+    public void The_fresh_character_option_is_refused_for_the_hunter_and_every_other_scenario_M4_fresh_B1(params string[] arguments)
+    {
+        var o = HeadlessOptions.Parse([.. arguments, "--fresh-character"]);
+        var error = Assert.Single(o.Errors);
+        Assert.StartsWith("--fresh-character: only --scenario=fighter-build on the Brawler (test-melee) or the Archer (test-archer) and --scenario=mage-build on the default account takes it", error, StringComparison.Ordinal);
+        Assert.False(o.FreshCharacter);
+    }
+
+    [Theory]
+    [InlineData("--scenario=fighter-build", "--account=test-melee")]
+    [InlineData("--scenario=fighter-build", "--account=test-archer")]
+    public void The_fresh_character_option_excludes_fighter_recreate_M4_fresh_B1(params string[] arguments)
+    {
+        var o = HeadlessOptions.Parse([.. arguments, "--fresh-character", "--fighter-recreate"]);
+        var error = Assert.Single(o.Errors);
+        Assert.StartsWith("--fresh-character: it excludes --fighter-recreate", error, StringComparison.Ordinal);
+        Assert.False(o.FreshCharacter);
+        Assert.Empty(HeadlessOptions.Parse([.. arguments, "--fresh-character", "--fighter-recreate=off"]).Errors);
+    }
+
+    [Theory]
+    [InlineData("test-melee")]
+    [InlineData("test-archer")]
+    [InlineData("somebody")]
+    public void The_fresh_character_option_on_the_mage_build_of_another_account_is_an_account_error_naming_no_value_M4_fresh_B1(string account)
+    {
+        var o = HeadlessOptions.Parse(["--scenario=mage-build", "--account=" + account, "--fresh-character"]);
+        var error = Assert.Single(o.Errors);
+        Assert.StartsWith("--account: --scenario=mage-build runs on the default test account 'test' only", error, StringComparison.Ordinal);
+        Assert.DoesNotContain(account, error, StringComparison.Ordinal);
+    }
 }

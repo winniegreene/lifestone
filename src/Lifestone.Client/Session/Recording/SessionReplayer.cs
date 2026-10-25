@@ -39,15 +39,22 @@ public sealed class SessionReplayer
     private readonly List<uint> _malformed = [];
     private bool _used;
 
+    private IReadOnlyList<DigestPart>? _recordedParts;
+    private IReadOnlyList<string>? _partDifferences;
+
     /// <summary>A replayer with a fresh state.</summary>
     /// <param name="log">Where the reducer logs (category <c>session</c>), or null for nowhere.</param>
-    public SessionReplayer(ILogSink? log = null)
+    /// <param name="spells">
+    /// The retail SpellTable's lookup, or null. A recording from M4 P5b F4 on carries the "&lt;spell&gt; has expired." lines the live client composed
+    /// (<see cref="SessionNotices.ExpiryLine"/>) and needs none; an older one replays them only with the table, as the live session composed them from it.
+    /// </param>
+    public SessionReplayer(ILogSink? log = null, Func<uint, Lifestone.Data.Magic.SpellInfo?>? spells = null)
     {
         Log = log ?? NullLogSink.Instance;
         Clock = new SessionClock(_time);
         State = new GameState();
         _bus = new EventBus(Log);
-        _reducer = new GameStateReducer(State, _bus, Clock, Log);
+        _reducer = new GameStateReducer(State, _bus, Clock, Log) { ReplaysRecording = true, SpellLookup = spells };
     }
 
     /// <summary>The replayed state.</summary>
@@ -84,6 +91,12 @@ public sealed class SessionReplayer
         var counts = default(ReplayCounts);
         while (reader.TryRead(out var frame))
         {
+            // An expiry line the replay composed for the last frame is added now unless this frame is the recording's own line (GameStateReducer.ReplaysRecording).
+            if (frame.Kind != RecordingFrameKind.Notice || frame.Notice.Code != SessionNotices.ExpiryLine)
+            {
+                _reducer.FlushExpiryLines();
+            }
+
             _time.MoveTo(frame.Time);
             switch (frame.Kind)
             {
@@ -110,6 +123,7 @@ public sealed class SessionReplayer
             _reducer.ExpireParked();
         }
 
+        _reducer.FlushExpiryLines();
         return new ReplayResult(
             reader.Header,
             reader.FramesRead,
@@ -124,7 +138,12 @@ public sealed class SessionReplayer
             reader.End,
             reader.Trailer,
             GameStateDigest.Compute(State),
-            _bus.HandlerFailures);
+            _bus.HandlerFailures)
+        {
+            RecordedParts = _recordedParts,
+            PartDifferences = _partDifferences,
+            ReplayedParts = GameStateDigest.Parts(State),
+        };
     }
 
     private void ApplyMessage(in RecordingFrame frame, ref ReplayCounts counts)
@@ -166,6 +185,14 @@ public sealed class SessionReplayer
 
     private void ApplyNotice(in RecordingNotice notice, double time)
     {
+        if (notice.Code == SessionNotices.DigestParts)
+        {
+            // The live session's final parts, written just before the trailer: compare them with the replay's state here (M4 P5b F4).
+            _recordedParts = GameStateDigest.ParseParts(notice.Text);
+            _partDifferences = GameStateDigest.CompareParts(_recordedParts, GameStateDigest.Parts(State));
+            return;
+        }
+
         if (notice.Code is > 0 and <= SessionNotices.LastReducerCode)
         {
             _reducer.ApplyLocal(notice);
@@ -229,6 +256,30 @@ public sealed record ReplayResult(
     /// there is no trailer or it has no digest.
     /// </summary>
     public bool? DigestMatches => Trailer?.StateDigest is { } recorded ? recorded.AsSpan().SequenceEqual(StateDigest) : null;
+
+    /// <summary>The live session's final digest parts (<see cref="SessionNotices.DigestParts"/>), or null for a recording made before M4 P5b F4.</summary>
+    public IReadOnlyList<DigestPart>? RecordedParts { get; init; }
+
+    /// <summary>The parts whose hash differs from the recorded ones (<see cref="GameStateDigest.CompareParts"/>), or null without <see cref="RecordedParts"/>.</summary>
+    public IReadOnlyList<string>? PartDifferences { get; init; }
+
+    /// <summary>The replayed state's digest parts (<see cref="GameStateDigest.Parts"/>).</summary>
+    public IReadOnlyList<DigestPart> ReplayedParts { get; init; } = [];
+
+    /// <summary>
+    /// What a failed digest check says (M4 P5b F4, TODO(m4-replay-vitae-digest)): the parts that differ, named with both hashes and their counts; or, for a
+    /// recording that holds no parts, that fact and every replayed part, so the reader can compare it with the live run's log.
+    /// </summary>
+    public string DigestDiagnosis()
+    {
+        var parts = PartDifferences switch
+        {
+            null => "the recording holds no digest parts (made before M4 P5b F4); replayed parts: " + GameStateDigest.FormatParts(ReplayedParts),
+            { Count: 0 } => "every recorded part matches the replay, so the trailer's digest and the parts disagree (a part added or reordered since the recording?)",
+            var differ => "differing parts: " + string.Join("; ", differ),
+        };
+        return parts + " | " + DigestEvidence();
+    }
 
     /// <summary>The trailer's facts and both digests in one line, for a failed digest check to carry (M4 P4 sfix2, TODO(m4-headless-digest)).</summary>
     internal string DigestEvidence() =>

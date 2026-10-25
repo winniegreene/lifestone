@@ -149,7 +149,7 @@ and answers one reply once ACE has removed the rows. The rules (`Core/CharPurgeR
 
 | Code | Refused when |
 |---|---|
-| `graduated` | the name is `Lifestone Smoke`, `Lifestone Loopback`, `BSD Mage` or `Holtburg Hunter` (any case): the graduated test characters are the baseline and are never purged |
+| `graduated` | the name is `Lifestone Smoke`, `Lifestone Loopback`, `Holtburg Hunter` or `Lifestone Tools` (any case): the graduated test characters are the baseline and are never purged; or `BSD Mage`, `Holtburg Brawler` or `Holtburg Archer` while the account holds no live copy of that name (m4-plan D44, D45: the live gate re-creates these three, and the new copy purges the old ones; for them `own-character` is decided by id, not by name, and only the pending copies are candidates, so `unknown-character` means no old copy is left) |
 | `own-character` | the name is the character the caller is playing |
 | `unknown-character` | no character of that name is on the caller's account (another account's characters are never read, so they look the same as no character) |
 | `character-online` | the character is online |

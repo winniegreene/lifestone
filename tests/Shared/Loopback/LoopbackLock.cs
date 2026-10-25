@@ -7,7 +7,7 @@ namespace Lifestone.Tests.Shared.Loopback;
 /// <summary>
 /// The cross-process lock that serialises loopback tests per test account (M4 D31): every worktree and every <c>dotnet test</c>
 /// shares the one localhost ACE, but ACE boots a second login of one account, so only one process at a time may run the loopback tests
-/// of an account. Different accounts (<c>test</c>, <c>test-melee</c>, <c>test-archer</c>) hold different locks, so their processes run at
+/// of an account. Different accounts (<c>test</c>, <c>test-melee</c>, <c>test-archer</c>, <c>test-tools</c>) hold different locks, so their processes run at
 /// once. Inside a process the <see cref="LoopbackCollection"/> runs tests one at a time.
 /// </summary>
 /// <remarks>

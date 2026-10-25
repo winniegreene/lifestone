@@ -161,6 +161,12 @@ public sealed class HeadlessStreamerDatTests(DatSetFixture fixture, ITestOutputH
         Assert.Equal(0, streamer.TileFailures);
         Assert.True(streamer.Attaches > peak, $"{streamer.Attaches} attaches over the run: the corridor moved on and released what it left");
         Assert.True(streamer.Releases > 0);
+
+        // nav-natural-steering, the same arrival with fewer turns: P5a's pursuit pressed a turn key 468 times to the belt (1,029.5 m, 415 key changes a minute)
+        // and 806 to the forest (1,864.0 m, 394 a minute); the straight run, which tracks the route near statics (NavRunner.TightClearanceNodes), 45 to 53 and
+        // 59 to 76 (33 to 52 a minute) over ten runs each.
+        Assert.InRange(runner.Turns, 1, groundCell == BeltCell ? 80 : 120);
+        Assert.InRange(runner.KeyChangesPerMinute, 0, 70);
     }
 
     private static CellFrame Lifestone()

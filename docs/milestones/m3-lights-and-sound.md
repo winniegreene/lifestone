@@ -1,6 +1,6 @@
 # Milestone 3: fights and sound (file: lights and sound)
 
-**Status: planned (2026-10-15), not started.** The plan of record, with the read map, the seams, the waves, wave 1's
+**Status: complete (2026-10-19; every item merged, the last of them 4.2, the end with the polish pass: §7 below, m3-plan.md §8).** The plan of record, with the read map, the seams, the waves, wave 1's
 slice tables, the gates, the decisions and the "as run" record, is [m3-plan.md](m3-plan.md). The scope stub of
 2026-10-14 (`m3-live-and-fight.md`) is reconciled in §3.3. M2 ([m2-log-in.md](m2-log-in.md)) is complete on master.
 

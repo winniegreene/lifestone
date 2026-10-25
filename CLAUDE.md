@@ -4,9 +4,10 @@ Lifestone is a faithful, single-player Asheron's Call. It is a Godot 4.7 (.NET, 
 - renders the user's own retail dats;
 - talks the AC protocol to a bundled ACE server on localhost.
 
-Read `README.md` and `docs/goals.md` for the project. The current milestone is
-**[docs/milestones/m4-fights-and-loot.md](docs/milestones/m4-fights-and-loot.md)** (the spec), with its plan of
-record, waves, slice tables, gates and decisions in **[docs/milestones/m4-plan.md](docs/milestones/m4-plan.md)**.
+Read `README.md` and `docs/goals.md` for the project. The next milestone is **M5, "patrons and outcomes"**, not
+yet planned: its planning session writes its spec and plan under `docs/milestones/` and points this paragraph at
+them. M4 ([docs/milestones/m4-fights-and-loot.md](docs/milestones/m4-fights-and-loot.md), "fights and loot"; its plan,
+gates, decisions and open TODOs in [docs/milestones/m4-plan.md](docs/milestones/m4-plan.md), §9 the rows placed "M5"),
 M3 ([docs/milestones/m3-lights-and-sound.md](docs/milestones/m3-lights-and-sound.md), "fights and sound" in prose;
 its plan [docs/milestones/m3-plan.md](docs/milestones/m3-plan.md)) and M2
 ([docs/milestones/m2-log-in.md](docs/milestones/m2-log-in.md)) are complete.
@@ -81,11 +82,13 @@ Every brief cites this section instead of restating it. All of these are in forc
   pre-authorised for the leads: docs/milestones/m4-plan.md §7, D8, as M3 D6 was). Slices never run `server\*.ps1`, `tools\play.ps1`
   against a live server, Loopback or Soak tests, or `smoke.ps1 -Backend require|start`; loopback tests they write must
   compile and say what they prove, and the lead runs them.
-- **Accounts:** automation uses the three test accounts `test`, `test-melee` and `test-archer` only. The graduated test
+- **Accounts:** automation uses the four test accounts `test`, `test-melee`, `test-archer` and `test-tools` only (M4 D39). The graduated test
   characters (`Lifestone Smoke`, `Lifestone Loopback`) are the baseline and are never reset or levelled. M3's `BSD Mage`
   (m3-plan.md §7, D3) and M4's `Holtburg Hunter` (m4-plan.md §7, D1), `Holtburg Brawler` (`test-melee`) and `Holtburg
   Archer` (`test-archer`) (both M4 D31) are levelled only by their build scenarios and by the loops' kills and are
-  never reset or purged. Only `Lifestone Throwaway` may be levelled freely or purged. A new test character is the
+  never reset or purged, with one exception: the live gate deletes and re-creates `BSD Mage`, `Holtburg Brawler` and
+  `Holtburg Archer` at the start of each gate (their builds' `--fresh-character`, M4 D44), and the new copy purges the
+  old one (M4 D45). `Holtburg Hunter` is never re-created. Only `Lifestone Throwaway` (on `test-tools`) may be levelled freely or purged. `Lifestone Tools` (on `test-tools`, the Throwaway's purge caller; owner decision D43) is created once when absent, never levelled or reset: it only enters and leaves to purge. A new test character is the
   owner's decision.
 - **Off limits:** never open or print the user profile's `.lifestone-secrets` key file, the values in
   `server\runtime\secrets.json`, or the files listed in `.git/info/exclude`.

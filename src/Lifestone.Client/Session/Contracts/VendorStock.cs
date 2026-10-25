@@ -44,6 +44,25 @@ public sealed record VendorStockEntry(int Stack, uint Guid, WeenieDesc Desc)
     public bool IsBuyable(uint amount) => amount > 0 && (IsUnlimited || (Stack > 0 && amount <= (uint)Stack));
 }
 
+/// <summary>The clause of a vendor's sale test that refuses an item (<see cref="VendorStock.Refusal"/>), in the order the test reads them.</summary>
+public enum SaleRefusal
+{
+    /// <summary>The vendor takes the item.</summary>
+    None,
+
+    /// <summary>The item's ItemType is outside the vendor's <see cref="VendorStock.Mask"/>.</summary>
+    Mask,
+
+    /// <summary>The item's Value is below 1.</summary>
+    Value,
+
+    /// <summary>The item carries ACE's Retained description bit (<see cref="VendorStock.RetainedFlag"/>).</summary>
+    Retained,
+
+    /// <summary>The item's weenie class is one ACE answers "is unsellable" (<see cref="VendorStock.BreadWcid"/>, <see cref="VendorStock.ArrowWcid"/>).</summary>
+    UnsellableWeenie,
+}
+
 /// <summary>
 /// The vendor the player has open (<see cref="GameState.Vendor"/>; M4 3.2 s1): the last GameEvent 0x0062 ApproachVendor, with ACE's price rules (<c>Vendor.GetSellCost</c> and <c>GetBuyCost</c>, W/Vendor.cs 573-609).
 /// ACE sends a fresh 0062 after every trade, so a refresh replaces the object (a new <see cref="Revision"/>); the instance a caller holds never changes.
@@ -150,10 +169,75 @@ public sealed class VendorStock
     public bool BuysType(uint itemType) => (Mask & itemType) != 0;
 
     /// <summary>True when the vendor takes the object: its ItemType is in the mask and its Value is at least 1 (ACE refuses a worthless item, "has no value and cannot be sold").</summary>
-    public bool Buys(WorldObject item)
+    public bool Buys(WorldObject item) => Refusal(item) == SaleRefusal.None;
+
+    /// <summary>
+    /// The first clause of <see cref="Buys"/> that refuses the object, in the order it tests them (the mask, the Value, then ACE's <see cref="UnsellableClause"/>), or <see cref="SaleRefusal.None"/> when the vendor takes it:
+    /// a failure line names the clause rather than saying the item was not taken.
+    /// </summary>
+    /// <param name="item">The pack item.</param>
+    public SaleRefusal Refusal(WorldObject item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        return BuysType(item.ItemType) && (item.Weenie.Value ?? 0) >= 1;
+        if (!BuysType(item.ItemType))
+        {
+            return SaleRefusal.Mask;
+        }
+
+        if ((item.Weenie.Value ?? 0) < 1)
+        {
+            return SaleRefusal.Value;
+        }
+
+        return UnsellableClause(item);
+    }
+
+    /// <summary>The refusal as a failure line reads it: the clause, then the numbers it tested (the item's ItemType and Value, this vendor's mask, the Retained bit, the weenie class).</summary>
+    /// <param name="item">The pack item.</param>
+    public string DescribeRefusal(WorldObject item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var w = item.Weenie;
+        return Refusal(item) switch
+        {
+            SaleRefusal.None => $"none: the mask 0x{Mask:X8} takes '{w.Name}' (ItemType 0x{item.ItemType:X}, Value {w.Value ?? 0})",
+            SaleRefusal.Mask => $"mask: '{w.Name}' ItemType 0x{item.ItemType:X} & the mask 0x{Mask:X8} is 0",
+            SaleRefusal.Value => $"value: '{w.Name}' has Value {w.Value ?? 0} (ACE refuses an item under 1)",
+            SaleRefusal.Retained => $"retained: '{w.Name}' carries the Retained description bit (flags 0x{item.DescriptionFlags:X8})",
+            _ => $"unsellable-list: '{w.Name}' is weenie class {w.WeenieClassId}, one ACE answers 'is unsellable' (IsSellable=0)",
+        };
+    }
+
+    /// <summary>ACE's <c>ObjectDescriptionFlag.Retained</c> (0x01000000; ACE.Entity/Enum/ObjectDescriptionFlag.cs:32 @95ef426d): the weenie description bit for a retained item.</summary>
+    public const uint RetainedFlag = 0x01000000;
+
+    /// <summary>The Bread weenie class (wcid 259), refused live by Renald the Elder: "The Bread is unsellable." (M4 P5b journey 3h, a Bread of type 0x20 inside his mask 0x480467A7).</summary>
+    public const uint BreadWcid = 259;
+
+    /// <summary>The Arrow weenie class (wcid 31717), IsSellable=0 in the world database (research.md section 6's read-only SELECT); refused live: "The Arrows is unsellable." (M4 P5b live 3a, the archer's vendor station).</summary>
+    public const uint ArrowWcid = 31717;
+
+    /// <summary>
+    /// True when ACE refuses the item whatever the vendor's mask says. F3-2: ACE's sale check (ACE.Server/WorldObjects/Player_Commerce.cs:268 @95ef426d, <c>VerifySellItems</c>) is
+    /// <c>(acceptedItemTypes &amp; wo.ItemType) == 0 || !wo.IsSellable || wo.Retained</c>, answered with the 02EB "The X is unsellable." (:270) and the item skipped. The mask is <see cref="BuysType"/>; <c>Retained</c> is the weenie
+    /// description bit <see cref="RetainedFlag"/>, read from the CreateObject; <c>IsSellable</c> (WorldObject_Properties.cs:1460) is a PropertyBool the wire does not carry for an unappraised item, so a weenie live-refused for it is listed
+    /// by class (<see cref="BreadWcid"/>, <see cref="ArrowWcid"/>: both confirmed by a read-only SELECT of ace_world weenie_properties_bool type 69 (IsSellable) = 0 for wcids 259 and 31717, research.md section 6;
+    /// <c>TODO(m4-vendor-issellable-wire)</c>: the wire still does not carry IsSellable, so add a class here per refusal the SELECT confirms).
+    /// </summary>
+    /// <param name="item">The item.</param>
+    public static bool Unsellable(WorldObject item) => UnsellableClause(item) != SaleRefusal.None;
+
+    /// <summary>The clause of <see cref="Unsellable"/> that refuses the item: <see cref="SaleRefusal.Retained"/> (the description bit), <see cref="SaleRefusal.UnsellableWeenie"/> (the class list), or <see cref="SaleRefusal.None"/>.</summary>
+    /// <param name="item">The item.</param>
+    public static SaleRefusal UnsellableClause(WorldObject item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if ((item.DescriptionFlags & RetainedFlag) != 0)
+        {
+            return SaleRefusal.Retained;
+        }
+
+        return item.Weenie.WeenieClassId is BreadWcid or ArrowWcid ? SaleRefusal.UnsellableWeenie : SaleRefusal.None;
     }
 
     /// <summary>What one created stack of Value <paramref name="stackValue"/> and ItemType <paramref name="itemType"/> costs: <c>max(1, ceil(SellPrice x Value - 0.1))</c> in ACE's float arithmetic.</summary>

@@ -8,6 +8,7 @@ using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.CharacterCreation;
 using Lifestone.Net.Messages;
+using Lifestone.ServerTools;
 using Lifestone.Tests.Shared;
 
 namespace Lifestone.Client.Tests.Session.Fighter;
@@ -21,8 +22,11 @@ namespace Lifestone.Client.Tests.Session.Fighter;
 public sealed class FighterBuildScenarioTests
 {
     private static readonly Regex Verdict = new(
-        @"^fighter=(ready|built|failed) level=\d+ template=(ok|short|mismatch:[A-Za-z]+ \d+/\d+)( template_short=\S+)? kit=\S+ wielded=\d+ worn=\d+( magic=(trained|short|not_entered)(:[a-z+]+)? spells=\d+/\d+)?( gear=\S+ gear_magic=\S+ spells_active=\S+)?( pack=\d+/\d+)?( recreated=yes old=pending-deletion)?$",
+        @"^fighter=(ready|built|failed) level=\d+ template=(ok|short|mismatch:[A-Za-z]+ \d+/\d+)( template_short=\S+)? kit=\S+ wielded=\d+ worn=\d+( magic=(trained|short|not_entered)(:[a-z+]+)? spells=\d+/\d+)?( gear=(\S+ gear_magic=\S+ spells_active=\S+|not_entered))?( gear_mana_min=\S+ recharged=\S+)?( pack=\d+/\d+)?( recreated=yes old=pending-deletion)?( fresh=(recreated|created|none) purged=\d+ refill=(none|level-up:\d+->\d+|failed))?$",
         RegexOptions.CultureInvariant);
+
+    /// <summary>M4 fresh F1: the verdict's refill field after a fresh build of <paramref name="template"/>: one level-up from the template's level (the extra experience stays unspent).</summary>
+    private static string Refilled(FighterTemplate template) => $"refill=level-up:{template.Level}->{template.Level + 1}";
 
     private static int Grants => FighterKit.Hunter.Items.Sum(i => i.Item.MaxStack is null ? i.Item.Stack : 1);
 
@@ -32,13 +36,13 @@ public sealed class FighterBuildScenarioTests
     {
         private readonly string _templateName;
 
-        public Run(Func<XpTableData, ScriptedAceSession, ScriptedFighter>? shape, Action<ScriptedAceSession>? server = null, FighterTemplate? template = null, bool recreate = false)
+        public Run(Func<XpTableData, ScriptedAceSession, ScriptedFighter>? shape, Action<ScriptedAceSession>? server = null, FighterTemplate? template = null, bool recreate = false, bool rechargeGear = false, bool fresh = false, Action<ScriptedPurge>? purge = null, int levels = 275)
         {
             _templateName = (template ?? FighterTemplate.Hunter).Name;
-            Table = ScriptedMage.SyntheticTable();
+            Table = ScriptedMage.SyntheticTable(levels);
             Scenario = template is null
                 ? new FighterBuildScenario(Table, HeadlessCharacterTests.StandInClasses(), Log)
-                : new FighterBuildScenario(Table, HeadlessCharacterTests.StandInClasses(), Log, template: template, recreate: recreate);
+                : new FighterBuildScenario(Table, HeadlessCharacterTests.StandInClasses(), Log, template: template, recreate: recreate, rechargeGear: rechargeGear, freshCharacter: fresh);
             Runner = HeadlessRunner.StartWith(
                 new HeadlessRunOptions { Session = new SessionOptions { Account = "test" }, QuitAfterSeconds = 600 },
                 Scenario,
@@ -66,11 +70,21 @@ public sealed class FighterBuildScenarioTests
                     }
 
                     Fighter.Attach();
+                    if (fresh)
+                    {
+                        Server.AnswerDeletes = true;
+                        Purge = new ScriptedPurge(Server);
+                        purge?.Invoke(Purge);
+                    }
+
                     return Server;
                 });
         }
 
         public const uint FighterGuid = 0x50000030;
+
+        /// <summary>The mod's purge as the scripted server plays it (M4 fresh B1); null unless the run is a fresh-character one.</summary>
+        public ScriptedPurge Purge { get; private set; } = null!;
 
         public XpTableData Table { get; }
 
@@ -748,6 +762,481 @@ public sealed class FighterBuildScenarioTests
         Assert.Contains("/102", run.Scenario.VerdictFields(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void With_the_recharge_a_Brawler_whose_Shirt_is_under_half_uses_the_kits_charge_on_itself_after_wearing_the_gear_and_is_granted_a_new_one()
+    {
+        var template = FighterTemplate.Melee;
+        using var run = new Run((table, server) =>
+        {
+            var f = ScriptedFighter.Ready(table, server, template.Name);
+            f.Appraises = true;
+            f.SetMana(2032, 200); // Branith's Shirt, 500 full: 40%
+            return f;
+        }, template: template, rechargeGear: true);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        var verdict = run.Scenario.VerdictFields();
+        Assert.Matches(Verdict, verdict);
+        Assert.StartsWith("fighter=built ", verdict, StringComparison.Ordinal); // a charge used is a change
+        Assert.Contains(" spells_active=n/a gear_mana_min=100 recharged=1 pack=", verdict, StringComparison.Ordinal);
+        var use = Assert.Single(run.Fighter.StoneUses);
+        Assert.Equal(run.FighterGuidOnServer, use.Target); // on the player: every equipped item below its maximum
+        Assert.Equal(500, run.Fighter.ManaOf(run.Fighter.Items.Single(i => i.Kind.Wcid == 2032).Guid));
+        // The kit's charge is granted again after the use, and the character ends holding one (the next build-verify's).
+        Assert.Equal([FighterKit.ManaChargeWcid], run.Fighter.ItemWcidsAsked);
+        Assert.Equal(1, run.Fighter.HeldCount(FighterKit.ManaChargeWcid));
+        var steps = run.Scenario.SentSteps.ToList();
+        Assert.True(steps.FindIndex(s => s.StartsWith("use a mana charge", StringComparison.Ordinal)) < steps.FindIndex(s => s.StartsWith("item Titan Mana Charge", StringComparison.Ordinal)), string.Join(" | ", steps));
+    }
+
+    [Theory]
+    [InlineData("melee")]
+    [InlineData("archer")]
+    public void With_the_recharge_a_ready_fighter_with_full_gear_is_only_appraised_and_stays_ready(string key)
+    {
+        var template = FighterTemplate.ForKey(key)!;
+        using var run = new Run((table, server) =>
+        {
+            var f = ScriptedFighter.Ready(table, server, template.Name);
+            f.Appraises = true;
+            return f;
+        }, template: template, rechargeGear: true);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        var verdict = run.Scenario.VerdictFields();
+        Assert.Matches(Verdict, verdict);
+        Assert.StartsWith("fighter=ready ", verdict, StringComparison.Ordinal); // the appraisals are a check, not a build step
+        Assert.Contains(" gear_mana_min=100 recharged=0 ", verdict, StringComparison.Ordinal);
+        Assert.Empty(run.Fighter.StoneUses);
+        Assert.Equal(0, run.Scenario.BuiltSteps);
+        Assert.All(run.Scenario.SentSteps, s => Assert.StartsWith("learn spells ", s, StringComparison.Ordinal)); // the spellbook's check only, as without the recharge
+        // Every worn piece (and the Archer's bow in the pack) and the charge appraised.
+        Assert.Equal(template.Kit.Gear!.Pieces.Count + 1, run.Fighter.Identified.Distinct().Count());
+    }
+
+    [Fact]
+    public void Without_the_recharge_the_headless_build_appraises_nothing_and_has_no_gear_mana_fields()
+    {
+        var template = FighterTemplate.Melee;
+        using var run = new Run((table, server) =>
+        {
+            var f = ScriptedFighter.Ready(table, server, template.Name);
+            f.Appraises = true;
+            f.SetMana(2032, 200);
+            return f;
+        }, template: template);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        Assert.Empty(run.Fighter.Identified);
+        Assert.Empty(run.Fighter.StoneUses);
+        Assert.DoesNotContain("gear_mana_min", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+    }
+
     /// <summary>The verdict without the gear and pack fields (M4 P5a C6; they are judged by <c>FighterGearBuildTests</c>).</summary>
     private static string Core(string verdict) => System.Text.RegularExpressions.Regex.Replace(verdict, @" gear=.*$| pack=\S+$", string.Empty);
+
+    // ------------------------------------------------------------------------------------------------ M4 fresh B1: --fresh-character (D44, D45)
+
+    private static FighterTemplate Template(string key) => FighterTemplate.ForKey(key)!;
+
+    [Theory]
+    [InlineData("melee")]
+    [InlineData("archer")]
+    public void With_fresh_character_the_live_fighter_is_deleted_from_the_list_never_entered_then_created_built_purged_placed_and_logged_off_in_that_order_M4_fresh_B1_D44_D45(string key)
+    {
+        var template = Template(key);
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        Assert.True(run.Scenario.Created);
+        var verdict = run.Scenario.VerdictFields();
+        Assert.Matches(Verdict, verdict);
+        Assert.StartsWith($"fighter=built level={template.Level + 1} template=ok ", verdict, StringComparison.Ordinal); // one level above the template's: the refill's level-up (M4 fresh F1)
+        Assert.EndsWith(" fresh=recreated purged=1 " + Refilled(template), verdict, StringComparison.Ordinal); // fresh= and purged= stay on the one line the gate's judge reads, the refill last
+        Assert.DoesNotContain("recreated=yes", verdict, StringComparison.Ordinal); // C5's field is C5's
+
+        // The old character is never entered: the delete comes from the character list, then the create, then the one entry (of the new character), then the mod's verbs, then the log off.
+        var opcodes = run.Server.Sent.Select(o => o.Opcode).ToList();
+        var delete = opcodes.IndexOf(MessageOpcodes.CharacterDelete);
+        var create = opcodes.IndexOf(MessageOpcodes.CharacterCreate);
+        var enter = opcodes.IndexOf(MessageOpcodes.CharacterEnterWorldRequest);
+        var logOff = opcodes.IndexOf(MessageOpcodes.CharacterLogOff);
+        Assert.True(delete >= 0 && delete < create && create < enter, string.Join(",", opcodes.Select(o => $"{o:X}")));
+        Assert.Single(opcodes, o => o == MessageOpcodes.CharacterDelete);
+        Assert.Single(opcodes, o => o == MessageOpcodes.CharacterCreate);
+        Assert.Single(opcodes, o => o == MessageOpcodes.CharacterEnterWorldRequest);
+        var created = run.Server.Characters.Single(c => c.Name == template.Name && c.DeleteField == 0);
+        Assert.NotEqual(Run.FighterGuid, created.Guid);
+        Assert.Equal([created.Guid], run.Server.EnterRequests);
+        Assert.DoesNotContain(run.Server.Characters, c => c.Guid == Run.FighterGuid); // the old copy was listed pending (restorable) until the new copy's purge removed it
+        Assert.Equal(1, run.Purge.Removed);
+
+        // The mod's verbs after the entry: the build's, then the refill's experience grant (M4 fresh F1), then the purge asked until unknown-character (twice: one removal, then the refusal), then the place, and the log off last.
+        var journal = run.Purge.Journal;
+        var purges = journal.Select((j, i) => (j.Request, j.SentIndex, i)).Where(j => j.Request == nameof(CharPurgeRequest)).ToList();
+        var place = journal.FindIndex(j => j.Request == nameof(PlacePoiRequest));
+        Assert.Equal(2, purges.Count);
+        Assert.Equal(purges[0].i + 1, purges[1].i);
+        Assert.True(place == journal.Count - 1 && place == purges[1].i + 1, string.Join(",", journal.Select(j => j.Request)));
+        Assert.All(journal.Take(purges[0].i), j => Assert.DoesNotContain(j.Request, new[] { nameof(CharPurgeRequest), nameof(PlacePoiRequest) }));
+        Assert.Contains(journal.Take(purges[0].i), j => j.Request == nameof(XpRequest));
+        Assert.Contains(journal.Take(purges[0].i), j => j.Request == nameof(ItemRequest));
+        var lastItem = journal.FindLastIndex(j => j.Request == nameof(ItemRequest));
+        Assert.Equal(nameof(XpRequest), journal[purges[0].i - 1].Request); // the refill's grant is the last verb before the purge ...
+        Assert.True(lastItem < purges[0].i - 1, string.Join(",", journal.Select(j => j.Request))); // ... and comes after the build's last (the kit)
+        Assert.Equal(2, journal.Count(j => j.Request == nameof(XpRequest))); // the build's grant and the refill's, never a third
+        Assert.True(journal[0].SentIndex > enter);
+        Assert.True(logOff > journal[place].SentIndex);
+        Assert.All(run.Purge.Asked, n => Assert.Equal(template.Name, n)); // no other name is ever purged
+        Assert.Contains(run.Log.Lines, l => l.Contains("fresh=recreated", StringComparison.Ordinal));
+        Assert.True(run.Fighter.InHoltburg);
+
+        // The three other characters of the account are as they were.
+        Assert.Contains(run.Server.Characters, c => c.Name == "Amy" && c.DeleteField == 0);
+        Assert.Contains(run.Server.Characters, c => c.Name == "Bo" && c.DeleteField == 1);
+        Assert.Contains(run.Server.Characters, c => c.Name == "Cy" && c.DeleteField == 0);
+    }
+
+    [Fact]
+    public void With_fresh_character_an_expired_old_row_is_purged_too_and_the_count_says_so_M4_fresh_B1_D45()
+    {
+        var template = Template("melee");
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true, purge: p => p.ExpiredRows = 1);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        Assert.EndsWith(" fresh=recreated purged=2 " + Refilled(template), run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Equal(3, run.Purge.Asked.Count); // two removals, then unknown-character
+        Assert.Matches(Verdict, run.Scenario.VerdictFields());
+    }
+
+    [Fact]
+    public void With_fresh_character_an_older_pending_copy_in_the_list_is_skipped_by_the_choosing_and_purged_with_the_deleted_one_M4_fresh_B1_D45()
+    {
+        var template = Template("archer");
+        using var run = new Run(
+            (table, server) => ScriptedFighter.Replaceable(table, server, template.Name),
+            server => server.Characters.Add(new Lifestone.Tests.Shared.Net.AceCharacter(0x50000077, template.Name, 1)),
+            template,
+            fresh: true);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        Assert.EndsWith(" fresh=recreated purged=2 " + Refilled(template), run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.DoesNotContain(0x50000077u, run.Server.EnterRequests);
+        Assert.Single(run.Server.Sent, o => o.Opcode == MessageOpcodes.CharacterDelete);
+        Assert.DoesNotContain(run.Server.Characters, c => c.Name == template.Name && c.DeleteField != 0); // both old rows are gone
+    }
+
+    [Theory]
+    [InlineData("melee")]
+    [InlineData("archer")]
+    public void With_fresh_character_and_no_live_copy_listed_the_fighter_is_only_created_and_built_and_the_verdict_says_created_M4_fresh_B1_D44(string key)
+    {
+        var template = Template(key);
+        using var run = new Run(null, template: template, fresh: true);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        Assert.True(run.Scenario.Created);
+        Assert.DoesNotContain(run.Server.Sent, o => o.Opcode == MessageOpcodes.CharacterDelete);
+        Assert.Single(run.Server.Sent, o => o.Opcode == MessageOpcodes.CharacterCreate);
+        Assert.EndsWith(" fresh=created purged=0 " + Refilled(template), run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Single(run.Purge.Asked); // asked once: unknown-character, which ends the loop with nothing purged (and creating needs no purge)
+        Assert.Matches(Verdict, run.Scenario.VerdictFields());
+    }
+
+    [Fact]
+    public void With_fresh_character_a_pending_row_of_the_name_and_no_live_copy_is_created_over_and_the_new_copy_purges_it_M4_fresh_B1_D45()
+    {
+        var template = Template("melee");
+        using var run = new Run(null, server => server.Characters.Add(new Lifestone.Tests.Shared.Net.AceCharacter(0x50000077, template.Name, 1)), template, fresh: true);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        Assert.DoesNotContain(run.Server.Sent, o => o.Opcode == MessageOpcodes.CharacterDelete);
+        Assert.EndsWith(" fresh=created purged=1 " + Refilled(template), run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.DoesNotContain(0x50000077u, run.Server.EnterRequests);
+    }
+
+    [Fact]
+    public void With_fresh_character_a_delete_the_server_does_not_answer_fails_before_anything_is_created_M4_fresh_B1_D44()
+    {
+        var template = Template("melee");
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true);
+        run.Server.AnswerDeletes = false; // the rig turns it on for a fresh run; this server never acknowledges the delete
+        var result = run.Finish();
+
+        Assert.False(result.Ok);
+        Assert.Equal("recreate-delete", result.Stage);
+        Assert.Contains("fresh-character: deleting the old character through the client's retail character delete", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Server.Sent, o => o.Opcode == MessageOpcodes.CharacterCreate);
+        Assert.Empty(run.Server.EnterRequests);
+        Assert.Empty(run.Purge.Asked);
+        Assert.Contains(" fresh=none purged=0", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Matches(Verdict, run.Scenario.VerdictFields());
+    }
+
+    [Theory]
+    [InlineData(ToolErrors.Graduated, "the name is one of the graduated test characters", "D45 rule", "setup-server.ps1 -ModOnly")]
+    [InlineData(ToolErrors.UnknownVerb, "the mod has no such verb", "no char purge verb", "setup-server.ps1 -ModOnly")]
+    [InlineData(ToolErrors.OwnCharacter, "that is the character you are playing", "own-character", "that is the character you are playing")]
+    public void With_fresh_character_a_purge_the_mod_refuses_fails_the_run_by_name_and_nothing_else_is_sent_M4_fresh_B1_D45(string code, string sentence, string named, string andAlso)
+    {
+        var template = Template("archer");
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true, purge: p => p.Refuse(code, sentence));
+        var result = run.Finish();
+
+        Assert.False(result.Ok);
+        Assert.Equal("purging", result.Stage);
+        Assert.StartsWith("purge: ", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains(named, run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains(andAlso, run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Single(run.Purge.Asked); // no second ask after a refusal
+        Assert.DoesNotContain(run.Purge.Journal, j => j.Request == nameof(PlacePoiRequest)); // and the character is not placed
+        Assert.DoesNotContain(run.Server.Sent, o => o.Opcode == MessageOpcodes.CharacterLogOff);
+        Assert.StartsWith("fighter=failed ", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.EndsWith(" fresh=recreated purged=0 " + Refilled(template), run.Scenario.VerdictFields(), StringComparison.Ordinal); // the refill ran before the purge asked
+        Assert.Matches(Verdict, run.Scenario.VerdictFields());
+    }
+
+    [Fact]
+    public void With_fresh_character_a_recreated_fighter_whose_old_copy_the_mod_did_not_purge_fails_the_run_M4_fresh_B1_D45()
+    {
+        var template = Template("melee");
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true, purge: p => p.Gone = true);
+        var result = run.Finish();
+
+        Assert.False(result.Ok);
+        Assert.Contains("purge: the old copy was not purged", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Single(run.Purge.Asked);
+        Assert.EndsWith(" fresh=recreated purged=0 " + Refilled(template), run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Purge.Journal, j => j.Request == nameof(PlacePoiRequest));
+        Assert.Matches(Verdict, run.Scenario.VerdictFields());
+    }
+
+    [Fact]
+    public void With_fresh_character_a_mod_that_never_runs_out_of_old_copies_fails_at_the_cap_of_ten_purges_M4_fresh_B1_D45()
+    {
+        var template = Template("archer");
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true, purge: p => p.Endless = true);
+        var result = run.Finish();
+
+        Assert.False(result.Ok);
+        Assert.Contains($"purged {FreshPurge.MaxPurges} times", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Equal(10, FreshPurge.MaxPurges);
+        Assert.Equal(FreshPurge.MaxPurges, run.Purge.Asked.Count);
+        Assert.EndsWith($" fresh=recreated purged={FreshPurge.MaxPurges} " + Refilled(template), run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Purge.Journal, j => j.Request == nameof(PlacePoiRequest));
+    }
+
+    [Fact]
+    public void With_fresh_character_a_build_that_fails_leaves_the_old_copy_pending_and_purges_nothing_M4_fresh_B1_D45()
+    {
+        var template = Template("melee");
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true);
+        run.Fighter.UnknownWcids.Add(template.WieldedWeaponWcid); // the mod refuses the weapon's class id: the build ends short
+        var result = run.Finish();
+
+        Assert.False(result.Ok);
+        Assert.Contains($"(weenie {template.WieldedWeaponWcid})", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Empty(run.Purge.Asked); // the purge is only after a build that ended met
+        Assert.Equal(1u, run.Server.Characters.Single(c => c.Guid == Run.FighterGuid).DeleteField); // the old copy stays listed as pending deletion: restorable
+        Assert.Contains(" fresh=recreated purged=0", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.EndsWith(" refill=none", run.Scenario.VerdictFields(), StringComparison.Ordinal); // and so is the refill (M4 fresh F1)
+        Assert.Single(run.Fighter.XpAsked); // only the build's grant: no refill grant after a build that ended short
+        Assert.Matches(Verdict, run.Scenario.VerdictFields());
+    }
+
+    [Fact]
+    public void With_fresh_character_a_mod_that_does_not_report_the_purge_verb_fails_at_the_status_stage_M4_fresh_B1()
+    {
+        var template = Template("archer");
+        using var run = new Run(null, server => server.StatusVerbs = [.. ToolsWire.Verbs.Where(v => v != FreshPurge.RequiredVerb)], template, fresh: true);
+        var result = run.Finish();
+
+        Assert.False(result.Ok);
+        Assert.Equal("status", result.Stage);
+        Assert.Contains($"'{FreshPurge.RequiredVerb}'", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Empty(run.Fighter.XpAsked);
+    }
+
+    // ------------------------------------------------------------------------------------------------ M4 fresh F1: the refill (the item's live gate round 1 finding)
+
+    [Theory]
+    [InlineData("melee")]
+    [InlineData("archer")]
+    public void With_fresh_character_the_vitals_are_refilled_by_one_level_up_after_the_build_and_before_the_purge_with_exactly_the_experience_to_the_next_level_M4_fresh_F1(string key)
+    {
+        var template = Template(key);
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        var next = run.Table.XpForLevel(template.Level + 1);
+        Assert.Equal(2, run.Fighter.XpAsked.Count); // the build's grant and the refill's, never a third
+        Assert.Equal(run.Table.XpForLevel(template.Level), (ulong)run.Fighter.XpAsked[0]); // the new copy had no experience: the build's grant is the template's level
+        Assert.Equal((long)next - run.Fighter.XpAsked[0], run.Fighter.XpAsked[1]); // exactly the experience to the next level: nothing else
+        Assert.Equal((long)next, run.Fighter.Total);
+        Assert.Equal(template.Level + 1, run.Fighter.Level);
+        var verdict = run.Scenario.VerdictFields();
+        Assert.Matches(Verdict, verdict);
+        Assert.EndsWith(" fresh=recreated purged=1 " + Refilled(template), verdict, StringComparison.Ordinal);
+
+        // The log tells it in order: the build ended met, why the vitals are below their maxima (with ACE's rule cited), the level-up that refilled them, then the purge.
+        var lines = run.Log.Lines.ToList();
+        int At(string text) => lines.FindIndex(l => l.Contains(text, StringComparison.Ordinal));
+        var ended = At("the build ended met; refilling the vitals");
+        var below = At("refill: the vitals are below their maxima (health ");
+        var refilled = At("refill: the level-up refilled the vitals (level-up:");
+        var full = At("the vitals are full (refill=level-up:");
+        var purged = At("purged an old copy");
+        Assert.True(ended >= 0 && ended < below && below < refilled && refilled < full && full < purged, string.Join(" | ", new[] { ended, below, refilled, full, purged }.Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture))));
+        Assert.Contains("Player_Xp.cs CheckForLevelup calls SetMaxVitals", lines[below], StringComparison.Ordinal);
+        Assert.Contains("95ef426d", lines[below], StringComparison.Ordinal);
+        Assert.StartsWith("refill xp ", run.Scenario.SentSteps[^2], StringComparison.Ordinal); // recorded just before the place
+        Assert.StartsWith("place to Holtburg", run.Scenario.SentSteps[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void With_fresh_character_and_the_vitals_already_full_the_refill_is_none_and_nothing_is_granted_M4_fresh_F1()
+    {
+        var template = Template("melee");
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true);
+        run.Fighter.FullVitals = true;
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        Assert.Single(run.Fighter.XpAsked); // the build's grant alone
+        var verdict = run.Scenario.VerdictFields();
+        Assert.Matches(Verdict, verdict);
+        Assert.EndsWith(" fresh=recreated purged=1 refill=none", verdict, StringComparison.Ordinal);
+        Assert.StartsWith($"fighter=built level={template.Level} template=ok ", verdict, StringComparison.Ordinal); // no level-up: the template's level
+        Assert.Contains(run.Log.Lines, l => l.Contains("refill: every vital is at its maximum", StringComparison.Ordinal));
+        Assert.Equal(1, run.Purge.Removed); // and the purge still ran after it
+    }
+
+    [Fact]
+    public void With_fresh_character_a_refused_refill_grant_fails_the_run_by_name_and_purges_and_grants_nothing_more_M4_fresh_F1()
+    {
+        var template = Template("archer");
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true);
+        run.Fighter.XpGrantsBeforeRefusal = 1; // the build's grant is answered, the refill's is refused
+        var result = run.Finish();
+
+        Assert.False(result.Ok);
+        Assert.Equal("refilling", result.Stage);
+        Assert.StartsWith("refill: the grant of ", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("was refused", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("the experience grant was refused", run.Scenario.Failure, StringComparison.Ordinal); // the mod's own sentence
+        Assert.Equal(2, run.Fighter.XpAsked.Count); // the refill asked once and is never asked again
+        Assert.Empty(run.Purge.Asked);
+        Assert.DoesNotContain(run.Purge.Journal, j => j.Request == nameof(PlacePoiRequest));
+        Assert.Equal(1u, run.Server.Characters.Single(c => c.Guid == Run.FighterGuid).DeleteField); // the old copy stays restorable
+        Assert.DoesNotContain(run.Server.Sent, o => o.Opcode == MessageOpcodes.CharacterLogOff);
+        Assert.StartsWith("fighter=failed ", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.EndsWith(" fresh=recreated purged=0 refill=failed", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Matches(Verdict, run.Scenario.VerdictFields());
+    }
+
+    [Fact]
+    public void With_fresh_character_a_refill_the_server_does_not_play_fails_ten_seconds_after_the_answer_naming_the_level_and_the_vitals_M4_fresh_F1()
+    {
+        var template = Template("melee");
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true);
+        run.Fighter.SkipRefill = true; // ACE's level-up that does not run SetMaxVitals: the grant levels the character up and the vitals stay short
+        double? sent = null;
+        double? ended = null;
+        for (var t = 0.0; t < 600 && ended is null; t += 0.05)
+        {
+            run.Time.Advance(TimeSpan.FromMilliseconds(50));
+            run.Runner.Step(run.Runner.Session.Clock.Now);
+            if (run.Server.PlayerGuid is not null)
+            {
+                run.Fighter.Pump();
+            }
+
+            if (sent is null && run.Fighter.XpAsked.Count == 2)
+            {
+                sent = run.Runner.Session.Clock.Now;
+            }
+
+            if (run.Runner.IsDone)
+            {
+                ended = run.Runner.Session.Clock.Now;
+            }
+        }
+
+        Assert.NotNull(ended);
+        Assert.False(run.Runner.Result.Ok);
+        Assert.Equal("refilling", run.Runner.Result.Stage);
+        Assert.Equal(10, FreshRefill.WaitSeconds);
+        Assert.InRange(ended!.Value - sent!.Value, FreshRefill.WaitSeconds, FreshRefill.WaitSeconds + 1); // the bound, not before it
+        Assert.StartsWith("refill: the level-up and the refilled vitals were not seen within 10 s of the grant", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains($"level {template.Level + 1}, was {template.Level}; health ", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Equal(2, run.Fighter.XpAsked.Count); // never granted twice
+        Assert.Empty(run.Purge.Asked);
+        Assert.EndsWith(" fresh=recreated purged=0 refill=failed", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void With_fresh_character_an_xp_table_that_ends_at_the_templates_level_names_no_level_for_the_refill_and_fails_by_name_M4_fresh_F1()
+    {
+        var template = Template("archer");
+        using var run = new Run((table, server) => ScriptedFighter.Replaceable(table, server, template.Name), template: template, fresh: true, levels: template.Level);
+        var result = run.Finish();
+
+        Assert.False(result.Ok);
+        Assert.Equal("refilling", result.Stage);
+        Assert.StartsWith($"refill: the XpTable cannot name a level above {template.Level} (it ends at level {template.Level})", run.Scenario.Failure, StringComparison.Ordinal);
+        Assert.Single(run.Fighter.XpAsked); // the refill sent nothing
+        Assert.Empty(run.Purge.Asked);
+        Assert.EndsWith(" refill=failed", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Without_fresh_character_the_build_sends_no_refill_grant_and_the_verdict_has_no_refill_field_M4_fresh_F1()
+    {
+        // The same build as the fresh one (the xp, then the raises that lift the maxima over the current values): only the fresh character refills.
+        var template = Template("melee");
+        using var run = new Run(null, template: template);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        Assert.Single(run.Fighter.XpAsked);
+        Assert.DoesNotContain("refill", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Scenario.SentSteps, s => s.StartsWith("refill", StringComparison.Ordinal));
+        Assert.DoesNotContain(run.Log.Lines, l => l.Contains("refill", StringComparison.Ordinal));
+        Assert.StartsWith($"fighter=built level={template.Level} template=ok ", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Fresh_character_is_for_the_brawler_and_the_archer_alone_and_not_with_recreate_or_an_embedded_build_M4_fresh_B1()
+    {
+        var table = ScriptedMage.SyntheticTable();
+        var classes = HeadlessCharacterTests.StandInClasses();
+        var hunter = Assert.Throws<ArgumentException>(() => new FighterBuildScenario(table, classes, new RecordingLogSink(), template: FighterTemplate.Hunter, freshCharacter: true));
+        Assert.Contains("Brawler and the Archer only", hunter.Message, StringComparison.Ordinal);
+        var both = Assert.Throws<ArgumentException>(() => new FighterBuildScenario(table, classes, new RecordingLogSink(), template: FighterTemplate.Melee, recreate: true, freshCharacter: true));
+        Assert.Contains("exclude each other", both.Message, StringComparison.Ordinal);
+        var embedded = Assert.Throws<ArgumentException>(() => new FighterBuildScenario(table, classes, new RecordingLogSink(), template: FighterTemplate.Melee, endSession: false, freshCharacter: true));
+        Assert.Contains("character list", embedded.Message, StringComparison.Ordinal);
+        Assert.NotNull(new FighterBuildScenario(table, classes, new RecordingLogSink(), template: FighterTemplate.Archer, freshCharacter: true));
+    }
+
+    [Fact]
+    public void Without_fresh_character_a_build_logs_no_fresh_field_and_asks_the_mod_to_purge_nothing_M4_fresh_B1()
+    {
+        var template = Template("melee");
+        using var run = new Run((table, server) => ScriptedFighter.Ready(table, server, template.Name), template: template);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure + " / " + run.Scenario.Failure);
+        Assert.DoesNotContain("fresh", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Server.Sent, o => o.Opcode == MessageOpcodes.CharacterDelete);
+    }
 }

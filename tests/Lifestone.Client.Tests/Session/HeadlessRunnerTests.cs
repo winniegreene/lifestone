@@ -290,6 +290,18 @@ public sealed class HeadlessRunnerTests
     }
 
     [Fact]
+    public void P5b_G0_a_run_on_test_tools_may_create_no_other_character_and_the_main_account_may_not_create_the_throwaway()
+    {
+        var tools = new HeadlessRunOptions { Session = new SessionOptions { Account = "test-tools" } };
+        var e = Assert.Throws<PlayAccountException>(() => new ScriptedRun(new LoginScenario(createCharacter: "Lifestone Smoke", skillClasses: HeadlessCharacterTests.StandInClasses()), options: tools));
+        Assert.DoesNotContain("test-tools", e.Message, StringComparison.Ordinal);
+        Assert.Contains("tools test account", e.Message, StringComparison.Ordinal);
+
+        var main = new HeadlessRunOptions { Session = new SessionOptions { Account = "test" } };
+        Assert.Throws<PlayAccountException>(() => new ScriptedRun(new LoginScenario(createCharacter: "Lifestone Throwaway", skillClasses: HeadlessCharacterTests.StandInClasses()), options: main));
+    }
+
+    [Fact]
     public void A_named_character_is_entered_and_an_unknown_one_fails_the_run()
     {
         using (var run = new ScriptedRun(new LoginScenario(character: "cy")))

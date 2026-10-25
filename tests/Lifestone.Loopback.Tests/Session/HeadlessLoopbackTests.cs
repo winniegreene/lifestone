@@ -41,7 +41,7 @@ public sealed class HeadlessLoopbackTests(ITestOutputHelper output)
         Assert.Equal(1, result.LoginCompletes);
         Assert.Contains(SessionPhase.InWorld, result.Phases);
         Assert.Equal(SessionPhase.CharacterSelect, result.Phases[^1]);
-        Assert.True(run.Replay.DigestMatches, "the recording does not replay to its own digest | " + run.Replay.DigestEvidence());
+        Assert.True(run.Replay.DigestMatches, "the recording does not replay to its own digest: " + run.Replay.DigestDiagnosis());
         Assert.Equal(0, run.Replay.Malformed);
     }
 

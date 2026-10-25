@@ -308,7 +308,7 @@ public sealed class UiFloatyCombatPanel : UiElement
 /// <para><b>Its controls</b> (<c>PostInit</c> 0x004CCD90, <c>ListenToElementMessage</c> 0x004CD020). The three check boxes (0x10000053 auto-repeat attack, 0x10000054 auto-target, 0x10000055 view combat target) show the
 /// player options of those names with the <c>ID_CombatPanelOption_*</c> labels; Lifestone ghosts a box whose option nothing honours (<see cref="PlayerOptionTable"/>), as the options page does, and a click on one does
 /// nothing (<c>TODO(m3-combat-options)</c>). A mouse down on an attack height button (0x10000057 high, 0x10000058 medium, 0x10000059 low) requests that height; the click is the attack
-/// (<c>ClientCombatSystem::EndAttackRequest</c>, 0x0056CE30): <b>M3 has no melee or missile attack action, so it answers the NotInM3 message, logged</b> (<c>TODO(m3-melee-attack)</c>). The power slider (0x1000004F) sets the requested power
+/// (<c>ClientCombatSystem::EndAttackRequest</c>, 0x0056CE30): <b>it sends the attack through the Action API, with the power <see cref="AttackPowerDriver"/> works out</b> (M4 1.2; the M3 stand-in that answered NotInM3 is gone). The power slider (0x1000004F) sets the requested power
 /// (its position as thousandths, clamped to 0..1, <c>m_rUIRequestedPower</c>). Notices the attack code will send: <see cref="SetPowerbarLevel"/> (the meter 0x10000050, power bar mode 1),
 /// <see cref="DesiredAttackPowerChanged"/> (the slider's goal) and <see cref="AttackHeightChanged"/> (the group box 0x10000056's selection).</para>
 /// <para>Nothing here runs per frame; every change is an event.</para>
@@ -535,7 +535,7 @@ public sealed class GameCombatPanel : UiElement
         }
     }
 
-    /// <summary>The window's messages (<c>ListenToElementMessage</c>, 0x004CD020): a mouse down on a height button requests that height, a click on one is the attack (NotInM3), the slider sets the requested power.</summary>
+    /// <summary>The window's messages (<c>ListenToElementMessage</c>, 0x004CD020): a mouse down on a height button requests that height, a click on one is the attack (the Action API), the slider sets the requested power.</summary>
     protected internal override UiListenResult ListenToElementMessage(in UiElementMessage message)
     {
         var id = message.ElementId;
@@ -543,7 +543,7 @@ public sealed class GameCombatPanel : UiElement
         {
             if (id is HighButtonId or MediumButtonId or LowButtonId)
             {
-                // EndAttackRequest (0x0056CE30): the click sends the attack through the Action API (closes TODO(m3-melee-attack)).
+                // EndAttackRequest (0x0056CE30): the click sends the attack through the Action API (the closed TODO(m3-melee-attack)).
                 Attacks?.ReleaseHeight(HeightOf(id));
                 return UiListenResult.Handled;
             }

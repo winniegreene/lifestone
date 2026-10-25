@@ -7,7 +7,7 @@
 
       [slicecheck] <stage> PASS|FAIL|SKIP <short detail> (<seconds>s) at_s=<seconds since the start>
 
-    Stages, in order (-Stages picks a subset; the default is build,test,steps, plus exhaustive with -Exhaustive and smoke with -Smoke):
+    Stages, in order (-Stages picks a subset; the default is build,test,steps, plus exhaustive with -Exhaustive or -Gate and smoke with -Smoke):
 
       build       dotnet build Lifestone.slnx --disable-build-servers; detail = warning and error counts (0 and 0 to pass)
       test        dotnet test Lifestone.slnx --no-build --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure"; detail = passed/failed/skipped
@@ -20,7 +20,7 @@
                   the green total) are left out of the default filter
       exhaustive  dotnet test Lifestone.slnx --no-build --filter "Tier=Exhaustive": every test that reads the retail dats (the dat
                   sweeps over every GfxObj, landblock and cell, and the decoder and asset pins), left out of the default filter (M4 polish
-                  cut d, D30). -Exhaustive adds the stage; -Smoke implies it (G-A); the lead runs it before a merge. A slice that
+                  cut d, D30). -Exhaustive and -Gate add the stage; -Smoke implies it; the lead runs it before a merge. A slice that
                   touches src/Lifestone.Data (or a dat reader in Client) runs `slice-check -Exhaustive`. Per-test timings as above
                   (exhaustive-times.txt)
       steps       the steps of -Steps (and, with -Changed, the steps the diff touches) through ONE tools\smoke.ps1 process
@@ -29,7 +29,16 @@
                   -Rerun runs the failed steps once more in a second smoke process
       smoke       with -Smoke: the whole of tools\smoke.ps1 -Backend auto -NoBuild -SoloFrames -FullScan; detail = its verdict and
                   total time. Its own test step is the run's test: with this stage the test stage is not run a second time, the
-                  `test` line is read from the smoke's test row (and -MinTests judges it)
+                  `test` line is read from the smoke's test row (and -MinTests judges it). The full offline smoke is the item-end
+                  check at a wave's last item and the milestone end (m4-plan.md section 5, D46), never G-A
+      offline     with -Gate only, never run: one SKIP line naming the backend-free steps the diff selects (as -Changed would run
+                  them), which the item-end check runs
+
+    -Gate is G-A, the check before every live gate round (m4-plan.md section 5, D46): build, test and exhaustive (about 3 min,
+    the part that catches merge breaks), then the offline line; no Godot step and no smoke. It refuses -Smoke, -Steps, -Changed
+    and -Stages. The offline Godot smoke runs once per item, after its last live gate and before the merge: `slice-check -Changed`
+    (the steps the item's diff selects; the build and the tests again), or `slice-check -Smoke` at a wave's last item and the
+    milestone end.
 
     -Changed [-Base master]: adds the backend-free steps the diff touches (merge-base with -Base, the working tree and untracked
     files, read-only git; tools\lib\StepPaths.psd1 maps source folders to steps). A path under src/ or tools/ that no rule matches runs
@@ -62,6 +71,9 @@
 
 .EXAMPLE
     pwsh -File tools\slice-check.ps1 -Changed -MinTests 7900
+
+.EXAMPLE
+    pwsh -File tools\slice-check.ps1 -Gate
 #>
 [CmdletBinding()]
 param(
@@ -71,6 +83,7 @@ param(
     [int] $MinTests = 0,
     [switch] $Smoke,
     [switch] $Exhaustive,
+    [switch] $Gate,
     [switch] $Changed,
     [string] $Base = 'master',
     [ValidateRange(1, 3)]
@@ -105,7 +118,13 @@ function Split-List([string[]] $values) { @($values | ForEach-Object { $_ -split
 $Stages = @(Split-List $Stages)
 $Steps = @(Split-List $Steps)
 foreach ($name in $Stages) { if ($allStages -notcontains $name) { throw "Unknown stage '$name'. Stages: $($allStages -join ', ')" } }
-if ($Stages.Count -eq 0) { $Stages = @(@("build", "test") + @(if ($Exhaustive -or $Smoke) { "exhaustive" }) + @(if ($Steps.Count -or $Changed) { "steps" }) + @(if ($Smoke) { "smoke" })) }
+if ($Gate) {
+    # D46: G-A before a live gate is the build and the tests; the offline Godot smoke is the item-end check, so -Gate runs none of it.
+    $refused = @(@(if ($Smoke) { '-Smoke' }) + @(if ($Steps.Count) { '-Steps' }) + @(if ($Changed) { '-Changed' }) + @(if ($Stages.Count) { '-Stages' }))
+    if ($refused.Count) { throw "-Gate is G-A before a live gate (build, test, exhaustive; no Godot step) and takes no $($refused -join ', '): the offline smoke is the item-end check (slice-check -Changed, or -Smoke at a wave's last item and the milestone end)." }
+    $Stages = @('build', 'test', 'exhaustive')
+}
+elseif ($Stages.Count -eq 0) { $Stages = @(@("build", "test") + @(if ($Exhaustive -or $Smoke) { "exhaustive" }) + @(if ($Steps.Count -or $Changed) { "steps" }) + @(if ($Smoke) { "smoke" })) }
 else {
     if ($Smoke -and $Stages -notcontains 'smoke') { $Stages += 'smoke' }
     if (($Smoke -or $Exhaustive) -and $Stages -notcontains 'exhaustive') { $Stages += 'exhaustive' }
@@ -359,6 +378,15 @@ function Get-StepsToRun {
     return $sorted
 }
 
+function Write-OfflineAdvisory {
+    # -Gate (D46): the backend-free steps the diff selects, named and not run (the item-end check runs them); a path no rule matches selects every step, as -Changed does.
+    $map = Import-PowerShellDataFile (Join-Path $PSScriptRoot 'lib\StepPaths.psd1')
+    $found = Resolve-ChangedSteps @(Get-ChangedFiles) $map
+    $why = if ($found.Unmatched.Count -gt 0) { "; no rule for $(($found.Unmatched | Select-Object -First 3) -join ', '), so every step" } elseif ($found.Everything) { '; a cross-cutting path changed, so every step' } else { '' }
+    $detail = if ($found.Steps.Count -eq 0) { "the diff against $Base selects no backend-free step" } else { "$($found.Steps.Count) step(s) the diff against $Base selects: $((@($found.Steps | Sort-Object)) -join ',')$why; G-A runs no Godot step, the item-end check runs them (slice-check -Changed)" }
+    Write-Stage 'offline' 'SKIP' $detail 0
+}
+
 function Invoke-StepsStage([string[]] $stepList) {
     if ($stepList.Count -eq 0) { Write-Stage 'steps' 'SKIP' 'no backend-free step is touched by the diff' 0; return }
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -394,7 +422,7 @@ function Invoke-StepsStage([string[]] $stepList) {
 
 function Invoke-SmokeStage {
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    # G-A: the whole smoke, frame checks judged (-SoloFrames: it waits for a quiet machine and fails on any frame check) and the secret scan in full (-FullScan).
+    # The item-end offline check (D46; G-A before D46): the whole smoke, frame checks judged (-SoloFrames: it waits for a quiet machine and fails on any frame check) and the secret scan in full (-FullScan).
     $run = Invoke-Smoke @('-SoloFrames', '-FullScan') 'smoke'
     # Its test step is the run's test (no second dotnet test): the `test` line comes from its row, judged by -MinTests.
     $testRow = Read-SmokeRow $run 'test'
@@ -439,6 +467,8 @@ foreach ($stage in 'test', 'exhaustive', 'steps', 'smoke') {
         'smoke' { Invoke-SmokeStage }
     }
 }
+
+if ($Gate -and $buildOk) { Write-OfflineAdvisory }
 
 Write-Host "[slicecheck] done ok=$($script:ok.ToString().ToLowerInvariant())"
 exit $(if ($script:ok) { 0 } else { 1 })

@@ -71,6 +71,8 @@ internal sealed class FakeActions : IActionApi
 
     public bool DryRun { get; set; }
 
+    public string? BusyReason => null;
+
     public ActionHandle LoginComplete(ActionSource source = ActionSource.Client)
     {
         LoginCompletes.Add((source, Now));

@@ -62,6 +62,10 @@ in global metres: `LandDefs.GetBlockOffset` from landblock 0x0000 plus the local
 1 m node whose south-west corner is global metre (gx, gy): landblock x is gx / 192 and node x is gx % 192. The node east of
 node 191 of one landblock is node 0 of the next; no carry between the id's bytes is ever formed. `NavMap.FromCellFrame` and
 `ToCellFrame` convert retail positions; an indoor position maps to the land cell above it (the room graph owns indoor cells).
+`FromCellFrame` normalises an outdoor origin past an edge into the neighbour, never an indoor one: an EnvCell's origin is in
+its own landblock's frame whatever its value (the Black Spawn Den's rooms lie at y -139 and beyond), and the room graph and
+the sight probe read the goal's local origin in the goal cell's frame (M4 4.2 F1: the normalised den corpse's goal sat 192 m
+from the corpse and the trip planned 201 m into the rock).
 
 **Steps.** A step goes to one of 8 neighbours. A diagonal needs both orthogonal nodes open (no corner cutting). A rise over
 0.6 m (`NavMap.StepUpMetres`, the body's step-up, the one definition: the builder's `NavBuildOptions.StepUp` takes its default from it) or a drop over 2 m
@@ -88,9 +92,13 @@ grow only with the map. A warm replan allocates only its result (352 B in Releas
 
 **String pulling and the route.** The node path is pulled to vertices by lattice line of sight (0.5 m samples, clearance at
 least 1, legal steps between samples), galloping and then binary-searching from each vertex. A pulled segment never crosses
-water, a slope, or a scar the node path kept off. Each vertex carries its node's z. `NavRoute` exposes the vertices, the
-horizontal arc length, `PointAt(s)`, `NearestArcLength(p)` and `DistanceFrom(p)`, which the runner's pure pursuit and its
-3 m off-route test (`PathPlanner.OffRouteMetres`) use.
+water, a slope, or a scar the node path kept off, nor more of the creature layer than the node path between it (below). Each
+vertex carries its node's z. Then the route is **straightened** (nav-natural-steering): a vertex goes when the vertex kept
+before it sees the one after it by the same rule at clearance 2 (`StraightenMinClearance`), up to four passes. The gallop
+stops at the first point it cannot see, and the lattice's sight is not monotone along a winding node path, so the pull left
+vertices a straight run does not need; the clearance is one more than the pull's because a small static's collision can
+reach past its stamp (TODO(nav-static-footprint)). `NavRoute` exposes the vertices, the horizontal arc length, `PointAt(s)`,
+`NearestArcLength(p)` and `DistanceFrom(p)`, which the runner and its 3 m off-route test (`PathPlanner.OffRouteMetres`) use.
 
 **Goals.** A point goal on a blocked or scarred node is `GoalBlocked`; there is no silent snap. An object goal arrives at
 any open node within its `Range` (at least 0.75 m, `MinObjectRange`); sight is left to the runner's sweep.
@@ -106,7 +114,7 @@ outer edge that the start reaches on the coarse graph and that lies nearest the 
 body stands and the keys are released; no rung is taken.
 
 **Named failures** (`NavPlanResult.Reason`): start-not-attached, start-blocked, goal-blocked, goal-scarred,
-no-open-node-in-range, no-horizon, no-path.
+no-open-node-in-range, no-horizon, no-path. The creature layer never fails a plan: it only costs.
 
 **Measured** (warm medians of ten plans, 2026-10-23): a 1 km plan over six hand-built tiles through a
 dense wood (120 boxes a tile, 4 percent blocked, about 40 percent of the ground under the clearance cost; 64k nodes expanded,
@@ -169,16 +177,43 @@ LandblockCellSet, lean)`, or `RoomPathSource`. A `NavPath` is waypoints (cell fr
 Horizon or Failed, and the cells it enters. Sources made from a cell set are `INavCellAvoider`s: a cell the physics refuses is
 left out and the room graph is rebuilt without it.
 
-**Pursuit.** Pure pursuit with a lead of max(2 m, 0.6 times the speed) in arc length, never past the next doorway vertex;
-outdoors the lead is clamped to the farthest route vertex the lattice can see. Forward is held within 60 degrees of error,
-otherwise the body turns in place. A turn key starts past 5 degrees and is let go within 1.5 degrees (hysteresis), and the
-turn key changes at most every 0.2 s unless the error is past 60 degrees. (Round a corner the bang-bang turn key flickered
-17 times a second; with the rule it changes 9 to 11 times at most.) The body walks within 2 m of a stop and within 3 m of a
-doorway vertex. Keys are sent only on change: `KeyChanges` and `MaxKeysPerSecond` report the rate.
+**The straight run** (nav-natural-steering; the owner, 2026-10-24: "always turning, where players ran in straight lines and
+turned rarely"). Outdoors over the lattice, towards a vertex that is not a doorway or indoors, the body aims at a route
+**vertex**, not a point a few metres ahead: the farthest one, from the next up to the first past max(10 m, 3 times the speed)
+of arc length, that it may run straight to. Every skipped vertex lies within 2 m of the line, the lattice sees the line at
+clearance 2 off water, slope and the run's scars, and the line crosses no more of the creature layer than the route does.
+Within max(3 m, 0.4 s of running) of its aimed vertex it aims at the next one when it sees it, so the turn is taken at the
+corner. No turn key is pressed within 6 degrees of the aim's bearing (`HeadingDeadBandDegrees`), so the body runs straight and
+turns at the corners.
 
-**Plans.** The runner replans when it is 3 m off the route, and follows the horizon contract above. Every path is confirmed
-(`RouteConfirmer`) before a key is pressed. A refusal outdoors scars the sample (1.5 m); a refusal indoors leaves out the cell
-the segment was entering. Three refusals end the run Blocked.
+**Tracking.** A heading is good only to half a physics step (below), about 3.4 degrees, which drifts about 6 m in 100 m, and
+the physics confirmed the route's line, not the drift: the confirmer's placements allow only 0.5 m sideways. So while it aims at
+the next vertex the body tracks back onto the route: past 1 m off (`CrossTrackMetres`) it aims at the route's point 2.5 s ahead
+(never past the vertex) with a 4 degree dead-band, until it is within 0.3 m again. Near a static, where the lattice's clearance at
+the body or 6 m ahead on the route is 3 nodes or less (`TightClearanceNodes`), it tracks always, with the pursuit's short lead,
+so it keeps within about half a metre of the line. Without it, the belt walk through the streamer drifted 1.2 m off its route
+and stuck against static 0x02000258 in 0xA8B3, whose collision reaches past its stamp (TODO(nav-static-footprint)), in about
+one run in four. (The item first let a straight run drift to 6 m while it saw its aim; that made the stuck worse and is gone.)
+
+**The turn key.** The body turns only when the physics steps (`PhysicsGlobals.MinQuantum`, 1/30 s; retail's), so a running turn
+of about 150 to 230 degrees a second (the runner measures it) moves the heading 5 to 8 degrees a step, and a heading is good to
+half a step. A held key is let go when the error is within half a step (`TurnReleaseQuanta`), or once the error has changed
+side, and **a release is never held back**. The dead-band is never under three quarters of a step (`DeadBandMinQuanta`), and a
+press waits 0.2 s after the last change unless the error is past 60 degrees. P5a held releases back for 0.2 s too: a 0.2 s
+press overshot the 5 degree tolerance into the other side's key, 9 to 11 key changes a second round a corner. Forward is held
+within 60 degrees of error, otherwise the body turns in place.
+
+**The pursuit** (towards a doorway vertex and indoors: P5a's). Pure pursuit with a lead of max(2 m, 0.6 times the speed) in arc
+length, never past the next doorway vertex; outdoors the lead is clamped to the farthest route vertex the lattice can see. A
+press needs 5 degrees of error. The body walks within 2 m of a stop and within 3 m of a doorway vertex. Keys are sent only on
+change: `KeyChanges`, `MaxKeysPerSecond`, `Turns` (turn keys pressed) and `KeyChangesPerMinute` report the rate.
+
+**Plans.** The runner replans when it is 3 m off the route, when a creature
+walks onto the route ahead (below), and follows the horizon contract above; each plan's log line names why (`start`,
+`off-route`, `horizon`, `creature`, `refused`, `stuck`). Every path is confirmed (`RouteConfirmer`) before a key is pressed. A
+refusal outdoors scars the sample (1.5 m); a refusal indoors leaves out the cell the segment was entering. Three refusals **in a
+row** (no path confirmed between them) end the run Blocked. P5a counted them over the whole run, and the 2 km forest run meets
+two at its start (small statics the tile under-stamps, TODO(nav-static-footprint)), so one more anywhere ended it.
 
 **The ladder.** Progress is arc length (in the last 2 m: the arc minus the distance to the end). If progress stays under
 0.25 m for 1.5 s with forward held and the body on the ground (or 6 s whatever the keys), that is a rung:
@@ -206,12 +241,59 @@ the two tangents (0.5 m either side). That is Arrived, else ArrivedWithoutSight.
 (TODO(nav-sight-no-physics)).
 
 **Verdict fields** (report-only in their first gate): `route_m= run_s= speed_mps= plans= replans= rungs= blocked=
-corrections= where_max_m=`. `corrections` and `where_max_m` come from the `MovementAudit`, and read `none` without one.
+corrections= where_max_m= turns= key_changes_per_min= creatures_max= creature_replans= creature_min_m=`. `corrections` and
+`where_max_m` come from the `MovementAudit`, and read `none` without one; `creature_min_m` (the nearest a hostile creature's centre
+came at a refresh, the goal's own left out) reads `none` before one was seen.
 
 **Measured** (offline walker, explore mode, 2026-10-23): Holtburg lifestone to Thelnoth's cellar 0xA9B40111, 166 m in
 23.8 s, 0 rungs; to Renald's front room 0xA9B4013F, 57 m in 9.6 s, 0 rungs; to the belt 0xA5B00032, 1,028.5 m in 136.3 s
 (7.55 m/s), one plan, 0 rungs, 950 MoveToStates (7 a second, at most 10), 0 corrections; the den's 12 legs, 4 to 55 m each,
 0 rungs.
+
+**The straight run, measured** (the same walker through the streamer, 7.5 m/s, 2026-10-24; `HeadlessStreamerDatTests`):
+
+| Walk | P5a's pursuit | The straight run |
+|---|---|---|
+| Holtburg to the belt 0xA5B00032 | 1,029.5 m, 3 plans, **468 turns**, 415 key changes a minute | 1,018.5 m, 3 plans, **53 turns**, 52 a minute |
+| Holtburg to the forest 0x9FB50039 | 1,864.0 m, 6 plans, **806 turns**, 394 a minute | 1,844.5 m, 6 plans, **76 turns**, 42 a minute |
+
+Both arrive with 0 rungs, the same in twenty runs of the class (the straight run before its tracking near statics turned 24 and
+39 times, and stuck in about one belt run in four). Live: see m4-plan.md section 8, "the wayfinder's feel".
+
+## The creature layer (nav-creature-avoid)
+
+The owner, 2026-10-24: the characters "seem unaware of the enemies and run right into them". `NavCreatures`
+(`Movement/Wayfinding/NavCreatures.cs`) is a run's own layer of the hostile creatures the client sees, refreshed as they move
+and never written into a tile (as the scars are not).
+
+- **Which creatures.** `HostileCreatureFeed` reads the session's object table: the creature item type (0x10), the attackable
+  bit (0x10), neither the player (0x8) nor the vendor (0x200) bit, a position, and not known dead. That is the radar's red blip
+  and the census's creature. The run's own goal creature (a hunt's seek names it as the object goal) is left out, so the hunt
+  still walks to its target. ACE alerts only an idle creature without a move-exclude tolerance (`AlertMonster`,
+  Creature_Combat.cs:1121-1151); the client sees neither, so every hostile creature counts.
+- **The disc.** ACE @95ef426d wakes a monster when the player comes within its `VisualAwarenessRange` (`Player.CheckMonsters`,
+  Player_Monster.cs:17-31, as the player moves), measured between the two cylinders (`get_distance_sq_to_object(obj, true)`,
+  PhysicsObj.cs:2519) and scaled by `mob_awareness_range` (1.0; the bundled shard's row is 1). The client is not sent the
+  property, so `CreatureAwareness` pins it for the 74 classes of the two hunt grounds' tables (a read-only SELECT of the
+  bundled world database, 2026-10-24: 8 m for a Blood Shreth to 35 m for a Shadow Wisp, every one of them set). Any other
+  creature takes ACE's default, 18 m (`VisualAwarenessRange_Default`, Monster_Awareness.cs:377, "the most common value from
+  retail"). The disc's radius is the awareness plus the player's 0.48 m plus the creature's own radius. That is assumed 1 m:
+  the creature's Setup radius is not read yet (TODO(nav-creature-radius)).
+- **The cost.** The planner stamps the layer per plan (`PathPlanner.Creatures`, which the runner sets at each plan). A step into
+  a disc costs 1 more a metre at its edge, rising linearly to 5 at the creature, and overlapping discs add. Going round a disc
+  in open ground is at most pi/2 of the chord, so the planner always goes round when it can, and a creature in a gap costs the
+  route but never fails it. A pulled or straightened segment never crosses more of the layer than the node path between its
+  ends (0.5 m of slack), and the runner's straight lines obey the same rule. Every weight is Lifestone's own.
+- **Moving creatures.** With a feed (both hosts: `HeadlessBody.NewRunner`, `GodotJourneyRunnerHost.NewRunner`), the runner
+  refreshes the layer every 0.5 s within 120 m. It replans, at most once every 2 s, when a creature the last plan did not know
+  there (new, or moved over 3 m) has a disc that meets the route's next 60 m. A creature whose disc already holds the body is not
+  a reason: it has noticed the body.
+- **Indoors.** The room graph has no lattice, so the den's walks and the shops' rooms have no creature layer
+  (TODO(nav-creatures-indoor)); the den fight is a fight on purpose.
+
+Tests: `NavCreatureTests`: the cost, a route going round a creature it would have crossed, the goal creature left out, a creature in
+the only gap, the feed's rule, the pinned awareness, a creature walking onto the route ahead (one replan, the body outside its disc),
+no replan for a creature the plan knew, and a warm runner with a layer allocating nothing a step.
 
 ## The confirmer
 
@@ -276,7 +358,7 @@ start and the end of each leg, then logoff. The run is outdoors only (TODO(wayfi
 
 The lines:
 
-- `wayfind leg=out|back ok= route_m= run_s= speed_mps= plans= replans= rungs= blocked= stuck= corrections= where_max_m= teleports= landblocks_peak=`
+- `wayfind leg=out|back ok= route_m= run_s= speed_mps= plans= replans= rungs= blocked= stuck= corrections= where_start_m= where_end_m= where_max_m= settle_s= teleports= landblocks_peak= turns= key_changes_per_min=`
   for each leg. A leg is ok when the runner Arrived, the server sent no correction, and the server's where-am-I agrees within
   0.5 m. Report-only in its first gate.
 - `wayfind streamer landblocks_peak= tiles_peak= heap_peak_mb= pump_max_ms= attach_max_ms= tile_build_max_ms= tile_attach_max_ms= attaches= releases= tile_builds= tile_rebuilds= tile_failures= step_gap_max_ms=` (report-only).
@@ -284,6 +366,26 @@ The lines:
 
 The default limit is 180 s plus, for each leg, 1.5 times the straight line at 4.8 m/s plus 300 s, counted from `--from` or the
 Holtburg lifestone; `--quit-after` overrides it.
+
+## The journeys' planner, the settle gate and the indoor exit (M4 P5b J5b, F1)
+
+A journey's legs on foot go through one planner for both hosts, `JourneyLegPlanner` (`Session/Scenarios/Journey`, in Lifestone.Client): it gives the
+goal, the path source (`SourceFor`), arrival, the failure name and whether the body moved. `JourneyRunLeg` runs a leg over `IJourneyLegBody`: the
+headless body (`HeadlessBody`, shared with the wayfind scenario) or the play's player. The two hosts differ only in the body and in where collision and
+tiles come from (the Godot host feeds the nav tiles from the player's own CollisionStreamer; the headless streamer keeps its external-collision form).
+
+- **The settle gate (Godot).** A leg waits before it plans until the player is present, the body is within 25 m of the server's position, and
+  `HeadlessStreamer.IsFocusSettled` holds over the play's CollisionStreamer and tile feeder (`JourneySettleGate`). The wait is at most 120 s, then the leg
+  fails `travel:run:not-settled:<cell>: not ready within 120 s (<reason>)`; the reasons are `not-present`, `not-placed:<cell>` and
+  `focus-not-settled:<cell>`. A leg's start no longer reports `no-tile` or `start-not-attached`.
+- **Failure names match in both hosts:** `travel:run:<state>: <reason>` (interrupted, blocked, arrivedwithoutsight, failed),
+  `travel:run:indoor-start-unreachable:<cell>`, `travel:run:moved` and `travel:run:no-path-source` (no den graph). `ArrivedWithoutSight` counts as an
+  arrival when the request does not need sight.
+- **Object goals are confirmed to their range (F1).** A station's object goal (a vendor, a chest, a portal) is arrived at only when the body is within
+  its use range of the object, not at the nearest planned node.
+- **The indoor exit route (F1).** A body that starts inside a building leaves by the route the indoor source plans to its door, and only then the
+  outdoor planner takes over (`IndoorOutdoorPathSource`). An outdoor point or object goal plans to its landblock id, so `SourceFor` gives the
+  indoor-outdoor source over that landblock, which hands a goal with no room to the outdoor planner.
 
 ## Open TODOs
 
@@ -293,8 +395,10 @@ Holtburg lifestone; `--quit-after` overrides it.
 | `TODO(placement-cell-edge)` | a placement on a land cell's edge is refused (Collided) on flat ground; not traced to retail or the port |
 | `TODO(nav-sight-no-physics)` | an object goal's sight is judged by the sweep only, not by physics |
 | `TODO(wayfind-indoor)` | the `wayfind` scenario is outdoors only |
-| `TODO(m4-keeper-swap)` | a fighter's keeper casts do not swap the caster in (`needs-swap`); P5b runs them inside a swap |
 | `TODO(nav-water-corner)` | water is flagged per land cell (24 m), not per corner; the streamer logs it once per landblock that has water nodes |
 | `TODO(hunt-crossing-stall)` | the hunt follower waits for a landblock crossing at most `HuntFollow.CrossingWaitSeconds` while the net pump runs, then builds it at once and logs this |
 | `TODO(m4-caster-value)` | the caster's Value is not read |
 | `TODO(m4-harm-heal-resist)` | a drain-resistance enchantment above 1.0 scales a harm past its table range (the margin covers a small one) |
+| `TODO(nav-static-footprint)` | some small statics collide about a metre past their stamp (0x02000246 in 0xA3B4, 0x020005C9 in 0xA6B4 on the forest route): the confirmer refuses a line at clearance 1 beside them; the straightening keeps clearance 2 and refusals Block only three in a row |
+| `TODO(nav-creature-radius)` | a creature's own radius (its Setup's radius times its scale) is not read: the aggro disc assumes 1 m |
+| `TODO(nav-creatures-indoor)` | the room graph has no creature layer (the den's walks, the shops' rooms) |

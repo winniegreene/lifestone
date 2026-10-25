@@ -14,7 +14,8 @@ namespace Lifestone.Client.Session.Scenarios;
 /// (<see cref="QualitiesChanged"/> of kind Description) and the CreateObject of a wielded item (a weapon whose object arrives after its wield). A disagreement is counted <b>once per change</b>: the same
 /// (problem, mode, item) seen again by the next event is the same disagreement, and one that ends (the mode or the weapon changes) and returns is counted again. A weapon whose object the table lacks cannot be judged
 /// (<see cref="CombatModeProblem.CannotCheck"/>): it is no disagreement, and is counted apart in <see cref="Unchecked"/>, never guessed. A mode value of 0 (the server has said nothing yet) reads as peace.</para>
-/// <para><b>Report-only.</b> The watch judges nothing: the legs print <see cref="Field"/> (<c>mode_mismatch=&lt;n&gt;</c>) beside their verdict fields, and no verdict reads it in its first gate. The leg runners' wiring is a later lane's.</para>
+/// <para><b>Judged by the hunt.</b> The watch itself judges nothing: the legs print <see cref="Field"/> (<c>mode_mismatch=&lt;n&gt;</c>) beside their verdict fields. Since M4 4.2 J1 the journey's hunt station runs one (<see cref="HuntScenario.ModeWatch"/>, both hosts)
+/// and <see cref="HuntLegVerdict.Compose"/> judges <c>mode_mismatch=0</c> (D23's rule; m4-plan.md section 4.9 row j).</para>
 /// </remarks>
 public sealed class CombatModeWatch : IDisposable
 {

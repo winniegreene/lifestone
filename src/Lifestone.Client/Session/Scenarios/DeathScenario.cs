@@ -11,12 +11,13 @@ using Lifestone.Data.World;
 using Lifestone.Data.World.Data;
 using Lifestone.Net.Session;
 using Lifestone.Net.Types;
+using Lifestone.Client.Session.Scenarios.Journey;
 
 namespace Lifestone.Client.Session.Scenarios;
 
 /// <summary>
 /// M3 3.2's death-and-regear scenario (<c>--scenario=death-and-regear</c>, plan section 4.8 lane da; BSD Mage and nobody else): the character is geared and gets its spell bars, is bound at Holtburg's lifestone (D34), goes to the
-/// Black Spawn Den, is unbuffed by a suicide when any enchantment but the vitae is active (D33), waits in non-combat among the Tusker Slaves until they kill it, respawns, is re-geared and logs off. By the Action API and
+/// Black Spawn Den, takes its armour off and lies down (D37, M4 P5b, <c>DeathScenario.LieDown.cs</c>: the D33 unbuff suicide is in no path since; <see cref="DeathStages.Unbuff"/> runs only when named), its places going through the travel seam (<see cref="DeathOptions.Travel"/>, <see cref="DeathOptions.StartAt"/>, <see cref="DeathOptions.LeaveOnFailure"/>), waits in non-combat among the Tusker Slaves until they kill it, respawns, is re-geared and logs off. By the Action API and
 /// <c>PlayerTools</c> only; what it saw is <see cref="DeathTally"/>'s and the verdict is <see cref="DeathLegVerdict"/>'s.
 /// </summary>
 /// <remarks>
@@ -162,6 +163,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     private bool _vitaeDone;
     private bool _enteredHere;
     private readonly DenExit _exit;
+    private readonly SeamLeg _seam;
     private bool _failLeave;
     private bool _failVitae;
     private bool _vitaeSent;
@@ -229,10 +231,18 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         _approach = approach;
         _regearKit = kit.HasDecoys ? kit.WithDecoys([]) : kit; // M4 3.1 d1: the decoys the death dropped are on the corpse; a regear that spawned them would carry a second copy of each
         _buffOptions = buff ?? new BuffOptions();
+        var travel = death.Travel ?? new PlaceTravel(); // M4 P5b: one seam per run, shared by the places, the composed fight and the den exit
+        _seam = new SeamLeg(travel);
         _fightOptions = fight ?? new FightOptions { Kills = death.FightKills, Seconds = death.FightSeconds };
+        if (death.Travel is not null || !death.LeaveOnFailure)
+        {
+            // An embedded run (a journey): the composed fight goes through the same seam, back to the den after the respawn (Primary Portal Recall), and stays in the den at its end (the corpse trip follows on
+            // foot). Every other run keeps its options as given (the fight then makes its own PlaceTravel: today's place).
+            _fightOptions = _fightOptions with { Travel = travel, PlacePurpose = TravelPurpose.Ground, LeaveOnFailure = death.LeaveOnFailure, LeaveAtEnd = death.LeaveOnFailure };
+        }
         _fightFactory = fightFactory ?? DefaultFightLeg;
         _gear = (stages & DeathStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) : null;
-        _exit = new DenExit(log, LogCategory);
+        _exit = new DenExit(log, LogCategory, travel);
         _holtburg = _exit.Destination;
     }
 
@@ -368,7 +378,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             measures = measures with { Respawn = kept }; // the respawn stage's classification stands (it was taken at the arrival plus the vitals wait, in the world)
         }
 
-        return measures with { CorpseLooted = CorpseLooted, ItemsRecovered = ItemsRecovered, TripSeconds = TripElapsedSeconds, TripAbort = _tripAbort, Rebuffed = _rebuffed, DenKills = _denKills, Decoys = DecoysCarried, DecoySafe = DecoySafeField, DecoysDropped = DecoysDropped, GearDropped = GearDropped, DecoysRecovered = DecoysRecovered, PretripHeals = _pretripHeals, GearLeft = GearLeft };
+        return measures with { CorpseLooted = CorpseLooted, ItemsRecovered = ItemsRecovered, TripSeconds = TripElapsedSeconds, TripAbort = _tripAbort, Rebuffed = _rebuffed, DenKills = _denKills, Decoys = DecoysCarried, DecoySafe = DecoySafeField, DecoysDropped = DecoysDropped, GearDropped = GearDropped, DecoysRecovered = DecoysRecovered, PretripHeals = _pretripHeals, GearLeft = GearLeft, Undressed = _undressed, LieDown = _lieDown, LieEcho = LieEcho };
     }
 
     /// <summary>
@@ -452,7 +462,12 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         switch (Stage)
         {
             case "start":
-                if ((_stages & DeathStages.Gear) == 0)
+                if (StartAtProblem() is { } startProblem)
+                {
+                    return Fail(session, startProblem);
+                }
+
+                if ((_stages & DeathStages.Gear) == 0 || _options.StartAt > DeathStages.Gear)
                 {
                     // Without the gear stage nothing else enters the world or waits for the player: a headless run of other stages alone (--death-stages=vitae) logs in and enters the mage itself, as the gear scenario's
                     // start does, and every such run waits for the unhidden player and its description before its first stage.
@@ -555,7 +570,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
                 return UnbuffDecoysStep(session, clock);
 
             case "death-mode":
-                return DeathModeStep(session, clock);
+                return _undressing ? UndressStep(session, clock) : DeathModeStep(session, clock);
             case "death-wait":
                 return DeathWaitStep(session, clock, walkStatus);
 
@@ -652,6 +667,8 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         _movedSubscription?.Dispose();
         _chatSubscription?.Dispose();
         _qualitiesSubscription?.Dispose();
+        _motionSubscription?.Dispose();
+        _seam.Abandon();
         _approach?.Dispose();
         _inner?.Dispose();
         _walk?.Dispose();
@@ -662,6 +679,11 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <summary>Enters the first enabled stage at or after <paramref name="from"/>; past the last one the run concludes.</summary>
     private ScenarioStatus Begin(DeathStages from, IGameSessionView session, double clock)
     {
+        if (_options.StartAt is { } startAt && from < startAt)
+        {
+            from = startAt; // M4 P5b: an embedded run begins at its stage (the stages before it were done by the journey's own stations)
+        }
+
         if (from <= DeathStages.Gear && (_stages & DeathStages.Gear) != 0)
         {
             Enter("gear", clock);
@@ -690,6 +712,16 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         if (from <= DeathStages.Death && (_stages & DeathStages.Death) != 0)
         {
             Subscribe(session);
+            SubscribeMotion(session);
+            if (_options.StartAt is not null)
+            {
+                _walk?.Prepare(session, clock); // the den's place did not run (an embedded run): the walk is made here; a walker that needs a teleport to be placed says so at its first leg
+                if (_walk?.Failure is { } prepareFailure)
+                {
+                    return Fail(session, "death: " + prepareFailure);
+                }
+            }
+
             _pending = null;
             Enter("death-mode", clock);
             return ScenarioStatus.Running;
@@ -703,6 +735,16 @@ public sealed partial class DeathScenario : IScenario, IDisposable
 
         return Conclude(session, clock);
     }
+
+    /// <summary>M4 P5b: a <see cref="DeathOptions.StartAt"/> that is not one of the linear stages (gear, bind, den, death, regear), or one the stage mask leaves out, is refused loudly; null when it is fine or not given.</summary>
+    private string? StartAtProblem() =>
+        _options.StartAt switch
+        {
+            null => null,
+            DeathStages.Gear or DeathStages.Bind or DeathStages.Den or DeathStages.Death or DeathStages.Regear when (_stages & _options.StartAt.Value) != 0 => null,
+            DeathStages.Gear or DeathStages.Bind or DeathStages.Den or DeathStages.Death or DeathStages.Regear => $"start_at: the stage {_options.StartAt.Value.ToString().ToLowerInvariant()} is not in this run's stages ({_stages.ToString().ToLowerInvariant()})",
+            _ => $"start_at: {_options.StartAt.Value.ToString().ToLowerInvariant()} is not a stage a run can begin at (gear, bind, den, death, regear); TODO(m4-death-start-at)",
+        };
 
     // ------------------------------------------------------------------------------------------------ the spell bars
 
@@ -749,30 +791,29 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         }
 
         _teleportMark = _selfTeleports;
-        _pending = session.Tools.Place(destination, ActionSource.Host);
+        _pending = null;
+        _seam.Start(session, new TravelRequest(destination, ReferenceEquals(destination, _holtburg) ? TravelPurpose.Bind : TravelPurpose.Ground), clock); // M4 P5b: the travel seam (PlaceTravel by default)
         Enter(next, clock);
         return ScenarioStatus.Running;
     }
 
     private ScenarioStatus TeleportingStep(IGameSessionView session, double clock, string next, string what)
     {
-        if (_pending is { Outcome: { } placed })
+        var travel = _seam.Step(session, clock);
+        if (travel == TravelStatus.Failed)
         {
-            _pending = null;
-            if (placed.Kind != ActionOutcomeKind.Confirmed)
-            {
-                return Fail(session, what + "sending the player there: " + Describe(placed));
-            }
+            return Fail(session, what + "sending the player there: " + _seam.Failure);
         }
 
-        if (_pending is null && _selfTeleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present)
+        // The arrival contract (IJourneyTravel): a place's arrival is today's check (the teleport seen, present); a run's, a recall's or a None's is authoritative.
+        if (travel == TravelStatus.Arrived && (_seam.Authoritative || (_selfTeleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present)))
         {
             _settleUntil = clock + SettleSeconds;
             Enter(next, clock);
             return ScenarioStatus.Running;
         }
 
-        return clock - _stageStart > TeleportSeconds
+        return _seam.Means == TravelMeans.Place && clock - _stageStart > TeleportSeconds
             ? Fail(session, string.Create(CultureInfo.InvariantCulture, $"{what}the player did not arrive and become present within {TeleportSeconds:0.#} s (teleports {_selfTeleports - _teleportMark}, travel {session.State.Self.Travel})"))
             : ScenarioStatus.Running;
     }
@@ -1066,7 +1107,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         {
             if (session.State.Self.Qualities.CombatMode == CombatModes.NonCombat)
             {
-                return BeginDeathWait(session, clock);
+                return BeginUndress(session, clock);
             }
 
             _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
@@ -1081,7 +1122,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
                 return Fail(session, "death: the non-combat mode was not entered: " + Describe(mode));
             }
 
-            return BeginDeathWait(session, clock);
+            return BeginUndress(session, clock);
         }
 
         return ScenarioStatus.Running;
@@ -1089,7 +1130,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
 
     private ScenarioStatus BeginDeathWait(IGameSessionView session, double clock)
     {
-        if (_walk is null)
+        if (_walk is null && _options.StartAt is null)
         {
             return Fail(session, "death: the wait must walk to the tuskers but has no walker; TODO(m3-fight-no-walker)");
         }
@@ -1101,11 +1142,20 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         _healthBucket = -1;
         _deathTeleportBase = _tally.DeathTeleports;
         _selfBase = _selfTeleports;
+        if (_walk is null)
+        {
+            // An embedded run with no walker (a journey whose den fight left the mage among the tuskers): the wait lies down where the player stands. Loud: no leg moves it on when no blow comes.
+            _log.Warn(LogCategory, $"death: no walker in this embedded run: the mage lies down where it stands among the tuskers, for up to {_options.Seconds:0.#} s, and is never moved on (TODO(m4-death-walkless-wait))");
+            Enter("death-wait", clock);
+            return ScenarioStatus.Running;
+        }
+
         if (!_walk.BeginLeg(session, clock, out var leg))
         {
             return Fail(session, "death: no walk could be planned to a tusker cell: " + _walk.Failure);
         }
 
+        StoodUp();
         _legs++;
         _log.Info(LogCategory, $"death: walking to the nearest tusker cell: {leg}; then non-combat among the tuskers for up to {_options.Seconds:0.#} s");
         Enter("death-wait", clock);
@@ -1125,6 +1175,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         {
             _walk?.Abandon(); // a leg still running drives a dead body: its keys are released here, and the respawn stages never tick it (a death in the middle of a leg is not a walk failure)
             _deathEnd = clock;
+            ReportLieEcho();
             _diedEarly = _options.StopAfterHits;
             if (_diedEarly)
             {
@@ -1165,20 +1216,22 @@ public sealed partial class DeathScenario : IScenario, IDisposable
                     $"death: {_options.Seconds:0.#} s passed and the tuskers did not kill the player (hits={_tally.HitsTaken} evades={_tally.Evades} protected={_tally.ProtectedHits} damage_taken={_tally.DamageTaken} health_min_pct={_tally.HealthMinPercent:0.0} legs={_legs})"));
         }
 
+        LieStep(session, clock, walkStatus); // D37: lie down once the walk has stopped
         var blows = Blows();
         if (blows != _blowMark || walkStatus == FightWalkStatus.Walking)
         {
             _blowMark = blows;
             _lastBlowAt = clock;
         }
-        else if (clock - _lastBlowAt >= IdleLegSeconds && walkStatus != FightWalkStatus.Walking)
+        else if (_walk is not null && _liePress is null && clock - _lastBlowAt >= IdleLegSeconds && walkStatus != FightWalkStatus.Walking)
         {
             _lastBlowAt = clock;
-            if (!_walk!.BeginLeg(session, clock, out var leg))
+            if (!_walk.BeginLeg(session, clock, out var leg))
             {
                 return Fail(session, "death: no walk could be planned to the next tusker cell: " + _walk.Failure);
             }
 
+            StoodUp();
             _legs++;
             _log.Info(LogCategory, $"death: no blow in {IdleLegSeconds:0} s; moving on: {leg}");
         }
@@ -1572,6 +1625,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
 
         _walk?.Abandon();
         _approach?.Abandon();
+        _seam.Abandon(); // a travel leg still running releases its keys
         _inner?.Dispose(); // the composed fight scenario follows the session and holds the shared walk: M4 3.1 d1
         _log.Error(LogCategory, why);
         FreezeMeasures(session);
@@ -1581,7 +1635,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             // Out of the den first, whatever endSession is (best effort, DenExit): a mage logged off in the den, by this scenario or by the game's leg as soon as this returns Failed, meets the tuskers at its next login. The
             // run stays Running until the leave is over, then logs off (endSession: true) or ends Failed where it stands.
             Subscribe(session); // the leave reads the player's own teleport positions: a failure before the first place (in a den a previous run left the mage in) has not subscribed yet
-            if (_exit.Begin(session, session.Clock.Now, _selfTeleports))
+            if (_options.LeaveOnFailure && _exit.Begin(session, session.Clock.Now, _selfTeleports))
             {
                 _failLeave = true;
                 return ScenarioStatus.Running;

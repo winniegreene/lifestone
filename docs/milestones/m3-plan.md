@@ -1,4 +1,4 @@
-# M3 plan: lights and sound
+# M3 plan: fights and sound (file: lights and sound)
 
 The plan of record for [m3-lights-and-sound.md](m3-lights-and-sound.md) (the spec: goal, DoD, research). Section
 numbers are stable: append, never renumber, so briefs can cite "§4.2". The process (§6) is the owner's settled one:

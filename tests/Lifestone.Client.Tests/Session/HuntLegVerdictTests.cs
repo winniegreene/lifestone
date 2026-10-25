@@ -36,7 +36,7 @@ public sealed class HuntLegVerdictTests
         {
             Kills = 3, DamageDealt = 412, DamageTaken = 57, HitsTaken = 6, Evades = 2, XpGained = 1250, Swings = 19, Hits = 11, Misses = 8, Blocked = 5, Seeks = 2,
             AttackFrameMaxMs = 61.04, CorpsesOpened = 3, CorpseItems = 7, Looted = 5, LootFrameMaxMs = 52.26, LootSkipped = 2,
-            Heals = 3, KitUses = 4, Potions = 1, Ground = HuntGroundChoice.Forest, ModeMismatch = 1,
+            Heals = 3, KitUses = 4, Potions = 1, Ground = HuntGroundChoice.Forest, ModeMismatch = 0,
             Sold = 7, Bought = 2, Pyreals = -14, Appraised = 5, VendorFrameMaxMs = 41.26,
         };
 
@@ -45,7 +45,7 @@ public sealed class HuntLegVerdictTests
         Assert.True(outcome.Ok, string.Join("; ", outcome.Problems));
         Assert.Empty(outcome.Problems);
         Assert.Matches(Shape, outcome.Line);
-        Assert.Equal("hunt done ok=true kills=3 damage_dealt=412 damage_taken=57 hits_taken=6 evades=2 xp_gained=1250 fighter=ok swings=19 shots=0 hits=11 misses=8 blocked=5 seeks=2 returned=yes attack_frame_max_ms=61.0 corpses_opened=3 corpse_items=7 looted=5 loot_frame_max_ms=52.3 loot_skipped=2 heals=3 kit_uses=4 potions=1 ground=forest mode_mismatch=1 sold=7 bought=2 pyreals=-14 appraised=5 vendor_frame_max_ms=41.3 one_blow_kills=0 loot_frame_over_50=yes frame_over_50=yes", outcome.Line);
+        Assert.Equal("hunt done ok=true kills=3 damage_dealt=412 damage_taken=57 hits_taken=6 evades=2 xp_gained=1250 fighter=ok swings=19 shots=0 hits=11 misses=8 blocked=5 seeks=2 returned=yes attack_frame_max_ms=61.0 corpses_opened=3 corpse_items=7 looted=5 loot_frame_max_ms=52.3 loot_skipped=2 heals=3 kit_uses=4 potions=1 ground=forest mode_mismatch=0 sold=7 bought=2 pyreals=-14 appraised=5 vendor_frame_max_ms=41.3 one_blow_kills=0 loot_frame_over_50=yes frame_over_50=yes", outcome.Line);
 
         // and the plain run: the n/a branches of the unmeasured windows
         var plain = HuntLegVerdict.Compose(null, Good());
@@ -233,14 +233,29 @@ public sealed class HuntLegVerdictTests
     }
 
     [Fact]
-    public void M4_3_1_s4_mode_mismatch_never_fails_the_leg()
+    public void M4_4_2_J1_a_mode_mismatch_fails_the_leg_by_name_and_none_passes()
     {
+        // m4-plan.md section 4.9 row j, D23's combat-mode rule: report-only since 3.1 s4 (every live gate read mode_mismatch=0), judged = 0 from 4.2.
         var mismatched = HuntLegVerdict.Compose(null, Good() with { Ground = HuntGroundChoice.Forest, ModeMismatch = 4, AttackFrameMaxMs = 61.0, LootFrameMaxMs = 55.5 });
 
-        Assert.True(mismatched.Ok, "a new judge is report-only in its first gate: mode_mismatch fails nothing");
-        Assert.Empty(mismatched.Problems);
+        Assert.False(mismatched.Ok);
+        Assert.Equal(["mode_mismatch=4 (0 expected: the combat mode and the wielded weapon disagreed)"], mismatched.Problems);
         Assert.Matches(Shape, mismatched.Line);
+        Assert.StartsWith("hunt done ok=false ", mismatched.Line, StringComparison.Ordinal);
+        Assert.Contains(" ground=forest mode_mismatch=4 sold=0 ", mismatched.Line, StringComparison.Ordinal);
         Assert.Equal(CombatModeWatch.FieldName + "=4", "mode_mismatch=4"); // the field's name is the watch's own
+
+        Assert.True(HuntLegVerdict.Compose(null, Good() with { ModeMismatch = 0 }).Ok);
+    }
+
+    [Theory]
+    [InlineData(61.04, "61.0")]
+    [InlineData(52.26, "52.3")]
+    [InlineData(null, "n/a")]
+    [InlineData(double.NaN, "n/a")]
+    public void M4_4_2_J1_a_window_frame_time_prints_one_decimal_or_n_a(double? ms, string printed)
+    {
+        Assert.Equal(printed, HuntLegVerdict.FrameMs(ms));
     }
 
     [Fact]
@@ -368,11 +383,11 @@ public sealed class HuntLegVerdictTests
     }
 
     [Fact]
-    public void M4_3_2_s4a_the_sale_the_buy_and_the_vendor_frame_judge_nothing()
+    public void M4_3_2_s4a_the_sale_the_buy_and_the_vendor_frame_are_not_the_hunt_verdicts_judges()
     {
         var shopped = HuntLegVerdict.Compose(null, Good() with { Sold = 7, Bought = 2, Pyreals = 123, Appraised = 5, VendorFrameMaxMs = 41.26 });
 
-        Assert.True(shopped.Ok, "report-only in the first gate: sold>=1 and vendor_frame_max_ms are judged at 4.2");
+        Assert.True(shopped.Ok, "the journey's vendor station judges the sale (SaleHappened) and smoke judges vendor_frame_max_ms from the station line (4.2 J1/J2)");
         Assert.Empty(shopped.Problems);
 
         // nothing sold, a negative delta (the purchase's price outweighs a small sale is not the sale's delta, but the field is a signed number), a slow vendor frame: still passes, the flag is the attack and loot windows' only

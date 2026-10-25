@@ -150,4 +150,73 @@ public sealed class CasterSwapTests
         Assert.Equal("swap:caster-missing", swap.Failure);
         Assert.Empty(swap.Steps);
     }
+
+    [Fact]
+    public void The_swap_waits_out_a_potions_ready_before_its_first_unwield_then_runs_in_order_fresh_gate_fix()
+    {
+        // The fresh-gate item's gate round 1: the fresh Brawler's vitals keeper drank Mana Potions right before the buff pass, and the unwield sent 30 ms after the last drink was refused (ACE's busy chain).
+        var t = new C1bSwapRig(FighterTemplate.Melee, fighterProfile: true, manaPotions: 3);
+        var drink = t.R.Api.Drink(ScriptedCaster.ManaPotionGuid, ActionSource.Host);
+        Assert.True(Frames(t, () => drink.Outcome is not null, 10));
+        Assert.Equal(ActionOutcomeKind.Confirmed, drink.Outcome!.Value.Kind);
+        Assert.Contains("Heal lane holds", t.R.Api.BusyReason, StringComparison.Ordinal);
+
+        Assert.True(t.Swap!.Begin(SwapDirection.In, t.Now));
+        var sentWhileBusy = 0;
+        Assert.True(Frames(t, () =>
+        {
+            var busy = t.R.Api.BusyReason is not null;
+            var before = t.Swap.Steps.Count;
+            t.Swap.Step(t.Now);
+            sentWhileBusy += busy && t.Swap.Steps.Count > before ? 1 : 0;
+            return t.Swap.Status != SwapStatus.Running;
+        }, 30));
+
+        Assert.Equal(SwapStatus.Done, t.Swap.Status);
+        Assert.Equal(0, sentWhileBusy);
+        Assert.Equal(["unwield-weapon", "wield-caster", "magic-mode"], t.Swap.Steps);
+        Assert.Equal(["unwield:" + C6Names.BrawlerWeapon, "wield:" + Heart, "mode:8"], t.Ops.Take(3));
+        Assert.Contains(t.R.H.Log.Lines, l => l.Contains("swap:busy-wait: the player is busy (the Heal lane holds", StringComparison.Ordinal));
+        Assert.Single(t.R.H.Log.Lines, l => l.Contains("swap:busy-wait: the player is free after", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_player_still_busy_after_the_bound_fails_swap_busy_wait_and_sends_nothing_fresh_gate_fix()
+    {
+        var t = new C1bSwapRig(FighterTemplate.Melee);
+        t.R.Api.PickUp(0x80000999, 0, 0, ActionSource.Host); // nobody answers it: an item move in flight past the bound
+        t.R.Tick();
+        Assert.Contains("an item move is in flight", t.R.Api.BusyReason, StringComparison.Ordinal);
+        Assert.True(t.Swap!.Begin(SwapDirection.In, t.Now));
+        Assert.True(Frames(t, () =>
+        {
+            t.Swap.Step(t.Now);
+            return t.Swap.Status != SwapStatus.Running;
+        }, CasterSwap.BusyWaitSeconds + 10));
+
+        Assert.Equal(SwapStatus.Failed, t.Swap.Status);
+        Assert.Equal("swap:busy-wait", t.Swap.Failure);
+        Assert.Contains("still busy after 15 s (an item move is in flight)", t.Swap.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain(t.Ops, o => o.StartsWith("unwield:", StringComparison.Ordinal) || o.StartsWith("wield:", StringComparison.Ordinal));
+    }
+
+    /// <summary>Frames of 0.05 s (the clock, the scripted ACE's answers, the Action API) until <paramref name="done"/> holds; false after <paramref name="maxSeconds"/>.</summary>
+    private static bool Frames(C1bSwapRig t, Func<bool> done, double maxSeconds)
+    {
+        var end = t.Now + maxSeconds;
+        while (t.Now < end)
+        {
+            if (done())
+            {
+                return true;
+            }
+
+            t.R.Tick(0.05);
+            t.Caster.Pump();
+            t.Pump();
+            t.R.Tick();
+        }
+
+        return done();
+    }
 }

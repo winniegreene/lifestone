@@ -34,7 +34,8 @@ namespace Lifestone.Loopback.Tests.Session;
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
-[Trait("Account", "test")]
+[Trait("Account", "test-tools")]
+[LoopbackCharacter("Lifestone Throwaway")]
 [LiveSharedSession]
 public sealed class StatsLiveTests(ITestOutputHelper output)
 {

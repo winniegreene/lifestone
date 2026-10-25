@@ -133,6 +133,20 @@ public sealed class GearKit
     /// <summary>What a coloured taper no profile formula of the account holds is given.</summary>
     public const int SpareTaperStack = 10;
 
+    /// <summary>The least a travel-only component is given (M4 P5b J3b): a tie or a recall burns one slot of it with a small chance, so three cover a journey's cast and its retry.</summary>
+    public const int TravelMinimumStack = 3;
+
+    /// <summary>The casts of each travel spell a gate makes (M4 P5b J3b: a journey casts a recall or a tie once, and the kit keeps one retry; a small number on purpose: the mage's burden has little headroom, GearKitTests).</summary>
+    public const int TravelCasts = 2;
+
+    /// <summary>The travel spells whose components the kit carries (M4 P5b J3b, W0: the mage lacked 767 for Lifestone Recall and 769, 788, 746 for Lifestone Tie): Lifestone Recall 1635 and Lifestone Tie 2644.</summary>
+    public static IReadOnlyList<uint> KitTravelSpells { get; } = [1635, 2644];
+
+    /// <summary>The fight spells beyond the profile's lines whose components the kit carries (M4 P5b J7): Cassius' Ring of Fire 1785, the hero video's cast (the mage lacked 110, 19 and 58).</summary>
+    public static IReadOnlyList<uint> KitFightSpells { get; } = [ArenaProfile.RingOfFireId];
+
+    private static bool IsKitFightLine(ProfileLine line) => line.Spells.Any(s => KitFightSpells.Contains(s.Id)); // sized as a travel line: a few casts a hero journey, the mage's burden has little headroom
+
     /// <summary>The burden of one component: the SELECT of the world database gives 4 to every component weenie in the kit (the Prismatic Taper, 20631, has 6, <see cref="PrismaticTaperBurden"/>).</summary>
     public const int ComponentBurden = 4;
 
@@ -253,7 +267,8 @@ public sealed class GearKit
     /// <returns>The kit.</returns>
     /// <exception cref="KeyNotFoundException">A profile spell is not in <paramref name="spells"/>.</exception>
     /// <exception cref="InvalidOperationException">A formula holds a component the pinned map (<see cref="ComponentWeenies"/>) does not.</exception>
-    public static GearKit Build(IReadOnlyDictionary<uint, SpellInfo> spells, string accountName)
+    /// <param name="heroRing">True only for the hero mage's gear station (M4 P5b fix FB, P5b-R12): the kit also carries <see cref="KitFightSpells"/>' components (Cassius' Ring of Fire). False (every other mage kit, the gate's): the ring's burden is left out.</param>
+    public static GearKit Build(IReadOnlyDictionary<uint, SpellInfo> spells, string accountName, bool heroRing = false)
     {
         ArgumentNullException.ThrowIfNull(spells);
         ArgumentException.ThrowIfNullOrEmpty(accountName);
@@ -261,12 +276,14 @@ public sealed class GearKit
 
         var union = new SortedSet<uint>();
         var used = new SortedSet<uint>(); // the account's formulas and the foci formula's components
+        var otherThanTravel = new HashSet<uint>(); // the components some non-travel line casts (they keep the MinimumStack; a travel-only component is sized by its few casts: the mage's burden has little headroom)
         var buffBurn = new Dictionary<uint, double>();
         var manaBurn = new Dictionary<uint, double>();
         var warBurn = new Dictionary<uint, double>();
+        var travelBurn = new Dictionary<uint, double>();
         var perSpell = new Dictionary<uint, int>();
         var counts = new Dictionary<uint, int>();
-        foreach (var line in ArenaProfile.Lines)
+        foreach (var line in ArenaProfile.Lines.Concat(ArenaProfile.Extras.Where(l => (l.Role == ProfileRole.Travel && l.Spells.Any(s => KitTravelSpells.Contains(s.Id))) || (heroRing && l.Spells.Any(s => KitFightSpells.Contains(s.Id))))))
         {
             var lineBurn = new Dictionary<uint, double>();
             foreach (var profileSpell in line.Spells)
@@ -289,6 +306,10 @@ public sealed class GearKit
 
                     union.Add(id);
                     used.Add(id);
+                    if (line.Role != ProfileRole.Travel && !IsKitFightLine(line))
+                    {
+                        otherThanTravel.Add(id);
+                    }
                     counts[id] = counts.GetValueOrDefault(id) + 1;
                 }
 
@@ -320,6 +341,11 @@ public sealed class GearKit
                 {
                     buffBurn[id] = buffBurn.GetValueOrDefault(id) + burn;
                 }
+                else if (line.Role == ProfileRole.Travel || IsKitFightLine(line))
+                {
+                    // The travel lines (M4 P5b J3b): a recall or a tie is cast a few times a gate (a journey, its fizzles).
+                    travelBurn[id] = travelBurn.GetValueOrDefault(id) + burn;
+                }
                 else if (line.IsManaLine)
                 {
                     // The mana lines (D24) are cast ManaCastsPerLine times a cycle, each cast at its worst spell.
@@ -350,8 +376,8 @@ public sealed class GearKit
             var wanted = SpareTaperStack;
             if (used.Contains(id))
             {
-                var expected = (BuffCycles * (buffBurn.GetValueOrDefault(id) + manaBurn.GetValueOrDefault(id))) + (FightCasts * warBurn.GetValueOrDefault(id));
-                wanted = Math.Max(Math.Max(MinimumStack, perSpell[id]), (int)Math.Ceiling(Safety * expected));
+                var expected = (BuffCycles * (buffBurn.GetValueOrDefault(id) + manaBurn.GetValueOrDefault(id))) + (FightCasts * warBurn.GetValueOrDefault(id)) + (TravelCasts * travelBurn.GetValueOrDefault(id));
+                wanted = Math.Max(Math.Max(otherThanTravel.Contains(id) ? MinimumStack : TravelMinimumStack, perSpell[id]), (int)Math.Ceiling(Safety * expected));
             }
 
             items.Add(new GearItem(

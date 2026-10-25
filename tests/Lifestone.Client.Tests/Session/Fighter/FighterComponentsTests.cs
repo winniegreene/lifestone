@@ -100,13 +100,13 @@ public sealed class FighterComponentsTests
         Assert.All(lines, l => Assert.Equal(FighterRole.Component, l.Role));
         Assert.All(lines, l => Assert.Equal(GearKit.WeenieTypeSpellComponent, l.Item.WeenieType));
 
-        // Per cast a slot burns 0.5 x CDM. Casts per gate: the 12 buff lines 3 cycles each, the 2 mana lines (3 + 3 legs) x 8 casts each, Harm Self 3 legs x 12, Heal Self 3 x 6, Lifestone Recall 6.
+        // Per cast a slot burns 0.5 x CDM. Casts per gate: the 12 buff lines 3 cycles each, the 2 mana lines (3 + 3 legs) x 8 casts each, Harm Self 3 legs x 12, Heal Self 3 x 6, Lifestone Recall 6, Lifestone Tie 6 (M4 P5b J3b).
         var casts = 12 * FighterComponents.BuffCycles + 2 * (FighterComponents.BuffCycles + FighterComponents.HarmHealLegs) * FighterComponents.ManaCastsPerLine + (FighterComponents.HarmHealLegs * FighterComponents.HarmCastsPerLeg)
-            + (FighterComponents.HarmHealLegs * FighterComponents.HealCastsPerLeg) + FighterComponents.RecallCasts;
-        Assert.Equal(12 * 3 + 2 * 6 * 8 + 36 + 18 + 6, casts); // 192
+            + (FighterComponents.HarmHealLegs * FighterComponents.HealCastsPerLeg) + (2 * FighterComponents.RecallCasts);
+        Assert.Equal(12 * 3 + 2 * 6 * 8 + 36 + 18 + 6 + 6, casts); // 198
         var scarab = lines.Single(l => l.Wcid == LeadScarab);
-        Assert.Equal((int)Math.Ceiling(FighterComponents.Safety * casts * 0.5 * 0.1), scarab.Item.Stack); // 29
-        Assert.Equal(29, scarab.Item.Stack);
+        Assert.Equal((int)Math.Ceiling(FighterComponents.Safety * casts * 0.5 * 0.1), scarab.Item.Stack); // 30
+        Assert.Equal(30, scarab.Item.Stack);
 
         // A herb burns ten times as fast: 288 would pass the weenie's maximum stack of 100, so 100.
         var herb = lines.Single(l => l.Wcid == Hyssop);

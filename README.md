@@ -3,11 +3,11 @@
 **A faithful, single-player rebuild of Asheron's Call: a new Godot client for your own game files and a local
 ACEmulator server.**
 
-> **Early development.** Milestones 1 to 3 are done: you can fly and walk through all of Dereth, rendered from your
-> own game files; log in to the bundled local server in the retail interface; and watch a mage buff, fight and die in
-> the Black Spawn Den, with lights and sound. Milestone 4 (fights and loot) is three waves of four in: a fighter who
-> hunts near Holtburg with melee and missile, loots, heals and trades with vendors. See
-> [Status and roadmap](#status-and-roadmap).
+> **Early development.** Milestones 1 to 4 are done: you can fly and walk through all of Dereth, rendered from your
+> own game files; log in to the bundled local server in the retail interface; watch a mage buff, fight and die in
+> the Black Spawn Den, with lights and sound; and play a fighter who hunts near Holtburg with melee or missile, loots,
+> heals and trades with vendors, with an auto-buff switch. Three characters play whole journeys on their own for the
+> tests. See [Status and roadmap](#status-and-roadmap).
 
 <!--
   Hero image: add a hosted screenshot here. None are stored in the repository, because every render shows retail
@@ -20,8 +20,8 @@ in January 2017 (client 11.6096). It is written in C# on Godot 4.7.2 .NET and dr
 that you already own (the `.dat` files, or "dats"). It will play the game against
 [ACEmulator](https://github.com/ACEmulator/ACE) (ACE), the community's open-source AC server, running on your own
 machine, so monsters, loot, spells and quests follow the rules the community rebuilt in ACE. The conveniences that
-Decal-era plugins used to add, such as auto-buffing and AFK hunting and looting, are planned as features of the client
-itself.
+Decal-era plugins used to add are becoming features of the client itself: auto-buff is built (a re-buff driver and a
+key that turns it on and off), and AFK hunting and looting run as the test loops, not yet as a player feature.
 
 What Lifestone is not:
 
@@ -38,18 +38,20 @@ What Lifestone is not:
 | **M1: Explore Dereth** | **Done** | The whole world, rendered from your dats, to fly and walk through |
 | **[M2: Log in](docs/milestones/m2-log-in.md)** | **Done** | Log in to the local ACE server, in the retail interface and through retail portal space: your character, movement, server-spawned objects |
 | **[M3: Fights and sound](docs/milestones/m3-lights-and-sound.md)** | **Done** | A level-126 mage buffs in all three schools, fights and dies in the Black Spawn Den: casts, projectiles and impacts on screen, dynamic lights, the game's sound, the retail panels with live content |
-| **[M4: Fights and loot](docs/milestones/m4-fights-and-loot.md)** | **In progress** (waves 1-3 of 4 done) | A fighter on the Low B belt and in the forest near Holtburg: melee and missile with the power bar, corpses looted, kits and potions, vendors and appraisal, the shortcut bar; next, auto-buff and the end-of-milestone audit |
+| **[M4: Fights and loot](docs/milestones/m4-fights-and-loot.md)** | **Done** | A fighter on the Low B belt and in the forest near Holtburg: melee and missile with the power bar, corpses looted, kits and potions, vendors and appraisal, the shortcut bar; the retail panels with live content; auto-buff; a wayfinder that walks planned routes; three self-driving characters that play whole journeys for the tests |
+| **M5: Patrons and outcomes** | Next (not yet planned) | Automation that reads its outcomes (a fizzled cast retried, Mana Conversion cast) and a patron bot |
 | More gameplay | Planned | NPCs and quests, the remaining panels, more of Dereth's rules through ACE |
-| Built-in automation | Started | The loops that test the game today drive the same action API the automation will use; auto-buff, then AFK hunting and looting ([automation vision](docs/automation-vision.md)) |
+| Built-in automation | Started | The loops that test the game today drive the same action API the automation will use; auto-buff is done, AFK hunting and looting is next ([automation vision](docs/automation-vision.md)) |
 | Polish | Planned | The remaining UI, larger window sizes, packaging |
 
 **Today** you can fly or walk anywhere in Dereth, at any time of day, into building interiors and down into
 dungeons, and watch any spell cast in the spell viewer. With the bundled server you log in through the retail
 character screens and portal space, walk among ACE's NPCs and monsters, and play in the retail interface: the chat,
 the vitals, the inventory and paperdoll, the spellbook and spell bars, the combat window and power bar, a corpse's or
-chest's contents, a vendor's window, the examine panel and the shortcut bar. Test loops play two characters for the
-checks: a mage who buffs, fights and dies in the Black Spawn Den, and a fighter who hunts, heals, loots and sells near
-Holtburg.
+chest's contents, a vendor's window, the examine panel and the shortcut bar. The `Pause` key turns auto-buff on and
+off. Test loops play three characters for the checks, each on its own route, planned by Lifestone's own wayfinder: the
+BSD Mage buffs, fights and dies in the Black Spawn Den and recovers; the Holtburg Brawler (melee) and the Holtburg
+Archer (missile) buff, hunt, heal, loot, sell and recall home.
 
 **Not there yet:** quests, fellowships, crafting, housing and most NPC conversations; the panels retail had beyond
 those above answer "Not in Lifestone" for now; only the 800x600 window is tested. Details: each milestone's status
@@ -80,6 +82,12 @@ section, and the [project goals](docs/goals.md).
   appraisal.
 - **A client built around an action API:** the UI, the test loops and (later) the automation all act through the same
   API, and every action is checked against what the server answers.
+- **Auto-buff:** a re-buff driver recasts any buff that is about to run out, on the session clock and never in a
+  fight, and the `Pause` key switches it on and off (`--buff-auto`).
+- **Self-driving journeys:** a mage and two fighters (melee and missile) play a whole day on their own, from a wayfinder
+  that plans routes over the world's real collision and yields to your own movement keys, through buffing, hunting,
+  looting, healing with kits and Harm Self, vendors and Lifestone Recall home, and are judged station by station.
+  Every live gate starts them from freshly re-created characters.
 - **Golden viewpoints and a smoke suite:** 18 fixed views for side-by-side comparison with retail, and one command
   that builds, tests and runs every engine check off-screen, plus loopback tests against the local server.
 
@@ -204,11 +212,14 @@ The game uses retail's default key map, read from your dats (movement, the panel
 | `1`-`9`, `Alt`+`1`-`9` | Use the item on shortcut slot 1-9 or 10-18 (drag an item from a pack onto the bar to add it) |
 | `F7` | Lifestone's tools panel: Places (search and teleport), Where am I, Add XP (needs the bundled server with the Lifestone mod) |
 | `Scroll Lock` | Lifestone's automation inspector (read-only) |
+| `Pause` | Auto-buff on or off; the chat says so in a `[Lifestone]` line. A character without a buff profile (only the BSD Mage and the two fighters have one) gets a notice and it stays off |
 | `Shift`+`Esc` | Log off (retail's End Character Session) |
 | `F3` / `F1` | Performance overlay / About |
 
-`F7` and `Scroll Lock` are keys retail's default key map leaves unbound (`docs/retail-ui.md` section 22.1); the number
-keys are retail's own shortcut-bar keys.
+`F7`, `Scroll Lock` and `Pause` are keys retail's default key map leaves unbound (`docs/retail-ui.md` section 22.1); the
+number keys are retail's own shortcut-bar keys, and the accent-grave key (`` ` ``) is retail's own combat key: peace to
+the weapon's combat mode and back, under the same rules as the combat window's button. Running is retail's own
+run key; a wayfinder run stops as soon as you press a movement key.
 
 **In the spell viewer**
 
@@ -235,6 +246,18 @@ keys are retail's own shortcut-bar keys.
 | `--retail-normals`, `--retail-sky-anchor` | Restore retail's rendering quirks (see [Principles](#principles)) |
 | `--retail-picking` | Retail's picking rules in play mode: a part's first hit polygon and per-part hit times, where a click can pick a different object than the nearest ([avatars.md](docs/avatars.md) section 18) |
 | `--dat-dir=DIR` | Read the dats from another folder |
+
+Playing on the local server and the test loops, which need it (`--help` lists every option, grouped, with its default):
+
+| Option | Effect |
+|---|---|
+| `--buff-auto=on\|off` | The re-buff driver (default off); `--buff-auto-check-s` and `--buff-rebuff-margin-s` set how often it looks and how early it recasts. The `Pause` key switches it in play |
+| `--examine-icon=on\|off` | The examine window's item icon (default off, as retail's layout has none) |
+| `--heal*`, `--vitals-*`, `--loot*`, `--sell`, `--buy-kits`, `--hunt-*` | The hunt's recovery, vitals-keeper, loot, vendor and hunt rules |
+| `--scenario=<name>` | A headless run on the local server: builds (`mage-build`, `fighter-build`), `buff`, `fight`, `death-and-regear`, `hunt`, `wayfind` (`--to=CELL`, `--from`, `--wayfind-back`) and `journey` |
+| `--journey=<mage\|melee\|archer>` | With `--scenario=journey` (headless) or `--login-check=journey` (the game, through `tools\godot.ps1 -Run -Offscreen -IsolateUserData -TimeoutSeconds N -GameArgs:'...'`): one character's whole day, station by station. `hero-archer`, `hero-brawler` and `hero-mage` are the same with showpiece shots for the trailer, and `--journey-shots` saves frame bursts at them |
+| `--fresh-character` | With the character builds: delete and re-create the journey character first (the live gate does this) |
+| `--play-look-shots=DIR`, `--play-panel-shots=DIR` | Save review frames of held items, or of every panel page |
 
 ## How it works
 
@@ -309,9 +332,10 @@ src/Lifestone.Client/   engine-agnostic client logic, the game-state session lay
 src/Lifestone.Net/      the AC network protocol: transport, session, message codecs
 src/Lifestone.Headless/ a console host that plays a session without Godot (the test loops)
 src/Lifestone.Game/     the Godot project: scenes, scripts, shaders
-tests/                  xUnit tests: Data, Client, Net, the server mod, and the loopback tests that need the local server
+tests/                  xUnit tests: Data, Client, Net, the server mod, and Lifestone.Loopback.Tests, which need the local server
 server/                 the localhost ACE and MariaDB backend (setup, start, stop)
-tools/                  godot.ps1 launcher, play.ps1 (the backend and the game in one command), smoke.ps1 suite, terrain-golden.ps1, hero-video.ps1, Python helpers
+tools/                  godot.ps1 launcher, play.ps1 (the backend and the game in one command), smoke.ps1 suite, slice-check.ps1,
+                        live-gate.ps1, commit.ps1, terrain-golden.ps1, hero-video.ps1, lib/ (shared PowerShell modules), Python helpers
 docs/                   design docs, milestones, research notes and third-party sources
 client/                 your retail dats (you create it; ignored by git)
 ```
@@ -359,20 +383,37 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
   never beside another Godot or dotnet run. `[Trait("Status","KnownFailure")]` marks a test that is known to fail; it is never
   in the green total, and each one names its TODO row in the test's reason, so the failure stays visible in the plan. Both are
   left out of the default filter of `dotnet test`, `tools\smoke.ps1` and `tools\slice-check.ps1`; run one with
-  `--filter "Status=KnownFailure"`. No test carries either trait yet.
+  `--filter "Status=KnownFailure"`. One test carries Timing (the wayfinder's 1 km plan, in `PathPlannerTests`); none
+  carries KnownFailure.
+- **Test count.** Coverage never decreases: `tests/Shared/test-count-baseline.json` holds the floor of the default run and
+  of the Exhaustive tier (9,130 and 735 at the end of M4), which `slice-check` enforces unless `-MinTests` is given. Only
+  a deletion that names where its behaviour is proved elsewhere lowers it.
 
-### Live tests and the live gate (M4 P4)
+### Live tests and the live gate
 
 The loopback tests and the live legs of `tools\smoke.ps1` play on the local backend
-([server/README.md](server/README.md)). Each automated run uses one of three test accounts, whose keys live in
+([server/README.md](server/README.md)). Each automated run uses one of four test accounts, whose keys live in
 `server\runtime\secrets.json` (gitignored; read the key names, never print the values):
 
 | Account key | Characters | What it does |
 |---|---|---|
-| `test` | BSD Mage (level 126, the Black Spawn Den), Holtburg Hunter, and the baseline Lifestone Smoke and Lifestone Loopback; Lifestone Throwaway | the mage, the Hunter and the throwaway |
-| `test-melee` | Holtburg Brawler (level 40, Heavy Weapons specialised, the Mace; hunts the Low B belt, levels 8 to 20) | the melee fighter |
-| `test-archer` | Holtburg Archer (level 40, Missile Weapons specialised, the Shortbow and arrows; hunts the low north forest, levels 20 to 30) | the missile fighter |
+| `test` | BSD Mage (level 126, the Black Spawn Den), Holtburg Hunter (the baseline fighter, never re-created), and the baseline Lifestone Smoke and Lifestone Loopback (never reset or levelled) | the mage's journey, the Hunter and the raw-net and headless classes |
+| `test-melee` | Holtburg Brawler (level 55, Heavy Weapons specialised, the Mace, three magic schools trained; hunts the Low B belt) | the melee journey |
+| `test-archer` | Holtburg Archer (level 55, Missile Weapons specialised, the Shortbow and arrows, three magic schools trained; hunts the low north forest) | the missile journey |
+| `test-tools` | Lifestone Throwaway (its tests create, use, delete and purge it) and Lifestone Tools (its purge caller; created once, never levelled or reset) | the throwaway and the mod-verb classes (headless) |
 
+- **Journeys.** A journey is one character's whole day as a list of stations (`--scenario=journey --journey=<mage|melee|archer>`
+  headless, `--login-check=journey` in the game; [docs/session.md](docs/session.md) section 41). The mage builds, buffs, casts,
+  harm-heals, binds at the lifestone, fights in the den, dies once, recovers and recalls home; the Brawler and the Archer buff,
+  bind, hunt (the belt, the forest), heal, recall home, sell, and open chests or set the shortcut bar. Trips go through the
+  wayfinder ([docs/wayfinding.md](docs/wayfinding.md)) or a retail travel spell (Lifestone Recall, Primary Portal Recall) before any
+  server hop. The fighters train Creature, Item and Life Magic for their self buffs and Lifestone Recall, and swap to a caster
+  to cast; a vitals keeper (`--vitals-*`) keeps health, stamina and mana up. Each station prints one `ok=` line, and the
+  journey's `done` line carries the verdict.
+- **Fresh characters.** Every live gate first deletes and re-creates the BSD Mage, the Brawler and the Archer (`--fresh-character`,
+  the `recreate` step; [docs/session.md](docs/session.md) section 42), and the new copy purges the old one. The gate characters
+  end one level above their template (127 and 56). The Hunter, Lifestone Smoke and Lifestone Loopback are never re-created, and
+  only Lifestone Throwaway may be levelled freely or purged.
 - **Traits.** Each loopback class carries one `[Trait("Account", "<key>")]`, and its characters live on that account;
   `LoopbackConventionTests` enforces it. `[Trait("Lane", "solo")]` marks the classes that need the game to themselves
   (the movement-precision runs). A filter picks an account and a lane, for example
@@ -384,17 +425,27 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
 - **Session mode.** `LIFESTONE_LOOPBACK_SESSION=shared` (the default) keeps one live session per account for its tests:
   the first run of a test resets the known state (peace mode, the launcher and ammunition off, the rest weapon, Holtburg),
   and each run logs `[live-session]` lines (`reset`, `logged <name> in`, `relog after failure`). `per-test` logs every run
-  in and out, as before M4 P4. `-Serial` in the gate uses `per-test`.
-- **The live gate.** `pwsh -File tools\live-gate.ps1 [-Worktree <path>] [-Tag <name>] [-Loopback full|core|<areas>] [-Serial] [-Soak] [-Plan]`
-  runs the backend from the main checkout (it stops it in a finally), so only an item's lead runs it. The default is
-  the parallel gate: the three account lanes run at once (`test`: its loopback classes, then the throwaway, buff, BSD and death
-  login legs; `test-melee`: its loopback classes; `test-archer`: its loopback classes, then the missile hunt), then a solo
-  phase that judges the frames and runs the melee hunt, the movement-precision classes and the leak scan. `-Serial` is the
-  old order, for a comparison. `-Soak` adds the Soak tier once at the end. `-Plan` (or `-WhatIf`) prints every step and runs
-  nothing. `-Loopback core` (the default) is the fixed list in `tools\lib\GateAreas.psd1` plus the areas the diff touches
-  (`net`, `movement`, `actions`, `fighter`, `mage`, `servermod`); `full` runs every non-Soak class and is used at a wave's last
-  item and at the milestone's end; an area list runs those areas only. Logs go to `cache\gate\<Tag>`, and the gate's
-  exit code is 0 only when every step passed.
+  in and out; `-Serial` in the gate uses it.
+- **The live gate.** `pwsh -File tools\live-gate.ps1 [-Worktree <path>] [-Tag <name>] [-Loopback full|core|<areas>] [-JourneySolo <names>] [-Serial] [-CompareTo <tag>] [-KeepCharacters] [-Soak] [-Plan]`
+  runs the backend from the main checkout (it stops it in a finally), so only an item's lead runs it. The exit code is 0 only
+  when every step passed; logs go to `cache\gate\<Tag>`.
+  - **Parallel (the default).** Four account lanes run at once, three of them with Godot: `test` re-creates the mage, runs its
+    short loopback classes, then the mage's journey; `test-melee` re-creates the Brawler, then runs the melee journey;
+    `test-archer` re-creates the Archer, runs Shortcut's relog class, then the archer journey; `test-tools` (headless) runs the
+    throwaway's and the mod-verb classes. While the lanes share the machine, frame times are reported, not judged.
+  - **Solo.** Then one step at a time with nothing else running: the frame judge three times (`login-check`, `login`), the
+    throwaway's frames, the leak scan and the movement-precision classes. `-JourneySolo <mage|melee|archer>` moves a journey
+    into this phase, so its station frames are judged. The frame rule: over 75 ms fails, over 50 ms is flagged, and two of
+    three runs over 50 ms fail the gate.
+  - **Options.** `-Serial` runs the three journeys headless, one after another, each after its own re-create; `-CompareTo <tag>`
+    prints them beside the journeys of a default-mode gate on the same commit. `-KeepCharacters` skips the re-create (a rerun
+    of one journey). `-Loopback core` (the default) is the fixed list in `tools\lib\GateAreas.psd1` plus the areas the diff
+    touches (`net`, `movement`, `actions`, `fighter`, `mage`, `servermod`); `full` runs every non-Soak class, at a wave's last
+    item and the milestone's end; an area list runs those areas only. `-Soak` adds the Soak-tier loopback tests once, alone,
+    at the end: the real 1,800 s buff expiry (`EnchantmentExpiryLiveTests`) and the lossy-network walk. `-Plan` (or `-WhatIf`)
+    prints every step and runs nothing.
+  - **Time.** The gate that closed the fresh-characters item took 1,613 s, against about 4,860 s for the old order (the
+    per-feature loopback classes and smoke legs, one after another).
 - **The audio check.** Every automated Godot run must log `audio service installed ... muted=true`; a smoke step whose
   run does not fails with `audio check`. Capture runs count as automated. `tools\play.ps1 -Audio` is refused with `-Offscreen`,
   since an offscreen run is the muted path.
@@ -404,11 +455,18 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
 - `pwsh -File tools\slice-check.ps1 -MinTests <count> -Steps <steps> [-Smoke] [-Rerun]` checks a slice in one command and
   prints one line per stage, `[slicecheck] <stage> PASS|FAIL|SKIP <detail> (<seconds>s)`, then `[slicecheck] done ok=true|false`
   (exit 0 or 1). Stages: `build` (warning and error counts), `test` (the default `dotnet test`, with the passed count per
-  assembly; `-MinTests` fails it when fewer passed), each Godot step of `-Steps` (run through `smoke.ps1 -Only <step>
-  -NoBuild -Backend auto`, so the command lines live in smoke only; `retail-ui-checks` is an alias of smoke's `retail-ui`)
-  and, with `-Smoke`, the whole smoke suite. `-Stages build,test` runs a subset; `-Rerun` reruns a failed Godot step once
-  (`PASS (rerun)`). A FAIL prints at most 15 lines of the failure and the log path; full logs are in `cache\slice-check\`.
-  It never starts the backend (`-Backend` accepts only `auto`).
+  assembly; it fails when fewer than `-MinTests` passed, and without `-MinTests` the baseline file is the floor), `exhaustive`
+  (the Exhaustive tier), each Godot step of `-Steps` (run through `smoke.ps1 -Only <step> -NoBuild -Backend auto`, so the
+  command lines live in smoke only; `retail-ui-checks` is an alias of smoke's `retail-ui`) and, with `-Smoke`, the whole smoke
+  suite. `-Stages build,test` runs a subset; `-Rerun` reruns a failed Godot step once (`PASS (rerun)`). A FAIL prints at most
+  15 lines of the failure and the log path; full logs are in `cache\slice-check\`. It never starts the backend (`-Backend`
+  accepts only `auto`).
+- **Which form, when.**
+  - `-Gate` is G-A, the check before every live gate: build, default tests and the Exhaustive tier, no Godot step (a few minutes).
+  - `-Changed` adds the backend-free Godot steps the diff selects (`tools\lib\StepPaths.psd1` maps folders to steps). It runs once
+    per item, after its last live gate and before the merge.
+  - `-Smoke` runs the whole offline smoke, at a wave's last item and the milestone's end.
+  - `-Exhaustive` adds the Exhaustive tier to a slice that touches `src/Lifestone.Data` or the Client folders listed above.
 - **Window size.** Every Godot check and frame run (`play-checks`, `retail-ui`, `shell-frames`, `login-check`, `login`) is at retail's
   native 800x600 (the owner's rule, 2026-10-14: several resolutions are a polish step at the end of the project). `-AllSizes` (on
   `slice-check.ps1` and `smoke.ps1`) is the opt-in that adds 1920x1080 and 2560x1440; `LIFESTONE_ALL_SIZES=1` runs the one Client
@@ -424,7 +482,10 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
   - `auto` (the default) runs them only when the backend is already up, and never starts it;
   - `start` starts the backend, then stops what it started;
   - `require` fails them instead of skipping them when the backend is down.
-  - The `login-throwaway` step (`--login-check=throwaway`, docs/session.md section 28) creates, uses, deletes and purges a character on the test account. It is not part of
+  - The three journey steps (`journey-mage`, `journey-melee`, `journey-archer`) run one character's whole day in the game
+    (`--login-check=journey`) and, like `login-throwaway`, only under `-Backend require`; the live
+    gate runs them.
+  - The `login-throwaway` step (`--login-check=throwaway`, docs/session.md section 28) creates, uses, deletes and purges a character on the test-tools account (its purge caller is Lifestone Tools). It is not part of
     `--login-check=all` and runs only under `-Backend require` (skipped under `auto` and `start`).
 - The `record-audio` step (M3 1.3 s3, no backend) runs `--play-checks --record-audio=<dir>` on the stand-in server: the game's own sound is recorded from the Master bus
   (automated, so muted: M2 D8), read back by `WaveLevels` and judged non-silent (peak above -60 dBFS and an active 50 ms window). The per-source counters
@@ -446,7 +507,8 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
   - [M1: Explore Dereth](docs/milestones/m1-explore-dereth.md): the first milestone, with its status and evidence
   - [M2: Log in](docs/milestones/m2-log-in.md), with its [plan](docs/milestones/m2-plan.md): the server, the login, retail portal space and the retail UI
   - [M3: Fights and sound](docs/milestones/m3-lights-and-sound.md), with its [plan](docs/milestones/m3-plan.md): the mage, magic, lights and sound
-  - [M4: Fights and loot](docs/milestones/m4-fights-and-loot.md), with its [plan](docs/milestones/m4-plan.md): the current milestone
+  - [M4: Fights and loot](docs/milestones/m4-fights-and-loot.md), with its [plan](docs/milestones/m4-plan.md): the fighters, loot, vendors, auto-buff and the journeys
+  - [The polish pass between M3 and M4](docs/milestones/m3-m4-polish-pass.md) and [M4's own](docs/milestones/m4-polish-pass.md)
   - [Protocol](docs/protocol.md): the AC network protocol as ACE implements it
   - [Session](docs/session.md): the game-state model, the action API, the test loops and their verdicts
   - [Local server](server/README.md): setting up and running ACE and MariaDB on 127.0.0.1
@@ -462,7 +524,8 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
     statics), [interiors and dungeons](docs/interiors.md), [sky and time of day](docs/sky.md)
   - [Navigation and golden viewpoints](docs/navigation.md), [spell viewer](docs/spell-viewer.md)
   - [Retail interface](docs/retail-ui.md) and its [data](docs/retail-ui-data.md), [avatars](docs/avatars.md) (characters,
-    motion, held items, effects), [portal space](docs/portal-space.md), [physics](docs/physics.md)
+    motion, held items, effects), [portal space](docs/portal-space.md), [physics](docs/physics.md), [wayfinding](docs/wayfinding.md) (the planner
+    that walks the test characters)
   - [Hero video](docs/hero-video.md): a trailer rendered from your dats
 - **Sources:** [docs/third-party](docs/third-party/) lists the sources behind each area.
 
@@ -480,7 +543,7 @@ Issues and pull requests are welcome. Contributions are made under the repositor
   behaviour that differs from retail on purpose is documented and has a flag that restores retail.
 - **Keep it green:** zero warnings, `dotnet test` passing, and `tools\smoke.ps1` for anything that touches rendering
   or streaming.
-- **Coding agents** follow [`CLAUDE.md`](CLAUDE.md): machine safety, privacy and the current milestone.
+- **Coding agents** follow [`CLAUDE.md`](CLAUDE.md): machine safety, privacy and the rules for agent sessions.
 
 ## FAQ
 

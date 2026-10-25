@@ -199,7 +199,7 @@ public sealed class HeadlessRunner : IDisposable
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(log);
 
-        // D10 (M4 D31): an automated run uses only the three test accounts (TestAccounts). Applied here, the one place every caller passes (the host, the scenarios' tests),
+        // D10 (M4 D31): an automated run uses only the four test accounts (TestAccounts). Applied here, the one place every caller passes (the host, the scenarios' tests),
         // before anything else; the refusal never repeats the account name (a mistyped option could be a password).
         if (!AutomatedAccountRule.TryApply(options.Session, automated: true, out var automatedSession, out var accountRefusal))
         {
@@ -216,6 +216,7 @@ public sealed class HeadlessRunner : IDisposable
             AcademyExitScenario a => (a.Login.Character, a.Login.CreateCharacter),
             HoltburgLapsScenario h => (h.Login.Character, h.Login.CreateCharacter),
             WayfindScenario w => (w.Login.Character, w.Login.CreateCharacter),
+            Scenarios.Journey.HeadlessJourneyScenario j => ((string?)j.Character, (string?)null), // M4 P5b J4: the journey enters its plan's character, creates none
             LoginCheckScenario c => ((string?)c.Character, (string?)c.Character), // the check creates its character when it is missing
             _ => ((string?)null, (string?)null),
         };

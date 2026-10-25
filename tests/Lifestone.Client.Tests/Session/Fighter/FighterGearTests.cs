@@ -97,8 +97,8 @@ public sealed class FighterGearTests
             Assert.Equal(5, kit.Worn.Count(i => i.Role == FighterRole.Jewelry));
         }
 
-        // The slots per fighter: the main pack, then the side packs (printed by the components' dat test with the real component lines).
-        Assert.Equal((4, 6), (FighterKit.Melee.MainPackSlots, FighterKit.Archer.MainPackSlots));
+        // The slots per fighter: the main pack, then the side packs (printed by the components' dat test with the real component lines). The gear's mana charge takes one main-pack slot (closes TODO(m4-gear-mana)).
+        Assert.Equal((5, 7), (FighterKit.Melee.MainPackSlots, FighterKit.Archer.MainPackSlots));
     }
 
     [Fact]

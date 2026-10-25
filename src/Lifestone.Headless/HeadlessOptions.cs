@@ -4,6 +4,7 @@ using Lifestone.Client.Session;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Scenarios.Journey;
 
 namespace Lifestone.Headless;
 
@@ -42,6 +43,9 @@ internal enum HeadlessScenario
 
     /// <summary>Log in as the account's fighter, run to <c>--to</c> with the wayfinder and the human's keys over the collision and tiles the headless streamer builds ahead (and with <c>--wayfind-back</c> back), print the wayfind lines (P5a S6, <c>WayfindScenario</c>); moves the character.</summary>
     Wayfind,
+
+    /// <summary>One of the three journeys (<c>--journey=mage|melee|archer</c>, M4 P5b J4): the plan's stations from one login, on foot.</summary>
+    Journey,
 }
 
 /// <summary>
@@ -106,8 +110,14 @@ internal sealed record HeadlessOptions
     /// </summary>
     internal FighterTemplate? Fighter { get; init; }
 
+    /// <summary>The journey's plan (<c>--journey</c>), or null when the scenario is not <c>journey</c>.</summary>
+    internal JourneyPlan? Journey { get; init; }
+
     /// <summary><c>--fighter-recreate</c> (M4 P5a C5, D40): <c>--scenario=fighter-build</c> on the Brawler or the Archer deletes (pending deletion) and re-creates a character whose creation attributes differ from the template's.</summary>
     internal bool FighterRecreate { get; init; }
+
+    /// <summary><c>--fresh-character</c> (M4 fresh B1, D44/D45): <c>--scenario=fighter-build</c> on the Brawler or the Archer, or <c>--scenario=mage-build</c>, deletes the live character from the character list, creates and builds the template's, and purges the old copies with the mod.</summary>
+    internal bool FreshCharacter { get; init; }
 
     /// <summary>The Session group's values.</summary>
     internal SessionOptions Session { get; init; } = new();
@@ -115,11 +125,15 @@ internal sealed record HeadlessOptions
     /// <summary>Every problem found, one line each, values never repeated.</summary>
     internal IReadOnlyList<string> Errors { get; init; } = [];
 
+    /// <summary>The command line as given (the journey's stations read their scenario options from it).</summary>
+    internal IReadOnlyList<string> Arguments { get; init; } = [];
+
     /// <summary>Parses the headless command line.</summary>
     /// <param name="args">The process arguments.</param>
     internal static HeadlessOptions Parse(IEnumerable<string> args)
     {
-        var arguments = CommandLineArgument.ParseAll(args);
+        var raw = args.ToList();
+        var arguments = CommandLineArgument.ParseAll(raw);
         var errors = new List<string>(OptionCatalog.Registry.Problems(arguments, OptionScenes.Headless));
         var session = SessionOptions.FromArguments(arguments);
         errors.AddRange(session.Errors);
@@ -135,6 +149,7 @@ internal sealed record HeadlessOptions
         errors.AddRange(wayfind.Errors);
         var o = new HeadlessOptions();
         FighterTemplate? requestedFighter = null;
+        JourneyPlan? journey = null;
         foreach (var argument in arguments)
         {
             switch (argument.Name)
@@ -159,8 +174,17 @@ internal sealed record HeadlessOptions
                             ("fight", HeadlessScenario.Fight),
                             ("death-and-regear", HeadlessScenario.DeathAndRegear),
                             ("hunt", HeadlessScenario.Hunt),
-                            ("wayfind", HeadlessScenario.Wayfind)),
+                            ("wayfind", HeadlessScenario.Wayfind),
+                            ("journey", HeadlessScenario.Journey)),
                     };
+                    break;
+                case "--journey":
+                    journey = JourneyPlans.ForName(argument.Value);
+                    if (journey is null)
+                    {
+                        errors.Add($"{argument.Name}: '{argument.Value}' is not one of {string.Join(", ", JourneyPlans.All.Select(p => p.Name))}");
+                    }
+
                     break;
                 case "--fighter":
                     requestedFighter = FighterTemplate.ForKey(argument.Value);
@@ -298,6 +322,30 @@ internal sealed record HeadlessOptions
             errors.Add("--to, --from and --wayfind-back: only --scenario=wayfind takes them");
         }
 
+        if (o.Scenario == HeadlessScenario.Journey)
+        {
+            // M4 P5b J4, the account rule: each journey runs on its own test account only (mage: test, melee: test-melee, archer: test-archer);
+            // without --account the run uses the journey's account.
+            if (journey is null && !arguments.Any(a => a.Name == "--journey"))
+            {
+                errors.Add($"--journey: --scenario=journey needs a journey ({string.Join(", ", JourneyPlans.All.Select(p => p.Name))})");
+            }
+            else if (journey is not null)
+            {
+                if (session.Account is { } journeyAccount && !string.Equals(journeyAccount, journey.Account, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"--account: --journey={journey.Name} runs on the test account '{journey.Account}' only; the value is not shown");
+                }
+
+                session = session with { Account = journey.Account };
+            }
+        }
+        else if (arguments.Any(a => a.Name == "--journey"))
+        {
+            errors.Add("--journey: only --scenario=journey takes it");
+            journey = null;
+        }
+
         var recreate = false;
         foreach (var argument in arguments)
         {
@@ -313,7 +361,27 @@ internal sealed record HeadlessOptions
             recreate = false;
         }
 
-        return o with { Session = session, Buff = buff, Fight = fight, Death = death, Hunt = hunt, Wayfind = wayfind, Fighter = fighter, FighterRecreate = recreate, Errors = errors };
+        var fresh = false;
+        foreach (var argument in arguments)
+        {
+            if (argument.Name == "--fresh-character")
+            {
+                fresh = OptionValues.Switch(argument, errors, false);
+            }
+        }
+
+        if (fresh && recreate)
+        {
+            errors.Add("--fresh-character: it excludes --fighter-recreate (the first deletes the live character whatever it is, the second only when its attributes differ)");
+            fresh = false;
+        }
+        else if (fresh && !(o.Scenario == HeadlessScenario.MageBuild || (o.Scenario == HeadlessScenario.FighterBuild && fighter is not null && fighter.Key != FighterTemplate.Hunter.Key)))
+        {
+            errors.Add("--fresh-character: only --scenario=fighter-build on the Brawler (test-melee) or the Archer (test-archer) and --scenario=mage-build on the default account takes it; the Hunter, any other account and every other scenario refuse it");
+            fresh = false;
+        }
+
+        return o with { Session = session, Buff = buff, Fight = fight, Death = death, Hunt = hunt, Wayfind = wayfind, Fighter = fighter, FighterRecreate = recreate, FreshCharacter = fresh, Journey = o.Scenario == HeadlessScenario.Journey ? journey : null, Arguments = raw, Errors = errors };
     }
 
     private static string? Required(CommandLineArgument argument, List<string> errors, string what)

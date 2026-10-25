@@ -26,11 +26,11 @@ public sealed class FighterProfileTests
     {
         var profile = FighterProfile.ForName(name)!;
         Assert.Equal(name, profile.CharacterName);
-        Assert.Equal(17, profile.Lines.Count);
+        Assert.Equal(18, profile.Lines.Count); // M4 P5b J3b: Lifestone Tie
         Assert.Equal(12, profile.Lines.Count(l => l.IsBuff));
         Assert.Equal(SharedBuffs.Append(mastery).Order(), profile.Lines.Where(l => l.IsBuff).Select(l => l.Name).Order());
         Assert.Equal(mastery, profile.WeaponMastery.Name);
-        Assert.Equal(["Stamina to Mana Self", "Revitalize Self", "Harm Self", "Heal Self", "Lifestone Recall"], profile.UtilityLines.Select(l => l.Name));
+        Assert.Equal(["Stamina to Mana Self", "Revitalize Self", "Harm Self", "Heal Self", "Lifestone Recall", "Lifestone Tie"], profile.UtilityLines.Select(l => l.Name));
         Assert.Equal(1635u, profile.LifestoneRecall.Spells.Single().Id); // M4 P5a C1c (D38): the fighters learn Lifestone Recall
         Assert.Equal(ProfileRole.Travel, profile.UtilityLine("Lifestone Recall")!.Role);
         Assert.Contains(1635u, profile.SpellsToLearn);
@@ -53,7 +53,7 @@ public sealed class FighterProfileTests
             Assert.Equal(["Harm Self"], p.Lines.Where(l => l.Role == ProfileRole.HarmSelf).Select(l => l.Name));
             Assert.Equal(["Heal Self"], p.Lines.Where(l => l.Role == ProfileRole.HealSelf).Select(l => l.Name));
             Assert.All(p.Lines.Where(l => l.Role is ProfileRole.CreatureBuff or ProfileRole.LifeBuff), l => Assert.True(l.IsBuff));
-            Assert.Equal(["Lifestone Recall"], p.Lines.Where(l => l.Role == ProfileRole.Travel).Select(l => l.Name));
+            Assert.Equal(["Lifestone Recall", "Lifestone Tie"], p.Lines.Where(l => l.Role == ProfileRole.Travel).Select(l => l.Name));
             Assert.DoesNotContain(p.Lines, l => l.Role is ProfileRole.ItemBuffArmor or ProfileRole.ItemBuffWand or ProfileRole.WarBolt or ProfileRole.WarOption); // no Item Enchantment buff and no War Magic: Lifestone Recall is a Travel line
         }
     }
@@ -125,7 +125,7 @@ public sealed class FighterProfileDatTests(DatSetFixture fixture) : IClassFixtur
                 {
                     ProfileRole.ManaTransfer => SpellType.Transfer,
                     ProfileRole.StaminaRestore or ProfileRole.HarmSelf or ProfileRole.HealSelf => SpellType.Boost,
-                    ProfileRole.Travel => SpellType.PortalRecall,
+                    ProfileRole.Travel => line.Name == FighterProfile.LifestoneTieLineName ? SpellType.PortalLink : SpellType.PortalRecall,
                     _ => SpellType.Enchantment,
                 };
                 Assert.True(dat.MetaSpellType == expectedType, $"{s.Name} ({s.Id}): type {dat.MetaSpellType}, line {expectedType}");

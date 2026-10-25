@@ -20,7 +20,7 @@
     account and character NAMES only (tools\lib\Play.psm1 checks them and refuses anything that looks like a password option).
 
     Agents and tests always pass -Offscreen -IsolateUserData -TimeoutSeconds N (no window on the owner's desktop, no audio,
-    user data inside the repository, a hard stop). An automated run uses the three test accounts only (M4 D31): -Offscreen makes -Account default to
+    user data inside the repository, a hard stop). An automated run uses the four test accounts only (M4 D31): -Offscreen makes -Account default to
     `test`, accepts `test-melee` and `test-archer`, and refuses any other; the play account is the owner's.
 
 .PARAMETER Account

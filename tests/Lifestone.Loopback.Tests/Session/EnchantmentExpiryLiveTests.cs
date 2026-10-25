@@ -161,7 +161,23 @@ public sealed class EnchantmentExpiryLiveTests(ITestOutputHelper output)
             return [.. found.Where(f => f.Info.Duration == shortest).OrderBy(f => f.Mana).ThenBy(f => f.Position).ThenBy(f => f.Order).Select(f => f.Info)];
         }
 
+        /// <summary>
+        /// One step on the session's game thread. The event subscriptions are released here when the leg ends, since a subscription's Dispose must run on the
+        /// game thread (docs/session.md §2); the test's own Dispose then has nothing left (M4 4.2 live round 2: the expiry was proved after 1,977 s and the
+        /// test still failed, disposing them from the test thread).
+        /// </summary>
         public ScenarioStatus Step(IGameSessionView session, double now)
+        {
+            var status = StepOnce(session, now);
+            if (status != ScenarioStatus.Running)
+            {
+                Dispose();
+            }
+
+            return status;
+        }
+
+        private ScenarioStatus StepOnce(IGameSessionView session, double now)
         {
             ArgumentNullException.ThrowIfNull(session);
             _session = session;

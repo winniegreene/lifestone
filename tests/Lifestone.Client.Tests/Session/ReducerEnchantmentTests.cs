@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Recording;
+using Lifestone.Client.Session.State;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Net.Dispatch;
 using Lifestone.Net.Messages;
@@ -393,6 +395,56 @@ public sealed class ReducerEnchantmentTests
         Send(h, (p, s) => AceM3Writers.MagicRemoveEnchantment(p, s, 666, 1));
 
         Assert.Equal("Vitae penalty has expired.", h.State.Chat[before].Text);
+    }
+
+    [Fact]
+    public void A_replay_holds_its_composed_expiry_line_until_the_next_frame_and_adds_it_when_the_recording_carries_none()
+    {
+        // M4 P5b F4, TODO(m4-replay-vitae-digest): a recording made before F4 has no ExpiryLine notice, so the replay adds the line it composed itself.
+        var h = WithNames();
+        h.Reducer.ReplaysRecording = true;
+        Send(h, (p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, Ench(666, 1, 0, 1, VitaeType, 0, 0.95f)));
+        var before = h.State.Chat.Count;
+
+        Send(h, (p, s) => AceM3Writers.MagicRemoveEnchantment(p, s, 666, 1));
+        Assert.Equal(before, h.State.Chat.Count);
+        h.Reducer.FlushExpiryLines();
+
+        Assert.Equal(before + 1, h.State.Chat.Count);
+        Assert.Equal((ChatKind.Notice, 7u, "Vitae penalty has expired."), (h.State.Chat[before].Kind, h.State.Chat[before].ChatType, h.State.Chat[before].Text));
+        h.Reducer.FlushExpiryLines();
+        Assert.Equal(before + 1, h.State.Chat.Count);
+    }
+
+    [Fact]
+    public void A_replay_gives_its_composed_expiry_line_up_for_the_recorded_one()
+    {
+        var h = WithNames();
+        h.Reducer.ReplaysRecording = true;
+        Send(h, (p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, Ench(666, 1, 0, 1, VitaeType, 0, 0.95f)));
+        var before = h.State.Chat.Count;
+
+        Send(h, (p, s) => AceM3Writers.MagicRemoveEnchantment(p, s, 666, 1));
+        h.Reducer.ApplyLocal(new RecordingNotice(SessionNotices.ExpiryLine, 666, "Vitae penalty has expired."));
+        h.Reducer.FlushExpiryLines();
+
+        Assert.Equal(before + 1, h.State.Chat.Count);
+        Assert.Equal((ChatKind.Notice, 7u, "Vitae penalty has expired."), (h.State.Chat[before].Kind, h.State.Chat[before].ChatType, h.State.Chat[before].Text));
+    }
+
+    [Fact]
+    public void A_replay_without_the_spell_table_composes_no_expiry_line_and_logs_no_todo()
+    {
+        var h = Buffed();
+        h.Reducer.ReplaysRecording = true;
+        Send(h, (p, s) => AceM3Writers.MagicUpdateEnchantment(p, s, Ench(666, 1, 0, 1, VitaeType, 0, 0.95f)));
+        var before = h.State.Chat.Count;
+
+        Send(h, (p, s) => AceM3Writers.MagicRemoveEnchantment(p, s, 666, 1));
+        h.Reducer.FlushExpiryLines();
+
+        Assert.Equal(before, h.State.Chat.Count);
+        Assert.DoesNotContain(h.Log.Entries, e => e.Message.Contains("m3-enchant-expiry-name", StringComparison.Ordinal));
     }
 
     [Fact]

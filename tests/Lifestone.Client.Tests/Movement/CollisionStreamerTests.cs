@@ -266,10 +266,10 @@ public sealed class CollisionStreamerTests(DatSetFixture fixture, ITestOutputHel
         Assert.Equal(AttachState.Pending, dungeon.StateOf(new LandblockCoord(0x87, 0x02)));
     }
 
-    /// <summary>Pumps and drains until every landblock in <paramref name="coords"/> has settled (at most 10 s).</summary>
+    /// <summary>Pumps and drains until every landblock in <paramref name="coords"/> has settled (at most 30 s: the helper's own bound, raised from 10 s after it timed out once under the full suite's load).</summary>
     private static void PumpUntilSettled(CollisionStreamer streamer, FrameBudgetScheduler budget, IEnumerable<LandblockCoord> coords)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(10);
+        var deadline = DateTime.UtcNow.AddSeconds(30);
         while (DateTime.UtcNow < deadline)
         {
             streamer.Pump(budget);
@@ -282,7 +282,7 @@ public sealed class CollisionStreamerTests(DatSetFixture fixture, ITestOutputHel
             Thread.Sleep(5);
         }
 
-        Assert.Fail("the collision did not settle within 10 s");
+        Assert.Fail("the collision did not settle within 30 s");
     }
 
     /// <summary>Settles the focus with <see cref="CollisionStreamer.PumpSynchronously"/> or through the frame budget.</summary>

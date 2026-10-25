@@ -10,6 +10,9 @@ using Lifestone.Tests.Shared.Net;
 using Lifestone.Net.Session;
 using Lifestone.Net.Types;
 using Lifestone.Tests.Shared;
+using Lifestone.Data.Dat;
+using Lifestone.Data.Magic;
+using Lifestone.Data.Tests;
 using Xunit.Abstractions;
 
 namespace Lifestone.Client.Tests.Session;
@@ -21,7 +24,7 @@ namespace Lifestone.Client.Tests.Session;
 /// stream, and drive a whole session's handles through <see cref="ReplayAcSession"/>. Real recordings in
 /// <c>cache/sessions/</c> are checked when present.
 /// </summary>
-public sealed class ReplayTests(ITestOutputHelper output)
+public sealed class ReplayTests(ITestOutputHelper output, DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     [Fact]
     public void Synthetic_login_replays_to_the_recorded_digest()
@@ -234,10 +237,14 @@ public sealed class ReplayTests(ITestOutputHelper output)
             output.WriteLine($"left out (ends before its header, not a recording): {Path.GetFileName(incomplete)}");
         }
 
+        // The SpellTable, when the dats are here: a recording made before M4 P5b F4 does not carry the "<spell> has expired." lines the live client
+        // composed from it (TODO(m4-replay-vitae-digest): the mage journey's vitae line), so its replay composes them from the same table.
+        var spells = DatSet.Exists() ? SpellTableData.Load(fixture.Dats).Spells : null;
+        Func<uint, SpellInfo?>? lookup = spells is null ? null : id => spells.GetValueOrDefault(id);
         foreach (var path in RealRecordings.Find())
         {
             var bytes = File.ReadAllBytes(path);
-            var first = new SessionReplayer().Replay(new MemoryStream(bytes));
+            var first = new SessionReplayer(spells: lookup).Replay(new MemoryStream(bytes));
             var name = Path.GetFileName(path);
             output.WriteLine($"{name}: {first.Frames} frames, end {first.End}, trailer digest matches {(first.DigestMatches is { } m ? m.ToString() : "n/a")}");
             Assert.True(first.Malformed == 0, $"{name}: net could not parse {first.Malformed} server message(s): {string.Join(", ", first.MalformedOpcodes.Select(o => "0x" + o.ToString("X4", CultureInfo.InvariantCulture)))}");
@@ -245,7 +252,8 @@ public sealed class ReplayTests(ITestOutputHelper output)
             if (first.End == RecordingEnd.Trailer)
             {
                 Assert.True(first.Trailer!.IsIntact, $"{name}: the trailer does not match the frames");
-                Assert.True(first.DigestMatches is null or true, $"{name}: the replayed state differs from the recorded digest");
+                Assert.True(first.DigestMatches is null or true, $"{name}: the replayed state differs from the recorded digest{(spells is null ? " (no dats: expiry lines of a recording made before M4 P5b F4 are not composed)" : string.Empty)}: {first.DigestDiagnosis()}");
+                Assert.True(first.PartDifferences is null or { Count: 0 }, $"{name}: the digest matches but parts differ: {first.DigestDiagnosis()}");
             }
 
             Assert.Equal(EventStreamHash(bytes, out _), EventStreamHash(bytes, out _));

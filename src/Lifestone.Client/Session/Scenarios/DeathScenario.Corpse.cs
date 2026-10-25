@@ -7,6 +7,7 @@ using Lifestone.Client.Session.Mage;
 using Lifestone.Client.World;
 using Lifestone.Data.World;
 using Lifestone.Net.Session;
+using Lifestone.Client.Session.Scenarios.Journey;
 
 namespace Lifestone.Client.Session.Scenarios;
 
@@ -140,10 +141,14 @@ public sealed partial class DeathScenario
                 CultureInfo.InvariantCulture,
                 $"corpse: going back for 0x{_tripCorpse:X8}: it died {age:0} s ago (ACE's rot floor {PlayerCorpseMinRotSeconds:0} s, Corpse.cs 103-118) in cell 0x{position.CellId:X8}; the health share is {health:0}% (the trip needs {_options.RecoverMinHealthPercent:0}%, aborts under {TripMinHealthPercent:0}%); the lifestone's protection is dispelled by this teleport as by every one (Player_Location.cs 702-703), so the arrival is unprotected: the trip runs after the fight when the death loop fights (the tuskers are dead), straight after the respawn when it does not; TODO(m4-death-trip-live): the {CorpseSettleSeconds:0.#} s settle, the {TripMinHealthPercent:0}% abort and the {TripSeconds:0} s limit are first-run values until the lead's live run"));
         _teleportMark = _selfTeleports;
-        _pending = session.Tools.Place(CorpseDestination(position), ActionSource.Host);
+        _pending = null;
+        _seam.Start(session, new TravelRequest(CorpseDestination(position), TravelPurpose.Corpse, _tripCorpse, CorpseTravelRangeMetres), clock); // M4 P5b: on foot over the room graph in a journey; today's place by default
         Enter("corpse-teleporting", clock);
         return true;
     }
+
+    /// <summary>M4 P5b: the object range the corpse trip's travel asks for (a run stops within it of the corpse; the place ignores it). TODO(m4-corpse-run-range): a first value until the lead's live journey.</summary>
+    public const double CorpseTravelRangeMetres = 2.0;
 
     private string? CorpsePrecondition(IGameSessionView session, double health)
     {
@@ -284,16 +289,16 @@ public sealed partial class DeathScenario
             return guarded;
         }
 
-        if (_pending is { Outcome: { } placed })
+        var travel = _seam.Step(session, clock);
+        if (travel == TravelStatus.Failed)
         {
-            _pending = null;
-            if (placed.Kind != ActionOutcomeKind.Confirmed)
-            {
-                return AbortTrip(session, clock, "place-refused", "the teleport to the corpse was not taken: " + Describe(placed));
-            }
+            // A place refused: the mage never left (nothing to place back from). A run or a recall that failed on the way: the trip is aborted and the way home goes through the seam as usual.
+            return _seam.Means == TravelMeans.Place
+                ? AbortTrip(session, clock, "place-refused", "the teleport to the corpse was not taken: " + _seam.Failure)
+                : AbortTrip(session, clock, "travel-failed", "the travel to the corpse failed: " + _seam.Failure);
         }
 
-        if (_pending is null && _selfTeleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present)
+        if (travel == TravelStatus.Arrived && (_seam.Authoritative || (_selfTeleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present)))
         {
             _tripArrivedAt = clock;
             _settleUntil = clock + CorpseSettleSeconds;
@@ -427,7 +432,7 @@ public sealed partial class DeathScenario
     {
         ResolveListing(session); // the table forgets the corpse's contents once the mage is away
         _teleportMark = _selfTeleports;
-        _pending = session.Tools.Place(_holtburg, ActionSource.Host);
+        _seam.Start(session, new TravelRequest(_holtburg, TravelPurpose.Home), clock); // M4 P5b: Lifestone Recall in a journey; today's place by default
         Enter("corpse-return", clock);
         return ScenarioStatus.Running;
     }
@@ -453,23 +458,20 @@ public sealed partial class DeathScenario
             return TripGuard(session, clock) ?? ScenarioStatus.Running; // a death on the way back is a death on the trip
         }
 
-        if (_pending is { Outcome: { } placed })
+        var travel = _seam.Step(session, clock);
+        if (travel == TravelStatus.Failed)
         {
-            _pending = null;
-            if (placed.Kind != ActionOutcomeKind.Confirmed)
-            {
-                return Fail(session, "corpse: the way back to Holtburg was refused: " + Describe(placed) + "; the mage is still at the corpse");
-            }
+            return Fail(session, "corpse: the way back to Holtburg was refused: " + _seam.Failure + "; the mage is still at the corpse");
         }
 
-        if (_pending is null && _selfTeleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present)
+        if (travel == TravelStatus.Arrived && (_seam.Authoritative || (_selfTeleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present)))
         {
             _settleUntil = clock + SettleSeconds;
             Enter("corpse-return-settle", clock);
             return ScenarioStatus.Running;
         }
 
-        return clock - _stageStart > TeleportSeconds
+        return _seam.Means == TravelMeans.Place && clock - _stageStart > TeleportSeconds
             ? Fail(session, string.Create(CultureInfo.InvariantCulture, $"corpse: the player did not arrive back at Holtburg and become present within {TeleportSeconds:0.#} s (teleports {_selfTeleports - _teleportMark}, travel {session.State.Self.Travel})"))
             : ScenarioStatus.Running;
     }

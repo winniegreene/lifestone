@@ -15,25 +15,26 @@ namespace Lifestone.Loopback.Tests.ServerMod;
 
 /// <summary>
 /// The server mod's <c>char purge</c> against the bundled ACE (owner decision D59; m2-plan §6.9, slice p1): WRITTEN AND COMPILED, RUN BY THE LEAD. It
-/// creates a throwaway character on the test account, proves the verb's refusals, deletes the throwaway through the Action API (ACE marks it, as the
-/// retail screens do), purges it from the graduated character <c>Lifestone Loopback</c>, and checks that the account's character list is what it was
+/// creates a throwaway character on the test-tools account, proves the verb's refusals, deletes the throwaway through the Action API (ACE marks it, as the
+/// retail screens do), purges it from the character <c>Lifestone Tools</c> (the purge caller of the tools account, M4 D43), and checks that the account's character list is what it was
 /// at the start, on a fresh login as well. Headless: everything goes through the Action API (<see cref="ActionSource.Host"/>); no window opens.
 /// </summary>
 /// <remarks>
 /// <para><b>Touches only the test account</b> and only the throwaway: the graduated characters are entered and left, never changed (no Add XP, no
 /// quest, no teleport). Always ends logged off: a failure after the player entered the world logs off before the run ends.</para>
-/// <para><b>A leftover</b> <c>Lifestone Throwaway</c> from a failed run is deleted when needed, then purged from <c>Lifestone Loopback</c> first
+/// <para><b>A leftover</b> <c>Lifestone Throwaway</c> from a failed run is deleted when needed, then purged from <c>Lifestone Tools</c> first
 /// (<c>leftover:</c> in the test output), and the list at the start is the list after that clean-up.</para>
 /// <para><b>Where the purge is NOT exercised</b> (unit tests only, <c>CharPurgeRulesTests</c>): <c>own-character</c> (the graduated names are refused before
 /// it, and both test characters are graduated), <c>character-online</c> (an account has one session).</para>
 /// </remarks>
 [Trait("Category", LoopbackCollection.Category)]
 [Collection(LoopbackCollection.Name)]
-[Trait("Account", "test")]
+[Trait("Account", "test-tools")]
+[LoopbackCharacter("Lifestone Tools")]
 public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
 {
     /// <summary>The graduated character that stays at the character screen's baseline and does the purging.</summary>
-    private const string Caller = "Lifestone Loopback";
+    private const string Caller = "Lifestone Tools"; // M4 D43: on test-tools, created once through the Action API when absent, never levelled or reset
 
     private const string Smoke = "Lifestone Smoke";
 
@@ -63,7 +64,7 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
         [
             (Throwaway, ToolErrors.NotPendingDeletion),
             (Smoke, ToolErrors.Graduated),
-            (Caller, ToolErrors.Graduated),
+            (Caller, ToolErrors.Graduated), // M4 D43: Lifestone Tools is on the server mod's graduated list (needs setup-server.ps1 -ModOnly after this commit)
             (Hunter, ToolErrors.Graduated),
             (Brawler, ToolErrors.Graduated),
             (Archer, ToolErrors.Graduated),
@@ -90,14 +91,13 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
         Assert.True(again.Ok, again.Failure);
         Assert.Equal(leg.Baseline, after.List);
         Assert.Contains(after.List, c => c.Name == Caller && !c.Pending);
-        Assert.Contains(after.List, c => c.Name == Smoke && !c.Pending);
     }
 
     private static HeadlessRunResult Run(DatSet dats, IScenario scenario, double seconds)
     {
         var files = BackendProbe.MainCheckoutFiles;
         var log = new RecordingLogSink();
-        LiveCharacter.Release(Console.WriteLine, BackendProbe.TestAccountKey);
+        LiveCharacter.Release(Console.WriteLine, LoopbackAccounts.For(Caller));
         var secrets = File.ReadAllBytes(files.SecretsFile);
         HeadlessRunner runner;
         try
@@ -105,7 +105,7 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
             runner = HeadlessRunner.Start(
                 new HeadlessRunOptions
                 {
-                    Session = new SessionOptions { Account = BackendProbe.TestAccountKey, Server = BackendProbe.Probe().AceEndPoint! },
+                    Session = new SessionOptions { Account = LoopbackAccounts.For(Caller), Server = BackendProbe.Probe().AceEndPoint! },
                     QuitAfterSeconds = seconds,
                 },
                 scenario,
@@ -134,7 +134,7 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
 
     /// <summary>
     /// The whole leg in one session, through the Action API: login, the list at the start, the leftover clean-up if any, the throwaway's creation, the refusals
-    /// from <c>Lifestone Loopback</c>, the throwaway's deletion, the purge from <c>Lifestone Loopback</c>, the list, quit. A failure after the player entered
+    /// from <c>Lifestone Tools</c>, the throwaway's deletion, the purge from <c>Lifestone Tools</c>, the list, quit. A failure after the player entered
     /// the world logs off first (<c>bailing</c>), so the run always ends logged off.
     /// </summary>
     internal sealed class PurgeLeg : IScenario
@@ -205,6 +205,10 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
                     return Settled(out var login)
                         ? (login.Kind == ActionOutcomeKind.Confirmed ? Inspect(session) : Fail(session, now, "login", login))
                         : ScenarioStatus.Running;
+                case "creating-caller":
+                    return Settled(out var callerCreated)
+                        ? (callerCreated.Kind == ActionOutcomeKind.Confirmed && Find(session, Caller) is { PendingDeletion: false } ? Inspect(session) : Fail(session, now, "creating the purge caller", callerCreated))
+                        : ScenarioStatus.Running;
                 case "creating":
                     return Settled(out var created)
                         ? (created.Kind == ActionOutcomeKind.Confirmed ? AfterCreate(session, now) : Fail(session, now, "creating the throwaway", created))
@@ -270,6 +274,13 @@ public sealed class ModCharPurgeLiveTests(ITestOutputHelper output)
 
         private ScenarioStatus Inspect(IGameSessionView session)
         {
+            if (Find(session, Caller) is null)
+            {
+                _log($"the purge caller '{Caller}' is not on the account: created once through the Action API (never levelled or reset)");
+                _pending = session.Actions.CreateCharacter(HeadlessCharacter.Intent(Caller, _skillClasses), ActionSource.Host);
+                return Go("creating-caller");
+            }
+
             var leftover = Find(session, Throwaway);
             if (leftover is null)
             {

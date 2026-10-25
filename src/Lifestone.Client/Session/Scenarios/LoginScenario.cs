@@ -26,7 +26,9 @@ namespace Lifestone.Client.Session.Scenarios;
 /// (owner decision D11).</item>
 /// <item><c>where</c>: <see cref="PlayerTools.WhereAmI"/>; the server's position of the player must agree with the
 /// client's (<see cref="GameState.Self"/>) within <see cref="PositionAgreement.ToleranceMetres"/>
-/// (<see cref="WhereMaxMetres"/>). Nothing has moved the player, so a disagreement is a defect of the read model.</item>
+/// (<see cref="WhereMaxMetres"/>). Nothing on the client has moved the player, so a disagreement is a defect of the read model, or ACE's own placement
+/// after the player's CreateObject (ACE Player_Networking.cs 224, then WorldObject.cs 209-220) moved a character saved inside a solid server object, which
+/// Lifestone's client does not collide with (<c>TODO(d25-server-object-host)</c>; M4 4.2 FS: 2.22 m out of Holtburg's lifestone).</item>
 /// <item><c>playing</c> (only with a <c>play</c> scenario, ST16): the player is in the world and the server agrees where it
 /// is; <c>play</c> is stepped each frame until it succeeds (then the scenario goes on) or fails (so does this one).</item>
 /// <item><c>logging-off</c>: <see cref="IActionApi.LogOff"/>, confirmed back at the character list.</item>

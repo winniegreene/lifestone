@@ -1,34 +1,53 @@
 <#
 .SYNOPSIS
-    The lead's live gate (M4 P4, D31): the backend from the main checkout, the loopback tests and the live smoke steps in two phases, the backend stopped in a finally.
+    The lead's live gate (M4 P4 D31, rebuilt for the journeys in P5b G2): the backend from the main checkout, the loopback tests and the journeys in two phases, the backend stopped in a finally.
 
 .DESCRIPTION
-    Slices never run this script (it starts the backend and logs in); the item's lead does. Replaces the cache\...\run-gate.ps1 each lead used to copy.
+    Slices never run this script (it starts the backend and logs in); the item's lead does. Replaces the cache\...
+un-gate.ps1 each lead used to copy.
 
-    Default (parallel) mode, by account, with the repeats removed:
+    Default (parallel) mode, by account (design cache\m4-p5-design.md 3.5):
 
-      PARALLEL phase   three lanes at once (at most three Godot runs), each lane one after the other inside:
-                         test        its loopback classes (Account=test, not the solo tests), then smoke login-buff, login-death (login-throwaway runs in the solo phase's three runs only, P4-R8; login-bsd is in the solo phase, rfix-c)
-                         test-melee  its loopback classes (Account=test-melee)
-                         test-archer its loopback classes (Account=test-archer), then smoke login-hunt-missile (kills=2, the review frames, the arrow frame among them)
+      PARALLEL phase   four lanes at once (at most three Godot runs: the fourth lane is headless, M4 P5b G0, D39), each lane one after the other inside; each journey lane starts with its
+                       re-create step (below, M4 D44, D45):
+                         test         recreate (BSD Mage), its short loopback classes (Account=test: LoopbackGate, LivePhaseA and B, Headless, FighterBuild, AcademyExit's quest facts, ModVerbs, ModXp), then smoke journey-mage
+                         test-melee   recreate (Holtburg Brawler), then smoke journey-melee (no loopback class is left on this account: they became the journey's stations)
+                         test-archer  recreate (Holtburg Archer), Shortcut's relog class (Account=test-archer), then smoke journey-archer
+                         test-tools   its loopback classes (Account=test-tools: Lifestone Throwaway's and the mod verbs'), headless: no Godot step and no re-create step
                        The lane smoke steps run with -ContendedFrames: frame-time fields are REPORTED, not judged. A frame-time failure that is the step's only failure, with another
-                       Godot run up, is "frames=contended", which smoke counts as a PASS (D42; smoke.ps1 Resolve-LiveFrames and the throwaway step's own rule).
+                       Godot run up, is "frames=contended", which smoke counts as a PASS (D42; smoke.ps1 Resolve-LiveFrames). The classes whose coverage moved into the journeys' stations were deleted (M4 P5b J6). New judges are REPORT-ONLY in their first gate: each journey row carries [report-only ...] with the done line's route_m, rungs, blocked, sightless,
+                       vitals_passes, run_s, the melee's granted and the keeper's fields. Judged from M4 4.2 J2 (smoke.ps1 Get-JourneyVerdict): teleports<=1, the mage's recalls>=2, recovery_places=0, the mage's and the archer's
+                       granted=0, and the window frames of the hunt, vendor and vendor-facts stations (over 75 ms fails, over 50 ms flags; reported, not judged, in the lanes' contended runs).
       SOLO phase       one at a time, nothing else running (smoke's -Backend require implies -SoloFrames and waits for other Godot runs):
                          frame judge       smoke -Only login-check,login, three runs
-                         melee hunt        smoke -Only login-hunt (test-melee, Holtburg Brawler) once, with its review frames, its frame fields judged
-                         den fight         smoke -Only login-bsd (rfix-c: the den fight's walk needs a quiet machine; in the parallel lane it failed "no progress toward goal 12 for 3 s")
-                         solo loopback     Category=Loopback ... Lane=solo: HoltburgLaps (with the jumps), AcademyExit (enter to walk), LivePhaseB's two walks
-                         throwaway frames  smoke -Only login-throwaway, three runs (its enter-to-walk and teleport frames)
+                         journeys          only the ones named by -JourneySolo <mage|melee|archer>: smoke -Only journey-<name> alone, its station frames judged (not contended)
+                         live phase B      Category=Loopback ... Lane=solo, LivePhaseBTests: the two raw-net walks (about 60 s)
+                         throwaway frames  smoke -Only login-throwaway, three runs (on test-tools: its enter-to-walk and teleport frames)
                          leak scan         smoke -Only stray-output (the secret scan over the repository and the gate's output)
+                       Gone from the old SOLO list (their judged fields come from the journeys' stations): the melee hunt, login-bsd, login-buff, login-death, login-hunt-missile and the solo movement loopback
+                       (the laps and the exit are judged solo three times inside login-check=all).
       The frame rule of both three-run groups (m4-plan.md section 5, m3-plan.md section 5 "Changed in M3 4.2"): over 75 ms fails, over 50 ms is flagged, two of three runs over 50 ms fail the
       gate. A run whose only failure is a frame window is one flagged run; a failure of any other kind fails the group at once.
 
-    -Serial: the old order exactly, for the comparison on one commit (P4-R10: with LIFESTONE_LOOPBACK_SESSION=per-test, every test logging in and out as before the shared session): the loopback suite (Category=Loopback&Tier!=Soak, the old filter, one process), the frame judge three runs, then the full smoke
-    (-Backend require -SoloFrames -FullScan -Parallel 2). -SkipOffline leaves the smoke steps that need no backend, and the test step, out of that last call (the build step stays: the Godot project must be
-    built); the parallel mode never runs them.
+    -Serial: the three journeys one after another HEADLESS (dotnet run --project src/Lifestone.Headless -- --scenario=journey --journey=<name>; each judged by smoke.ps1's Get-JourneyVerdict, the
+    same done-line rule as the Godot step), then the frame judge three runs. Each headless journey is preceded by its own step, recreate-<mage|melee|archer>. The same-commit comparison: with
+    -CompareTo <tag of a default-mode gate on the same commit> the gate log prints both done lines of each journey side by side (headless, then Godot) and whether the two verdicts agree. The old
+    serial loopback suite and the full smoke are gone (the journeys replaced them).
 
-    No repeats: the offline smoke steps are G-A's (slice-check -Smoke on the same commit); the full smoke's login-check and login are not run again after the frame judge (parallel mode has no full smoke);
-    one hunt of each weapon per gate; the loopback suite by area (-Loopback).
+    The re-create step (M4 D44, D45): BSD Mage (account test), Holtburg Brawler (test-melee) and Holtburg Archer (test-archer) are deleted and re-created at the start of every live gate, by their
+    idempotent builds, before their journeys; Holtburg Hunter is never re-created. The step is `dotnet run --disable-build-servers --no-build --project src/Lifestone.Headless -- --scenario=fighter-build
+    --account=<test-melee|test-archer> --fresh-character` (the mage: `--scenario=mage-build --fresh-character`), run in the worktree. The NEW copy purges its predecessor (the server mod's purge rule),
+    so no old copy is left behind. Judge (GateJudge.psm1 Get-RecreateVerdict): PASS = exit 0 and `headless done scenario=<fighter-build|mage-build> ok=1` and a line with `fresh=(recreated|created)`
+    and `purged=<n>`; the row names them and the level (`fresh=recreated purged=1 level=55`); a FAIL names why (no done line; ok=0 with the build's own ERROR line; a missing field; the exit code).
+    A journey step (the lane's smoke journey, journey-<name>-solo in SOLO, headless-journey-<name> in -Serial) is NOT run when its account's re-create failed in this gate: it gets one FAIL row
+    "not run: the re-create on <account> failed" (the lane's other steps still run). With -JourneySolo the re-create stays at the head of its PARALLEL lane and the journey moves to SOLO.
+
+    -JourneySolo <names>          moves those journeys from the PARALLEL phase into the SOLO phase (when a diff touches `fighter` or `mage`, so their station frames are judged, not contended).
+    -CompareTo <tag>              -Serial only: the gate folder (a tag under <worktree>\cache\gate and <main>\cache\gate) of a default-mode gate whose journey logs to compare with.
+    -KeepCharacters               no re-create step at all: the journeys run on the characters as they are (a rerun of one journey, or a gate that must not touch the characters). The plan and the gate log
+                                  say so in one line at the start.
+
+    No repeats: G-A is slice-check -Gate (build and tests, no Godot step, D46) and the offline smoke runs once per item at its end; parallel mode has no full smoke; one journey of each character per gate; the loopback suite by area (-Loopback).
 
     -Loopback full|core|<areas>   full: every non-Soak loopback class (a wave's last item and the milestone end). core (default): a fixed list (tools\lib\GateAreas.psd1 Core) plus the classes of the
                                   areas the diff touches (the changed files mapped like tools\lib\StepPaths.psd1 maps folders to steps; a change to a shared file runs everything and says so). An area
@@ -54,7 +73,9 @@ param(
     [switch] $Serial,
     [switch] $Soak,
     [switch] $Plan,
-    [switch] $SkipOffline,
+    [switch] $KeepCharacters,
+    [string[]] $JourneySolo = @(),
+    [string] $CompareTo = '',
     [string] $Base = 'master',
     [string[]] $ChangedPaths = @()
 )
@@ -67,6 +88,8 @@ $Worktree = [IO.Path]::GetFullPath($Worktree)
 $Loopback = @($Loopback | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($Loopback.Count -eq 0) { $Loopback = @('core') }
 $ChangedPaths = @($ChangedPaths | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$JourneySolo = @($JourneySolo | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Select-Object -Unique)
+foreach ($j in $JourneySolo) { if (@('mage', 'melee', 'archer') -notcontains $j) { throw "-JourneySolo '$j': use mage, melee or archer" } }
 $dry = [bool]($Plan -or $WhatIfPreference)
 if ($Tag -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,30}$') { throw "-Tag must be letters, digits, '_', '.' or '-': $Tag" }
 
@@ -121,7 +144,7 @@ function Get-LoopbackSelection {
             [void]$selected.Add($n)
         }
     }
-    if ($Mode -contains 'full') { return @{ Mode = 'full'; All = $true; Classes = $names; Notes = @('every non-Soak loopback class') } }
+    if ($Mode -contains 'full') { return @{ Mode = 'full'; All = $true; Classes = @($names); Notes = @('every non-Soak loopback class') } }
     $areaNames = @($Mode | Where-Object { $_ -ne 'core' })
     foreach ($a in $areaNames) { if (-not $Areas.Areas.ContainsKey($a)) { throw "unknown -Loopback value '$a'. Use full, core or areas: $(($Areas.Areas.Keys | Sort-Object) -join ', ')" } }
     if ($Mode -contains 'core') {
@@ -130,7 +153,7 @@ function Get-LoopbackSelection {
         $everything = @($Changed | Where-Object { $path = $_; @($Areas.Everything | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0 })
         if ($everything.Count -gt 0) {
             $notes.Add("a shared file changed ($(($everything | Select-Object -First 3) -join ', ')): every loopback class runs")
-            return @{ Mode = 'core'; All = $true; Classes = $names; Notes = @($notes) }
+            return @{ Mode = 'core'; All = $true; Classes = @($names); Notes = @($notes) }
         }
         foreach ($area in $Areas.Areas.Keys | Sort-Object) {
             $hit = @($Changed | Where-Object { $path = $_; @($Areas.Areas[$area].Paths | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0 })
@@ -148,127 +171,179 @@ function Get-LoopbackSelection {
 }
 
 function Get-LoopbackFilter {
-    <# The dotnet test filter for one lane: $Base plus the class clause when the selection is not everything. Returns $null when the selection has no class for the lane. #>
-    param([string] $Base, [hashtable] $Selection, [string[]] $LaneClasses)
-    if ($Selection.All) { return $Base }
-    $chosen = @($LaneClasses | Where-Object { $Selection.Classes -contains $_ })
+    <#
+      The dotnet test filter for one lane: $Base, then the retired classes and facts left out, plus the class clause when the selection is not everything (or $ClassClause is set: a solo step names its class).
+      $LaneClasses are the lane's classes without the retired ones; $null when the selection has no class for the lane (so a lane with nothing left plans no step). $LaneClause is the Lane trait term
+      (default Lane!=solo); $InLane names solo-trait classes the account lane runs anyway (GateAreas.psd1 InLane): the term becomes (Lane!=solo|FullyQualifiedName~.<class>.).
+    #>
+    param([string] $Base, [hashtable] $Selection, [string[]] $LaneClasses, [string[]] $Retired = @(), [string[]] $Facts = @(), [string[]] $InLane = @(), [string] $LaneClause = 'Lane!=solo', [switch] $ClassClause)
+    $chosen = @($LaneClasses | Where-Object { $_ -and ($Selection.All -or $Selection.Classes -contains $_) })   # a lane with no class passes $null: it has no step
     if ($chosen.Count -eq 0) { return $null }
-    return $Base + '&(' + (($chosen | ForEach-Object { "FullyQualifiedName~.$_." }) -join '|') + ')'
+    $filter = $Base
+    if ($LaneClause -eq 'Lane!=solo') {
+        $inHere = @($InLane | Where-Object { $chosen -contains $_ })
+        $filter += '&' + $(if ($inHere.Count -gt 0) { '(Lane!=solo|' + (($inHere | ForEach-Object { "FullyQualifiedName~.$_." }) -join '|') + ')' } else { 'Lane!=solo' })
+    }
+    elseif ($LaneClause) { $filter += '&' + $LaneClause }
+    foreach ($r in $Retired) { $filter += "&FullyQualifiedName!~.$r." }
+    foreach ($f in $Facts) { $filter += "&FullyQualifiedName!~$f" }
+    if (-not $Selection.All -or $ClassClause) { $filter += '&(' + (($chosen | ForEach-Object { "FullyQualifiedName~.$_." }) -join '|') + ')' }
+    return $filter
 }
 
 # ---------------------------------------------------------------------------------------------- the plan
 
-function Get-OfflineSteps {
-    <# The smoke steps that need no backend, read from tools\smoke.ps1's own lists, for -SkipOffline. #>
-    param([string] $Root)
-    $text = [IO.File]::ReadAllText((Join-Path $Root 'tools\smoke.ps1'))
-    $all = [regex]::Match($text, '\$allSteps = @\(([^)]*)\)', 'Singleline').Groups[1].Value
-    $backend = [regex]::Match($text, '\$backendSteps = @\(([^)]*)\)').Groups[1].Value
-    $q = { param($s) @([regex]::Matches($s, "'([a-z-]+)'") | ForEach-Object { $_.Groups[1].Value }) }
-    $backendList = & $q $backend
-    return @(& $q $all | Where-Object { $backendList -notcontains $_ -and $_ -ne 'stray-output' })
-}
-
 # P5a F-gate: the account whose character a step logs in ('none': it logs in nobody; '': unknown, so it waits on any killed step). A killed step leaves its character in ACE's world for the release wait.
 $script:ReleaseSeconds = 80   # ACE's session timeout (60 s) + the log off, plus 5 s (LoginRetryPolicy.DefaultCharacterInWorldWaitSeconds is 75)
+$script:JourneyAccounts = @{ mage = 'test'; melee = 'test-melee'; archer = 'test-archer' }
 function Get-GateStepAccount {
     param([string] $Lane, [string] $Name)
-    if ($Lane -in @('test', 'test-melee', 'test-archer')) { return $Lane }
-    if ($Name -eq 'melee-hunt') { return 'test-melee' }
-    if ($Name -eq 'login-bsd' -or $Name -like 'frame-judge-*' -or $Name -like 'throwaway-frames-*') { return 'test' }
+    if ($Lane -in @('test', 'test-melee', 'test-archer', 'test-tools')) { return $Lane }   # M4 fresh G1, D44: a lane's `recreate` step is its lane's account
+    if ($Name -match '^(headless-)?journey-(?<j>mage|melee|archer)(-solo)?$') { return $script:JourneyAccounts[$Matches['j']] }   # P5b G2: a journey logs in its own character's account
+    if ($Name -match '^recreate-(?<j>mage|melee|archer)$') { return $script:JourneyAccounts[$Matches['j']] }   # M4 fresh G1, D44: -Serial's re-create of that journey's character
+    if ($Name -like 'frame-judge-*' -or $Name -eq 'live-phase-b') { return 'test' }
+    if ($Name -like 'throwaway-frames-*') { return 'test-tools' }   # D39: Lifestone Throwaway lives on test-tools
     if ($Name -in @('build', 'leak-scan')) { return 'none' }
     return ''
 }
 
 function New-GateStep {
-    <# One plan step: Kind 'test' (dotnet test, judged by its totals) or 'smoke' (tools\smoke.ps1, judged by its rows). Group: steps of one three-run group share it. #>
-    param([string] $Phase, [string] $Lane, [string] $Name, [string] $Kind, [string[]] $Arguments, [string] $OutDir = '', [string] $Group = '', [int] $Run = 0, [string] $Exe = 'dotnet', [int] $TimeoutSeconds = 0, [hashtable] $Env = @{})
+    <#
+      One plan step: Kind 'test' (dotnet test, judged by its totals), 'smoke' (tools\smoke.ps1, judged by its rows), 'headless' (a headless journey, judged by Get-JourneyVerdict) or 'recreate' (a character's
+      delete and re-create, judged by Get-RecreateVerdict; M4 fresh G1, D44). Group: steps of one three-run group share it. Expected: the step's expected seconds (the plan's projection).
+      NeedsRecreate: a journey step names the account whose re-create step must have passed ('' = none planned, or -KeepCharacters): the step is not run when that re-create failed (Invoke-GateSteps).
+    #>
+    param([string] $Phase, [string] $Lane, [string] $Name, [string] $Kind, [string[]] $Arguments, [string] $OutDir = '', [string] $Group = '', [int] $Run = 0, [string] $Exe = 'dotnet', [int] $TimeoutSeconds = 0, [hashtable] $Env = @{}, [int] $Expected = 0, [string] $NeedsRecreate = '')
     if ($TimeoutSeconds -le 0) { throw "step $Lane $Name has no timeout: every gate step gets about twice its expected time (rfix-c)" }
-    return [pscustomobject]@{ Phase = $Phase; Env = $Env; Lane = $Lane; Name = $Name; Kind = $Kind; Exe = $Exe; Arguments = @($Arguments); OutDir = $OutDir; Group = $Group; Run = $Run; TimeoutSeconds = $TimeoutSeconds; Account = (Get-GateStepAccount $Lane $Name); ReleaseSeconds = $script:ReleaseSeconds }
+    return [pscustomobject]@{ Phase = $Phase; Env = $Env; Lane = $Lane; Name = $Name; Kind = $Kind; Exe = $Exe; Arguments = @($Arguments); OutDir = $OutDir; Group = $Group; Run = $Run; TimeoutSeconds = $TimeoutSeconds; Expected = $Expected; Account = (Get-GateStepAccount $Lane $Name); ReleaseSeconds = $script:ReleaseSeconds; NeedsRecreate = $NeedsRecreate }
 }
 
-# Each step's time limit is about twice its expected time (rfix-c, fault 2; never a flat 4 h). The expected times are the g2 run's, in seconds; the smoke legs' own limits (smoke.ps1: buff 900, bsd 1200,
-# death 2500, hunt 1500, throwaway 840, check 1100, login 480) stay inside them as the game's deadlines. A step over its limit is killed and is a FAIL naming the step and the limit.
+# Each step's time limit is about twice its expected time (rfix-c, fault 2; never a flat 4 h). A step over its limit is killed and is a FAIL naming the step and the limit. The journeys' numbers are the design's
+# (cache\m4-p5-design.md 3.5; P5b G2): estimates until the lead's first live gate, which tunes them. The smoke journeys' own deadlines (smoke.ps1) are the game's, inside or beside the gate's.
 $script:ExpectedSeconds = [ordered]@{
-    'build'             = 150    # 15 s warm; a cold restore is longer
-    'loopback:test'     = 1400   # g2: 1358 (full)
-    'loopback:test-melee' = 800  # g2: 512; p5a-r2: 459 with the Brawler buff failing at 18 s; +700 s buff leg (FighterBuffLiveTests.cs:20) +about 130 s of the working harm-heal, vendor and hunt legs = about 1,250 s
-    'loopback:test-archer' = 750 # g2: 192 with a failure; p5a-r2: 253 s done + Appraise about 60 s +700 s buff leg = about 1,015 s (the limit is twice this: 1,500 s)
-    'smoke:test'        = 450    # login-buff 64 + login-death 374 (g2)
-    'smoke:test-archer' = 150    # login-hunt-missile 83
-    'frame-judge'       = 170    # login-check 138 + login 23
-    'melee-hunt'        = 140    # g2: 134
-    'login-bsd'         = 100    # g2: 96, now solo
-    'movement-loopback' = 420    # g2: 415
-    'throwaway-frames'  = 60     # g2: 41 to 54
-    'leak-scan'         = 60
-    'serial-loopback'   = 3600   # estimate: per-test sessions, every class in one process (no run yet; the lead adjusts after the first -Serial gate)
-    'serial-full-smoke' = 3600   # estimate: the full smoke -Parallel 2 (no run yet)
-    'soak'              = 2700   # the real 1,800 s buff expiry (M3 D26) and the soak run
+    'build'                = 150    # 15 s warm; a cold restore is longer
+    'loopback:test'        = 450    # FC-b3: round 1 timed out at 300 s; the lane runs LivePhaseB and HoltburgLaps too (about 7 min)
+    'loopback:test-melee'  = 60     # unused while the account has no loopback class; kept so a class added later is not planned without a limit
+    'loopback:test-archer' = 70     # Shortcut's relog class
+    'loopback:test-tools'  = 200    # FC-b3: round 1 measured 167 s (the throwaway's and the mod verbs' classes)
+    'journey-mage'         = 600    # FC-b3: round 1 measured 558 s Godot (lane 858 s less its 300 s loopback); the headless -Serial run uses the same figure
+    'journey-melee'        = 450    # FC-b3: round 1 measured 206 s, ended early at vendor-facts; the serial run averaged 540 s a journey
+    'journey-archer'       = 400    # FC-b3: round 1 measured 357 s (lane, with its 70 s class)
+    'recreate:fighter'     = 90     # M4 fresh G1 (D44): P5a measured about 65 s for a fighter's re-create and build; an estimate until the lead's first fresh gate
+    'recreate:mage'        = 120    # M4 fresh G1 (D44): the mage's build trains and learns the most; an estimate until the lead's first fresh gate
+    'frame-judge'          = 170    # login-check 138 + login 23 (g2)
+    'live-phase-b'         = 60     # the two raw-net walks
+    'throwaway-frames'     = 60     # g2: 41 to 54
+    'leak-scan'            = 60
+    'soak'                 = 2700   # the real 1,800 s buff expiry (M3 D26) and the soak run
+}
+$script:JourneyNames = @('mage', 'melee', 'archer')
+# smoke.ps1's own step timeouts per journey: the gate's limit for a journey step must exceed them (plus the lane's loopback time and a margin), or the gate kills a journey its own deadline would still allow.
+$script:SmokeJourneyTimeouts = @{ mage = 2200; melee = 1900; archer = 2000 }
+function Get-JourneyLimit([string] $Journey, [int] $LoopbackExpected) {
+    # M4 fresh G1: unchanged. Every step's limit is its own (Invoke-GateSteps waits per step), so the lane's earlier steps never spend a journey's time; the loopback seconds added here are a cushion
+    # for the lane's load, not a share of its clock, and the re-create (about 90 to 120 s, its own limit) needs no cushion of its own.
+    return [math]::Max(2 * $script:ExpectedSeconds["journey-$Journey"], $script:SmokeJourneyTimeouts[$Journey] + 300 + $LoopbackExpected)
+}
+
+function New-RecreateStep {
+    <# M4 fresh G1 (D44): the re-create step of one journey's character. The command line is the fixed contract with the headless slice (cache\m4\fresh\facts.md): the mage's build on the default account, the
+       fighter build on the Brawler's or the Archer's, both with --fresh-character (the character is deleted through the retail delete and re-created from the template; the new copy purges its predecessor, D45). #>
+    param([string] $Phase, [string] $Lane, [string] $Name, [string] $Journey)
+    $account = $script:JourneyAccounts[$Journey]
+    $fighter = $Journey -ne 'mage'
+    $scenario = if ($fighter) { @('--scenario=fighter-build', "--account=$account") } else { @('--scenario=mage-build') }
+    $key = if ($fighter) { 'recreate:fighter' } else { 'recreate:mage' }
+    return New-GateStep $Phase $Lane $Name 'recreate' (@('run', '--disable-build-servers', '--no-build', '--project', 'src/Lifestone.Headless', '--') + $scenario + @('--fresh-character')) '' '' 0 'dotnet' (2 * $script:ExpectedSeconds[$key]) @{} $script:ExpectedSeconds[$key]
 }
 
 function Get-GatePlan {
-    param([string] $Root, [string] $Tag, [string[]] $Mode, [string[]] $Changed, [bool] $Serial, [bool] $Soak, [bool] $SkipOffline, [string] $LogDir)
+    param([string] $Root, [string] $Tag, [string[]] $Mode, [string[]] $Changed, [bool] $Serial, [bool] $Soak, [string[]] $Solo, [string] $LogDir, [bool] $Keep = $false)
     $areas = Import-PowerShellDataFile (Join-Path $Root 'tools\lib\GateAreas.psd1')
     $classes = Get-LoopbackClasses $Root
     $selection = Get-LoopbackSelection -Mode $Mode -Classes $classes -Changed $Changed -Areas $areas
+    $facts = @($areas.RetiredFacts)
+    $inLane = @($areas.InLane)
     $test = 'tests\Lifestone.Loopback.Tests'
     $out = Join-Path $Root "cache\gate\$Tag"
     $steps = [System.Collections.Generic.List[object]]::new()
     $base = 'Category=Loopback&Tier!=Soak'
-    $laneClasses = { param($account, $solo) @($classes | Where-Object { $_.Account -eq $account -and -not $_.Soak -and ($solo -or -not $_.Solo) } | ForEach-Object { $_.Name }) }
+    $laneClasses = { param($account) @($classes | Where-Object { $_.Account -eq $account -and -not $_.Soak -and (-not $_.Solo -or $inLane -contains $_.Name) } | ForEach-Object { $_.Name }) }
     $testArgs = { param($filter) @('test', $test, '--disable-build-servers', '--no-build', '--filter', $filter, '--logger', 'console;verbosity=detailed') }
     $smokeArgs = { param($only, $dir, $extra) @('-NoProfile', '-File', (Join-Path $Root 'tools\smoke.ps1'), '-Only', $only, '-Backend', 'require', '-NoBuild', '-OutDir', $dir, '-ResultsJson', (Join-Path $dir 'rows.json'), '-NoScan') + $extra }
     $pwsh = 'pwsh'
-    $perTest = @{ LIFESTONE_LOOPBACK_SESSION = 'per-test' }   # -Serial is the old order: every test logs in and out on its own (P4-R10)
+    $expected = $script:ExpectedSeconds
+    $steps.Add((New-GateStep 'SETUP' 'setup' 'build' 'build' @('build', (Join-Path $Root 'Lifestone.slnx'), '--disable-build-servers', '-nologo') '' '' 0 'dotnet' (2 * $expected['build']) @{} $expected['build']))
 
     if ($Serial) {
-        $filter = Get-LoopbackFilter $base $selection @($classes | Where-Object { -not $_.Soak } | ForEach-Object { $_.Name })
-        if ($filter) { $steps.Add((New-GateStep 'SERIAL' 'serial' 'loopback' 'test' @('test', $test, '--disable-build-servers', '--filter', $filter, '--logger', 'console;verbosity=detailed') '' '' 0 'dotnet' (2 * $script:ExpectedSeconds['serial-loopback']) $perTest)) }
+        # P5b G2: the three journeys one after another, headless (judged by Get-JourneyVerdict, as the Godot step is), then the frame judge; -CompareTo prints both verdicts per journey side by side.
+        # M4 fresh G1 (D44): each journey's character is re-created just before its journey (-KeepCharacters: not at all); the journey is not run when that re-create failed.
+        foreach ($name in $script:JourneyNames) {
+            $needs = ''
+            if (-not $Keep) { $steps.Add((New-RecreateStep 'SERIAL' 'serial' "recreate-$name" $name)); $needs = $script:JourneyAccounts[$name] }
+            $steps.Add((New-GateStep 'SERIAL' 'serial' "headless-journey-$name" 'headless' @('run', '--disable-build-servers', '--no-build', '--project', 'src/Lifestone.Headless', '--', '--scenario=journey', "--journey=$name") '' '' 0 'dotnet' (2 * $expected["journey-$name"]) @{} $expected["journey-$name"] $needs))
+        }
         foreach ($i in 1..3) {
             $dir = Join-Path $out "serial-frames-$i"
-            $steps.Add((New-GateStep 'SERIAL' 'serial' "frame-judge-$i" 'smoke' @('-NoProfile', '-File', (Join-Path $Root 'tools\smoke.ps1'), '-Only', 'login-check,login', '-Backend', 'require', '-OutDir', $dir, '-ResultsJson', (Join-Path $dir 'rows.json'), '-NoScan') $dir 'frame-judge' $i $pwsh (2 * $script:ExpectedSeconds['frame-judge']) $perTest))
+            $steps.Add((New-GateStep 'SERIAL' 'serial' "frame-judge-$i" 'smoke' (& $smokeArgs 'login-check,login' $dir @()) $dir 'frame-judge' $i $pwsh (2 * $expected['frame-judge']) @{} $expected['frame-judge']))
         }
-        $dir = Join-Path $out 'serial-smoke'
-        $skip = if ($SkipOffline) { @('-Skip', ((Get-OfflineSteps $Root | Where-Object { $_ -ne 'build' }) -join ',')) } else { @() }
-        $steps.Add((New-GateStep 'SERIAL' 'serial' 'full-smoke' 'smoke' (@('-NoProfile', '-File', (Join-Path $Root 'tools\smoke.ps1'), '-Backend', 'require', '-SoloFrames', '-FullScan', '-ScanDir', "$out,$LogDir", '-Parallel', '2', '-OutDir', $dir, '-ResultsJson', (Join-Path $dir 'rows.json')) + $skip) $dir '' 0 $pwsh (2 * $script:ExpectedSeconds['serial-full-smoke']) $perTest))
     }
     else {
-        $steps.Add((New-GateStep 'SETUP' 'setup' 'build' 'build' @('build', (Join-Path $Root 'Lifestone.slnx'), '--disable-build-servers', '-nologo') '' '' 0 'dotnet' (2 * $script:ExpectedSeconds['build'])))
-        # login-bsd is in the SOLO phase (rfix-c, fault 5): the den fight's walk needs precision a loaded machine cannot give (g2: no progress toward goal 12 for 3 s in the parallel lane).
-        $lanes = [ordered]@{ 'test' = @('login-buff', 'login-death'); 'test-melee' = @(); 'test-archer' = @('login-hunt-missile') }
+        # The lanes in account order; a smoke slot per Godot lane (the headless lane has none). A journey named by -JourneySolo leaves its lane for the SOLO phase.
+        # M4 fresh G1 (D44): each journey lane starts with its character's re-create (-KeepCharacters: none), also when its journey moved to SOLO; test-tools has none.
+        $lanes = [ordered]@{ 'test' = 'mage'; 'test-melee' = 'melee'; 'test-archer' = 'archer'; 'test-tools' = '' }
         $slot = 0
         foreach ($account in $lanes.Keys) {
-            $slot++
-            $filter = Get-LoopbackFilter "$base&Account=$account&Lane!=solo" $selection (& $laneClasses $account $false)
-            if ($filter) { $steps.Add((New-GateStep 'PARALLEL' $account 'loopback' 'test' (& $testArgs $filter) '' '' 0 'dotnet' (2 * $script:ExpectedSeconds["loopback:$account"]))) }
-            if ($lanes[$account].Count -gt 0) {
-                $dir = Join-Path $out "smoke-$account"
-                $steps.Add((New-GateStep 'PARALLEL' $account 'smoke' 'smoke' (& $smokeArgs ($lanes[$account] -join ',') $dir @('-ContendedFrames', '-UserDataSlot', "g$slot")) $dir '' 0 $pwsh (2 * $script:ExpectedSeconds["smoke:$account"])))
+            $journey = $lanes[$account]
+            $needs = ''
+            if ($journey -and -not $Keep) { $steps.Add((New-RecreateStep 'PARALLEL' $account 'recreate' $journey)); $needs = $account }
+            $filter = Get-LoopbackFilter "$base&Account=$account" $selection (& $laneClasses $account) @() $facts $inLane
+            if ($filter) { $steps.Add((New-GateStep 'PARALLEL' $account 'loopback' 'test' (& $testArgs $filter) '' '' 0 'dotnet' (2 * $expected["loopback:$account"]) @{} $expected["loopback:$account"])) }
+            if ($journey -and $Solo -notcontains $journey) {
+                $slot++
+                $dir = Join-Path $out "journey-$journey"
+                $steps.Add((New-GateStep 'PARALLEL' $account 'smoke' 'smoke' (& $smokeArgs "journey-$journey" $dir @('-ContendedFrames', '-UserDataSlot', "g$slot")) $dir '' 0 $pwsh (Get-JourneyLimit $journey $(if ($filter) { $expected["loopback:$account"] } else { 0 })) @{} $expected["journey-$journey"] $needs))
             }
         }
         foreach ($i in 1..3) {
             $dir = Join-Path $out "frame-judge-$i"
-            $steps.Add((New-GateStep 'SOLO' 'solo' "frame-judge-$i" 'smoke' (& $smokeArgs 'login-check,login' $dir @()) $dir 'frame-judge' $i $pwsh (2 * $script:ExpectedSeconds['frame-judge'])))
+            $steps.Add((New-GateStep 'SOLO' 'solo' "frame-judge-$i" 'smoke' (& $smokeArgs 'login-check,login' $dir @()) $dir 'frame-judge' $i $pwsh (2 * $expected['frame-judge']) @{} $expected['frame-judge']))
         }
-        $dir = Join-Path $out 'melee-hunt'
-        $steps.Add((New-GateStep 'SOLO' 'solo' 'melee-hunt' 'smoke' (& $smokeArgs 'login-hunt' $dir @()) $dir '' 0 $pwsh (2 * $script:ExpectedSeconds['melee-hunt'])))
-        $dir = Join-Path $out 'login-bsd'
-        $steps.Add((New-GateStep 'SOLO' 'solo' 'login-bsd' 'smoke' (& $smokeArgs 'login-bsd' $dir @()) $dir '' 0 $pwsh (2 * $script:ExpectedSeconds['login-bsd'])))
-        $soloNames = @($classes | Where-Object { $_.Solo -or $_.Name -eq 'LivePhaseBTests' } | ForEach-Object { $_.Name })
-        $filter = Get-LoopbackFilter "$base&Lane=solo" $selection $soloNames
-        if ($filter) { $steps.Add((New-GateStep 'SOLO' 'solo' 'movement-loopback' 'test' (& $testArgs $filter) '' '' 0 'dotnet' (2 * $script:ExpectedSeconds['movement-loopback']))) }
+        foreach ($journey in $script:JourneyNames) {
+            if ($Solo -notcontains $journey) { continue }
+            $dir = Join-Path $out "journey-$journey-solo"
+            $steps.Add((New-GateStep 'SOLO' 'solo' "journey-$journey-solo" 'smoke' (& $smokeArgs "journey-$journey" $dir @()) $dir '' 0 $pwsh (Get-JourneyLimit $journey 0) @{} $expected["journey-$journey"] $(if ($Keep) { '' } else { $script:JourneyAccounts[$journey] })))
+        }
+        $filter = Get-LoopbackFilter "$base&Lane=solo" $selection @('LivePhaseBTests') @() @() @() '' -ClassClause   # LivePhaseB's two raw-net walks (Lane=solo on the methods)
+        if ($filter) { $steps.Add((New-GateStep 'SOLO' 'solo' 'live-phase-b' 'test' (& $testArgs $filter) '' '' 0 'dotnet' (2 * $expected['live-phase-b']) @{} $expected['live-phase-b'])) }
         foreach ($i in 1..3) {
             $dir = Join-Path $out "throwaway-$i"
-            $steps.Add((New-GateStep 'SOLO' 'solo' "throwaway-frames-$i" 'smoke' (& $smokeArgs 'login-throwaway' $dir @()) $dir 'throwaway-frames' $i $pwsh (2 * $script:ExpectedSeconds['throwaway-frames'])))
+            $steps.Add((New-GateStep 'SOLO' 'solo' "throwaway-frames-$i" 'smoke' (& $smokeArgs 'login-throwaway' $dir @()) $dir 'throwaway-frames' $i $pwsh (2 * $expected['throwaway-frames']) @{} $expected['throwaway-frames']))
         }
-        $dir = Join-Path $out 'leak-scan'
-        $steps.Add((New-GateStep 'SOLO' 'solo' 'leak-scan' 'smoke' @('-NoProfile', '-File', (Join-Path $Root 'tools\smoke.ps1'), '-Only', 'stray-output', '-Backend', 'require', '-NoBuild', '-FullScan', '-ScanDir', "$out,$LogDir", '-OutDir', $dir, '-ResultsJson', (Join-Path $dir 'rows.json')) $dir '' 0 $pwsh (2 * $script:ExpectedSeconds['leak-scan'])))   # the whole gate: the sibling smoke folders and the dotnet test logs (P4-R4)
     }
+    # The leak scan closes both modes (P5b G2: -Serial lost its full smoke, which used to carry it).
+    $leakPhase = if ($Serial) { 'SERIAL' } else { 'SOLO' }; $leakLane = if ($Serial) { 'serial' } else { 'solo' }
+    $dir = Join-Path $out 'leak-scan'
+    $steps.Add((New-GateStep $leakPhase $leakLane 'leak-scan' 'smoke' @('-NoProfile', '-File', (Join-Path $Root 'tools\smoke.ps1'), '-Only', 'stray-output', '-Backend', 'require', '-NoBuild', '-FullScan', '-ScanDir', "$out,$LogDir", '-OutDir', $dir, '-ResultsJson', (Join-Path $dir 'rows.json')) $dir '' 0 $pwsh (2 * $expected['leak-scan']) @{} $expected['leak-scan']))   # the whole gate: the sibling smoke folders and the dotnet test logs (P4-R4)
     if ($Soak) {
-        $steps.Add((New-GateStep 'SOAK' 'soak' 'soak' 'test' @('test', $test, '--disable-build-servers', '--filter', 'Category=Loopback&Tier=Soak', '--logger', 'console;verbosity=detailed') '' '' 0 'dotnet' (2 * $script:ExpectedSeconds['soak'])))
+        $steps.Add((New-GateStep 'SOAK' 'soak' 'soak' 'test' @('test', $test, '--disable-build-servers', '--filter', 'Category=Loopback&Tier=Soak', '--logger', 'console;verbosity=detailed') '' '' 0 'dotnet' (2 * $expected['soak']) @{} $expected['soak']))
     }
     return @{ Steps = @($steps); Selection = $selection; Out = $out; Classes = $classes }
+}
+
+function Get-GateProjection {
+    <# The plan's time projection from the steps' expected seconds: PARALLEL = the slowest lane, SOLO and SERIAL = the sum; the SETUP build and a Soak run are not in the headline total. Returns @{ Lanes; Parallel; Solo; Serial; Total; Bound }. #>
+    param([object[]] $Steps)
+    $lanes = [ordered]@{}
+    foreach ($s in @($Steps | Where-Object { $_.Phase -eq 'PARALLEL' })) {
+        $so = if ($lanes.Contains($s.Lane)) { [int]$lanes[$s.Lane] } else { 0 }
+        $lanes[$s.Lane] = $so + [int]$s.Expected
+    }
+    $parallel = 0; $bound = ''
+    foreach ($k in $lanes.Keys) { if ($lanes[$k] -gt $parallel) { $parallel = $lanes[$k]; $bound = $k } }
+    $solo = 0; $serial = 0
+    foreach ($s in @($Steps)) { if ($s.Phase -eq 'SOLO') { $solo += [int]$s.Expected } elseif ($s.Phase -eq 'SERIAL') { $serial += [int]$s.Expected } }
+    return @{ Lanes = $lanes; Parallel = $parallel; Solo = $solo; Serial = $serial; Total = $parallel + $solo + $serial; Bound = $bound }
 }
 
 function Format-Command {
@@ -301,22 +376,32 @@ $commonDir = (& git -C $Worktree rev-parse --path-format=absolute --git-common-d
 $main = Split-Path -Parent $commonDir
 if (-not $LogDir) { $LogDir = Join-Path $main "cache\gate\$Tag" }
 $LogDir = [IO.Path]::GetFullPath($LogDir)
+if ($Serial -and $JourneySolo.Count -gt 0) { throw '-JourneySolo applies to the default (parallel) gate: -Serial runs every journey headless, one after another' }
+if ($CompareTo -and -not $Serial) { throw '-CompareTo applies to -Serial: it names the default-mode gate whose Godot journey verdicts the headless ones are compared with' }
+if ($CompareTo -and $CompareTo -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,30}$') { throw "-CompareTo must be a gate tag (letters, digits, '_', '.' or '-'): $CompareTo" }
 $gate = Get-GatePlan -Root $Worktree -Tag $Tag -Mode $Loopback -Changed $(if ($Loopback -contains 'core') { if ($ChangedPaths.Count -gt 0) { $ChangedPaths } else { Get-ChangedFiles $Worktree $Base } } else { @() }) `
-    -Serial ([bool]$Serial) -Soak ([bool]$Soak) -SkipOffline ([bool]$SkipOffline) -LogDir $LogDir
+    -Serial ([bool]$Serial) -Soak ([bool]$Soak) -Solo @($JourneySolo) -LogDir $LogDir -Keep ([bool]$KeepCharacters)
 $steps = @($gate.Steps)
+$keepLine = '-KeepCharacters: no re-create step; the journeys run on the characters as they are'   # M4 fresh G1 (D45): said once at the start, in the plan and in the gate log
 
 if ($dry) {
     $phases = @($steps | ForEach-Object { $_.Phase } | Select-Object -Unique)
-    Write-Output "[gate-plan] mode=$(if ($Serial) { 'serial' } else { 'parallel' }) loopback=$($gate.Selection.Mode) classes=$(if ($gate.Selection.All) { 'all' } else { $gate.Selection.Classes -join ',' }) soak=$([bool]$Soak) worktree=<worktree> tag=$Tag session=$(if ($Serial) { 'per-test (LIFESTONE_LOOPBACK_SESSION, the old order)' } else { 'shared' })"
+    Write-Output "[gate-plan] mode=$(if ($Serial) { 'serial' } else { 'parallel' }) loopback=$($gate.Selection.Mode) classes=$(if ($gate.Selection.All) { 'all' } else { $gate.Selection.Classes -join ',' }) soak=$([bool]$Soak) worktree=<worktree> tag=$Tag session=$(if ($Serial) { 'n/a (headless journeys, no loopback class)' } else { 'shared' }) journeys=$(if ($Serial) { 'headless, one after another' } else { 'parallel in their lanes' + $(if ($JourneySolo.Count -gt 0) { '; solo: ' + ($JourneySolo -join ',') } else { '' }) })"
+    if ($KeepCharacters) { Write-Output "[gate-plan] $keepLine" }
+    else { Write-Output "[gate-plan] re-create (M4 D44, D45): $(if ($Serial) { 'each journey is preceded by recreate-<name>' } else { 'each journey lane starts with recreate' }) = dotnet run --project src/Lifestone.Headless -- --scenario=<mage-build|fighter-build> [--account=<test-melee|test-archer>] --fresh-character (the character is deleted and re-created by its idempotent build; the new copy purges its predecessor); a journey whose re-create failed is not run (one FAIL row); test-tools has none; -KeepCharacters skips them" }
     foreach ($n in $gate.Selection.Notes) { Write-Output "[gate-plan] loopback: $n" }
-    if (-not $Serial) { Write-Output '[gate-plan] login-bsd runs in the SOLO phase, after the melee hunt (the den fight walks a route that needs a quiet machine; D31: walking precision is solo)' }
+    if (-not $Serial) {
+        Write-Output '[gate-plan] journeys: mage on lane test, melee on lane test-melee, archer on lane test-archer (smoke journey-<name>, -ContendedFrames in the lanes); -JourneySolo <name> moves one into the SOLO phase (judged station frames)'
+        foreach ($a in @('test', 'test-melee', 'test-archer', 'test-tools')) { if (@($steps | Where-Object { $_.Phase -eq 'PARALLEL' -and $_.Lane -eq $a -and $_.Name -eq 'loopback' }).Count -eq 0) { Write-Output "[gate-plan] lane ${a}: no loopback class (its classes are the journey's stations, or not selected by -Loopback)" } }
+    }
+    else { Write-Output "[gate-plan] serial: the three journeys headless (judged by smoke.ps1 Get-JourneyVerdict; each after its re-create unless -KeepCharacters), then the frame judge; $(if ($CompareTo) { "compare with the Godot verdicts of gate tag $CompareTo" } else { 'no -CompareTo: the Godot verdicts are not printed beside them' })" }
     Write-Output '[gate-plan] timeouts: every step about twice its expected time, named per step below; a step over its limit is killed and is a FAIL naming the step and the limit'
     Write-Output "[gate-plan] release: after a step is killed by its timeout the next step on the same account waits up to $($script:ReleaseSeconds) s for ACE to release the character (else it is refused with CharacterError 0x0D)"
     Write-Output '[gate-plan] backend: server\start-server.ps1 from the main checkout before the first step; server\stop-server.ps1 in a finally (not run by -Plan)'
     foreach ($phase in $phases) {
         $inPhase = @($steps | Where-Object { $_.Phase -eq $phase })
         $lanes = @($inPhase | ForEach-Object { $_.Lane } | Select-Object -Unique)
-        $how = switch ($phase) { 'PARALLEL' { "$($lanes.Count) lanes at once (at most three Godot), each lane in order" } 'SOLO' { 'one at a time, nothing else running' } 'SERIAL' { 'the old order, one at a time' } 'SETUP' { 'once, before the lanes' } 'SOAK' { 'once, alone, at the end' } default { '' } }
+        $how = switch ($phase) { 'PARALLEL' { "$($lanes.Count) lanes at once (at most three Godot), each lane in order" } 'SOLO' { 'one at a time, nothing else running' } 'SERIAL' { 'each journey headless after its re-create, one after another, then the frame judge' } 'SETUP' { 'once, before the lanes' } 'SOAK' { 'once, alone, at the end' } default { '' } }
         Write-Output "[gate-plan] phase $phase ($how)"
         $n = 0
         foreach ($s in $inPhase) {
@@ -325,6 +410,8 @@ if ($dry) {
             Write-Output ("[gate-plan] {0} lane={1} step={2} {3}: {4} (timeout {5} s)" -f $phase, $s.Lane, $n, $s.Name, $cmd, $s.TimeoutSeconds)
         }
     }
+    $proj = Get-GateProjection $steps
+    Write-Output ("[gate-plan] projected (expected seconds, the SETUP build and a Soak run not counted): " + $(if ($Serial) { "serial=$($proj.Serial) s" } else { 'parallel=' + $proj.Parallel + ' s (lane ' + $proj.Bound + ' bounds it; ' + (($proj.Lanes.Keys | ForEach-Object { "$_=$($proj.Lanes[$_])" }) -join ' ') + ') solo=' + $proj.Solo + ' s' }) + " total=$($proj.Total) s about $([math]::Round($proj.Total / 60)) min")
     Write-Output "[gate-plan] done steps=$($steps.Count) (nothing was run)"
     exit 0
 }
@@ -340,6 +427,7 @@ $env:PATH = "$($env:DOTNET_ROOT);$env:PATH"
 $env:LIFESTONE_DOTNET_ROOT = $env:DOTNET_ROOT
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Get-ChildItem -LiteralPath $LogDir -Filter 'killed-*.stamp' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue   # an earlier run's kills do not hold this run
+Get-ChildItem -LiteralPath $LogDir -Filter 'recreate-failed-*.stamp' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue   # nor an earlier run's failed re-creates (M4 fresh G1)
 $gateLog = Join-Path $LogDir 'gate.log'
 
 function Write-Gate([string] $Line) {
@@ -350,7 +438,9 @@ function Write-Gate([string] $Line) {
 $all = [System.Collections.Generic.List[object]]::new()
 $phaseSeconds = [ordered]@{}
 $total = [Diagnostics.Stopwatch]::StartNew()
-Write-Gate "[gate] start tag=$Tag mode=$(if ($Serial) { 'serial' } else { 'parallel' }) loopback=$($gate.Selection.Mode) logs=$LogDir"
+$headCommit = (& git -C $Worktree rev-parse --short=10 HEAD 2>$null)
+Write-Gate "[gate] start tag=$Tag commit=$headCommit mode=$(if ($Serial) { 'serial' } else { 'parallel' }) loopback=$($gate.Selection.Mode) logs=$LogDir"
+if ($KeepCharacters) { Write-Gate "[gate] $keepLine" }
 try {
     Set-Location $main
     $startLog = Join-Path $LogDir 'start-server.log'
@@ -390,6 +480,31 @@ finally {
     Set-Location $main
     Write-Gate '[gate] backend stop-server.ps1 (finally)'
     & pwsh -NoProfile -File (Join-Path $main 'server\stop-server.ps1') *> (Join-Path $LogDir 'stop-server.log')
+}
+
+# P5b G2: -Serial's same-commit comparison: each headless journey's done line beside the Godot one of the default-mode gate named by -CompareTo (both printed in the gate log; a disagreement is reported, not hidden).
+if ($Serial) {
+    $compareDirs = @(); $godotCommit = ''
+    if ($CompareTo) {
+        $compareDirs = @((Join-Path $Worktree "cache\gate\$CompareTo"), (Join-Path $main "cache\gate\$CompareTo") | Where-Object { Test-Path -LiteralPath $_ })
+        $godotLog = Join-Path (Join-Path $main "cache\gate\$CompareTo") 'gate.log'
+        if (Test-Path -LiteralPath $godotLog) { $cm = [regex]::Match((Get-Content -LiteralPath $godotLog -TotalCount 1), 'commit=(\w+)'); if ($cm.Success) { $godotCommit = $cm.Groups[1].Value } }
+        if ($compareDirs.Count -eq 0) { Write-Gate "[gate] compare: no gate folder for tag $CompareTo under <worktree>\cache\gate or <main>\cache\gate: nothing to compare with" }
+    }
+    else { Write-Gate '[gate] compare: no -CompareTo <tag of a default-mode gate on this commit>: the headless verdicts stand alone' }
+    foreach ($name in $script:JourneyNames) {
+        $hLog = Join-Path $LogDir "serial-headless-journey-$name.log"
+        $hText = if (Test-Path -LiteralPath $hLog) { Get-Content -LiteralPath $hLog -Raw } else { '' }
+        $gText = ''
+        foreach ($d in $compareDirs) {
+            foreach ($f in @(Get-ChildItem -LiteralPath $d -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.log', '.txt') })) {
+                $c = Get-Content -LiteralPath $f.FullName -Raw -ErrorAction SilentlyContinue
+                if ($c -and $c -match "journey done ok=\S+ name=${name}(\s|$)") { $gText = $c; break }
+            }
+            if ($gText) { break }
+        }
+        foreach ($line in @(Get-JourneyComparison -Name $name -HeadlessText $hText -GodotText $gText -Commit $headCommit -GodotCommit $godotCommit)) { Write-Gate $line }
+    }
 }
 
 # P4-R5: the gate is never ok with a planned step that reported nothing (a lane that died, or a phase the run never reached).

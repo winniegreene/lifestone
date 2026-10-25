@@ -167,6 +167,8 @@ internal sealed class S5LinePaths : INavPathSource
 {
     public NavMap? Map { get; set; }
 
+    public PathPlanner? Planner => null;
+
     public int PlanCalls { get; private set; }
 
     public string? FailWith { get; set; }

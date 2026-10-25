@@ -259,6 +259,17 @@ the cell array has grown (`PhysicsAllocationTests`).
 - A step up is a step down by the step-up height onto what was hit (`step_up`, `step_down`).
   `CPolygon::adjust_sphere_to_plane` lets that landing use a walk interpolation down to -0.5, so a physics BSP step up to
   1.5 step-up heights is climbed (0.9 m for the human's 0.6 m); spheres and cylinders compare their heights exactly.
+- Props are stairs, and an edge holds what a step up left on it (on the dats, `RenaldCounterStepDatTests`). Renald the
+  Elder's counter in Holtburg (cell 0xA9B4013F, static 0x02000272, top 0.94 m above the floor) is over 1.5 step-ups, so a
+  walk straight at its face stops on the floor; the 0.5 m box at its west end (static 0x02000121) takes a walker up in two
+  step-ups, 0.53 and 0.41 m (`CTransition::step_up`, 11.4186 0x0050B610, 11.6096 0x0050C0E0). A step up lands with no
+  footprint test (`CTransition::step_down`, 0x0050B2A0 / 0x0050BD70, skips `check_walkable` while it steps up); a step
+  down of an EdgeSlide object needs the walkable it lands on under the sphere's half-radius footprint
+  (`CTransition::check_walkable` 0x0050AFF0 / 0x0050BAC0, `BSPLEAF::hits_walkable` 0x0053D670 / 0x0053E3D0 with
+  `CPolygon::check_small_walkable` 0x005390B0 / 0x00539DF0). So a walker that stepped up with its centre over the drop
+  stays on the edge except toward ground under its footprint: from the counter's corner by the box, only south-west, onto
+  the box. M4 P5b's headless body came there following ACE's walk-to-use MoveToObject toward Renald (gate round 1), which
+  steers straight at its target; the journey's `RaisedStart` steps it off before a leg plans.
 - With no contact plane after a step, an object in contact steps down by its step-down height (0.04 m off walkable
   ground); a one-sphere object whose step-down height exceeds its diameter steps down half its radius, and a step taller
   than the diameter is tried as two halves (`transitional_insert`, `find_placement_position`). A human (two spheres,
@@ -389,6 +400,9 @@ passes through it; two players pass through each other unless either is impenetr
 ethereal object is passed through but reported; a missile ignores missiles and, aimed, creatures other than its target.
 Server objects are not stepped (D24), so a host that wants one to block the player keeps a PhysicsObj for it and moves it
 with `ForceIntoCell` (retail recomputes the shadows only when the cell changes; `RecalcCrossCells` does it on demand).
+No host does yet (`TODO(d25-server-object-host)`): the live player walks through lifestones and NPCs that ACE and retail collide with. Seen at M4 4.2's
+live gate round 1: the recall into Holtburg's lifestone (docs/session.md, "Off the lifestone") and a stop of the Holtburg laps where ACE held the player
+against Alcott (a world-database NPC 1.3 m from the ring's start, which the dat-only ring check cannot see) while the client walked on, 1.02 m apart.
 An object with physics BSPs (a door) poses its parts when it moves; `SetEthereal(false)` fails while another moving object
 overlaps it and is retried each update (CheckEthereal).
 

@@ -266,4 +266,50 @@ public sealed class BuffLegVerdictTests
         Assert.False(mixed.Ok);
         Assert.Contains(" forced=yes ", mixed.Line, StringComparison.Ordinal); // printed from the forced result when one exists; the judgement is the driver's
     }
+
+    // ---------------------------------------------------------------------------------------------- the driver run's judge (M4 4.2 J1, DoD 14, m4-plan.md section 4.9 row j)
+
+    [Fact]
+    public void M4_4_2_J1_a_driver_run_with_no_driver_pass_fails_by_name()
+    {
+        var none = BuffLegVerdict.Compose(new BuffLegScenarioResult(true, null, Gear, Cycle(), null, DriverOn: true), Measures());
+
+        Assert.False(none.Ok);
+        Assert.Contains("driver=none (the driver was on, but no driver pass ended)", none.Problems);
+        Assert.EndsWith(" driver=on rebuff_lines=0 rebuff_s=n/a", none.Line, StringComparison.Ordinal);
+        Assert.Matches(Line, none.Line);
+    }
+
+    [Fact]
+    public void M4_4_2_J1_a_driver_pass_that_cast_no_line_fails_by_name()
+    {
+        var idle = BuffLegVerdict.Compose(Driven(Driver(cast: 0)), Measures());
+
+        Assert.False(idle.Ok);
+        Assert.Contains("rebuff_lines=0 (>= 1 expected: the driver's pass cast no line)", idle.Problems);
+        Assert.EndsWith(" driver=on rebuff_lines=0 rebuff_s=33", idle.Line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void M4_4_2_J1_a_forced_pass_that_landed_in_a_driver_run_fails_by_name_even_when_the_driver_pass_held()
+    {
+        var both = BuffLegVerdict.Compose(new BuffLegScenarioResult(true, null, Gear, Cycle(), Forced(), DriverOn: true, Driver: Driver(), RebuffSeconds: 33.4), Measures());
+
+        Assert.False(both.Ok);
+        Assert.Equal(["forced=yes (no expected with the driver on: a forced pass landed)"], both.Problems);
+        Assert.Contains(" rebuffed=yes forced=yes ", both.Line, StringComparison.Ordinal);
+
+        Assert.True(BuffLegVerdict.Compose(Driven(), Measures()).Ok); // the mage's journey: forced=no driver=on rebuff_lines=3 holds
+    }
+
+    [Fact]
+    public void M4_4_2_J1_the_fighters_forced_run_without_the_driver_is_not_judged_on_the_driver()
+    {
+        // The fighters' journeys run the forced pass by design (forced=yes swapped=yes) with the driver off (JourneyStations.Buff sets Auto only for the mage).
+        var fighter = BuffLegVerdict.Compose(Ran(), Measures());
+
+        Assert.True(fighter.Ok, string.Join("; ", fighter.Problems));
+        Assert.Contains(" rebuffed=yes forced=yes ", fighter.Line, StringComparison.Ordinal);
+        Assert.DoesNotContain("driver=", fighter.Line, StringComparison.Ordinal);
+    }
 }

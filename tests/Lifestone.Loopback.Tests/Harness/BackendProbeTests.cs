@@ -157,10 +157,12 @@ public sealed class BackendProbeTests : IDisposable
     [Fact]
     public void A_characters_account_is_checked_by_key_name_and_the_probe_still_gates_on_test_only()
     {
-        // M4 D31: Holtburg Brawler logs in on test-melee, Holtburg Archer on test-archer, every earlier character on test.
+        // M4 D31: Holtburg Brawler logs in on test-melee, Holtburg Archer on test-archer; M4 D39: Lifestone Throwaway on test-tools; every other character on test.
         Assert.Equal("test-melee", LoopbackAccounts.For("Holtburg Brawler"));
         Assert.Equal("test-archer", LoopbackAccounts.For("Holtburg Archer"));
+        Assert.Equal("test-tools", LoopbackAccounts.For("Lifestone Throwaway")); // M4 D39
         Assert.Equal("test", LoopbackAccounts.For("BSD Mage"));
+        Assert.Equal("test", LoopbackAccounts.For("Lifestone Loopback"));
         Assert.Equal("test", LoopbackAccounts.For(null));
 
         WriteReadyBackend(); // a secrets file with accounts.test only
@@ -174,6 +176,7 @@ public sealed class BackendProbeTests : IDisposable
         File.WriteAllText(_files.SecretsFile, "{\"accounts\":{\"test\":{},\"test-melee\":{\"password\":\"" + SentinelPassword + "\"}}}");
         Assert.Null(BackendProbe.AccountProblem(_files.SecretsFile, "test-melee"));
         Assert.Contains("'accounts.test-archer'", BackendProbe.AccountProblem(_files.SecretsFile, "test-archer"), StringComparison.Ordinal);
+        Assert.Contains("'accounts.test-tools'", BackendProbe.AccountProblem(_files.SecretsFile, "test-tools"), StringComparison.Ordinal); // M4 D39: checked by key name like the others
     }
 
     [Fact]

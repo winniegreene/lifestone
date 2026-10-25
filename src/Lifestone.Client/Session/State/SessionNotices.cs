@@ -39,6 +39,19 @@ internal static class SessionNotices
     /// </summary>
     internal const ushort SessionOptionSet = 8;
 
+    /// <summary>
+    /// The client composed retail's "&lt;spell&gt; has expired." for a 02C3 or 02C5 (<c>Value</c>: the spell id; <c>Text</c>: the line). The name comes from
+    /// the SpellTable, which a recording does not hold, so the line is recorded for the replay (M4 P5b F4, TODO(m4-replay-vitae-digest)): a replay adds the
+    /// recorded line and composes none of its own when the recording carries it.
+    /// </summary>
+    internal const ushort ExpiryLine = 9;
+
+    /// <summary>
+    /// The final state's digest parts (<c>Text</c>: <see cref="Recording.GameStateDigest.FormatParts"/>), written by the session just before the trailer
+    /// (M4 P5b F4). It changes no state: a replay compares its own parts with it and names the parts that differ.
+    /// </summary>
+    internal const ushort DigestParts = 10;
+
     /// <summary>The last code reserved for the reducer.</summary>
     internal const ushort LastReducerCode = 15;
 }

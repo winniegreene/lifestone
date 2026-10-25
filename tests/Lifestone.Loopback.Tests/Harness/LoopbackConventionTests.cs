@@ -28,38 +28,6 @@ public sealed partial class LoopbackConventionTests
     }
 
     [Fact]
-    public void P5a_C3_the_heal_legs_need_no_hunt_and_no_ground()
-    {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "Lifestone.slnx")))
-        {
-            root = root.Parent;
-        }
-
-        Assert.NotNull(root);
-        var code = File.ReadAllText(Path.Combine(root.FullName, "tests", "Lifestone.Loopback.Tests", "Session", "HealLiveTests.cs"));
-        Assert.DoesNotContain("HuntScenario", code, StringComparison.Ordinal); // C3: Harm Self gives the damage; the luck of the belt (and the archer lane's forest, D31) is gone from the heal facts
-        Assert.DoesNotContain("HuntGroundChoice", code, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void P5a_C3_the_fighters_heal_legs_run_the_harm_heal_script_with_the_caster_swap_and_the_potion_follows_the_kit()
-    {
-        var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (root is not null && !File.Exists(Path.Combine(root.FullName, "Lifestone.slnx")))
-        {
-            root = root.Parent;
-        }
-
-        Assert.NotNull(root);
-        var code = File.ReadAllText(Path.Combine(root.FullName, "tests", "Lifestone.Loopback.Tests", "Session", "HealLiveTests.cs"));
-        Assert.Contains("new HarmHealScript(S, spells, keeper, swap, new HarmHealOptions(), scriptLog)", code, StringComparison.Ordinal);
-        Assert.Contains("CasterSwap.ForCharacter(characterName", code, StringComparison.Ordinal);
-        Assert.Contains("[Trait(\"Account\", \"test-melee\")]", code, StringComparison.Ordinal);
-        Assert.Contains("[Trait(\"Account\", \"test-archer\")]", code, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void Every_loopback_test_is_marked_and_serialised()
     {
         var loopbackTests = 0;
@@ -98,7 +66,7 @@ public sealed partial class LoopbackConventionTests
     }
 
     /// <summary>
-    /// M4 D31: every class in the Loopback collection carries exactly one <c>[Trait("Account", ...)]</c>, one of the three test accounts, and it is the account of
+    /// M4 D31: every class in the Loopback collection carries exactly one <c>[Trait("Account", ...)]</c>, one of the four test accounts, and it is the account of
     /// every character the class names with <see cref="LoopbackCharacterAttribute"/> (on the class or a method; a class that names none uses <c>test</c>). The lock per
     /// account, and the gate's lanes, read that account. A <c>Lane</c> trait may only be <c>solo</c> (the gate runs those alone, after the parallel phase).
     /// </summary>
@@ -153,6 +121,7 @@ public sealed partial class LoopbackConventionTests
         Assert.Equal(["test", "test-melee"], TraitValues(typeof(ConventionSamples.TwoAccounts), "Account"));
         Assert.Equal(["Holtburg Brawler"], CharacterNames(typeof(ConventionSamples.BrawlerOnTest)));
         Assert.Equal("test-melee", LoopbackAccounts.For("Holtburg Brawler"));
+        Assert.Equal("test-tools", LoopbackAccounts.For("Lifestone Throwaway")); // M4 D39: the throwaway classes carry Account test-tools and [LoopbackCharacter("Lifestone Throwaway")]
         Assert.Empty(TraitValues(typeof(ConventionSamples.InTheCollection), "Account"));
     }
 

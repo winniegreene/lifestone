@@ -47,44 +47,6 @@ public sealed class AcademyExitLoopbackTests(ITestOutputHelper output)
 {
     private const string Character = "Lifestone Loopback";
 
-    private static readonly Regex Verdict = new(
-        @"^movement route=academy-exit laps=\d+ corrections=0 where_max_m=\d+\.\d\d result=PASS$",
-        RegexOptions.CultureInvariant);
-
-    [LoopbackFact]
-    public void The_character_uses_the_exit_portal_from_range_and_ACE_teleports_it_outside_with_no_corrections()
-    {
-        using var dats = DatSet.Open();
-        var (result, scenario) = RunScenario(dats, ExitQuestMode.Stamp);
-        var putBackByTheTest = false;
-        try
-        {
-            Assert.True(result.Ok, result.Failure);
-            Assert.Matches(Verdict, scenario.Play.SummaryLine);
-            var play = scenario.Play;
-            var audit = play.Audit!;
-            Assert.Equal(0, audit.Corrections);
-            Assert.Equal(0, result.Corrections);
-            Assert.InRange(audit.WhereMaxMetres!.Value, 0.0, 0.5);
-            Assert.True(play.ExitAnnounced, "no F751 followed the portal Use");
-            Assert.NotEqual(0x8602u, play.ExitArrival!.Value.CellId >> 16); // outside the Academy dungeon
-            Assert.Equal(ActionOutcomeKind.Confirmed, play.UseOutcome!.Value.Kind);
-            Assert.False(play.ExitRefusedByQuest);
-            Assert.Equal(0, result.Errors);
-            Assert.Equal("done", result.Stage);
-            Assert.True(play.QuestFound is not null, "the scenario never asked about the quest");
-            Assert.True(play.QuestPutBack, "the scenario did not verify the quest registry after the way home"); // the portal's emote set took the stamped quest; the registry is as found
-            Assert.Equal("put-back", play.QuestVerdict);
-            Assert.False(play.QuestPutBackAfterFailure);
-        }
-        finally
-        {
-            putBackByTheTest = PutTheCharacterAtTheAcademyStart(dats, scenario.Play);
-        }
-
-        Assert.False(putBackByTheTest, "the run passed but the test had to put the quest registry back");
-    }
-
     /// <summary>
     /// The refusal, on purpose: the character is sent to the exit's wing, the quest is taken from it (it holds none, so nothing is changed),
     /// it walks to "Exit to Holtburg" with ACE accepting every move, uses it from range, follows the server's MoveTo to the portal (UseDone

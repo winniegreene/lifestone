@@ -10,6 +10,7 @@ using Lifestone.Data.Magic;
 using Lifestone.Data.World;
 using Lifestone.Net.Session;
 using Lifestone.Net.Types;
+using Lifestone.Client.Session.Scenarios.Journey;
 
 namespace Lifestone.Client.Session.Scenarios;
 
@@ -151,7 +152,7 @@ public sealed class FightScenario : IScenario, IDisposable
     private BuffCycle? _cycle;
     private ActionHandle? _pending;
     private ActionHandle? _health;
-    private ToolHandle<PlaceResult>? _place;
+    private readonly SeamLeg _seam;
     private IDisposable? _diedSubscription;
     private IDisposable? _createdSubscription;
     private IDisposable? _movedSubscription;
@@ -233,7 +234,9 @@ public sealed class FightScenario : IScenario, IDisposable
         _cellFilter = fight.ArenaHere ? null : BlackSpawnDen.IsFloorCell;
         _buffOptions = buff with { RebuffMarginSeconds = TopUpSeconds };
         _gear = (stages & FightStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) : null;
-        _exit = new DenExit(log, LogCategory);
+        var travel = fight.Travel ?? new PlaceTravel(); // M4 P5b: one seam per scenario, shared by the place and the den exit
+        _seam = new SeamLeg(travel);
+        _exit = new DenExit(log, LogCategory, travel);
         var line = ArenaProfile.LineNamed(ArenaProfile.WarLineName) ?? throw new InvalidOperationException("the profile has no " + ArenaProfile.WarLineName + " line");
         for (var i = 0; i < Levels; i++)
         {
@@ -608,32 +611,29 @@ public sealed class FightScenario : IScenario, IDisposable
         }
 
         _teleportMark = _selfTeleports;
-        _place = session.Tools.Place(_destination, ActionSource.Host);
-        _pending = _place;
+        _seam.Start(session, new TravelRequest(_destination, _options.PlacePurpose), clock); // M4 P5b: the travel seam (PlaceTravel by default: today's Tools.Place)
         Enter("teleporting", clock);
         return ScenarioStatus.Running;
     }
 
     private ScenarioStatus TeleportingStep(IGameSessionView session, double clock)
     {
-        if (_pending is { Outcome: { } placed })
+        var travel = _seam.Step(session, clock);
+        if (travel == TravelStatus.Failed)
         {
-            _pending = null;
-            if (placed.Kind != ActionOutcomeKind.Confirmed)
-            {
-                return Fail(session, "place: sending the player to the den: " + Describe(placed));
-            }
+            return Fail(session, "place: sending the player to the den: " + _seam.Failure);
         }
 
         _walk?.Tick(session, clock);
-        if (_pending is null && _selfTeleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present)
+        if (travel == TravelStatus.Arrived && (_seam.Authoritative || (_selfTeleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present)))
         {
+            // The arrival contract (IJourneyTravel): a place's arrival is today's check (the teleport seen, present); a run's, a recall's or a None's is authoritative.
             _settleUntil = clock + SettleSeconds;
             Enter("settle", clock);
             return ScenarioStatus.Running;
         }
 
-        return clock - _stageStart > TeleportSeconds
+        return _seam.Means == TravelMeans.Place && clock - _stageStart > TeleportSeconds
             ? Fail(session, string.Create(CultureInfo.InvariantCulture, $"place: the player did not arrive in the den and become present within {TeleportSeconds:0.#} s (teleports {_selfTeleports - _teleportMark}, travel {session.State.Self.Travel})"))
             : ScenarioStatus.Running;
     }
@@ -696,7 +696,36 @@ public sealed class FightScenario : IScenario, IDisposable
         var self = session.State.Self;
         uint skill;
         string why;
-        if (_options.ArenaHere)
+        if (_options.SpellId != 0)
+        {
+            // M4 P5b J7: a named spell instead of the Flame Bolt line (the hero plan's Cassius' Ring of Fire): slot 0 holds it, and a fizzle has no lower level to drop to.
+            _levelIds[0] = _options.SpellId;
+            if (_options.ArenaHere)
+            {
+                skill = _options.ArenaSkill;
+                why = string.Empty;
+                _level = 0;
+            }
+            else if (!GearCasts.TryCurrentSkill(self.Qualities, MageTemplate.WarMagic, out skill, out why))
+            {
+                _level = -1;
+            }
+            else if (self.Spellbook is { IsKnown: false } || !self.Spellbook.Knows(_options.SpellId))
+            {
+                _level = -1;
+                why = $"the spellbook does not hold spell {_options.SpellId} (the build learns it)";
+            }
+            else if (!_spells.TryGetValue(_options.SpellId, out var named) || GearCasts.Chance(skill, named.Power) < _buffOptions.CastChance)
+            {
+                _level = -1;
+                why = $"spell {_options.SpellId} is not in the SpellTable or does not reach a cast chance of {_buffOptions.CastChance} at War Magic skill {skill}";
+            }
+            else
+            {
+                _level = 0;
+            }
+        }
+        else if (_options.ArenaHere)
         {
             skill = _options.ArenaSkill;
             _level = ChooseLevel(skill, null, _buffOptions.CastChance, out why); // the arena-here run does not read the spellbook
@@ -708,7 +737,7 @@ public sealed class FightScenario : IScenario, IDisposable
 
         if (_level < 0)
         {
-            return Fail(session, "fight: no Flame Bolt level to cast: " + why);
+            return Fail(session, "fight: no " + (_options.SpellId != 0 ? "spell" : "Flame Bolt level") + " to cast: " + why);
         }
 
         if (!_spells.TryGetValue(_levelIds[_level], out var info))
@@ -1221,7 +1250,7 @@ public sealed class FightScenario : IScenario, IDisposable
     {
         var clock = session.Clock.Now;
         Subscribe(session); // the leave reads the player's own teleport positions
-        if (!_options.ArenaHere && _exit.Begin(session, clock, _selfTeleports))
+        if (!_options.ArenaHere && _options.LeaveAtEnd && _exit.Begin(session, clock, _selfTeleports))
         {
             Enter("leave-den", clock);
             return ScenarioStatus.Running;
@@ -1282,6 +1311,7 @@ public sealed class FightScenario : IScenario, IDisposable
         Failure = why;
         _fightEnd = double.IsNaN(_fightEnd) ? session.Clock.Now : _fightEnd;
         _walk?.Abandon();
+        _seam.Abandon(); // a travel leg still running releases its keys
         _log.Error(LogCategory, why);
         _log.Info(LogCategory, "verdict " + VerdictFields());
         if (session.State.Phase == SessionPhase.InWorld && Stage is not ("logging-off" or "quitting"))
@@ -1289,7 +1319,7 @@ public sealed class FightScenario : IScenario, IDisposable
             // Out of the den first, whatever endSession is (best effort, DenExit; not in the arena-here run): a mage left in the den by this run, logged off by it or by the game's leg as soon as this returns Failed, meets the
             // tuskers at its next login. The run stays Running until the leave is over, then logs off (endSession: true) or ends Failed where it stands.
             Subscribe(session);
-            if (!_options.ArenaHere && _exit.Begin(session, session.Clock.Now, _selfTeleports))
+            if (!_options.ArenaHere && _options.LeaveOnFailure && _exit.Begin(session, session.Clock.Now, _selfTeleports))
             {
                 _failLeave = true;
                 return ScenarioStatus.Running;

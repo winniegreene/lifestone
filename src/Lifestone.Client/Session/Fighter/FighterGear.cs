@@ -103,7 +103,8 @@ public sealed record GearPiece(
 /// <para><b>Not retail:</b> which items a character wears is Lifestone's own test-character choice; the items, their spells, difficulties and requirements are ace_world's.</para>
 /// <para><b>ACE's rule.</b> A wielded item's spell book is activated when its ItemCurMana is above 0 and the wielder's Arcane Lore (current) is at least its ItemDifficulty: <c>Player_Inventory.cs:314</c> (<c>if (item.ItemCurMana &gt; 0) TryActivateSpells</c>), <c>:327</c> (<c>CheckUseRequirements</c>) and
 /// <c>WorldObject_Use.cs:205-209</c> (<c>arcaneLore.Current &lt; ItemDifficulty</c> refuses with "Your Arcane Lore is too low"); the item still equips. Creature and Life magic spells go on the wearer, Item magic spells on the item (<c>Creature_Magic.cs:98-134</c> <c>CreateItemSpell</c>). Wield requirements: <c>Player_Inventory.cs:2080-2200</c> (all ACE 95ef426d).
-/// The mana burns while the spells are active, every ~5 s (<c>Player_Tick.cs:620-660</c>); at 0 the spells are removed (<c>HandleManaDepleted</c>). <c>TODO(m4-gear-mana)</c>: nothing recharges the items yet (mana stones or a re-grant come later); the build only reports it.</para>
+/// The mana burns while the spells are active, every ~5 s (<c>Player_Tick.cs:620-660</c>); at 0 the spells are removed (<c>HandleManaDepleted</c>). The journey's build-verify recharges the items with a retail mana charge when one runs low and wears a piece whose
+/// spells were removed again (<see cref="GearRecharge"/>, <see cref="FighterKit.ManaChargeWcid"/>; <c>TODO(m4-gear-mana)</c> closed).</para>
 /// </remarks>
 public sealed class FighterGearSet
 {

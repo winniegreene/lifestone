@@ -16,7 +16,7 @@ public static class LoopbackAccounts
 
 /// <summary>
 /// Names the character a loopback test (or its class) logs in with, so the gate also skips it, with a named reason, when that character's account
-/// (<c>test-melee</c>, <c>test-archer</c>) has no entry in secrets.json. Tests of the characters on <c>test</c> need none: the probe gates on it already.
+/// (<c>test-melee</c>, <c>test-archer</c>, <c>test-tools</c>) has no entry in secrets.json. Tests of the characters on <c>test</c> need none: the probe gates on it already.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class)]
 public sealed class LoopbackCharacterAttribute(string name) : Attribute

@@ -45,6 +45,9 @@ public enum SwapStatus
 /// choose the next step: nothing is assumed. A step that confirms while the read model still shows the old state waits <see cref="SettleSeconds"/> and then fails; each half is bounded by <see cref="MaxHalfSeconds"/> and
 /// <see cref="MaxSteps"/>. A failure is named <c>swap:&lt;step&gt;</c> and never retried. A failed In half then runs the Out half as a restore (the same steps, logged), so the weapon is back in hand and the player in peace at the end of
 /// a refused <c>wield-caster</c>; the status is <see cref="SwapStatus.Failed"/> after it, with the first failure as <see cref="Failure"/>.</para>
+/// <para><b>The busy wait</b> (M4 fresh-gate fix, gate round 1, as M4 P5b fix FC-a1 did for <see cref="RecallHome"/>): ACE refuses an item move sent into the player's busy chain (<c>Player.IsBusy</c>), and the fresh Brawler's
+/// unwield, sent 30 ms after the vitals keeper's fourth Mana Potion, was refused so. Before each action the swap waits while <see cref="IActionApi.BusyReason"/> names a busy chain (a potion's Ready on the Heal lane, a move's
+/// chain), at most <see cref="BusyWaitSeconds"/> (<c>swap:busy-wait</c> past it, nothing sent), then sends once; a refusal after that is still the step's failure, never retried.</para>
 /// <para>The mage wields its wand already and never swaps: <see cref="For"/> gives a swap only to a template whose kit holds a caster in the pack.</para>
 /// </remarks>
 public sealed class CasterSwap
@@ -60,6 +63,9 @@ public sealed class CasterSwap
 
     /// <summary>The most actions one half may send (a loud bound against a loop that never reaches its goal).</summary>
     public const int MaxSteps = 12;
+
+    /// <summary>The most seconds the swap waits for <see cref="IActionApi.BusyReason"/> to clear before an action (<see cref="RecallHome.BusyWaitSeconds"/>'s bound).</summary>
+    public const double BusyWaitSeconds = RecallHome.BusyWaitSeconds;
 
     private const EquipMask MeleeSlots = EquipMask.MeleeWeapon | EquipMask.TwoHanded;
     private const EquipMask MissileSlots = EquipMask.MissileWeapon;
@@ -85,6 +91,7 @@ public sealed class CasterSwap
     private double _seconds;
     private string? _firstFailure;
     private string? _firstDetail;
+    private double _busySince = double.NaN;
 
     /// <summary>A swap over an Action API and a read model for the fighter whose kit is <paramref name="kit"/>.</summary>
     /// <param name="actions">The Action API the wields, unwields and combat-mode changes go through.</param>
@@ -230,6 +237,26 @@ public sealed class CasterSwap
             return now - _settleSince > SettleSeconds
                 ? Fail(StepOf(next), "the step was confirmed but the read model still shows the old state after " + SettleSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s", now)
                 : Status;
+        }
+
+        // The busy wait (M4 fresh-gate fix): never send into ACE's busy chain (a potion's Ready, a move's chain); bounded, then one send.
+        if (_actions.BusyReason is { } busy)
+        {
+            if (double.IsNaN(_busySince))
+            {
+                _busySince = now;
+                _log.Info(LogCategory, "swap:busy-wait: the player is busy (" + busy + "); " + StepOf(next) + " waits up to " + BusyWaitSeconds.ToString("0", CultureInfo.InvariantCulture) + " s");
+            }
+
+            return now - _busySince > BusyWaitSeconds
+                ? Fail("busy-wait", "the player was still busy after " + BusyWaitSeconds.ToString("0", CultureInfo.InvariantCulture) + " s (" + busy + "); " + StepOf(next) + " was not sent", now)
+                : Status;
+        }
+
+        if (!double.IsNaN(_busySince))
+        {
+            _log.Info(LogCategory, "swap:busy-wait: the player is free after " + (now - _busySince).ToString("0.00", CultureInfo.InvariantCulture) + " s");
+            _busySince = double.NaN;
         }
 
         if (++_halfSteps > MaxSteps)
@@ -406,6 +433,7 @@ public sealed class CasterSwap
         _halfStart = now;
         _halfSteps = 0;
         _settleSince = now;
+        _busySince = double.NaN;
         Status = SwapStatus.Running;
     }
 

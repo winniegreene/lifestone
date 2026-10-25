@@ -19,7 +19,7 @@ namespace Lifestone.Client.Tests.Session.Mage;
 /// <summary>
 /// M3 1.4 s1, the gear scenario (<see cref="GearScenario"/>) against the offline stand-in, which answers a wield in ACE's order (<c>Player_Inventory.cs</c> <c>TryEquipObjectWithNetworking</c> 297-306: 0x02DA Wielder 0, 0x02CE 0, then
 /// GameEvent 0x0023): a first run grants the kit, wields the wand and wears the five pieces (<c>gear=wielded worn=5</c>, <c>gear_steps</c> above 0); a second run on the same state sends nothing (<c>gear_steps=0</c>); a piece already worn is
-/// skipped; a refused wield (GameEvent 0x00A0) and a refused grant end <c>gear=failed</c> with the reason. The whole real kit (59 lines, needs the dats) is run once to size the timeouts.
+/// skipped; a refused wield (GameEvent 0x00A0) and a refused grant end <c>gear=failed</c> with the reason. The whole real kit (63 lines, needs the dats) is run once to size the timeouts.
 /// </summary>
 public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
@@ -746,10 +746,10 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
 
         var seconds = rig.Session.Clock.Now - start;
         Assert.True(seconds < first.SpawnLimit, $"{seconds:0.#} s against a spawn limit of {first.SpawnLimit:0.#} s");
-        Assert.Equal("gear=wielded worn=5 kit=59/59 gear_steps=12 topup=53 cast=n/a", first.VerdictFields()); // 6 requests and 6 wields, and 53 component lines
+        Assert.Equal("gear=wielded worn=5 kit=63/63 gear_steps=12 topup=57 cast=n/a", first.VerdictFields()); // 6 requests and 6 wields, and 57 component lines
         var second = new GearScenario(spells, "gear-test-account", rig.Log, endSession: false);
         Assert.Equal(ScenarioStatus.Succeeded, rig.Run(second));
-        Assert.Equal("gear=wielded worn=5 kit=59/59 gear_steps=0 topup=0 cast=n/a", second.VerdictFields());
+        Assert.Equal("gear=wielded worn=5 kit=63/63 gear_steps=0 topup=0 cast=n/a", second.VerdictFields());
     }
 
     // ---------------------------------------------------------------- M4 3.1 d0 (D20): the decoys in the gear scenario

@@ -455,6 +455,9 @@ public sealed class GameSession : IGameSessionView, Lifestone.Client.RetailUi.Pa
         _reducer.StandIn?.Clear();
         if (_recorder is { } recorder)
         {
+            // The digest's parts first, so a replay that misses the digest names the part it missed (M4 P5b F4, TODO(m4-replay-vitae-digest)).
+            var parts = GameStateDigest.FormatParts(GameStateDigest.Parts(State));
+            recorder.Notice(Clock.Now, new RecordingNotice(SessionNotices.DigestParts, 0, parts));
             Span<byte> digest = stackalloc byte[GameStateDigest.Size];
             GameStateDigest.Compute(State, digest);
             recorder.Complete(digest);
@@ -464,7 +467,8 @@ public sealed class GameSession : IGameSessionView, Lifestone.Client.RetailUi.Pa
                 "session recording complete",
                 new LogField("frames", recorder.Frames),
                 new LogField("omittedBodies", recorder.OmittedBodies),
-                new LogField("digest", GameStateDigest.ToHex(digest)));
+                new LogField("digest", GameStateDigest.ToHex(digest)),
+                new LogField("parts", parts));
         }
 
         _live?.Credentials.Dispose();

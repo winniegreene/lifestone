@@ -65,7 +65,7 @@ public sealed class WayfindOptionsTests
         Assert.Equal(names, group.Options.Select(o => o.Name));
         Assert.All(names, n => Assert.Equal(OptionScenes.Headless, OptionCatalog.Registry.ScenesOf(n)));
         var scenario = Assert.Single(OptionCatalog.Registry.Groups.SelectMany(g => g.Options), o => o.Name == "--scenario" && o.Value is not null && o.Value.Contains("holtburg-laps", StringComparison.Ordinal));
-        Assert.EndsWith("|wayfind", scenario.Value, StringComparison.Ordinal);
+        Assert.Contains("|wayfind", scenario.Value, StringComparison.Ordinal); // P5b J4 added |journey after it
     }
 
     [Fact]

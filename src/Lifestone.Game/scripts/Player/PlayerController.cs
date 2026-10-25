@@ -437,6 +437,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
                     ("render_setup_cpu_ms", RenderingServer.GetFrameSetupTimeCpu()),
                     ("gc_gen0_collections", GC.CollectionCount(0)),
                     .. gc.Fields(), // M4 P4 g3fix: the collector's pause and collections in this frame's interval, so the line names a GC pause as the cause (TODO(m4-throwaway-teleport-frame))
+                    .. gc.LastCollectionFields(), // M4 P5b: and how big that collection was
                     .. compiled.Fields(),
                 ]);
         }

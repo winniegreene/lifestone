@@ -27,10 +27,12 @@ public enum RecallStatus
 /// The way home (M4 P5a C1c, owner decisions D36 and D38): a character casts Lifestone Recall (spell 1635) and waits to arrive at the lifestone it is bound to, so the journeys do not run home. A Brawler or an Archer first swaps its
 /// caster in (<see cref="CasterSwap"/>, <see cref="SwapDirection.In"/>: the weapon and ammunition to the pack, the caster wielded, the magic mode) and swaps back out when it has arrived (or when the recall failed after the swap in);
 /// BSD Mage wields its wand already and casts alone (the magic mode is entered only when it is not in it). P5b's stations call it between stations; nothing here wires a journey.
+/// <para>M4 P5b J1: the spell and the destination's landblock are parameters (defaults Lifestone Recall 1635 and Holtburg 0xA9B4), so Primary Portal Recall (spell 48, <see cref="PrimaryPortalRecallSpell"/>) to the tied portal's destination
+/// (the Black Spawn Den, landblock 0x0105, <see cref="DenLandblock"/>) runs the same steps; the journey's travel seam (<c>JourneyTravel</c>) uses both.</para>
 /// </summary>
 /// <remarks>
 /// <para><b>Steps and the failure name.</b> The steps are <c>present</c> (the character must be in the world and not in portal space), <c>swap-in</c>, <c>spell</c> (the spellbook, once the description has arrived, lacks spell 1635), <c>mode</c>
-/// (the magic mode, for a caster that has not entered it), <c>cast</c>, <c>teleport</c>, <c>arrival</c> and <c>swap-out</c>. A failure is <c>recall:&lt;step&gt;</c> with a sentence behind it; nothing is retried silently, but a fizzled cast (0x0402) is counted and cast again, at most <see cref="MaxFizzles"/> times a recall (M4 P5a fix F-abil, P5a-R4: Item Enchantment is built to the 0.9 chance rule, so about one cast in ten fizzles and a journey must not fail for it). The cast's refusals are named from ACE
+/// (the magic mode, for a caster that has not entered it), <c>busy-wait</c> (M4 P5b fix FC-a1: the cast waits while <see cref="IActionApi.BusyReason"/> names a busy chain, at most <see cref="BusyWaitSeconds"/>), <c>cast</c>, <c>teleport</c>, <c>arrival</c> and <c>swap-out</c>. A failure is <c>recall:&lt;step&gt;</c> with a sentence behind it; nothing is retried silently, but a fizzled cast (0x0402) is counted and cast again, at most <see cref="MaxFizzles"/> times a recall (M4 P5a fix F-abil, P5a-R4: Item Enchantment is built to the 0.9 chance rule, so about one cast in ten fizzles and a journey must not fail for it). The cast's refusals are named from ACE
 /// @95ef426d: WeenieError 0x049E <c>YouMustLinkToLifestoneToRecall</c> (<c>WorldObject_Magic.cs</c> 1087-1093 sends it when the player has no LinkedLifestone; <c>WeenieError.cs</c> 658), 0x049F
 /// <c>YouFailToRecallToLifestone</c> (:663), 0x04CC <c>YouHaveBeenInPKBattleTooRecently</c> (:834, <c>WorldObject_Magic.cs</c> 1054-1058), and the spell refusals 0x0400 (components), 0x0401 (mana), 0x0402 (fizzle) the Action API reports. Research
 /// section 1's portal ones (0x04A3 <c>YouMustLinkToPortalToRecall</c>, 0x04AD <c>YouCannotRecallPortal</c>) are named too for the portal recall P5b may add. A refusal arrives as a chat line of the WeenieError kind, so the recall
@@ -50,6 +52,12 @@ public sealed class RecallHome : IDisposable
     /// <summary>Lifestone Recall (Item Enchantment, power 100; <c>SpellStage.cs</c> names it; <c>FighterMagicDatTests</c> pins its power and school against the SpellTable).</summary>
     public const uint LifestoneRecallSpell = 1635;
 
+    /// <summary>Primary Portal Recall (Item Enchantment): ACE teleports to the tied portal's destination 2 s after the cast, or answers 0x04A3 when no portal is tied (M4 P5b W0, pinned live).</summary>
+    public const uint PrimaryPortalRecallSpell = 48;
+
+    /// <summary>The landblock of the Black Spawn Den's arrival (the den portal's destination, cell 0x01050375): where Primary Portal Recall lands once the den portal is tied (M4 P5b W0).</summary>
+    public const uint DenLandblock = 0x0105;
+
     /// <summary>The landblock of Holtburg's lifestone (the BSD Mage's bind, M3 D34; the fighters bind there too in P5b's first station).</summary>
     public const uint HoltburgLandblock = 0xA9B4;
 
@@ -65,11 +73,19 @@ public sealed class RecallHome : IDisposable
     /// <summary>The fizzles one recall retries (a named cap, not retail's: Lifestone's own); the next fizzle fails the recall <c>recall:cast</c>. At the 0.9 chance rule five in a row is one in a hundred thousand.</summary>
     public const int MaxFizzles = 5;
 
+    /// <summary>
+    /// Seconds the recall waits, before it sends the cast, for the player to stop being busy by the Action API's lane rule (<see cref="IActionApi.BusyReason"/>; M4 P5b fix FC-a1): past it the recall fails <c>recall:busy-wait</c>.
+    /// Lifestone's own bound, not retail's: the longest chain the rule knows is a corpse pickup's 1.35 s after its return stance, and a held lane is let go at its tracker's timeout; 15 s covers a loot's last move and a heal's Ready with room.
+    /// </summary>
+    public const double BusyWaitSeconds = 15.0;
+
     private readonly IGameSessionView _session;
     private readonly IActionApi _actions;
     private readonly GameState _state;
     private readonly CasterSwap? _swap;
     private readonly uint _homeLandblock;
+    private readonly uint _spell;
+    private readonly string _spellName;
     private readonly ILogSink _log;
     private readonly IDisposable _travelSubscription;
     private readonly IDisposable _chatSubscription;
@@ -88,6 +104,7 @@ public sealed class RecallHome : IDisposable
     private int _recalls;
     private int _fizzlesThisRecall;
     private int _fizzles;
+    private double _busySince = double.NaN;
 
     private enum Phase
     {
@@ -103,8 +120,9 @@ public sealed class RecallHome : IDisposable
     /// <param name="session">The session (its Action API, read model and event bus).</param>
     /// <param name="swap">The caster swap over the same session, or null (the mage).</param>
     /// <param name="log">Where the recall logs.</param>
-    /// <param name="homeLandblock">The landblock of the lifestone the character is bound to (the high 16 bits of a cell id).</param>
-    public RecallHome(IGameSessionView session, CasterSwap? swap, ILogSink log, uint homeLandblock = HoltburgLandblock)
+    /// <param name="homeLandblock">The landblock of the lifestone the character is bound to (the high 16 bits of a cell id), or the tied portal destination's for <see cref="PrimaryPortalRecallSpell"/>.</param>
+    /// <param name="spellId">The recall spell: <see cref="LifestoneRecallSpell"/> (the default) or <see cref="PrimaryPortalRecallSpell"/>.</param>
+    public RecallHome(IGameSessionView session, CasterSwap? swap, ILogSink log, uint homeLandblock = HoltburgLandblock, uint spellId = LifestoneRecallSpell)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _actions = session.Actions;
@@ -112,6 +130,8 @@ public sealed class RecallHome : IDisposable
         _swap = swap;
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _homeLandblock = homeLandblock & 0xFFFF;
+        _spell = spellId;
+        _spellName = SpellName(spellId);
         _travelSubscription = session.Events.Subscribe<SelfTravelChanged>(OnTravel);
         _chatSubscription = session.Events.Subscribe<ChatReceived>(OnChat);
     }
@@ -122,17 +142,18 @@ public sealed class RecallHome : IDisposable
     /// <param name="session">The session.</param>
     /// <param name="characterName">The character's name as the read model holds it, or null.</param>
     /// <param name="log">The log.</param>
-    /// <param name="homeLandblock">The lifestone's landblock.</param>
-    public static RecallHome? ForCharacter(IGameSessionView session, string? characterName, ILogSink log, uint homeLandblock = HoltburgLandblock)
+    /// <param name="homeLandblock">The lifestone's landblock (or the tied portal destination's).</param>
+    /// <param name="spellId">The recall spell (<see cref="LifestoneRecallSpell"/> by default, or <see cref="PrimaryPortalRecallSpell"/>).</param>
+    public static RecallHome? ForCharacter(IGameSessionView session, string? characterName, ILogSink log, uint homeLandblock = HoltburgLandblock, uint spellId = LifestoneRecallSpell)
     {
         ArgumentNullException.ThrowIfNull(session);
         var template = FighterTemplate.ForName(characterName);
         if (template is { HasMagic: true })
         {
-            return new RecallHome(session, CasterSwap.For(template, session.Actions, session.State, log), log, homeLandblock);
+            return new RecallHome(session, CasterSwap.For(template, session.Actions, session.State, log), log, homeLandblock, spellId);
         }
 
-        return string.Equals(characterName?.Trim(), MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase) ? new RecallHome(session, null, log, homeLandblock) : null;
+        return string.Equals(characterName?.Trim(), MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase) ? new RecallHome(session, null, log, homeLandblock, spellId) : null;
     }
 
     /// <summary>Where the recall is.</summary>
@@ -143,6 +164,21 @@ public sealed class RecallHome : IDisposable
 
     /// <summary>The lifestone's landblock (the high 16 bits of its cell ids).</summary>
     public uint HomeLandblock => _homeLandblock;
+
+    /// <summary>The recall spell this object casts (1635 or 48).</summary>
+    public uint SpellId => _spell;
+
+    /// <summary>The recall refusal ACE sent during the last recall (0x049E, 0x049F, 0x04A3, 0x04AD or 0x04CC), or 0: the journey reads the ties from it (M4 P5b contract 4).</summary>
+    public uint Refusal => _refusal;
+
+    /// <summary>The name of a recall spell for the log: Lifestone Recall, Primary Portal Recall, or "spell N".</summary>
+    /// <param name="spellId">The spell id.</param>
+    public static string SpellName(uint spellId) => spellId switch
+    {
+        LifestoneRecallSpell => "Lifestone Recall",
+        PrimaryPortalRecallSpell => "Primary Portal Recall",
+        _ => "spell " + spellId.ToString(CultureInfo.InvariantCulture),
+    };
 
     /// <summary>The first failure as <c>recall:&lt;step&gt;</c> (<c>recall:cast</c>), or null. Cleared by the next <see cref="Begin"/>.</summary>
     public string? Failure { get; private set; }
@@ -194,11 +230,12 @@ public sealed class RecallHome : IDisposable
         _teleportSeen = false;
         _refusal = 0;
         _fizzlesThisRecall = 0;
+        _busySince = double.NaN;
         _swapIn = false;
         _pending = null;
         _started = now;
         Status = RecallStatus.Running;
-        _log.Info(LogCategory, "recall: begin" + (_swap is null ? string.Empty : " (with the caster swap)"));
+        _log.Info(LogCategory, "recall: begin " + _spellName + (_swap is null ? string.Empty : " (with the caster swap)"));
         if (_state.Phase != SessionPhase.InWorld || _state.Self.Travel != SelfTravel.Present)
         {
             EndFailed("present", "the character is " + (_state.Phase != SessionPhase.InWorld ? "not in the world" : "in " + _state.Self.Travel + " (portal space or arriving)"), now, restore: false);
@@ -276,9 +313,9 @@ public sealed class RecallHome : IDisposable
     private RecallStatus StepMode(double now)
     {
         var book = _state.Self.Spellbook;
-        if (book.IsKnown && !book.Knows(LifestoneRecallSpell))
+        if (book.IsKnown && !book.Knows(_spell))
         {
-            return Fail("spell", "Lifestone Recall (spell 1635) is not in the spellbook (rerun --scenario=fighter-build or mage-build: it teaches the profile's spells)", now);
+            return Fail("spell", $"{_spellName} (spell {_spell.ToString(CultureInfo.InvariantCulture)}) is not in the spellbook (rerun --scenario=fighter-build or mage-build: it teaches the profile's spells)", now);
         }
 
         if (_state.Self.Qualities.CombatMode == CombatModes.Magic)
@@ -312,8 +349,28 @@ public sealed class RecallHome : IDisposable
     {
         if (_pending is null)
         {
-            _log.Info(LogCategory, "recall: casting Lifestone Recall (" + LifestoneRecallSpell.ToString(CultureInfo.InvariantCulture) + ")");
-            _pending = _actions.Cast(LifestoneRecallSpell);
+            // FC-a1: ACE answers a cast sent into the player's busy chain (a corpse pickup's return stance, a heal's Ready) 0x001D; wait for the Action API's rule to clear, bounded, then cast once. A 0x001D after that is a failure.
+            if (_actions.BusyReason is { } busy)
+            {
+                if (double.IsNaN(_busySince))
+                {
+                    _busySince = now;
+                    _log.Info(LogCategory, $"recall:busy-wait: the player is busy ({busy}); the cast waits up to {BusyWaitSeconds:0} s");
+                }
+
+                return now - _busySince > BusyWaitSeconds
+                    ? Fail("busy-wait", $"the player was still busy after {BusyWaitSeconds:0} s ({busy}); the cast was not sent", now)
+                    : Status;
+            }
+
+            if (!double.IsNaN(_busySince))
+            {
+                _log.Info(LogCategory, $"recall:busy-wait: the player is free after {now - _busySince:0.00} s");
+                _busySince = double.NaN;
+            }
+
+            _log.Info(LogCategory, "recall: casting " + _spellName + " (" + _spell.ToString(CultureInfo.InvariantCulture) + ")");
+            _pending = _actions.Cast(_spell);
             return Status;
         }
 
@@ -335,10 +392,10 @@ public sealed class RecallHome : IDisposable
             _fizzles++;
             if (++_fizzlesThisRecall > MaxFizzles)
             {
-                return Fail("cast", $"Lifestone Recall fizzled {_fizzlesThisRecall} times in one recall, over the cap of {MaxFizzles}: " + Describe(outcome), now);
+                return Fail("cast", $"{_spellName} fizzled {_fizzlesThisRecall} times in one recall, over the cap of {MaxFizzles}: " + Describe(outcome), now);
             }
 
-            _log.Warn(LogCategory, $"recall: Lifestone Recall fizzled (fizzle {_fizzlesThisRecall} of at most {MaxFizzles}); casting again");
+            _log.Warn(LogCategory, $"recall: {_spellName} fizzled (fizzle {_fizzlesThisRecall} of at most {MaxFizzles}); casting again");
             return Status;
         }
 

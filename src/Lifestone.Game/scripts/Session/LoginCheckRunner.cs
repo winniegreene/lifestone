@@ -219,7 +219,7 @@ public sealed partial class LoginCheckRunner : Node
         ArgumentNullException.ThrowIfNull(mode);
         if (kind == LoginCheckKind.Throwaway)
         {
-            ThrowawayLegRunner.Install(main, host, mode, ui); // a separate check with its own script and verdict (never part of 'all')
+            ThrowawayLegRunner.Install(main, services, host, mode, ui); // a separate check with its own script and verdict (never part of 'all')
             return;
         }
 
@@ -238,6 +238,12 @@ public sealed partial class LoginCheckRunner : Node
         if (kind == LoginCheckKind.Hunt)
         {
             HuntLegRunner.Install(main, services, host, mode, ui); // a kind of its own (M4 1.2 s4b): Holtburg Hunter's hunt on the hunt grounds, never part of 'all'
+            return;
+        }
+
+        if (kind == LoginCheckKind.Journey)
+        {
+            JourneyLegRunner.Install(main, services, host, mode, ui); // a kind of its own (M4 P5b J5): a journey's stations in one login on foot, never part of 'all'
             return;
         }
 

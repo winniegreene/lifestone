@@ -20,7 +20,7 @@ public sealed class LootRulesTests
     // 1500 capacity: Strength 10 and no augmentations (EncumbranceSystem.EncumbranceCapacity(10, 0)).
     private static readonly LootContext Empty = new(Burden: 0, Capacity: 1500, Inventory: null);
 
-    internal static WorldObject Item(uint itemType, uint? value, ushort? burden = null, uint guid = 0x80000211, string name = "Thing", uint wcid = 141, ushort? maxStack = null)
+    internal static WorldObject Item(uint itemType, uint? value, ushort? burden = null, uint guid = 0x80000211, string name = "Thing", uint wcid = 141, ushort? maxStack = null, uint descriptionFlags = 0)
     {
         var header = WeenieHeaderFlags.None;
         if (value is not null)
@@ -45,7 +45,7 @@ public sealed class LootRulesTests
             WeenieClassId = wcid,
             IconId = 0x06000001,
             ItemType = itemType,
-            ObjectDescriptionFlags = 0,
+            ObjectDescriptionFlags = descriptionFlags,
             Value = value,
             Burden = burden,
             StackSize = maxStack is null ? null : (ushort)1,

@@ -23,7 +23,7 @@ namespace Lifestone.Client.Tests.Session;
 public sealed class WayfindScenarioTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     private static readonly Regex Leg = new(
-        @"^wayfind leg=(out|back) ok=true route_m=\d+\.\d run_s=\d+\.\d speed_mps=\d+\.\d\d plans=\d+ replans=\d+ rungs=0 blocked=0 stuck=0 corrections=0 where_start_m=\d+\.\d\d where_end_m=\d+\.\d\d where_max_m=\d+\.\d\d settle_s=\d+\.\d teleports=\d landblocks_peak=\d+$",
+        @"^wayfind leg=(out|back) ok=true route_m=\d+\.\d run_s=\d+\.\d speed_mps=\d+\.\d\d plans=\d+ replans=\d+ rungs=0 blocked=0 stuck=0 corrections=0 where_start_m=\d+\.\d\d where_end_m=\d+\.\d\d where_max_m=\d+\.\d\d settle_s=\d+\.\d teleports=\d landblocks_peak=\d+ turns=\d+ key_changes_per_min=\d+$",
         RegexOptions.CultureInvariant);
 
     private DatSet Dats => fixture.Dats;

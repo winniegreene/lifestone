@@ -10,7 +10,7 @@ using Lifestone.Net.Wire;
 namespace Lifestone.Net.Messages;
 
 /// <summary>GameEvent 0x01A7 AttackDone (ACE <c>GameEventAttackDone</c>): the attack is over; 0 for a finished swing, 0x0036
-/// (YoureTooBusy) when the attack could not start or repeat.</summary>
+/// (ACE's <c>WeenieError.ActionCancelled</c> at @95ef426d; YoureTooBusy is 0x001D, a different error) when the attack could not start or repeat.</summary>
 /// <param name="WeenieError">The WeenieError, 0 for none.</param>
 public readonly record struct AttackDoneEvent(uint WeenieError);
 

@@ -41,4 +41,26 @@ public readonly record struct GcFrame(double PauseMilliseconds, int Gen0, int Ge
         ("gc_gen1", Gen1),
         ("gc_gen2", Gen2),
     ];
+
+    /// <summary>
+    /// M4 P5b (<c>TODO(m4-throwaway-teleport-frame)</c>): when this frame held a collection, the last collection's generation, pause, gen 0 size when it began and the bytes it promoted
+    /// (<c>gc_last_generation</c>, <c>gc_last_pause_ms</c>, <c>gc_last_gen0_before_mib</c>, <c>gc_last_promoted_mib</c>), so a slow-frame line says how big the collection was; empty otherwise. It allocates (the
+    /// runtime's info object), so it is read only when such a line is written.
+    /// </summary>
+    public (string Key, object? Value)[] LastCollectionFields()
+    {
+        if (Gen0 == 0)
+        {
+            return [];
+        }
+
+        var last = GC.GetGCMemoryInfo(GCKind.Any);
+        return
+        [
+            ("gc_last_generation", last.Generation),
+            ("gc_last_pause_ms", last.PauseDurations[0].TotalMilliseconds),
+            ("gc_last_gen0_before_mib", last.GenerationInfo[0].SizeBeforeBytes / 1048576.0),
+            ("gc_last_promoted_mib", last.PromotedBytes / 1048576.0),
+        ];
+    }
 }

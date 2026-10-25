@@ -188,6 +188,21 @@ public sealed class CombatModeWatchTests
         Assert.Equal(1, r.Watch.Violations);
     }
 
+    [Fact]
+    public void M4_4_2_J1_the_hunts_watch_count_reaches_the_measures_and_fails_the_verdict_and_the_station_fields_print_it()
+    {
+        var r = new Rig(WieldedSetups.Wand);
+        r.Mode(CombatModes.Melee);
+        var hunt = new HuntScenario(new HuntOptions(), new RecordingLogSink(), _ => 40f) { ModeWatch = r.Watch };
+
+        var measures = HuntLegVerdict.FromScenario(hunt, HuntWeapon.Melee, lootEnabled: false, HuntGroundChoice.Belt);
+
+        Assert.Equal(1, measures.ModeMismatch);
+        Assert.Contains(HuntLegVerdict.Compose(null, measures).Problems, p => p.StartsWith("mode_mismatch=1 (0 expected", StringComparison.Ordinal));
+        Assert.Contains(" mode_mismatch=1 attack_frame_max_ms=", Lifestone.Client.Session.Scenarios.Journey.JourneyStations.HuntFields(hunt, null), StringComparison.Ordinal);
+        Assert.Equal(0, HuntLegVerdict.FromScenario(new HuntScenario(new HuntOptions(), new RecordingLogSink(), _ => 40f), HuntWeapon.Melee, false, HuntGroundChoice.Belt).ModeMismatch); // no watch: 0
+    }
+
     /// <summary>A world with the pieces wielded and a watch started on it; the sequences of the server's messages count per rig.</summary>
     private sealed class Rig
     {

@@ -1,3 +1,4 @@
+using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Client.Options;
 
 namespace Lifestone.Client.Play;
@@ -63,6 +64,13 @@ public enum LoginCheckKind
     /// Mace or, with <c>--hunt-weapon=missile</c>, the Shortbow and Arrows, returns to Holtburg, logs off and judges what it measured (<see cref="Lifestone.Client.Session.Scenarios.HuntLegVerdict"/>).
     /// </summary>
     Hunt,
+
+    /// <summary>
+    /// <c>--login-check=journey --journey=mage|melee|archer</c> (M4 P5b J5): a separate check, never part of <see cref="All"/>. Enters the plan's character on the plan's test account and runs the journey
+    /// (<see cref="Lifestone.Client.Session.Scenarios.Journey.JourneyScenario"/>: the stations in one login, on foot between them) in the game's session with the player's own body as the runner's walker,
+    /// takes the review frames at the stations and judges the journey's verdict lines.
+    /// </summary>
+    Journey,
 }
 
 /// <summary>
@@ -100,6 +108,12 @@ public sealed record PlayOptions
     /// <c>--play-screenshot-after</c> moves the path here, so play mode's own capture (a fixed wait after the player is placed, then quit) does not fire; null otherwise.
     /// </summary>
     public string? BuffShotPath { get; init; }
+
+    /// <summary>The journey's plan name from <c>--journey=mage|melee|archer</c> (M4 P5b J5), or null when not given; read by <c>--login-check=journey</c> only.</summary>
+    public string? Journey { get; init; }
+
+    /// <summary>The journey's extra frames (<c>--journey-shots</c>, J7): off by default. The seam the hero hook turns on without restructuring the runner.</summary>
+    public Lifestone.Client.Session.Scenarios.Journey.JourneyShots JourneyShots { get; init; } = Lifestone.Client.Session.Scenarios.Journey.JourneyShots.Off;
 
     /// <summary>
     /// The folder <c>--play-panel-shots=DIR</c> saves one frame of each registered panel page to (M3 2.2 s0; <see cref="PanelFramesPlan"/>), or null: in a plain <c>--play</c> run, after the arrival settles, each page is
@@ -296,16 +310,147 @@ public sealed record PlayOptions
                         ("bsd-fight", LoginCheckKind.BsdFight),
                         ("bsd-death", LoginCheckKind.BsdDeath),
                         ("hunt", LoginCheckKind.Hunt),
+                        ("journey", LoginCheckKind.Journey),
                         ("all", LoginCheckKind.All)),
                 };
             }
         }
 
-        if (options is { LoginCheck: LoginCheckKind.Buff or LoginCheckKind.BsdFight or LoginCheckKind.BsdDeath or LoginCheckKind.Hunt, ScreenshotPath: { } shot, ScreenshotAfterGiven: false })
+        options = JourneyChecked(options, args, errors);
+        options = JourneyShotsChecked(options, args, errors);
+        if (options is { LoginCheck: LoginCheckKind.Buff or LoginCheckKind.BsdFight or LoginCheckKind.BsdDeath or LoginCheckKind.Hunt or LoginCheckKind.Journey, ScreenshotPath: { } shot, ScreenshotAfterGiven: false })
         {
             options = options with { ScreenshotPath = null, BuffShotPath = shot }; // the buff leg takes its own frames, mid-cast, and the fight leg its three
         }
 
         return options with { Errors = errors };
+    }
+
+    /// <summary>
+    /// <c>--journey-shots</c>, <c>--journey-shot-frames=N</c> and <c>--journey-shot-step=S</c> (M4 P5b J7): the showpiece bursts of the journey check. Without <c>--journey-shots</c> the other two are errors; outside the journey check all three are errors.
+    /// </summary>
+    private static PlayOptions JourneyShotsChecked(PlayOptions options, IEnumerable<CommandLineArgument> args, List<string> errors)
+    {
+        var on = false;
+        var frames = JourneyShots.DefaultBurstFrames;
+        var step = JourneyShots.OnWithDefaults.StepSeconds;
+        var given = new List<string>();
+        foreach (var argument in args)
+        {
+            var known = errors.Count;
+            switch (argument.Name)
+            {
+                case "--journey-shots":
+                    on = OptionValues.Switch(argument, errors, on);
+                    given.Add(argument.Name);
+                    break;
+                case "--journey-shot-frames":
+                    var n = OptionValues.Int(argument, errors, frames);
+                    if (errors.Count == known && n is >= 1 and <= JourneyShots.MaxBurstFrames)
+                    {
+                        frames = n;
+                    }
+                    else if (errors.Count == known)
+                    {
+                        errors.Add($"--journey-shot-frames: '{argument.Value}' is not 1 to {JourneyShots.MaxBurstFrames}");
+                    }
+
+                    given.Add(argument.Name);
+                    break;
+                case "--journey-shot-step":
+                    var seconds = OptionValues.Double(argument, errors, step);
+                    if (errors.Count == known && seconds is > 0 and <= 5)
+                    {
+                        step = seconds;
+                    }
+                    else if (errors.Count == known)
+                    {
+                        errors.Add($"--journey-shot-step: '{argument.Value}' is not a number of seconds above 0 and up to 5");
+                    }
+
+                    given.Add(argument.Name);
+                    break;
+            }
+        }
+
+        if (given.Count == 0)
+        {
+            return options;
+        }
+
+        if (options.LoginCheck != LoginCheckKind.Journey)
+        {
+            errors.Add("--journey-shots: only --login-check=journey reads " + string.Join(", ", given));
+            return options;
+        }
+
+        if (!on)
+        {
+            if (given.Any(g => g != "--journey-shots"))
+            {
+                errors.Add("--journey-shot-frames and --journey-shot-step need --journey-shots");
+            }
+
+            return options;
+        }
+
+        return options with { JourneyShots = new JourneyShots(true, BurstFrames: frames, StepSeconds: step) };
+    }
+
+    /// <summary>
+    /// <c>--journey=NAME</c> (M4 P5b J5): the plan's name, and the account rule of the headless host: the plan runs on its own test account (mage on <c>test</c>, melee on <c>test-melee</c>, archer on
+    /// <c>test-archer</c>); no <c>--account</c> is the test account, so the melee and the archer journeys need theirs. A journey given without the journey check, a bad name and a wrong account are errors.
+    /// </summary>
+    private static PlayOptions JourneyChecked(PlayOptions options, IEnumerable<CommandLineArgument> args, List<string> errors)
+    {
+        string? name = null;
+        string? account = null;
+        foreach (var argument in args)
+        {
+            if (argument.Name == "--journey")
+            {
+                name = argument.HasValue ? argument.Value : null;
+                if (name is null)
+                {
+                    errors.Add("--journey: needs a plan (--journey=mage|melee|archer)");
+                }
+            }
+            else if (argument.Name == "--account" && argument.HasValue)
+            {
+                account = argument.Value;
+            }
+        }
+
+        if (options.LoginCheck != LoginCheckKind.Journey)
+        {
+            if (name is not null)
+            {
+                errors.Add("--journey: only --login-check=journey reads it");
+            }
+
+            return options;
+        }
+
+        if (name is null)
+        {
+            errors.Add("--login-check=journey: needs --journey=mage|melee|archer|hero-archer|hero-brawler|hero-mage");
+            return options;
+        }
+
+        var plan = Lifestone.Client.Session.Scenarios.Journey.JourneyPlans.ForName(name);
+        if (plan is null)
+        {
+            errors.Add($"--journey: '{name}' is not a plan (mage, melee, archer, hero-archer, hero-brawler or hero-mage)");
+            return options;
+        }
+
+        var effective = string.IsNullOrWhiteSpace(account) ? "test" : account;
+        if (!string.Equals(effective, plan.Account, StringComparison.Ordinal))
+        {
+            errors.Add($"--journey={plan.Name}: the {plan.Name} journey runs {plan.Character} on the account '{plan.Account}' (give --account={plan.Account}); '{effective}' is refused");
+            return options;
+        }
+
+        return options with { Journey = plan.Name };
     }
 }

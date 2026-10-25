@@ -5,6 +5,7 @@ using Lifestone.Client.Navigation;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Client.World;
 using Lifestone.Data.World;
 
@@ -141,12 +142,13 @@ public sealed partial class HuntScenario
     public int Appraised => _appraisals.Appraised;
 
     /// <summary>How the sale ended: <c>off</c>, <c>not-run</c>, <c>none</c> (nothing the shop takes was held), <c>ok</c>, <c>partial</c>, <c>skipped:&lt;why&gt;</c> or <c>failed:&lt;reason&gt;</c>.</summary>
-    public string SellOutcome => _options.Sell ? _sellOutcome : "off";
+    public string SellOutcome => !Has(HuntStages.Vendor) ? "n/a" : _options.Sell ? _sellOutcome : "off";
 
     /// <summary>How the purchase ended: <c>off</c>, <c>not-run</c>, <c>enough</c> (the kits were held), <c>ok</c>, <c>partial</c>, <c>skipped:&lt;why&gt;</c> or <c>failed:&lt;reason&gt;</c>.</summary>
-    public string BuyOutcome => _options.BuyKits > 0 ? _buyOutcome : "off";
+    public string BuyOutcome => !Has(HuntStages.Vendor) ? "n/a" : _options.BuyKits > 0 ? _buyOutcome : "off";
 
-    private string VendorFields() =>
+    /// <summary>The vendor fields (<c>sold= bought= pyreals= appraised= sell= buy= buy_pyreals=</c>): the detail line's, and the vendor station's beside the verdict.</summary>
+    public string VendorFields() =>
         string.Create(CultureInfo.InvariantCulture, $"sold={_tally.Sold} bought={_tally.Bought} pyreals={_tally.Pyreals} appraised={_appraisals.Appraised} sell={Token(SellOutcome)} buy={Token(BuyOutcome)} buy_pyreals={_buyCost}");
 
     /// <summary>A value on the detail line has no spaces.</summary>
@@ -177,6 +179,11 @@ public sealed partial class HuntScenario
         }
 
         _vendorTripBegun = true;
+        if (!Has(HuntStages.Vendor))
+        {
+            return null; // M4 P5b: the shops are their own station in a journey (the stage is logged once as skipped; sell=n/a buy=n/a)
+        }
+
         _wantSell = _options.Sell;
         _wantBuy = _options.BuyKits > 0;
         if (!_wantSell && !_wantBuy)
@@ -221,13 +228,54 @@ public sealed partial class HuntScenario
 
     private ScenarioStatus VendorGo(IGameSessionView session, int side = 1)
     {
+        if (OnFoot)
+        {
+            return VendorGoOnFoot(session);
+        }
+
         _vendorSide = side;
         var shop = Beside(_visit == VendorVisit.Renald ? RenaldShop : ThelnothShop, side * VendorStandOffMetres);
         var at = shop.Location.Position.Local;
         _vendorPlace = true;
         _vendorGuid = 0;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vendors: going to {shop.Name}: place loc cell 0x{shop.Location.Position.CellId:X8} at ({at.X:0.##}, {at.Y:0.##}, {at.Z:0.##}), {Math.Abs(VendorStandOffMetres):0.0} m {(side > 0 ? "+X" : "-X")} of the vendor (TODO(m4-vendor-approach): the walk through the door is not built)"));
-        BeginPlace(session, shop, "vendor-arrive", home: false);
+        BeginPlace(session, shop, "vendor-arrive", home: false, TravelPurpose.Vendor);
+        return ScenarioStatus.Running;
+    }
+
+    /// <summary>Renald the Elder's front room (inside the shop's door, in front of his counter): the shop goal on foot, never his room 0xA9B40141 behind the counter (TODO(room-steps): its floor is a metre above).</summary>
+    public const uint RenaldFrontRoomCell = 0xA9B4013F;
+
+    /// <summary>
+    /// The radius the walk ends in: Renald 6.5 m (from his front room: no standable front-room floor lies within 5 m of him,
+    /// 5.72 m measured by P5b F1, and the counter blocks every sight line, so the goal asks for no sight), Thelnoth 3 m (his
+    /// cellar 0xA9B40111 is his shop's own cell). Not retail: Lifestone's own; ACE's approach walks the rest of the use range.
+    /// </summary>
+    private double VendorUseMetres => _visit == VendorVisit.Renald ? RenaldUseMetres : ThelnothUseMetres;
+
+    /// <summary>The radius every walk to Renald the Elder ends in (the hunt's and the vendor-facts station's, M4 P5b fix FC-b2): 6.5 m from his front room, asking for no sight.</summary>
+    public const double RenaldUseMetres = 6.5;
+
+    /// <summary>The radius every walk to Thelnoth Cort ends in: 3 m (his cellar is his shop's own cell).</summary>
+    public const double ThelnothUseMetres = 3.0;
+
+    /// <summary>
+    /// The shop door on foot (M4 P5b, lane J2a; closes the live walk of <c>m4-vendor-approach</c>): the travel seam's object goal is the vendor within its use radius, the point is the vendor's own x and y in the room the
+    /// walk ends in (Renald's front room <see cref="RenaldFrontRoomCell"/>, Thelnoth's cellar); the vendor's guid when it is in view, else a point goal.
+    /// </summary>
+    private ScenarioStatus VendorGoOnFoot(IGameSessionView session)
+    {
+        _vendorSide = 0;
+        _vendorPlace = true;
+        _vendorGuid = 0;
+        var renald = _visit == VendorVisit.Renald;
+        var shop = renald ? RenaldShop : ThelnothShop;
+        var cell = renald ? RenaldFrontRoomCell : shop.Location.Position.CellId;
+        var goal = shop with { Name = shop.Name + " (on foot)", Location = shop.Location with { Position = shop.Location.Position with { CellId = cell } } };
+        var guid = FindVendor(session, renald ? RenaldWcid : ThelnothWcid);
+        var at = goal.Location.Position.Local;
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vendors: on foot to {VisitName}: cell 0x{cell:X8}, the vendor's point ({at.X:0.##}, {at.Y:0.##}, {at.Z:0.##}), {(guid == 0 ? "a point goal (the vendor is not in view yet)" : $"the object goal 0x{guid:X8} within {VendorUseMetres:0} m")}"));
+        BeginPlace(session, goal, "vendor-arrive", home: false, TravelPurpose.Vendor, guid, VendorUseMetres);
         return ScenarioStatus.Running;
     }
 
@@ -292,7 +340,11 @@ public sealed partial class HuntScenario
                 : ScenarioStatus.Running;
         }
 
-        if (_vendorSide > 0 && !WithinReach(session, guid))
+        if (_lastMeans != TravelMeans.Place && !WithinUse(session, guid))
+        {
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vendors: the walk ended outside {VisitName}'s use radius ({VendorUseMetres:0} m); the open is sent and ACE's own approach walks the rest (TODO(m4-vendor-approach))"));
+        }
+        else if (_vendorSide > 0 && !WithinReach(session, guid))
         {
             _log.Info(LogCategory, $"vendors: the +X spot is outside {VisitName}'s cell or use radius; trying the -X side once");
             return VendorGo(session, -1);
@@ -315,8 +367,12 @@ public sealed partial class HuntScenario
             return false;
         }
 
-        return there.ToGlobal().DistanceTo(here.ToGlobal()) <= (_visit == VendorVisit.Renald ? 5.0 : 3.0);
+        return there.ToGlobal().DistanceTo(here.ToGlobal()) <= VendorUseMetres;
     }
+
+    /// <summary>True when the player is within the vendor's use radius, whatever the cell (the walk's arrival: the front room is not the vendor's cell).</summary>
+    private bool WithinUse(IGameSessionView session, uint vendor) =>
+        session.State.Self.Position is { } here && session.State.Objects.TryGet(vendor, out var npc) && npc.Position is { } there && there.ToGlobal().DistanceTo(here.ToGlobal()) <= VendorUseMetres + 0.5;
 
     private uint FindVendor(IGameSessionView session, uint wcid)
     {
@@ -482,6 +538,11 @@ public sealed partial class HuntScenario
         if (sold == 0)
         {
             _sellOutcome = "failed:" + (_sellFirstError ?? "no item left the pack");
+            if (!Has(HuntStages.Hunt))
+            {
+                Failure ??= $"vendors: {VisitName}: nothing was sold ({_sellOutcome})";
+            }
+
             _log.Warn(LogCategory, $"sell: nothing was sold ({_sellOutcome}); the hunt goes on");
         }
         else
@@ -603,7 +664,17 @@ public sealed partial class HuntScenario
     {
         _pending = null;
         _trade = null;
-        _log.Warn(LogCategory, $"vendors: {VisitName}: {why}; the hunt goes on (a failed shop visit never fails the hunt)");
+        if (!Has(HuntStages.Hunt))
+        {
+            // The vendor station (M4 P5b F2): the visit is the whole run, so a visit that failed (the walk to the shop included) fails it, with the visit's reason.
+            Failure ??= $"vendors: {VisitName}: {why}";
+            _log.Warn(LogCategory, $"vendors: {VisitName}: {why}; the vendor-only run fails with it");
+        }
+        else
+        {
+            _log.Warn(LogCategory, $"vendors: {VisitName}: {why}; the hunt goes on (a failed shop visit never fails the hunt)");
+        }
+
         if (_visit == VendorVisit.Renald)
         {
             _sellOutcome = "failed:" + why;
@@ -630,8 +701,14 @@ public sealed partial class HuntScenario
 
         _visit = VendorVisit.None;
         _vendorPlace = false;
+        if (!Has(HuntStages.Home))
+        {
+            _log.Info(LogCategory, "vendors: done; the home stage is skipped (the journey's next station travels)");
+            return Home(session);
+        }
+
         _log.Info(LogCategory, "vendors: done; back to Holtburg");
-        BeginPlace(session, _holtburg, "wind-home-done", home: true);
+        BeginPlace(session, _holtburg, "wind-home-done", home: true, TravelPurpose.Home);
         return ScenarioStatus.Running;
     }
 

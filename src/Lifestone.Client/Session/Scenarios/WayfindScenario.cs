@@ -183,18 +183,10 @@ public sealed class WayfindScenario : IScenario, IDisposable
         private readonly ILogSink _log;
         private readonly WayfindOptions _options;
         private readonly Func<IGameSessionView, IMovementSink>? _sinkOf;
-        private readonly List<ObjectMoved> _moves = [];
+        private readonly HeadlessBody _body;
         private readonly List<string> _lines = [];
-        private PhysicsWorld? _world;
-        private NavMap? _map;
-        private HeadlessStreamer? _streamer;
-        private OfflineWalker? _walker;
-        private MovementAudit? _audit;
-        private MoveIntents? _move;
         private NavRunner? _runner;
-        private RouteConfirmer? _confirmer;
         private INavPathSource? _source;
-        private IDisposable? _movesSubscription;
         private ActionHandle? _pending;
         private ToolHandle<WhereResult>? _where;
         private CellFrame _whereClient;
@@ -204,8 +196,6 @@ public sealed class WayfindScenario : IScenario, IDisposable
         private string _leg = "out";
         private bool _placed;
         private bool _disposed;
-        private bool _focusSet;
-        private int _teleports;
         private int _teleportMark;
         private int _legTeleports;
         private int _legCorrectionsAtStart;
@@ -215,7 +205,6 @@ public sealed class WayfindScenario : IScenario, IDisposable
         private double _nextWhere;
         private double _lastStepMs = double.NaN;
         private double _stepGapMax;
-        private long _heapPeak;
         private string? _legFailure;
         private double? _whereStartMetres;
         private double? _whereEndMetres;
@@ -227,6 +216,7 @@ public sealed class WayfindScenario : IScenario, IDisposable
         public Play(DatSet dats, ILogSink log, WayfindOptions options, Func<IGameSessionView, IMovementSink>? sinkOf)
         {
             (_dats, _log, _options, _sinkOf) = (dats, log, options, sinkOf);
+            _body = new HeadlessBody(dats, log, LogCategory, sinkOf);
         }
 
         public string Name => ScenarioName;
@@ -235,16 +225,16 @@ public sealed class WayfindScenario : IScenario, IDisposable
 
         public string? Failure { get; private set; }
 
-        public double? WhereMaxMetres => _audit?.Summary.WhereMaxMetres;
+        public double? WhereMaxMetres => _body.Audit?.Summary.WhereMaxMetres;
 
         public long Unmatched => 0;
 
         public IReadOnlyList<string> Lines => _lines;
 
-        public HeadlessStreamer? Streamer => _streamer;
+        public HeadlessStreamer? Streamer => _body.Streamer;
 
-        public string? StreamerLine => _streamer is { } s
-            ? string.Create(CultureInfo.InvariantCulture, $"wayfind streamer landblocks_peak={s.PeakAttached} tiles_peak={s.PeakTiles} heap_peak_mb={_heapPeak / 1048576.0:F0} pump_max_ms={s.PumpMaxMilliseconds:F1} attach_max_ms={s.AttachMaxMilliseconds:F1} tile_build_max_ms={s.TileBuildMaxMilliseconds:F1} tile_attach_max_ms={s.TileAttachMaxMilliseconds:F1} attaches={s.Attaches} releases={s.Releases} tile_builds={s.TileBuilds} tile_rebuilds={s.TileRebuilds} tile_failures={s.TileFailures} step_gap_max_ms={_stepGapMax:F1}")
+        public string? StreamerLine => _body.Streamer is { } s
+            ? string.Create(CultureInfo.InvariantCulture, $"wayfind streamer landblocks_peak={s.PeakAttached} tiles_peak={s.PeakTiles} heap_peak_mb={_body.HeapPeak / 1048576.0:F0} pump_max_ms={s.PumpMaxMilliseconds:F1} attach_max_ms={s.AttachMaxMilliseconds:F1} tile_build_max_ms={s.TileBuildMaxMilliseconds:F1} tile_attach_max_ms={s.TileAttachMaxMilliseconds:F1} attaches={s.Attaches} releases={s.Releases} tile_builds={s.TileBuilds} tile_rebuilds={s.TileRebuilds} tile_failures={s.TileFailures} step_gap_max_ms={_stepGapMax:F1}")
             : null;
 
         public ScenarioStatus Step(IGameSessionView session, double now)
@@ -286,15 +276,7 @@ public sealed class WayfindScenario : IScenario, IDisposable
 
             _disposed = true;
             _runner?.Dispose();
-            _confirmer?.Dispose();
-            if (_move is not null && _walker is not null)
-            {
-                _move.Unbind(_walker.Controller);
-            }
-
-            _movesSubscription?.Dispose();
-            _audit?.Dispose();
-            _streamer?.Dispose();
+            _body.Dispose();
         }
 
         private ScenarioStatus Run(IGameSessionView session, double now)
@@ -306,19 +288,15 @@ public sealed class WayfindScenario : IScenario, IDisposable
             }
 
             _lastStepMs = ms;
-            if (_walker is null)
+            if (_body.Walker is null)
             {
                 return Begin(session, now);
             }
 
-            _streamer!.Pump();
-            DrainMoves(now);
+            _body.Frame(now);
             if (_placed)
             {
-                _walker.Controller.Tick(now);
-                _legPeak = Math.Max(_legPeak, _world!.AttachedCount);
-                _focusSet = true;
-                _streamer.SetFocus(_walker.Position.CellId);
+                _legPeak = Math.Max(_legPeak, _body.World!.AttachedCount);
             }
 
             switch (Stage)
@@ -363,28 +341,8 @@ public sealed class WayfindScenario : IScenario, IDisposable
                 return Fail("begin: the player is indoors and no --from was given; the run starts outdoors");
             }
 
-            var weenie = QualitiesWeenie.FromSkillTable(self.Qualities, SkillTableData.Load(_dats), _log);
-            var geometry = new PhysicsGeometryLibrary(_dats);
-            _world = new PhysicsWorld();
-            _map = new NavMap();
-            _streamer = new HeadlessStreamer(_dats, geometry, _world, _map, _log);
-            var sink = _sinkOf?.Invoke(session) ?? new PresenceGatedMovementSink(session.Actions.Movement, () => session.State.Self.Travel == SelfTravel.Present);
-            _audit = new MovementAudit(sink, session.Events, () => session.Clock.Now, "wayfind");
-            _world.SetTime(now);
-            _walker = OfflineWalker.Create(_dats, _world, _log, weenie, geometry, id: self.Guid, sink: _audit);
-            _move = session.Actions.Move; // the human's keys (R2): the runner presses them through IActionApi.Move
-            _move.Bind(_walker.Controller, _walker.Controller.Options.RunByDefault);
-            _movesSubscription = session.Events.Subscribe<ObjectMoved>((in ObjectMoved e) =>
-            {
-                if (e.IsSelf)
-                {
-                    _moves.Add(e);
-                    if (e.Verdict == PositionVerdict.SelfTeleport)
-                    {
-                        _teleports++;
-                    }
-                }
-            });
+            _body.Create(session, now);
+            var weenie = _body.Weenie!;
             _log.Info(
                 LogCategory,
                 "the wayfind scenario begins",
@@ -400,7 +358,7 @@ public sealed class WayfindScenario : IScenario, IDisposable
                 {
                     var name = "wayfind start";
                     var destination = new TeleportDestination(name, [], new WorldLocation(name, new CellPosition(_fromFrame.CellId, _fromFrame.Origin), HasHeight: true, HeadingDegrees: 0), "scenario");
-                    _teleportMark = _teleports;
+                    _teleportMark = _body.Teleports;
                     _pending = session.Tools.Place(destination, ActionSource.Host);
                     return Go("placing", session);
                 }
@@ -420,13 +378,13 @@ public sealed class WayfindScenario : IScenario, IDisposable
                 }
             }
 
-            if (_pending is null && _teleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present && session.State.Self.Position is { } at && SameLandblock(at, _fromFrame))
+            if (_pending is null && _body.Teleports > _teleportMark && session.State.Self.Travel == SelfTravel.Present && session.State.Self.Position is { } at && SameLandblock(at, _fromFrame))
             {
                 return Go("settling", session);
             }
 
             return session.Clock.Now - _stageStart > TeleportSeconds
-                ? Fail(string.Create(CultureInfo.InvariantCulture, $"placing: the player was not present at --from within {TeleportSeconds:0.#} s (teleports {_teleports - _teleportMark}, travel {session.State.Self.Travel})"))
+                ? Fail(string.Create(CultureInfo.InvariantCulture, $"placing: the player was not present at --from within {TeleportSeconds:0.#} s (teleports {_body.Teleports - _teleportMark}, travel {session.State.Self.Travel})"))
                 : ScenarioStatus.Running;
         }
 
@@ -438,58 +396,32 @@ public sealed class WayfindScenario : IScenario, IDisposable
                 return session.Clock.Now - _stageStart > SettleSeconds ? Fail("settling: the player is not present") : ScenarioStatus.Running;
             }
 
-            if (!_focusSet || _streamer!.Collision.FocusCellId != at.CellId)
-            {
-                _focusSet = true;
-                _streamer!.SetFocus(at.CellId);
-            }
-
-            if (!Ring3x3Settled(at))
+            if (!_body.Settled(at))
             {
                 return session.Clock.Now - _stageStart > SettleSeconds
-                    ? Fail(string.Create(CultureInfo.InvariantCulture, $"settling: the collision and tiles round the start did not settle within {SettleSeconds:0.#} s ({_streamer!.StatsLine()})"))
+                    ? Fail(string.Create(CultureInfo.InvariantCulture, $"settling: the collision and tiles round the start did not settle within {SettleSeconds:0.#} s ({_body.Streamer!.StatsLine()})"))
                     : ScenarioStatus.Running;
             }
 
-            if (!_world!.IsAttached(LandblockCoord.FromId(at.CellId)))
+            if (!_body.World!.IsAttached(LandblockCoord.FromId(at.CellId)))
             {
                 return Fail("settling: the collision of the start's landblock failed to build (see the log)");
             }
 
-            _world.SetTime(session.Clock.Now);
-            if (!_walker!.Place(at))
+            if (!_body.PlaceAt(at, session.Clock.Now))
             {
                 return Fail("settling: no valid position for the client's body where the server put the player");
             }
 
             _placed = true;
-            _moves.Clear();
-            _start = _walker.Position;
-            _log.Info(LogCategory, "the client's body is placed", new LogField("cell", $"0x{_start.CellId:X8}"), new LogField("streamer", _streamer!.StatsLine()));
-            _whereClient = _walker.Position;
+            _start = _body.Walker!.Position;
+            _log.Info(LogCategory, "the client's body is placed", new LogField("cell", $"0x{_start.CellId:X8}"), new LogField("streamer", _body.Streamer!.StatsLine()));
+            _whereClient = _body.Walker.Position;
             _where = session.Tools.WhereAmI(ActionSource.Host);
             _pending = _where;
             return Go("where-start", session);
         }
 
-        private bool Ring3x3Settled(CellFrame at)
-        {
-            var centre = LandblockCoord.FromId(at.CellId);
-            for (var dx = -1; dx <= 1; dx++)
-            {
-                for (var dy = -1; dy <= 1; dy++)
-                {
-                    if (centre.Offset(dx, dy) is { } c && !_streamer!.IsSettled(c.LandBlockId))
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            return _streamer!.TilesPending == 0;
-        }
-
-        /// <summary>The where-am-I at the start of the run and at the end of each leg: the server's view must agree with the client's body.</summary>
         private ScenarioStatus Where(IGameSessionView session)
         {
             if (_pending is null)
@@ -499,7 +431,7 @@ public sealed class WayfindScenario : IScenario, IDisposable
                     return ScenarioStatus.Running;
                 }
 
-                _whereClient = _walker!.Position;
+                _whereClient = _body.Walker!.Position;
                 _where = session.Tools.WhereAmI(ActionSource.Host);
                 _pending = _where;
                 return ScenarioStatus.Running;
@@ -522,7 +454,7 @@ public sealed class WayfindScenario : IScenario, IDisposable
                 return ScenarioStatus.Running;
             }
 
-            var metres = _audit!.RecordWhere(_whereClient, server.Position, server.ForcePositionSequence);
+            var metres = _body.Audit!.RecordWhere(_whereClient, server.Position, server.ForcePositionSequence);
             _log.Info(LogCategory, "the server's view of the player", new LogField("stage", Stage), new LogField("metres", metres), new LogField("rest_s", _restSeconds));
             if (Stage == "where-start")
             {
@@ -552,15 +484,14 @@ public sealed class WayfindScenario : IScenario, IDisposable
                 _whereStartMetres = _lastEndMetres; // the back leg starts where the out leg's end check found the body
             }
 
-            _legTeleports = leg == "out" ? _teleports - _teleportMark : 0;
-            _legCorrectionsAtStart = _audit!.Summary.Corrections;
-            _legPeak = _world!.AttachedCount;
+            _legTeleports = leg == "out" ? _body.Teleports - _teleportMark : 0;
+            _legCorrectionsAtStart = _body.Audit!.Summary.Corrections;
+            _legPeak = _body.World!.AttachedCount;
             var target = leg == "out" ? NavGoal.ToPoint(PointOf(_options.To!.Value, GroundOf(_options.To.Value))) : NavGoal.ToPoint(NavMap.FromCellFrame(_start));
             _goal = target;
-            _confirmer ??= new RouteConfirmer(_world, _walker!.Physics.Setup!, _log);
-            _source = new OutdoorPathSource(new PathPlanner(_map!));
+            _source = new OutdoorPathSource(new PathPlanner(_body.Map!));
             _runner?.Dispose();
-            _runner = new NavRunner(_move!, new ControllerNavBody(_walker!.Controller), _source, _confirmer, _audit, new NavRunnerOptions { Name = "wayfind-" + leg, ConfirmBudgetMilliseconds = ConfirmBudgetMilliseconds }, _log);
+            _runner = _body.NewRunner(_source, "wayfind-" + leg, ConfirmBudgetMilliseconds);
             _runner.Start(target, session.Clock.Now);
             _nextCorridor = 0;
             _log.Info(LogCategory, "the leg begins", new LogField("leg", leg), new LogField("goal", target.Point.ToString()));
@@ -569,9 +500,8 @@ public sealed class WayfindScenario : IScenario, IDisposable
 
         private float GroundOf(WayfindPlace place)
         {
-            var coord = LandblockCoord.FromId(place.CellId);
             var local = PointOf(place, 0f).Local;
-            return _dats.GetLandblockTerrain(coord) is { } terrain ? new TerrainSampler(terrain, _dats.TerrainRegion.LandHeightTable).GetHeight(local.X, local.Y) : 0f;
+            return HeadlessBody.TerrainZ(_dats, place.CellId, local.X, local.Y);
         }
 
         private CellFrame FrameOf(WayfindPlace place)
@@ -614,8 +544,8 @@ public sealed class WayfindScenario : IScenario, IDisposable
         private ScenarioStatus Resting(IGameSessionView session)
         {
             var now = session.Clock.Now;
-            var at = _walker!.Position;
-            var still = _walker.Controller.Motion.IsStandingStill() && Vector3.DistanceSquared(at.Origin, _restAt.Origin) < 1e-6f && at.CellId == _restAt.CellId;
+            var at = _body.Walker!.Position;
+            var still = _body.Walker.Controller.Motion.IsStandingStill() && Vector3.DistanceSquared(at.Origin, _restAt.Origin) < 1e-6f && at.CellId == _restAt.CellId;
             _restAt = at;
             if (!still)
             {
@@ -635,7 +565,7 @@ public sealed class WayfindScenario : IScenario, IDisposable
 
             _restSeconds = now - _stageStart;
             _log.Info(LogCategory, rested ? "the body is at rest" : "the body did not come to rest in time; asking anyway", new LogField("settle_s", _restSeconds));
-            _whereClient = _walker.Position;
+            _whereClient = _body.Walker.Position;
             _where = session.Tools.WhereAmI(ActionSource.Host);
             _pending = _where;
             return Go("where-end", session);
@@ -643,19 +573,14 @@ public sealed class WayfindScenario : IScenario, IDisposable
 
         private void UpdateCorridor()
         {
-            if (_streamer!.FollowRoute(_runner!, _walker!.Position))
-            {
-                _log.Debug(LogCategory, "the corridor changed", new LogField("ahead", string.Join(' ', _streamer.Collision.Corridor.Select(c => c.ToString()))), new LogField("streamer", _streamer.StatsLine()));
-            }
-
-            _heapPeak = Math.Max(_heapPeak, GC.GetTotalMemory(false));
+            _body.FollowRoute(_runner!);
         }
 
         private ScenarioStatus EndLeg(IGameSessionView session)
         {
             var runner = _runner!;
             runner.Dispose();
-            var summary = _audit!.Summary;
+            var summary = _body.Audit!.Summary;
             var corrections = summary.Corrections - _legCorrectionsAtStart;
             var arrived = runner.State == NavRunState.Arrived;
             if (corrections > 0 && _legFailure is null)
@@ -670,10 +595,10 @@ public sealed class WayfindScenario : IScenario, IDisposable
             var seconds = runner.RunSeconds;
             var line = string.Create(
                 CultureInfo.InvariantCulture,
-                $"wayfind leg={_leg} ok={(ok ? "true" : "false")} route_m={runner.RouteMetres:0.0} run_s={seconds:0.0} speed_mps={(seconds > 0 ? runner.RouteMetres / seconds : 0):0.00} plans={runner.Plans} replans={runner.Replans} rungs={runner.Rungs} blocked={(runner.State == NavRunState.Blocked ? 1 : 0)} stuck={runner.Stuck} corrections={corrections} where_start_m={Metres(_whereStartMetres)} where_end_m={Metres(_whereEndMetres)} where_max_m={Metres(legWhereMax)} settle_s={_restSeconds:0.0} teleports={_legTeleports} landblocks_peak={_legPeak}");
+                $"wayfind leg={_leg} ok={(ok ? "true" : "false")} route_m={runner.RouteMetres:0.0} run_s={seconds:0.0} speed_mps={(seconds > 0 ? runner.RouteMetres / seconds : 0):0.00} plans={runner.Plans} replans={runner.Replans} rungs={runner.Rungs} blocked={(runner.State == NavRunState.Blocked ? 1 : 0)} stuck={runner.Stuck} corrections={corrections} where_start_m={Metres(_whereStartMetres)} where_end_m={Metres(_whereEndMetres)} where_max_m={Metres(legWhereMax)} settle_s={_restSeconds:0.0} teleports={_legTeleports} landblocks_peak={_legPeak} turns={runner.Turns} key_changes_per_min={runner.KeyChangesPerMinute:0}");
             _lines.Add(line);
             _log.Info(LogCategory, line + (_legFailure is null ? string.Empty : " -- " + _legFailure));
-            _log.Info(LogCategory, "streamer: " + _streamer!.StatsLine());
+            _log.Info(LogCategory, "streamer: " + _body.Streamer!.StatsLine());
             if (!ok)
             {
                 return Fail($"the {_leg} leg did not succeed: {_legFailure}");
@@ -686,33 +611,6 @@ public sealed class WayfindScenario : IScenario, IDisposable
 
             Stage = "done";
             return ScenarioStatus.Succeeded;
-        }
-
-        private void DrainMoves(double now)
-        {
-            if (_moves.Count == 0)
-            {
-                return;
-            }
-
-            if (!_placed)
-            {
-                _moves.Clear(); // the body is placed from the server's position once the collision is there
-                return;
-            }
-
-            var batch = _moves.ToArray();
-            _moves.Clear();
-            foreach (var move in batch)
-            {
-                if (!_world!.IsAttached(LandblockCoord.FromId(move.Position.CellId)))
-                {
-                    _log.Debug(LogCategory, "a position of the player outside the attached collision is not applied", new LogField("cell", $"0x{move.Position.CellId:X8}"));
-                    continue;
-                }
-
-                _walker!.Controller.Apply(move, now);
-            }
         }
 
         private static bool SameLandblock(CellFrame a, CellFrame b) => (a.CellId >> 16) == (b.CellId >> 16);

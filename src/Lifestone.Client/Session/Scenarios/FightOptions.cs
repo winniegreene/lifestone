@@ -1,5 +1,6 @@
 using System.Globalization;
 using Lifestone.Client.Options;
+using Lifestone.Client.Session.Scenarios.Journey;
 
 namespace Lifestone.Client.Session.Scenarios;
 
@@ -38,6 +39,35 @@ public sealed record FightOptions
 
     /// <summary>True: the loop picks the nearest tusker with no check of the line to it (<c>--fight-ignore-line</c>; default false: a clear line is required, M3 4.2 P4).</summary>
     public bool IgnoreLine { get; init; }
+
+    /// <summary>
+    /// A spell the fight casts instead of the Flame Bolt line (M4 P5b J7: the hero plan's Cassius' Ring of Fire, 1785); 0 is the Flame Bolt line, the level chosen by the cast chance. The spell must be in the spellbook and reach the cast chance at the buffed War Magic skill, or the fight fails naming it.
+    /// </summary>
+    public uint SpellId { get; init; }
+
+    /// <summary>
+    /// M4 P5b (3.4): the travel seam the fight's place and its den exit go through, or null for today's <c>Tools.Place</c> (a fresh <see cref="PlaceTravel"/> per scenario, so every existing run is unchanged). A journey injects
+    /// its own. Not on the command line.
+    /// </summary>
+    public IJourneyTravel? Travel { get; init; }
+
+    /// <summary>
+    /// M4 P5b: why the fight's place travels (<see cref="TravelPurpose.Spot"/> by default: a fight spot in the den, on foot in a journey; the death loop's composed fight, after the respawn, asks for
+    /// <see cref="TravelPurpose.Ground"/>: back to the den, Primary Portal Recall in a journey).
+    /// </summary>
+    public TravelPurpose PlacePurpose { get; init; } = TravelPurpose.Spot;
+
+    /// <summary>
+    /// M4 P5b (3.4): true (the default, every existing run) leaves the den on a failure (<see cref="DenExit"/>) before the run ends; false (a journey's station) ends Failed where the player stands, in the world: no exit, and
+    /// no log off when <c>endSession</c> is false (the journey recovers).
+    /// </summary>
+    public bool LeaveOnFailure { get; init; } = true;
+
+    /// <summary>
+    /// M4 P5b: true (the default, every existing run) leaves the den after the fight (<see cref="DenExit"/>); false ends in the den (a journey's den fight is followed by the death station there, and the death loop's
+    /// composed fight in a journey by the corpse trip on foot).
+    /// </summary>
+    public bool LeaveAtEnd { get; init; } = true;
 
     /// <summary>Every problem found while parsing, one line each.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
@@ -88,5 +118,5 @@ public sealed record FightOptions
     }
 
     /// <summary>The options as the run logs them, in invariant culture.</summary>
-    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"kills={Kills} seconds={Seconds}{(IgnoreLine ? " ignore_line=on" : string.Empty)}{(ArenaHere ? $" arena=here skill={ArenaSkill}" : string.Empty)}");
+    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"kills={Kills} seconds={Seconds}{(IgnoreLine ? " ignore_line=on" : string.Empty)}{(SpellId == 0 ? string.Empty : $" spell={SpellId}")}{(ArenaHere ? $" arena=here skill={ArenaSkill}" : string.Empty)}{(Travel is null or PlaceTravel ? string.Empty : " travel=journey")}{(LeaveOnFailure ? string.Empty : " leave_on_failure=no")}{(LeaveAtEnd ? string.Empty : " leave_at_end=no")}");
 }

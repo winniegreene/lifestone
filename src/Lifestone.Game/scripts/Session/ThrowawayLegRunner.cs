@@ -53,9 +53,10 @@ public sealed partial class ThrowawayLegRunner : Node
     private bool _finished;
 
     /// <summary>Adds the check to the scene; it starts with the scene's first frame.</summary>
-    public static void Install(Main main, SessionHost host, PlayMode mode, RetailUiLayer? ui)
+    public static void Install(Main main, GameServices services, SessionHost host, PlayMode mode, RetailUiLayer? ui)
     {
         ArgumentNullException.ThrowIfNull(main);
+        ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(mode);
         if (ui is null)
@@ -68,7 +69,15 @@ public sealed partial class ThrowawayLegRunner : Node
         // The log off is asked for with retail's key, Shift+Escape, as the other login checks do.
         Func<ActionHandle?>? logOffKey = mode.EndKey is null ? null : () => PressLogOffKey(ui, mode.EndKey);
         var session = host.Session ?? throw new InvalidOperationException("the throwaway check needs the session host's session");
-        var scenario = new ThrowawayLegScenario(new ThrowawayScreens(ui, session), logOffKey, message => Log.Info(LogCategory, "throwaway: " + message));
+        // M4 D43: on the tools account the purge caller is Lifestone Tools (created through the Action API when absent); on test it is Lifestone Smoke.
+        var onTools = string.Equals(host.Options.Account, Lifestone.Client.Session.Credentials.TestAccounts.Tools, StringComparison.Ordinal);
+        var dats = onTools ? services.Dats ?? throw new InvalidOperationException("the throwaway check on the tools account needs the dats to create its purge caller") : null;
+        var scenario = new ThrowawayLegScenario(
+            new ThrowawayScreens(ui, session),
+            logOffKey,
+            message => Log.Info(LogCategory, "throwaway: " + message),
+            caller: onTools ? ThrowawayLegScenario.Tools : ThrowawayLegScenario.Smoke,
+            callerIntent: onTools ? () => Lifestone.Client.Session.Scenarios.HeadlessCharacter.Intent(ThrowawayLegScenario.Tools, Lifestone.Client.Session.Scenarios.HeadlessCharacter.RetailSkillClasses(dats!)) : null);
         var runner = new ThrowawayLegRunner
         {
             Name = "ThrowawayLegRunner",
@@ -145,7 +154,19 @@ public sealed partial class ThrowawayLegRunner : Node
     }
 
     /// <inheritdoc/>
-    public override void _ExitTree() => _scenario?.Dispose();
+    public override void _EnterTree() => GetTree().ProcessFrame += StepGcWatch;
+
+    /// <inheritdoc/>
+    public override void _ExitTree()
+    {
+        GetTree().ProcessFrame -= StepGcWatch;
+        _scenario?.Dispose();
+    }
+
+    // M4 P5b (TODO(m4-throwaway-teleport-frame)): the watch is read when the tree starts a frame's processing, before any node's, so its interval is the one the delta measures. Read in this node's own
+    // _Process (priority 100, after the player's) it missed a collection that ran between the player's process and this node's in the frame the delta measures: the frame lines said gc_pause_ms=0 for a
+    // frame whose player line had a 62 ms pause.
+    private void StepGcWatch() => _gcWatch.Step();
 
     private readonly GcFrameWatch _gcWatch = new();
 
@@ -156,7 +177,7 @@ public sealed partial class ThrowawayLegRunner : Node
     private void SampleFrame(double delta)
     {
         var ms = delta * 1000.0;
-        var gc = _gcWatch.Step(); // the collector's work in the interval the delta measures (M4 P4 g3fix, TODO(m4-throwaway-teleport-frame))
+        var gc = _gcWatch.Last; // the collector's work in the interval the delta measures (M4 P4 g3fix, TODO(m4-throwaway-teleport-frame)); stepped at the frame's start (StepGcWatch)
         var enterWindow = !double.IsNaN(_scenario.EnterAt) && double.IsNaN(_scenario.SettledAt);
         var teleportWindow = !double.IsNaN(_scenario.PlaceAskedAt) && (double.IsNaN(_scenario.PlaceArrivedAt) || InTail());
         if (!double.IsNaN(_scenario.PlaceArrivedAt) && double.IsNaN(_teleportTailStart))
@@ -192,6 +213,7 @@ public sealed partial class ThrowawayLegRunner : Node
                     ("process_ms_previous_frame", Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000.0),
                     ("render_setup_cpu_ms", RenderingServer.GetFrameSetupTimeCpu()),
                     .. gc.Fields(),
+                    .. gc.LastCollectionFields(),
                 ]);
         }
 

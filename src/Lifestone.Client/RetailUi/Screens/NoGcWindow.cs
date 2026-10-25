@@ -7,6 +7,11 @@ namespace Lifestone.Client.RetailUi.Screens;
 /// M4 1.1 s4 and its fix (<c>TODO(m3-ui-step-gc-margin)</c>): one no-GC window (<see cref="GC.TryStartNoGCRegion(long, bool)"/>) over the staged shell build. Only the instance whose start returned true
 /// owns the process's region and ends it (a static owner), so a screen that was refused, or whose region ended early, never ends another screen's. The budget is per server-GC heap, so the request is sized
 /// from the heap count (<see cref="RequestBytes"/>).
+/// <para>M4 P5b (<c>TODO(m4-throwaway-teleport-frame)</c>): <see cref="GC.EndNoGCRegion"/> leaves gen 0's allocation budget at the region's size, so after a held window the next collection waited
+/// for up to <see cref="CapBytes"/> of allocation and then promoted every survivor since the build: one 57 to 95 ms pause at the next arrival (the throwaway's Holtburg teleport, each journey's first).
+/// The owner that ends a held region therefore leaves one gen 0 collection pending, which <see cref="RunPendingClose"/> runs at the start of the next retail UI step, before that step's clock starts
+/// (the window keeps collections out of the UI steps, so its own closing collection is not run inside one): gen 0 then holds little more than the window's allocations, and the collection gives it its normal
+/// budget back (<see cref="ClosingCollectionMilliseconds"/>).</para>
 /// </summary>
 internal sealed class NoGcWindow
 {
@@ -26,6 +31,7 @@ internal sealed class NoGcWindow
     public const long CapBytes = 512L * 1024 * 1024;
 
     private static NoGcWindow? s_owner;
+    private static NoGcWindow? s_pendingClose;
 
     private bool _started;
 
@@ -34,6 +40,12 @@ internal sealed class NoGcWindow
 
     /// <summary>The milliseconds the start cost.</summary>
     public double StartMilliseconds { get; private set; }
+
+    /// <summary>The pause of the gen 0 collection that closed a held window, in milliseconds; NaN until it runs, and when none is due (the window was off, refused or ended early: a collection had already reset the budget).</summary>
+    public double ClosingCollectionMilliseconds { get; private set; } = double.NaN;
+
+    /// <summary>True from the end of a held window until <see cref="RunPendingClose"/> has run its closing collection.</summary>
+    public bool ClosePending => ReferenceEquals(Volatile.Read(ref s_pendingClose), this);
 
     /// <summary>The GC heaps the request was sized for.</summary>
     public int Heaps { get; private set; }
@@ -137,6 +149,7 @@ internal sealed class NoGcWindow
             if (GCSettings.LatencyMode == GCLatencyMode.NoGCRegion)
             {
                 GC.EndNoGCRegion();
+                Volatile.Write(ref s_pendingClose, this); // the closing collection runs at the next UI step's start (RunPendingClose)
             }
             else
             {
@@ -147,5 +160,22 @@ internal sealed class NoGcWindow
         {
             Report = "ended early";
         }
+    }
+
+    /// <summary>
+    /// Runs the gen 0 collection a held window's end left pending, so the next collection comes at gen 0's normal budget rather than the region's (see the class remarks); the retail UI layer calls it at
+    /// the start of each step, before the step's clock. Nothing is pending most frames (one field read). A window that is open again is left alone (a collection would end it); its own end closes it.
+    /// </summary>
+    public static void RunPendingClose()
+    {
+        if (Volatile.Read(ref s_pendingClose) is not { } window || GCSettings.LatencyMode == GCLatencyMode.NoGCRegion)
+        {
+            return;
+        }
+
+        Volatile.Write(ref s_pendingClose, null);
+        var pause = GC.GetTotalPauseDuration();
+        GC.Collect(0, GCCollectionMode.Forced, blocking: true);
+        window.ClosingCollectionMilliseconds = (GC.GetTotalPauseDuration() - pause).TotalMilliseconds;
     }
 }

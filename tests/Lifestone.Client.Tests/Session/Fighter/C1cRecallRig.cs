@@ -26,34 +26,35 @@ internal sealed class C1cRecallRig
     private ushort _positionStamp = 2;
     private ushort _stateStamp = 2;
 
-    /// <summary>A rig for the fighter template <paramref name="template"/>, or for the mage when it is null.</summary>
-    public C1cRecallRig(FighterTemplate? template, bool knowsSpell = true)
+    /// <summary>A rig for the fighter template <paramref name="template"/>, or for the mage when it is null; <paramref name="spell"/> and <paramref name="homeLandblock"/> pick the recall (M4 P5b J1: Primary Portal Recall 48 to the den, 0x0105).</summary>
+    public C1cRecallRig(FighterTemplate? template, bool knowsSpell = true, uint spell = RecallHome.LifestoneRecallSpell, uint homeLandblock = RecallHome.HoltburgLandblock)
     {
+        Spell = spell;
         if (template is not null)
         {
             _swapRig = new C1bSwapRig(template);
             R = _swapRig.R;
             Caster = _swapRig.Caster;
             View = _swapRig.View;
-            Recall = new RecallHome(View, _swapRig.Swap, R.H.Log);
+            Recall = new RecallHome(View, _swapRig.Swap, R.H.Log, homeLandblock, spell);
         }
         else
         {
             R = new WorldActionRig();
             Caster = new ScriptedCaster(R, 426, 275);
             View = new MageView(R);
-            Recall = new RecallHome(View, null, R.H.Log);
+            Recall = new RecallHome(View, null, R.H.Log, homeLandblock, spell);
         }
 
         // The character knows Lifestone Recall (the description of the scripted mage lists no spells; ACE's LearnSpell event 0x02C1 adds it to the spellbook).
         if (knowsSpell)
         {
-            R.Server((p, seq) => AceM3Writers.MagicUpdateSpell(p, seq, (ushort)RecallHome.LifestoneRecallSpell));
+            R.Server((p, seq) => AceM3Writers.MagicUpdateSpell(p, seq, (ushort)spell));
         }
 
         Caster.CastHook = spell =>
         {
-            if (spell != RecallHome.LifestoneRecallSpell)
+            if (spell != Spell)
             {
                 return false;
             }
@@ -83,6 +84,12 @@ internal sealed class C1cRecallRig
     }
 
     public WorldActionRig R { get; }
+
+    /// <summary>The recall spell the scripted ACE answers (1635 by default, 48 for Primary Portal Recall).</summary>
+    public uint Spell { get; }
+
+    /// <summary>The WeenieError ACE sends when <see cref="Bound"/> is false: 0x049E (no lifestone) by default, 0x04A3 (no portal tied) for Primary Portal Recall.</summary>
+    public uint UnboundRefusal { get; set; } = 0x049E;
 
     public ScriptedCaster Caster { get; }
 
@@ -169,7 +176,7 @@ internal sealed class C1cRecallRig
             }
             else if (!Bound)
             {
-                R.WeenieError(0x049E);
+                R.WeenieError(UnboundRefusal);
             }
             else if (!NoTeleport)
             {

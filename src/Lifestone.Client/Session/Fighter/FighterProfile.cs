@@ -21,7 +21,7 @@ namespace Lifestone.Client.Session.Fighter;
 public sealed class FighterProfile : IBuffProfile
 {
     /// <summary>The line names of the utility spells (the Boost and Transfer lines are <see cref="BuffProfile.BoostLineName"/> and <see cref="BuffProfile.TransferLineName"/>).</summary>
-    public const string HarmSelfLineName = "Harm Self", HealSelfLineName = "Heal Self", LifestoneRecallLineName = "Lifestone Recall";
+    public const string HarmSelfLineName = "Harm Self", HealSelfLineName = "Heal Self", LifestoneRecallLineName = "Lifestone Recall", LifestoneTieLineName = "Lifestone Tie";
 
     /// <summary>The line names of the two weapon masteries.</summary>
     public const string HeavyMasteryLineName = "Heavy Weapon Mastery Self", MissileMasteryLineName = "Missile Weapon Mastery Self";
@@ -76,9 +76,11 @@ public sealed class FighterProfile : IBuffProfile
         HarmSelf = ArenaProfile.ExtraNamed(HarmSelfLineName) ?? throw new InvalidOperationException("the mage profile has no extra " + HarmSelfLineName);
         HealSelf = HealLine;
         LifestoneRecall = ArenaProfile.ExtraNamed(LifestoneRecallLineName) ?? throw new InvalidOperationException("the mage profile has no extra " + LifestoneRecallLineName);
+        LifestoneTie = ArenaProfile.ExtraNamed(LifestoneTieLineName) ?? throw new InvalidOperationException("the mage profile has no extra " + LifestoneTieLineName);
         lines.Add(HarmSelf);
         lines.Add(HealSelf);
         lines.Add(LifestoneRecall);
+        lines.Add(LifestoneTie);
         _profile = new BuffProfile(template.Name, lines, ["Focus Self", "Willpower Self"], []);
     }
 
@@ -112,6 +114,9 @@ public sealed class FighterProfile : IBuffProfile
     /// <summary>Lifestone Recall (spell 1635, <see cref="ProfileRole.Travel"/>; an Item Enchantment spell of power 100, no duration, so a skill of 132 casts it at the 0.9 chance rule; M4 P5a C1c, owner decision D38): takes the caster to the lifestone it is bound to. The same line the mage learns (<see cref="ArenaProfile.Extras"/>); not a buff, never in the cycle.</summary>
     public ProfileLine LifestoneRecall { get; }
 
+    /// <summary>Lifestone Tie (spell 2644, <see cref="ProfileRole.Travel"/>; M4 P5b J3b, W0): cast at Holtburg's lifestone it sets ACE's LinkedLifestone, the point Lifestone Recall reads (WorldObject_Magic.cs:966-976 and :1087-1093 at 95ef426d; using the lifestone only sets the Sanctuary). The same line the mage learns (<see cref="ArenaProfile.Extras"/>); a travel line, never in the buff cycle.</summary>
+    public ProfileLine LifestoneTie { get; }
+
     /// <summary>Stamina to Mana Self, I-VIII (<see cref="ProfileRole.ManaTransfer"/>): the cycle's mana line.</summary>
     public ProfileLine StaminaToMana => _profile.ManaTransferLine;
 
@@ -121,10 +126,10 @@ public sealed class FighterProfile : IBuffProfile
     /// <summary>Revitalize Self, I-VIII (<see cref="ProfileRole.StaminaRestore"/>): the cycle's stamina line.</summary>
     public ProfileLine Revitalize => _profile.StaminaRestoreLine;
 
-    /// <summary>The five utility lines: Stamina to Mana Self, Revitalize Self, Harm Self, Heal Self, Lifestone Recall (the lines that are no buff).</summary>
-    public IReadOnlyList<ProfileLine> UtilityLines => [StaminaToMana, Revitalize, HarmSelf, HealSelf, LifestoneRecall];
+    /// <summary>The six utility lines: Stamina to Mana Self, Revitalize Self, Harm Self, Heal Self, Lifestone Recall, Lifestone Tie (the lines that are no buff).</summary>
+    public IReadOnlyList<ProfileLine> UtilityLines => [StaminaToMana, Revitalize, HarmSelf, HealSelf, LifestoneRecall, LifestoneTie];
 
-    /// <summary>The utility line named <paramref name="name"/> ("Stamina to Mana Self", "Revitalize Self", "Harm Self", "Heal Self" or "Lifestone Recall"), or null.</summary>
+    /// <summary>The utility line named <paramref name="name"/> ("Stamina to Mana Self", "Revitalize Self", "Harm Self", "Heal Self", "Lifestone Recall" or "Lifestone Tie"), or null.</summary>
     public ProfileLine? UtilityLine(string name) => UtilityLines.FirstOrDefault(l => l.Name == name);
 
     /// <inheritdoc/>

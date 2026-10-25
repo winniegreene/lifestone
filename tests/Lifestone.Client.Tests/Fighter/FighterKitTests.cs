@@ -84,6 +84,24 @@ public sealed class FighterKitTests
     {
         Assert.Equal([260, 1100, 150, 2400, 1100, 1100, 200, 1, 10, 170], FighterKit.Hunter.Items.Select(i => i.Value).ToArray());
     }
+
+    [Fact]
+    public void The_gear_kits_carry_one_Titan_Mana_Charge_in_the_main_pack_inside_the_burden_and_headroom_guards_and_never_sold()
+    {
+        // Closes TODO(m4-gear-mana): ace_world's 9060 "Titan Mana Charge" (read-only SELECT 2026-10-24): ManaStone 37, ItemType 0x80000, 5,000 mana, burden 50, Value 9,000, no stack.
+        foreach (var kit in new[] { FighterKit.Melee, FighterKit.Archer })
+        {
+            var line = kit.Items.Single(i => i.Role == FighterRole.ManaCharge);
+            Assert.Equal((9060u, "Titan Mana Charge", FighterKit.WeenieTypeManaStone, 0x80000u, 1, (int?)null, 50, 9_000, false), (line.Wcid, line.Item.Name, line.Item.WeenieType, line.Item.ItemType, line.Item.Stack, line.Item.MaxStack, line.Item.Burden, line.Value, line.Wield));
+            Assert.Equal((FighterKit.ManaChargeWcid, FighterKit.ManaChargeCount), (kit.ChargeWcid, kit.ManaCharges));
+            Assert.DoesNotContain(line, kit.SidePackLines); // a main-pack slot, counted in MainPackSlots
+            Assert.True(kit.MainPackSlots + FighterKit.MainPackHeadroom <= Lifestone.Client.Session.Mage.GearKit.PackCapacity);
+            Assert.Contains(line.Wcid, SellRules.KeptWeenies);
+        }
+
+        Assert.Equal((0u, 0), (FighterKit.Hunter.ChargeWcid, FighterKit.Hunter.ManaCharges)); // the Hunter has no magic gear
+        Assert.Equal(5_000, FighterKit.ManaChargeMana);
+    }
 }
 
 /// <summary>The template's weapon skill ids, for the kit test.</summary>
