@@ -52,6 +52,7 @@ public sealed class CultureInvarianceTests
             "place LOC 0xa9b40001 0.25 0.5 -1.5",
             "QUEST STAMP SentryTaskComplete #I1",
             "quest Has KillTask-BlightSpirit",
+            "CORPSES Rot #K1",
         ];
         foreach (var text in texts)
         {
@@ -107,6 +108,7 @@ public sealed class CultureInvarianceTests
         ToolsWire.Reply(ToolReply.Success("q", ToolVerbs.Quest, ToolsWireTests.QuestStamped), ToolsWireTests.QuestStamped.Describe()),
         ToolsWire.Reply(ToolReply.Success("r", ToolVerbs.Quest, ToolsWireTests.QuestErased), ToolsWireTests.QuestErased.Describe()),
         ToolsWire.Reply(ToolReply.Success("c", ToolVerbs.Char, ToolsWireTests.CharPurged), ToolsWireTests.CharPurged.Describe()),
+        ToolsWire.Reply(ToolReply.Success("k", ToolVerbs.Corpses, ToolsWireTests.CorpsesRotted), ToolsWireTests.CorpsesRotted.Describe()),
     ];
 
     private static T Invariant<T>(Func<T> action) => Under(CultureInfo.InvariantCulture.Name, action);

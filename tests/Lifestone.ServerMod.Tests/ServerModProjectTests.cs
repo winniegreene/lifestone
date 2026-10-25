@@ -49,7 +49,7 @@ public sealed class ServerModProjectTests
         var core = RepositoryFiles.PathOf("server", "mod", "Lifestone.ServerMod", "Core");
         var files = Directory.EnumerateFiles(core, "*.cs", SearchOption.AllDirectories).ToArray();
         Assert.Equal(
-            ["CharPurgeRules.cs", "ItemCreateRules.cs", "OneAnswer.cs", "PlacesBuilder.cs", "QuestChange.cs", "ToolRouting.cs", "XpGrant.cs"],
+            ["CharPurgeRules.cs", "CorpseRotRules.cs", "ItemCreateRules.cs", "OneAnswer.cs", "PlacesBuilder.cs", "QuestChange.cs", "ToolRouting.cs", "XpGrant.cs"],
             files.Select(Path.GetFileName).Order(StringComparer.Ordinal));
         Assert.All(files, f => Assert.DoesNotMatch(@"\busing\s+ACE\b|\bACE\.\w", File.ReadAllText(f)));
     }

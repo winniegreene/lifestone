@@ -38,7 +38,7 @@ What Lifestone is not:
 | **M1: Explore Dereth** | **Done** | The whole world, rendered from your dats, to fly and walk through |
 | **[M2: Log in](docs/milestones/m2-log-in.md)** | **Done** | Log in to the local ACE server, in the retail interface and through retail portal space: your character, movement, server-spawned objects |
 | **[M3: Fights and sound](docs/milestones/m3-lights-and-sound.md)** | **Done** | A level-126 mage buffs in all three schools, fights and dies in the Black Spawn Den: casts, projectiles and impacts on screen, dynamic lights, the game's sound, the retail panels with live content |
-| **[M4: Fights and loot](docs/milestones/m4-fights-and-loot.md)** | **Done** | A fighter on the Low B belt and in the forest near Holtburg: melee and missile with the power bar, corpses looted, kits and potions, vendors and appraisal, the shortcut bar; the retail panels with live content; auto-buff; a wayfinder that walks planned routes; three self-driving characters that play whole journeys for the tests |
+| **[M4: Fights and loot](docs/milestones/m4-fights-and-loot.md)** | **Done** | A fighter on the Low B belt and in the forest near Holtburg: melee and missile with the power bar, corpses looted, kits and potions, vendors and appraisal, the shortcut bar; the retail panels with live content; auto-buff; a wayfinder that walks planned routes; three self-driving characters that play whole journeys for the tests; a 30-second hero video cut from their live takes |
 | **M5: Patrons and outcomes** | Next (not yet planned) | Automation that reads its outcomes (a fizzled cast retried, Mana Conversion cast) and a patron bot |
 | More gameplay | Planned | NPCs and quests, the remaining panels, more of Dereth's rules through ACE |
 | Built-in automation | Started | The loops that test the game today drive the same action API the automation will use; auto-buff is done, AFK hunting and looting is next ([automation vision](docs/automation-vision.md)) |
@@ -54,7 +54,9 @@ BSD Mage buffs, fights and dies in the Black Spawn Den and recovers; the Holtbur
 Archer (missile) buff, hunt, heal, loot, sell and recall home.
 
 **Not there yet:** quests, fellowships, crafting, housing and most NPC conversations; the panels retail had beyond
-those above answer "Not in Lifestone" for now; only the 800x600 window is tested. Details: each milestone's status
+those above answer "Not in Lifestone" for now; only the 800x600 window is tested. Objects the server owns (doors,
+lifestones, other creatures) are not yet solid on the client, so you can walk through a closed door, and creatures that
+crowd you can overlap and snap back to where the server has them (`TODO(d25-server-object-host)`, [physics](docs/physics.md)). Details: each milestone's status
 section, and the [project goals](docs/goals.md).
 
 ## Highlights
@@ -255,7 +257,8 @@ Playing on the local server and the test loops, which need it (`--help` lists ev
 | `--examine-icon=on\|off` | The examine window's item icon (default off, as retail's layout has none) |
 | `--heal*`, `--vitals-*`, `--loot*`, `--sell`, `--buy-kits`, `--hunt-*` | The hunt's recovery, vitals-keeper, loot, vendor and hunt rules |
 | `--scenario=<name>` | A headless run on the local server: builds (`mage-build`, `fighter-build`), `buff`, `fight`, `death-and-regear`, `hunt`, `wayfind` (`--to=CELL`, `--from`, `--wayfind-back`) and `journey` |
-| `--journey=<mage\|melee\|archer>` | With `--scenario=journey` (headless) or `--login-check=journey` (the game, through `tools\godot.ps1 -Run -Offscreen -IsolateUserData -TimeoutSeconds N -GameArgs:'...'`): one character's whole day, station by station. `hero-archer`, `hero-brawler` and `hero-mage` are the same with showpiece shots for the trailer, and `--journey-shots` saves frame bursts at them |
+| `--journey=<mage\|melee\|archer>` | With `--scenario=journey` (headless) or `--login-check=journey` (the game, through `tools\godot.ps1 -Run -Offscreen -IsolateUserData -TimeoutSeconds N -GameArgs:'...'`): one character's whole day, station by station. `hero-archer`, `hero-brawler` and `hero-mage` are the hero video's journeys: the lower-right bar filled from the pack, the Brawler's store, the mage's den cleared of its own leftover corpses (`@lifestone corpses rot`), its death and re-buff |
+| `--journey-film`, `--journey-shots` | With `--login-check=journey`: `--journey-film` turns retail's chase camera for each station (as a player turns it) and opens the attributes page at a re-buff and the inventory with the paper doll at a loot, saving no frame, for a screen capture of the window; `--journey-shots` saves frame bursts at the showpiece moments instead |
 | `--fresh-character` | With the character builds: delete and re-create the journey character first (the live gate does this) |
 | `--play-look-shots=DIR`, `--play-panel-shots=DIR` | Save review frames of held items, or of every panel page |
 
@@ -386,7 +389,7 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
   `--filter "Status=KnownFailure"`. One test carries Timing (the wayfinder's 1 km plan, in `PathPlannerTests`); none
   carries KnownFailure.
 - **Test count.** Coverage never decreases: `tests/Shared/test-count-baseline.json` holds the floor of the default run and
-  of the Exhaustive tier (9,130 and 735 at the end of M4), which `slice-check` enforces unless `-MinTests` is given. Only
+  of the Exhaustive tier (9,238 and 736 at the end of M4), which `slice-check` enforces unless `-MinTests` is given. Only
   a deletion that names where its behaviour is proved elsewhere lowers it.
 
 ### Live tests and the live gate
@@ -398,8 +401,8 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
 | Account key | Characters | What it does |
 |---|---|---|
 | `test` | BSD Mage (level 126, the Black Spawn Den), Holtburg Hunter (the baseline fighter, never re-created), and the baseline Lifestone Smoke and Lifestone Loopback (never reset or levelled) | the mage's journey, the Hunter and the raw-net and headless classes |
-| `test-melee` | Holtburg Brawler (level 55, Heavy Weapons specialised, the Mace, three magic schools trained; hunts the Low B belt) | the melee journey |
-| `test-archer` | Holtburg Archer (level 55, Missile Weapons specialised, the Shortbow and arrows, three magic schools trained; hunts the low north forest) | the missile journey |
+| `test-melee` | Holtburg Brawler (level 55, Heavy Weapons specialised, a mismatched set of retail magic gear with the Staff of All Aspects, Creature, Item and Life Magic and Mana Conversion trained; hunts the Low B belt) | the melee journey |
+| `test-archer` | Holtburg Archer (level 55, Missile Weapons specialised, retail magic gear with the Serpent's Flight bow and Greater Frost Arrows, Creature, Item and Life Magic and Mana Conversion trained; hunts the low north forest) | the missile journey |
 | `test-tools` | Lifestone Throwaway (its tests create, use, delete and purge it) and Lifestone Tools (its purge caller; created once, never levelled or reset) | the throwaway and the mod-verb classes (headless) |
 
 - **Journeys.** A journey is one character's whole day as a list of stations (`--scenario=journey --journey=<mage|melee|archer>`
@@ -407,8 +410,8 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
   harm-heals, binds at the lifestone, fights in the den, dies once, recovers and recalls home; the Brawler and the Archer buff,
   bind, hunt (the belt, the forest), heal, recall home, sell, and open chests or set the shortcut bar. Trips go through the
   wayfinder ([docs/wayfinding.md](docs/wayfinding.md)) or a retail travel spell (Lifestone Recall, Primary Portal Recall) before any
-  server hop. The fighters train Creature, Item and Life Magic for their self buffs and Lifestone Recall, and swap to a caster
-  to cast; a vitals keeper (`--vitals-*`) keeps health, stamina and mana up. Each station prints one `ok=` line, and the
+  server hop. The fighters train Creature, Item and Life Magic and Mana Conversion for their self buffs and Lifestone Recall, wear
+  retail magic gear (owner decision D41) and swap to a caster to cast; a vitals keeper (`--vitals-*`) keeps health, stamina and mana up. Each station prints one `ok=` line, and the
   journey's `done` line carries the verdict.
 - **Fresh characters.** Every live gate first deletes and re-creates the BSD Mage, the Brawler and the Archer (`--fresh-character`,
   the `recreate` step; [docs/session.md](docs/session.md) section 42), and the new copy purges the old one. The gate characters
@@ -526,7 +529,7 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
   - [Retail interface](docs/retail-ui.md) and its [data](docs/retail-ui-data.md), [avatars](docs/avatars.md) (characters,
     motion, held items, effects), [portal space](docs/portal-space.md), [physics](docs/physics.md), [wayfinding](docs/wayfinding.md) (the planner
     that walks the test characters)
-  - [Hero video](docs/hero-video.md): a trailer rendered from your dats
+  - [Hero video](docs/hero-video.md): a trailer rendered from your dats, and M4's, cut from window captures of the hero journeys
 - **Sources:** [docs/third-party](docs/third-party/) lists the sources behind each area.
 
 ### Contributing

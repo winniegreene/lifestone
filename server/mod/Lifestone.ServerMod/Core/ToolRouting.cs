@@ -11,7 +11,7 @@ internal enum ToolScope
     /// <summary>A player's session, but not the player in the world (<c>places</c>).</summary>
     Session,
 
-    /// <summary>The player in a landblock (<c>where</c>, <c>place</c>, <c>xp</c>, <c>quest</c>, <c>char</c>, <c>spell</c>, <c>item</c>).</summary>
+    /// <summary>The player in a landblock (<c>where</c>, <c>place</c>, <c>xp</c>, <c>quest</c>, <c>char</c>, <c>spell</c>, <c>item</c>, <c>corpses</c>).</summary>
     Player,
 }
 
@@ -58,6 +58,9 @@ internal interface IToolVerbs<in TPlayer>
     /// <summary>Runs <c>item</c> for a player in the world.</summary>
     void Item(TPlayer player, ItemRequest request);
 
+    /// <summary>Runs <c>corpses rot</c> for a player in the world (the landblock searched is the player's own).</summary>
+    void CorpsesRot(TPlayer player, CorpsesRotRequest request);
+
     /// <summary>A request type the parser makes but no verb here handles: a mod bug, answered as failed.</summary>
     void Unhandled(ToolRequest request);
 }
@@ -90,7 +93,7 @@ internal static class ToolRouting
     {
         StatusRequest or NetRequest => ToolScope.Console,
         PlacesRequest => ToolScope.Session,
-        WhereRequest or PlacePoiRequest or PlaceLocRequest or XpRequest or QuestRequest or CharPurgeRequest or SpellLearnRequest or ItemRequest => ToolScope.Player,
+        WhereRequest or PlacePoiRequest or PlaceLocRequest or XpRequest or QuestRequest or CharPurgeRequest or SpellLearnRequest or ItemRequest or CorpsesRotRequest => ToolScope.Player,
         _ => null,
     };
 
@@ -188,6 +191,9 @@ internal static class ToolRouting
                 return;
             case ItemRequest item:
                 verbs.Item(player, item);
+                return;
+            case CorpsesRotRequest rot:
+                verbs.CorpsesRot(player, rot);
                 return;
             default:
                 verbs.Unhandled(request);

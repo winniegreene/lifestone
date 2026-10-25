@@ -88,7 +88,7 @@ public sealed record ToolReply(int V, string? Id, string Verb, bool Ok, string? 
     /// <summary>
     /// The data as <typeparamref name="T"/> (one of <see cref="StatusData"/>, <see cref="WhereData"/>,
     /// <see cref="PlaceData"/>, <see cref="XpData"/>, <see cref="QuestData"/>, <see cref="CharPurgeData"/>, <see cref="SpellLearnData"/>,
-    /// <see cref="ItemData"/>, <see cref="NetData"/>, <see cref="PlacesData"/>), or null when the
+    /// <see cref="ItemData"/>, <see cref="CorpsesData"/>, <see cref="NetData"/>, <see cref="PlacesData"/>), or null when the
     /// reply has none. Throws <see cref="JsonException"/> when the data does not have that shape.
     /// </summary>
     public T? DataAs<T>()
@@ -383,6 +383,37 @@ public sealed record ItemData(uint Guid, uint Wcid, string Name, int Stack, int?
     public string Describe() => string.Create(
         CultureInfo.InvariantCulture,
         $"created {(Stack > 1 ? Stack.ToString("N0", CultureInfo.InvariantCulture) + " x " : string.Empty)}{Name} (wcid {Wcid}, 0x{Guid:X8}) in your pack{(Clamped ? MaxStack is { } max ? $"; the stack was clamped to {max:N0}" : "; it does not stack, so one was created" : string.Empty)}");
+}
+
+/// <summary>
+/// The data of a <c>corpses rot</c> reply: what the verb found among the corpses in the landblock the caller is in, and what it set to rot.
+/// <see cref="Rotted"/> is at most <see cref="Found"/>: a corpse already rotting (its time to rot is at or under ACE's
+/// <c>Corpse.EmptyDecayTime</c>, or ACE has decayed it already) is found and left alone. ACE's decay then removes each corpse that was set
+/// shortly after (15 seconds, counted down at its landblock's 5-second heartbeat); its contents are put on the ground first, where ACE's own item decay takes them.
+/// </summary>
+/// <param name="Found">How many corpses matched: player corpses in the landblock named "Corpse of " and the caller's character's name.</param>
+/// <param name="Rotted">How many of those had their time to rot set to ACE's <c>Corpse.EmptyDecayTime</c>.</param>
+/// <param name="Landblock">The landblock searched, the caller's own (<c>0xXXYYFFFF</c>); corpses in any other landblock are untouched.</param>
+public sealed record CorpsesData(int Found, int Rotted, string Landblock)
+{
+    /// <summary>The reply's human sentence.</summary>
+    public string Describe()
+    {
+        var found = string.Create(CultureInfo.InvariantCulture, $"found {Found} corpse{(Found == 1 ? string.Empty : "s")} of yours in landblock {Landblock}");
+        if (Found == 0)
+        {
+            return found;
+        }
+
+        if (Rotted == 0)
+        {
+            return found + "; none set to rot (" + (Found == 1 ? "it is" : "they are") + " already rotting)";
+        }
+
+        return found + string.Create(
+            CultureInfo.InvariantCulture,
+            $"; {Rotted} set to rot (ACE's decay removes {(Rotted == 1 ? "it" : "them")} shortly){(Rotted < Found ? "; the others were already rotting" : string.Empty)}");
+    }
 }
 
 /// <summary>

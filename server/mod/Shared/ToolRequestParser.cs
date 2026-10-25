@@ -156,6 +156,11 @@ public static class ToolRequestParser
             return ParseChar(words, id);
         }
 
+        if (Is(verb, ToolVerbs.Corpses))
+        {
+            return ParseCorpses(words, id);
+        }
+
         return Fail(ToolErrors.UnknownVerb, "unknown verb; use " + ToolsWire.Usage, verbGuess, id);
     }
 
@@ -266,6 +271,9 @@ public static class ToolRequestParser
                 }
 
                 text.Append(ToolVerbs.Char).Append(' ').Append(ToolVerbs.CharPurge).Append(" \"").Append(purge.Name).Append('"');
+                break;
+            case CorpsesRotRequest:
+                text.Append(ToolVerbs.Corpses).Append(' ').Append(ToolVerbs.CorpsesRot);
                 break;
             default:
                 throw new ArgumentException("unknown request type " + request.GetType().Name, nameof(request));
@@ -389,6 +397,8 @@ public static class ToolRequestParser
     private const string ItemRule = "item takes a weenie class id (a whole number), optionally a stack size from 1 to 65,535, a palette=<1 to 93> (ACE's PaletteTemplate) and a shade=<0 to 1>: item <wcid> [<stack>] [palette=<n>] [shade=<f>]";
 
     private const string CharUsage = "char takes purge and one character name in double quotes: char purge \"<name>\"";
+
+    private const string CorpsesUsage = "corpses takes rot and nothing else: corpses rot";
 
     private const string QuestUsage = "quest takes stamp, erase or has and one quest name: quest stamp <name>";
 
@@ -539,6 +549,18 @@ public static class ToolRequestParser
         return IsValidCharacterName(name)
             ? new ToolRequestParse(new CharPurgeRequest(name, id), null, ToolVerbs.Char, id)
             : Fail(ToolErrors.BadArgs, CharNameRule, ToolVerbs.Char, id);
+    }
+
+    private static ToolRequestParse ParseCorpses(List<(string Text, bool Quoted)> words, string? id)
+    {
+        if (words.Count < 2 || words[1].Quoted || !Is(words[1].Text, ToolVerbs.CorpsesRot))
+        {
+            return Fail(ToolErrors.BadArgs, CorpsesUsage, ToolVerbs.Corpses, id);
+        }
+
+        return words.Count == 2
+            ? new ToolRequestParse(new CorpsesRotRequest(id), null, ToolVerbs.Corpses, id)
+            : Fail(ToolErrors.BadArgs, "corpses rot takes no arguments", ToolVerbs.Corpses, id);
     }
 
     private static ToolRequestParse ParseQuest(List<(string Text, bool Quoted)> words, string? id)

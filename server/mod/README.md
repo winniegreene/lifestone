@@ -17,13 +17,13 @@ What it is and is not:
 |---|---|
 | `Shared/` | The wire contract (`Lifestone.ServerTools`): the request grammar, the two-line reply and its JSON, the cell rules. Base class library only; compiled into the mod and, by a compile link, into Lifestone.Client. Tested by `tests/Lifestone.ServerMod.Tests`. |
 | `Lifestone.ServerMod/` | The mod: `Mod` (the load gate), `StartupWatch` (auto-promotion off, then the ready line), `LifestoneCommand` (the one command), `ToolCall` (one answer per request), `Reply`, `AceFacts` (everything read from ACE's internals, cited) and `Verbs/`. Built against the setup-built ACE in `server/runtime/ace`; outside `Lifestone.slnx`. |
-| `Lifestone.ServerMod/Core/` | The command's decisions that need nothing from ACE: `ToolRouting` (the guards in order, and which verb runs), `OneAnswer` (the one-answer gate), `PlacesBuilder` (the `places` list), `XpGrant` (what `xp` added), `QuestChange` (when `quest` is refused, its counts and the check that ACE's registry ended as asked) and `CharPurgeRules` (which characters `char purge` may remove, and the check that the purge did) and `ItemCreateRules` (which weenies `item` refuses, and how its stack settles). The mod compiles them; `tests/Lifestone.ServerMod.Tests` compiles them by link and runs them. Nothing from ACE may appear here. |
+| `Lifestone.ServerMod/Core/` | The command's decisions that need nothing from ACE: `ToolRouting` (the guards in order, and which verb runs), `OneAnswer` (the one-answer gate), `PlacesBuilder` (the `places` list), `XpGrant` (what `xp` added), `QuestChange` (when `quest` is refused, its counts and the check that ACE's registry ended as asked) and `CharPurgeRules` (which characters `char purge` may remove, and the check that the purge did) and `ItemCreateRules` (which weenies `item` refuses, and how its stack settles) and `CorpseRotRules` (which corpses `corpses rot` matches and sets). The mod compiles them; `tests/Lifestone.ServerMod.Tests` compiles them by link and runs them. Nothing from ACE may appear here. |
 | `.editorconfig` | Culture-sensitive calls (CA1304, CA1305, CA1310, CA1311) are build errors for every file here, in both builds. |
 
 ## The command
 
 ```text
-@lifestone status | where | net | places | xp <amount> | place poi "<name>" | place loc <cell> <x> <y> <z> [<qw> <qx> <qy> <qz>] | quest stamp <name> | quest erase <name> | quest has <name> | char purge "<name>" | spell learn <id>[,<id>...] | item <wcid> [<stack>] [palette=<n>] [shade=<f>]  [#id]
+@lifestone status | where | net | places | xp <amount> | place poi "<name>" | place loc <cell> <x> <y> <z> [<qw> <qx> <qy> <qz>] | quest stamp <name> | quest erase <name> | quest has <name> | char purge "<name>" | spell learn <id>[,<id>...] | item <wcid> [<stack>] [palette=<n>] [shade=<f>] | corpses rot  [#id]
 ```
 
 - Words are separated by spaces. A name with spaces goes in double quotes (one level, no escapes); a one-word name
@@ -38,6 +38,7 @@ What it is and is not:
 - A `quest` name is 1 to 64 of `A-Z a-z 0-9 _ - ( )` (every quest name in ACE's world database has only those, bar one with
   an apostrophe), unquoted. Never `@`: ACE reads what follows it as a comment.
 - A `char purge` name is 1 to 32 of `A-Z a-z 0-9`, space, apostrophe and hyphen, in double quotes (a one-word name may go without), matched ignoring case.
+- `corpses` takes the one word `rot` and nothing else: `corpses rot` (any other word, a quoted `rot` or an extra argument is `bad-args`).
 - A `place loc` cell is 8 hex digits (with or without `0x`). An outdoor cell (index 0x0001-0x0040) must be the one
   that holds x and y, which must be in [0, 192); an EnvCell is 0x0100-0xFFFD. The rotation (w, x, y, z) must have
   length 1 ± 0.01 and defaults to the identity.
@@ -70,6 +71,7 @@ which a reader following retail's string unpack takes as the escape for a 32-bit
 | `quest erase <name>` | Removes the quest's row from the caller's own character (ACE's `QuestManager.Erase`); a quest it does not hold is answered (`heldBefore` false), not an error | the same fields, `action` `erase` |
 | `quest has <name>` | Reads whether the caller's own character holds the quest; changes nothing | the same fields, `action` `has` |
 | `char purge "<name>"` | Removes a character that is **already marked for deletion** from the shard database, for good, through ACE's own purge (`ShardDatabaseOfflineTools.PurgeCharacter`); the one verb that writes the database. Only a character on the caller's own account is purged (see below) | `name`, `characters`, `playerBiotas`, `possessions` (ACE's three counts; a purge that removed nothing is `failed`, not a reply with zeros) |
+| `corpses rot` | In **the landblock the caller is in, and no other**, sets every player corpse named exactly `Corpse of ` and the caller's own character's name (every generation of a re-created character shares its name) to rot in ACE's `Corpse.EmptyDecayTime` (15 seconds), so ACE's own decay removes it: the same single write ACE makes to a player's oldest corpse over `corpse_spam_limit` (`Landblock.AddWorldObjectInternal`). It never destroys anything, never touches the database and never touches a creature's corpse, another name or another landblock's corpses; see below | `found` (corpses that matched), `rotted` (of those, how many were set; a corpse already at or under 15 seconds, or already decayed, is found and left alone), `landblock` (`0xXXYYFFFF`, the caller's) |
 
 Examples (the place reply is Holtburg's real destination; the xp numbers are illustrative):
 
@@ -162,6 +164,18 @@ The ACE path (`Verbs/CharVerb.cs`, each step safe while the server runs):
 3. **The purge** on the shard worker, never on the world thread: a second read of the character's row (the rules run again on it), then `ShardDatabaseOfflineTools.PurgeCharacter` (inventory and wielded biotas, the player biota and the character record in one save), then a read to confirm the record is gone, because ACE's purge logs a failed save and returns its counts anyway. Running in the queue's order means nothing queued for the character can land after it and put the rows back.
 4. **One reply** with the counts, from that worker thread (the session's send queue takes messages from any thread); an exception answers once as `failed`.
 
+**`corpses rot` and what ACE then does** (the verb's code is `Verbs/CorpsesVerb.cs`; the selection is `Core/CorpseRotRules.cs`, unit tested). It exists to clear
+the corpses of earlier generations of a re-created test character, which the current character cannot loot (ACE lets the corpse's victim, by object id, its killer and the victim's `/permit`ted looters open a player corpse, `Corpse.HasPermission`,
+Corpse.cs:150-198, and a re-created character has a new id) and which the database must not be edited for. A player corpse rots after `max(3600, level * 300)` seconds
+(`Corpse.RecalculateDecayTime`), counted down only while its landblock is loaded; this sets it to 15 instead.
+
+- **Which corpses.** Only a *player* corpse, told from a creature's the way ACE's own decay and spam-limit code do, by `Level.HasValue` (ACE sets a corpse's Level only for a player's, and it is one of the corpse's saved properties) and not `Corpse.IsMonster`
+  (a field, false again for a corpse loaded from the database); named exactly `Corpse of <the caller's character name>`, compared ordinally and case-sensitively. A corpse of any other name, a creature's corpse, and every corpse in another landblock are never looked at. The landblock searched is the one the caller is in when the command arrives; the reply names it.
+- **Which of those are set.** A corpse with more than 15 seconds left, no time to rot set, or `-1` (never rots, which ACE's decay skips) is set to 15 seconds. One already at or under 15, expired (0 or below but not `-1`) or already decayed is *found* and left alone, because setting it would only lengthen its life (`found` greater than `rotted`).
+- **Thread.** The command runs on ACE's world thread; the mod queues one action on the caller's landblock (`Landblock.EnqueueAction`), which ACE runs at the start of that landblock's tick, ahead of the heartbeat's decay, and does the search, the writes and the reply there, so the write happens on the thread that owns the corpses, as ACE's own limit does. The reply is therefore sent a tick later than the command. If the landblock unloads first the action is dropped and the client's own timeout reports it.
+- **What ACE does next (nothing the mod does).** Every 5 seconds a landblock's heartbeat counts the time to rot of each decayable object down (`WorldObject.Decay`). A corpse is only counted once its inventory has loaded, so one the landblock has just loaded waits for that. At zero, unless a player has the corpse open (it then waits until closed), ACE **puts a player corpse's contents on the ground** where the corpse lies (each is then an ordinary item on the landblock with ACE's default 5 minutes to rot, after which ACE destroys it and its database record, unless it is picked up or its own time to rot is `-1`), fades the corpse out and destroys it a second later, removing its database record. So a corpse is gone about 15 to 20 seconds after the verb, and its items about 5 minutes after that. Expect them scattered around where the corpses lay for that time.
+- **Not the database.** The mod writes nothing to it; every removal is ACE's own destroy. Run it again to see the effect: `found` counts corpses still in the landblock (an item on the ground is not a corpse).
+
 A `place` success means the teleport **started**: the client sees it finish as ACE's teleport (F751) and position
 (F748) messages. ACE may hold a teleport for a second to clear fog first.
 
@@ -174,7 +188,7 @@ A `place` success means the teleport **started**: the client sees it finish as A
 | `not-found` | `place poi`: no point of interest has that name |
 | `invalid-cell` | `place loc`: the cell is not in ACE's cell dat (an outdoor cell's landblock, or the EnvCell itself) |
 | `busy` | `place`: the player is already teleporting, logging out or dead; `xp`, `quest stamp`, `quest erase`, `spell learn`, `item`: logging out (`quest has` is never refused) |
-| `not-in-world` | `where`, `place`, `xp`, `quest`, `spell`, `item`: the character is not in a landblock yet |
+| `not-in-world` | `where`, `place`, `xp`, `quest`, `spell`, `item`, `corpses`: the character is not in a landblock yet |
 | `not-loopback` | The session is not from a loopback address |
 | `needs-player` | ACE's console asked for anything but `status` or `net` |
 | `graduated`, `own-character`, `unknown-character`, `character-online`, `not-pending-deletion` | `char purge` only: the guards above |
@@ -280,4 +294,4 @@ and `GetModContainer` (Mods/); `CommandHandlerAttribute` with the raw text, and 
 (Command/); `Session` and `GameMessageSystemChat` (Network/); `DatabaseManager.AutoPromoteNextAccountToAdmin`,
 `Shard` and the world database's point-of-interest and weenie caches (ACE.Database); `WorldManager.WorldStatus`;
 `NetworkStatistics`; `Player.Location`, `Teleport`, `GrantXP`, `EnqueueAction`, `Sequences`, `Teleporting`,
-`IsLoggingOut`, `IsDead`, `QuestManager` (`Stamp`, `Erase`, `GetQuest`); for `char purge` the shard queue (`SerializedShardDatabase.GetCharacters`, `GetCharacter`), `PlayerManager` (`GetOnlinePlayer`, `ProcessDeletedPlayer`), `WorldManager.ActionQueue`, `Session.Characters` and `ShardDatabaseOfflineTools.PurgeCharacter`; `WorldObject.AdjustDungeon`; `DatManager.CellDat.AllFiles` (ACE.DatLoader).
+`IsLoggingOut`, `IsDead`, `QuestManager` (`Stamp`, `Erase`, `GetQuest`); for `corpses rot` `Landblock.EnqueueAction` and `GetWorldObjectsForPhysicsHandling`, `Corpse` (`EmptyDecayTime`, `IsMonster`) and `WorldObject.Level`, `Name`, `TimeToRot`; for `char purge` the shard queue (`SerializedShardDatabase.GetCharacters`, `GetCharacter`), `PlayerManager` (`GetOnlinePlayer`, `ProcessDeletedPlayer`), `WorldManager.ActionQueue`, `Session.Characters` and `ShardDatabaseOfflineTools.PurgeCharacter`; `WorldObject.AdjustDungeon`; `DatManager.CellDat.AllFiles` (ACE.DatLoader).

@@ -13,6 +13,8 @@
                     under a black cover until the place is complete and the sky is built, runs the pre-roll, then
                     hands exactly the shot's frames to --cinematic-capture (raw RGBA at the window's size), so no
                     loading frame reaches the film and nothing needs trimming. A failed shot is retried once.
+                    A clip shot (scene "clip", the M4 hero video's live takes) records nothing: it names a captured take
+                    under cache\ (source) and the second it starts at (from), and its duration's frames are encoded.
       3. segments   each shot's raw frames are encoded to a near-lossless RGB intermediate and the raw file deleted.
       4. edit       ffmpeg: per segment the lower-third caption (drawtext over a soft dark halo, faded in and out)
                     and, over the title shot, the title card; a generated end card; crossfades (xfade) between all of
@@ -225,6 +227,20 @@ function Get-Duration([string] $file) {
     return [double]::Parse(($d | Select-Object -First 1), [Globalization.CultureInfo]::InvariantCulture)
 }
 
+function Get-ClipArguments {
+    <#
+    ffmpeg's arguments for a clip shot (scene "clip": a span of a captured take, the M4 hero video's live screen captures): $Frames frames of $Source from
+    $From seconds, at $Fps and $Width x $Height, encoded as the recorded shots' near-lossless RGB segment. The seek is before the input, which ffmpeg makes
+    frame-exact when it re-encodes.
+    #>
+    param([string] $Source, [double] $From, [int] $Frames, [int] $Fps, [int] $Width, [int] $Height, [string] $Segment)
+    if ($From -lt 0) { throw "a clip's 'from' is a time in its source, 0 or more (got $From)" }
+    if ($Frames -lt 1) { throw "a clip needs at least one frame (got $Frames)" }
+    $at = $From.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture)
+    return @('-ss', $at, '-i', $Source, '-frames:v', "$Frames", '-an', '-vf', "fps=$Fps,scale=${Width}:${Height}:flags=lanczos,format=rgb24",
+        '-c:v', 'libx264rgb', '-preset', 'faster', '-crf', '8', $Segment)
+}
+
 $script:built = [bool]$NoBuild
 function Invoke-Shot {
     <# One Godot run for one shot (or for stills). Returns @{ Code; Log; Text }. #>
@@ -289,10 +305,22 @@ foreach ($shot in $shots) {
         continue
     }
 
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    if ((Get-Prop $shot 'scene' 'world') -eq 'clip') {
+        # A span of a captured take: trimmed and encoded, nothing is recorded. Takes are renders of the user's data, so they stay under cache\.
+        $source = [IO.Path]::GetFullPath([IO.Path]::Combine($repoRoot, [string](Get-Prop $shot 'source' '')))
+        if (-not (Test-Inside $source @('cache'))) { throw "Clip '$id': its source must be inside cache\ (gitignored): $source" }
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Clip '$id': no source file $source" }
+        $from = [double](Get-Prop $shot 'from' 0)
+        Invoke-FFmpeg -LogPath (Join-Path $logDir "$id-clip.log") -Arguments (Get-ClipArguments -Source $source -From $from -Frames $expected -Fps $Fps -Width $width -Height $height -Segment $segment)
+        $summary.Add([pscustomobject]@{ Shot = $id; Frames = $expected; Seconds = [double]$shot.duration; Recorded = ('clip {0:0.###} s' -f $from); Wall = ('{0:0}s' -f $watch.Elapsed.TotalSeconds) })
+        Write-Host ("[hero-video] clipped  {0,-24} {1} frames from {2:0.###} s of {3}" -f $id, $expected, $from, (Split-Path -Leaf $source)) -ForegroundColor Green
+        continue
+    }
+
     $raw = Join-Path $rawDir "$id.rgba"
     $meta = Join-Path $rawDir "$id.json"
     $ok = $false
-    $watch = [Diagnostics.Stopwatch]::StartNew()
     if ($MovieMaker) {
         # Movie Maker writes every frame of the run; the shot's own are the ones its log line names.
         $movieDir = Join-Path $WorkDir "movie\$id"
@@ -364,6 +392,11 @@ function Escape-FilterPath([string] $path) {
 }
 
 function Format-Number([double] $value) { return $value.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture) }
+
+function Get-FilmFadeOut([double] $duration) {
+    # The film's last second fading to black, when the list has no end card.
+    return "fade=t=out:st=$(Format-Number ([Math]::Max(0.0, $duration - 1.0))):d=$(Format-Number ([Math]::Min(1.0, $duration)))"
+}
 
 function Get-Alpha([double] $in, [double] $out, [double] $fade) {
     # Opacity ramp: 0 before $in, fades up over $fade, holds, fades down to 0 at $out.
@@ -440,10 +473,13 @@ for ($i = 0; $i -lt $shots.Count; $i++) {
         $filters += Get-DrawText -TextFile $subtitle -Size 44 -X '(w-text_w)/2' -Y "h*0.34+$([int](92 * $scale))" -Alpha (Get-Alpha ($tIn + 0.5) $tOut 1.0) -Shadow 0.6
     }
     if ($i -eq 0) { $filters += 'fade=t=in:st=0:d=1.0' }
+    if ($i -eq $shots.Count - 1 -and -not $endCard) { $filters += Get-FilmFadeOut $duration } # no end card: the last shot fades to black
     $chains.Add("$head$(@($filters | ForEach-Object { ",$_" }) -join '')[v$i]")
 }
 
-# The end card: dark, the wordmark above the two lines of the list.
+# The end card: dark, the wordmark above the two lines of the list. A list with no endCard ends on its last shot's fade to black (the M4 hero
+# video: the owner wanted no text on screen).
+if ($endCard) {
 $endIndex = $shots.Count
 $endDuration = [double](Get-Prop $endCard 'duration' 5.0)
 $durations.Add($endDuration)
@@ -458,6 +494,7 @@ $endFilters = @("fps=$Fps", 'format=rgb24',
     (Get-DrawText -TextFile $endSubtitle -Size 38 -X '(w-text_w)/2' -Y "h*0.5+$([int](78 * $scale))" -Alpha (Get-Alpha 1.2 ($endDuration - 0.2) 0.8) -Color '0xB8BCC6'),
     "fade=t=out:st=$(Format-Number ($endDuration - 0.8)):d=0.8")
 $chains.Add("[${endIndex}:v]$($endFilters -join ',')[v$endIndex]")
+}
 
 # Crossfades: each join overlaps the streams by its transition's length; a shot's start in the film is its xfade offset.
 $current = 'v0'
@@ -470,12 +507,12 @@ for ($k = 1; $k -lt $durations.Count; $k++) {
     $xfade = if ($kind -eq 'fadeblack') { 'fadeblack' } else { 'fade' }
     $offset = $length - $d
     $starts.Add($offset)
-    $label = if ($k -eq $durations.Count - 1) { 'film' } else { "x$k" }
+    $label = "x$k"
     $chains.Add("[$current][v$k]xfade=transition=${xfade}:duration=$(Format-Number $d):offset=$(Format-Number $offset)[$label]")
     $current = $label
     $length = $offset + $durations[$k]
 }
-$chains.Add("[film]scale=out_color_matrix=bt709:out_range=tv:flags=lanczos+accurate_rnd+full_chroma_int,format=yuv420p," +
+$chains.Add("[$current]scale=out_color_matrix=bt709:out_range=tv:flags=lanczos+accurate_rnd+full_chroma_int,format=yuv420p," +
     "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv[out]")
 $graph = Join-Path $WorkDir 'edit.filtergraph'
 [IO.File]::WriteAllText($graph, ($chains -join ";`n"), [Text.UTF8Encoding]::new($false))

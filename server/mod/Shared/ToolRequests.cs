@@ -57,6 +57,12 @@ public static class ToolVerbs
 
     /// <summary>Creates an item in the player's own pack (<see cref="ItemData"/>).</summary>
     public const string Item = "item";
+
+    /// <summary>Acts on the corpses the player's own characters left in the landblock the player is in (<see cref="CorpsesData"/>).</summary>
+    public const string Corpses = "corpses";
+
+    /// <summary>The <c>corpses</c> form that sets the caller's character's own player corpses in the landblock to rot, by ACE's own decay.</summary>
+    public const string CorpsesRot = "rot";
 }
 
 /// <summary>
@@ -226,6 +232,19 @@ public sealed record ItemRequest(uint Wcid, int? Stack = null, string? Id = null
 {
     /// <inheritdoc/>
     public override string Verb => ToolVerbs.Item;
+}
+
+/// <summary>
+/// <c>@lifestone corpses rot</c>: in the landblock the calling player is in, every player corpse named "Corpse of " and the caller's
+/// own character's name (every generation of a re-created character shares the name) is set to rot in ACE's
+/// <c>Corpse.EmptyDecayTime</c>, so ACE's own decay removes it, as it does for a player over the per-landblock corpse limit. It takes no
+/// argument: corpses in other landblocks, creature corpses and any other name are never touched.
+/// </summary>
+/// <param name="Id">The correlation id, or null.</param>
+public sealed record CorpsesRotRequest(string? Id = null) : ToolRequest(Id)
+{
+    /// <inheritdoc/>
+    public override string Verb => ToolVerbs.Corpses;
 }
 
 /// <summary>

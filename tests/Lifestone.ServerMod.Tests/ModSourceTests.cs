@@ -59,6 +59,8 @@ public sealed partial class ModSourceTests
             "server/mod/Lifestone.ServerMod/Verbs/CharVerb.cs",
             "server/mod/Lifestone.ServerMod/Verbs/SpellVerb.cs",
             "server/mod/Lifestone.ServerMod/Verbs/ItemVerb.cs",
+            "server/mod/Lifestone.ServerMod/Verbs/CorpsesVerb.cs",
+            "server/mod/Lifestone.ServerMod/Core/CorpseRotRules.cs",
             "server/mod/Lifestone.ServerMod/Core/ItemCreateRules.cs",
             "server/mod/Lifestone.ServerMod/Core/ToolRouting.cs",
             "server/mod/Lifestone.ServerMod/Core/CharPurgeRules.cs",
@@ -384,6 +386,35 @@ public sealed partial class ModSourceTests
             .Select(Relative)
             .ToArray();
         Assert.True(spelled.Length == 0, "the graduated names belong in CharPurgeRules only:\n" + string.Join('\n', spelled));
+    }
+
+    [Fact]
+    public void Corpses_rot_makes_the_one_write_ACE_s_corpse_limit_makes_on_the_landblocks_queue_and_destroys_and_saves_nothing()
+    {
+        // ACE call shapes no unit test reaches (CorpseRotRulesTests run the selection): the search runs as one action on the caller's current
+        // landblock's own queue (Landblock.EnqueueAction, as ACE's spam-limit block runs on it), reads that landblock's objects there, takes
+        // the corpses the rules pick from Corpse objects only, and writes only TimeToRot, to Corpse.EmptyDecayTime, once per corpse. It never destroys
+        // anything (ACE's decay does), never reaches the database, and never moves, opens or empties a corpse.
+        var path = Path.Combine(ProjectFolder, "Verbs", "CorpsesVerb.cs");
+        var code = string.Join(Environment.NewLine, File.ReadLines(path).Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+        Assert.Contains("public static void Rot(ToolCall call, Player player, CorpsesRotRequest request)", code, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(code, @"player\.CurrentLandblock\b"));
+        Assert.Single(Regex.Matches(code, @"landblock\.EnqueueAction\(new ActionEventDelegate\("));
+        Assert.Single(Regex.Matches(code, @"\.GetWorldObjectsForPhysicsHandling\(\)\.OfType<Corpse>\(\)\.ToList\(\)"));
+        Assert.Contains("c.Level.HasValue, c.IsMonster, c.TimeToRot", code, StringComparison.Ordinal);
+        Assert.Contains("CorpseRotRules.Plan(", code, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(code, @"\.TimeToRot\s*=[^=]"));
+        Assert.Single(Regex.Matches(code, @"corpse\.TimeToRot = Corpse\.EmptyDecayTime;"));
+        Assert.Equal(3, Regex.Matches(code, @"\bCorpse\.EmptyDecayTime\b").Count);
+        string[] forbidden = ["Destroy", "Decay(", "RemoveWorldObject", "DatabaseManager", "SaveBiota", "SaveCharacter", "ExecuteSql", "TryRemoveFromInventory", "Open(", "Close(", "Location =", ".Inventory", "Teleport"];
+        Assert.All(forbidden, word => Assert.DoesNotContain(word, code, StringComparison.Ordinal));
+
+        // The header names the ACE source and the port is listed.
+        Assert.StartsWith("// Ported from ACEmulator/ACE@95ef426d Source/ACE.Server/Entity/Landblock.cs AddWorldObjectInternal", File.ReadLines(path).First(), StringComparison.Ordinal);
+        Assert.Contains("CorpsesVerb.cs", File.ReadAllText(RepositoryFiles.PathOf("docs", "third-party", "server-mod.md")), StringComparison.Ordinal);
+
+        // Nothing but char purge writes the shard database, and the new verb is not char purge (the quest test scans every verb for it too).
+        Assert.DoesNotMatch(@"DatabaseManager\s*\.\s*Shard|SaveCharacter|\.ExecuteSql|\bSaveBiota", File.ReadAllText(path));
     }
 
     [Fact]

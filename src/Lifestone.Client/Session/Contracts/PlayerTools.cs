@@ -241,6 +241,27 @@ public sealed class PlayerTools
             observe: null,
             "ToolItem wcid=" + ActionText.Count(wcid) + (stack is { } count ? " stack=" + ActionText.Count(count) : string.Empty) + (palette is { } pal ? " palette=" + ActionText.Count(pal) : string.Empty));
 
+    /// <summary>
+    /// Sets this character's own corpses in the landblock it is in to rot (<c>@lifestone corpses rot</c>), so ACE's own decay removes them: every player corpse there named
+    /// "Corpse of " and the character's name (every generation of a re-created character shares it, which is the point: the corpses of earlier generations cannot be
+    /// looted and cannot be removed any other way) gets ACE's <c>Corpse.EmptyDecayTime</c> (15 seconds) as its time to rot, as ACE does to a player's oldest corpse over its
+    /// per-landblock limit. Nothing else is touched: not another landblock's corpses, not a creature's, not another name, and the database is not written by the mod (ACE's decay
+    /// does that). A corpse's contents are put on the ground when it decays and rot there on ACE's own item timer; a corpse someone has open waits. Confirmed with how many corpses
+    /// matched and how many were set (<see cref="CorpsesResult"/>); zero found is a confirmed answer, not an error.
+    /// </summary>
+    /// <param name="source">Who asked.</param>
+    /// <returns>The request's handle.</returns>
+    public ToolHandle<CorpsesResult> RotCorpses(ActionSource source) =>
+        Request(
+            ActionKind.ToolCorpsesRot,
+            source,
+            id => new CorpsesRotRequest(id),
+            "Lifestone: asking the server to rot this character's corpses in the landblock...",
+            silent: false,
+            ToolResultReader.Corpses,
+            observe: null,
+            "ToolCorpsesRot");
+
     /// <summary>The gear spawn still under way, if any: a second <see cref="SpawnGear"/> returns it instead of counting an inventory that its grants have not finished changing.</summary>
     private GearSpawn? _gear;
 

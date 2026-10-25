@@ -7,7 +7,7 @@ namespace Lifestone.Client.Session.Contracts;
 /// carried out that the tool then judges a failure (<see cref="PlayerTools.LearnSpells"/> with an unknown id: a server error with the result set).
 /// </summary>
 /// <typeparam name="T">The result type (<see cref="ToolStatus"/>, <see cref="PlaceResult"/>, <see cref="WhereResult"/>,
-/// <see cref="XpResult"/>, <see cref="QuestResult"/>, <see cref="CharPurgeResult"/>, <see cref="SpellLearnResult"/>, <see cref="ItemResult"/>).</typeparam>
+/// <see cref="XpResult"/>, <see cref="QuestResult"/>, <see cref="CharPurgeResult"/>, <see cref="SpellLearnResult"/>, <see cref="ItemResult"/>, <see cref="CorpsesResult"/>).</typeparam>
 public sealed class ToolHandle<T> : ActionHandle
     where T : class
 {

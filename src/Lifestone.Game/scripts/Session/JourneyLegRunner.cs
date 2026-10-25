@@ -105,6 +105,7 @@ public sealed partial class JourneyLegRunner : Node
     private int _linesPrinted;
     private int _framesSaved;
     private string? _stem;
+    private bool _film;
     private readonly List<string> _notTaken = [];
     private readonly List<(Node Node, bool WasVisible)> _hidden = [];
 
@@ -151,6 +152,7 @@ public sealed partial class JourneyLegRunner : Node
             _optionError = errors.Count == 0 ? null : "bad journey option: " + string.Join("; ", errors),
             _wholeSeconds = plan is null ? LoginSeconds : WholeSecondsFor(plan),
             _stem = play.BuffShotPath,
+            _film = play.JourneyFilm,
         };
         runner._observer = new JourneyFrameObserver(runner._stem, play.JourneyShots, GodotLogSink.Instance);
 
@@ -172,7 +174,8 @@ public sealed partial class JourneyLegRunner : Node
             ("scenario", JourneyScenario.ScenarioName),
             ("whole_check_s", runner._wholeSeconds),
             ("review_frames", runner._stem is null ? "not asked for" : "station-<name> at each station's end"),
-            ("journey_shots", play.JourneyShots.Enabled));
+            ("journey_shots", play.JourneyShots.Enabled),
+            ("journey_film", play.JourneyFilm));
     }
 
     /// <inheritdoc/>
@@ -410,7 +413,7 @@ public sealed partial class JourneyLegRunner : Node
         var context = JourneyScenario.NewContext(plan, log, spells, keeper, _dats, _runners, _observer, windowFrames: _windows);
         // endSession: false, the node logs off itself when the journey ends (the journey ends at Holtburg's lifestone).
         _scenario = new JourneyScenario(plan, factory, context, endSession: false);
-        if (_stem is not null)
+        if (_stem is not null || _film)
         {
             HideDeveloperHud();
         }
@@ -427,6 +430,7 @@ public sealed partial class JourneyLegRunner : Node
         PrintNewLines(scenario);
         StepStationShots(session, scenario);
         StepInStationFrames(session, scenario);
+        StepHeroPanels(session, scenario); // --journey-film: the hero video's panels (JourneyLegRunner.HeroPanels.cs)
         SaveRequested(session);
         if (before is not null && _observer.Current is null)
         {

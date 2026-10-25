@@ -117,3 +117,34 @@ public sealed class ShowpieceWatch
         return _events;
     }
 }
+
+/// <summary>
+/// The panels a filmed hero journey opens (the M4 hero video, the owner's re-cut; <c>--journey-film</c> only): the character sheet's attributes tab while the death station re-buffs (retail's death stripped the buffs,
+/// so each buff that lands raises its stat on screen) and the inventory with the paper doll while a hunt loots a corpse. Engine-free: the Godot host opens and closes the page through its toolbar action, as a
+/// player's click would, and holds it <see cref="HoldSeconds"/> after its moment. The vendor window needs nothing here (the vendor opens it).
+/// </summary>
+public static class HeroPanels
+{
+    /// <summary>The inventory page, with the paper doll (retail's panel 7; <c>GameInventoryPage.Panel</c>).</summary>
+    public const uint Inventory = 7;
+
+    /// <summary>The character information page (retail's panel 11).</summary>
+    public const uint CharacterInfo = 11;
+
+    /// <summary>The character page's attributes tab button (gmAttributeUI's tab, 0x10000228; <c>PanelFramesPlan</c>'s page 11 tab a).</summary>
+    public const uint AttributesTab = 0x10000228;
+
+    /// <summary>The seconds a page stays open after its moment ends, so the last change is seen (Lifestone's own).</summary>
+    public const double HoldSeconds = 1.5;
+
+    /// <summary>The page the moment wants open, or 0 for none.</summary>
+    /// <param name="station">The running station's name (null between stations).</param>
+    /// <param name="deathStage">The death station's stage, or null outside it.</param>
+    /// <param name="containerViewed">True while the player views a container (a corpse being looted).</param>
+    public static uint Want(string? station, string? deathStage, bool containerViewed) => station switch
+    {
+        StationKinds.Death when string.Equals(deathStage, "rebuff", StringComparison.Ordinal) => CharacterInfo,
+        JourneyStationNames.Hunt when containerViewed => Inventory,
+        _ => 0,
+    };
+}

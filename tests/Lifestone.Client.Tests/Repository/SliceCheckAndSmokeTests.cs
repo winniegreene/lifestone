@@ -19,6 +19,8 @@ public sealed class SliceCheckAndSmokeTests
 
     private static string StepPaths => File.ReadAllText(RepositoryFiles.PathOf("tools", "lib", "StepPaths.psd1"));
 
+    private static string HeroVideo => File.ReadAllText(RepositoryFiles.PathOf("tools", "hero-video.ps1"));
+
     private const string DefaultFilter = "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure";
 
     // ------------------------------------------------------------------------------------------ C1: the default filter and the Exhaustive stage
@@ -622,6 +624,28 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("[string] $UserDataSlot = ''", godot, StringComparison.Ordinal);
         Assert.Contains("$dataRoot = if ($UserDataSlot) { Join-Path $repoRoot \"cache\\godot\\slot-$UserDataSlot\" } else { Join-Path $repoRoot 'cache\\godot' }", godot, StringComparison.Ordinal);
         Assert.Contains("[switch] $IsolateUserData", godot, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_hero_video_composer_trims_a_clip_shot_to_its_frames_at_the_lists_fps_and_size_M4_hero_video()
+    {
+        // The M4 hero video's shots are live screen captures (takes): a clip shot names its take and the second it starts at, and the composer encodes exactly the shot's
+        // frames into the same near-lossless segment a recorded shot gets, so the edit (captions, crossfades, cards, the 720p and the poster) is unchanged.
+        var script = Function(HeroVideo, "Get-ClipArguments") + "\n";
+        var run = RunPowerShell(script + "(Get-ClipArguments -Source 'cache/take.mkv' -From 12.25 -Frames 105 -Fps 30 -Width 1920 -Height 1080 -Segment 'cache/seg.mkv') -join '|'");
+        Assert.Equal("-ss|12.25|-i|cache/take.mkv|-frames:v|105|-an|-vf|fps=30,scale=1920:1080:flags=lanczos,format=rgb24|-c:v|libx264rgb|-preset|faster|-crf|8|cache/seg.mkv", run.Trim());
+        var refused = RunPowerShell(script + "foreach ($from in -1, 3) { try { $null = Get-ClipArguments -Source a -From $from -Frames 0 -Fps 30 -Width 2 -Height 2 -Segment b; 'kept' } catch { 'refused' } }");
+        Assert.Equal(["refused", "refused"], refused.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); // a negative start; no frames
+
+        // A list with no end card (the owner: no text on screen) ends on the last shot's one-second fade to black.
+        var fade = RunPowerShell("function Format-Number([double] $value) { return $value.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture) }\n" + Function(HeroVideo, "Get-FilmFadeOut") + "\nGet-FilmFadeOut 6.2\nGet-FilmFadeOut 0.5");
+        Assert.Equal(["fade=t=out:st=5.2:d=1", "fade=t=out:st=0:d=0.5"], fade.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        Assert.Contains("if ($i -eq $shots.Count - 1 -and -not $endCard) { $filters += Get-FilmFadeOut $duration }", HeroVideo, StringComparison.Ordinal);
+        Assert.Contains("if ($endCard) {", HeroVideo, StringComparison.Ordinal);
+
+        // The record loop: a clip records nothing, and its source must lie under cache\ (takes are renders of the user's data).
+        Assert.Contains("if ((Get-Prop $shot 'scene' 'world') -eq 'clip')", HeroVideo, StringComparison.Ordinal);
+        Assert.Contains("if (-not (Test-Inside $source @('cache')))", HeroVideo, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------------------------------------ helpers

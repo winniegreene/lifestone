@@ -124,7 +124,7 @@ public sealed class WorldActionStubTests
         // Appended after ToolItem so the recorded values above stay stable.
         Assert.Equal(ActionKind.ToolItem + 1, ActionKind.CastSpell);
         Assert.Equal(
-            [ActionKind.CastSpell, ActionKind.SetCombatMode, ActionKind.Wield, ActionKind.Unwield, ActionKind.MoveToPack, ActionKind.MergeStack, ActionKind.Suicide, ActionKind.AddSpellFavorite, ActionKind.RemoveSpellFavorite, ActionKind.Attack, ActionKind.MissileAttack, ActionKind.CancelAttack, ActionKind.OpenContainer, ActionKind.CloseContainer, ActionKind.PickUp, ActionKind.Drop, ActionKind.SplitToContainer, ActionKind.SplitTo3D, ActionKind.SplitToWield, ActionKind.Give, ActionKind.UseWithTarget, ActionKind.Drink, ActionKind.AddShortcut, ActionKind.RemoveShortcut, ActionKind.UseShortcut, ActionKind.Identify, ActionKind.OpenVendor, ActionKind.Buy, ActionKind.Sell, ActionKind.UseManaStone],
+            [ActionKind.CastSpell, ActionKind.SetCombatMode, ActionKind.Wield, ActionKind.Unwield, ActionKind.MoveToPack, ActionKind.MergeStack, ActionKind.Suicide, ActionKind.AddSpellFavorite, ActionKind.RemoveSpellFavorite, ActionKind.Attack, ActionKind.MissileAttack, ActionKind.CancelAttack, ActionKind.OpenContainer, ActionKind.CloseContainer, ActionKind.PickUp, ActionKind.Drop, ActionKind.SplitToContainer, ActionKind.SplitTo3D, ActionKind.SplitToWield, ActionKind.Give, ActionKind.UseWithTarget, ActionKind.Drink, ActionKind.AddShortcut, ActionKind.RemoveShortcut, ActionKind.UseShortcut, ActionKind.Identify, ActionKind.OpenVendor, ActionKind.Buy, ActionKind.Sell, ActionKind.UseManaStone, ActionKind.ToolCorpsesRot],
             Enum.GetValues<ActionKind>().Where(k => k > ActionKind.ToolItem));
     }
 

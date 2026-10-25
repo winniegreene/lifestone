@@ -116,6 +116,12 @@ public sealed record PlayOptions
     public Lifestone.Client.Session.Scenarios.Journey.JourneyShots JourneyShots { get; init; } = Lifestone.Client.Session.Scenarios.Journey.JourneyShots.Off;
 
     /// <summary>
+    /// <c>--journey-film</c> (the M4 hero video): the journey check frames retail's chase camera for each station as <c>--journey-shots</c> does (the hunt's side turn, the fight's and the den
+    /// travel's turn) and logs the showpiece events, but saves no frame, so a screen capture of the window records the run at its full frame rate (a 1080p frame's save stalls the game about 0.5 s).
+    /// </summary>
+    public bool JourneyFilm { get; init; }
+
+    /// <summary>
     /// The folder <c>--play-panel-shots=DIR</c> saves one frame of each registered panel page to (M3 2.2 s0; <see cref="PanelFramesPlan"/>), or null: in a plain <c>--play</c> run, after the arrival settles, each page is
     /// opened in turn, saved at the window's size and closed, and the run quits like <c>--play-screenshot</c>. Relative paths are taken from the repository root.
     /// </summary>
@@ -332,6 +338,7 @@ public sealed record PlayOptions
     private static PlayOptions JourneyShotsChecked(PlayOptions options, IEnumerable<CommandLineArgument> args, List<string> errors)
     {
         var on = false;
+        bool? film = null;
         var frames = JourneyShots.DefaultBurstFrames;
         var step = JourneyShots.OnWithDefaults.StepSeconds;
         var given = new List<string>();
@@ -343,6 +350,9 @@ public sealed record PlayOptions
                 case "--journey-shots":
                     on = OptionValues.Switch(argument, errors, on);
                     given.Add(argument.Name);
+                    break;
+                case "--journey-film":
+                    film = OptionValues.Switch(argument, errors, film ?? false);
                     break;
                 case "--journey-shot-frames":
                     var n = OptionValues.Int(argument, errors, frames);
@@ -370,6 +380,22 @@ public sealed record PlayOptions
 
                     given.Add(argument.Name);
                     break;
+            }
+        }
+
+        if (film is not null)
+        {
+            if (options.LoginCheck != LoginCheckKind.Journey)
+            {
+                errors.Add("--journey-film: only --login-check=journey reads it");
+            }
+            else if (on || options.ScreenshotPath is not null)
+            {
+                errors.Add("--journey-film saves no frame, so it cannot go with " + (on ? "--journey-shots" : "--play-screenshot") + " (a saved frame stalls the filmed run)");
+            }
+            else
+            {
+                options = options with { JourneyFilm = film.Value };
             }
         }
 

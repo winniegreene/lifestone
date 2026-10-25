@@ -8,7 +8,7 @@ namespace Lifestone.Client.Session.Tools;
 
 /// <summary>
 /// Turns the server mod's reply data (ToolsWire's <see cref="StatusData"/>, <see cref="WhereData"/>,
-/// <see cref="PlaceData"/>, <see cref="XpData"/>, <see cref="QuestData"/>, <see cref="CharPurgeData"/>, <see cref="SpellLearnData"/> and <see cref="ItemData"/>) into the session's tool results. Every reader throws
+/// <see cref="PlaceData"/>, <see cref="XpData"/>, <see cref="QuestData"/>, <see cref="CharPurgeData"/>, <see cref="SpellLearnData"/>, <see cref="ItemData"/> and <see cref="CorpsesData"/>) into the session's tool results. Every reader throws
 /// <see cref="ToolDataException"/> for data that does not have its verb's shape, which the tools report as a server
 /// error rather than a result.
 /// </summary>
@@ -73,6 +73,20 @@ internal static class ToolResultReader
     {
         var d = Data<ItemData>(reply);
         return new ItemResult(d.Guid, d.Wcid, d.Name ?? string.Empty, d.Stack, d.Requested, d.MaxStack, d.Clamped);
+    }
+
+    /// <summary>A <c>corpses rot</c> reply's result. A landblock that is not a cell id, or a count that is negative or above the other, is data of the wrong shape.</summary>
+    internal static CorpsesResult Corpses(ToolReply reply)
+    {
+        var d = Data<CorpsesData>(reply);
+        if (!ToolsWire.TryParseCell(d.Landblock, out var landblock))
+        {
+            throw new ToolDataException("the reply's landblock is not a cell id");
+        }
+
+        return d.Found < 0 || d.Rotted < 0 || d.Rotted > d.Found
+            ? throw new ToolDataException("the reply's corpse counts do not add up")
+            : new CorpsesResult(d.Found, d.Rotted, landblock);
     }
 
     private static SpellOutcomeKind SpellOutcome(string? word) => word switch

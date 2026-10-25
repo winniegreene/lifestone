@@ -170,6 +170,9 @@ public enum ActionKind
 
     /// <summary><see cref="IActionApi.UseManaStone"/> (closes <c>TODO(m4-gear-mana)</c>; appended).</summary>
     UseManaStone,
+
+    /// <summary><see cref="PlayerTools.RotCorpses"/> (M4 hero step; appended).</summary>
+    ToolCorpsesRot,
 }
 
 /// <summary>The height of an attack (ACE's <c>AttackHeight</c>, the value on the wire; retail's group box 0x10000056 selects it).</summary>

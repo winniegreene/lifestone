@@ -325,7 +325,7 @@ public static class JourneyStations
                 StationKinds.KitRefused => new KitRefusedStation(),
                 StationKinds.HarmHeal => new HarmHealStation(),
                 StationKinds.Bind => new BindStation(),
-                StationKinds.DenTravel => new DenTravelStation(),
+                StationKinds.DenTravel => new DenTravelStation(spec.Arguments.ContainsKey(JourneyPlans.StepOffArgument)),
                 StationKinds.DenFight => DenFight(spec),
                 StationKinds.Death => Death(spec),
                 StationKinds.Hunt => Hunt(spec, vendor: false),
@@ -336,6 +336,8 @@ public static class JourneyStations
                 StationKinds.AppraiseVendor => new AppraiseVendorStation(),
                 StationKinds.VendorFacts => new VendorFactsStation(),
                 StationKinds.Shortcuts => new ShortcutsStation(),
+                StationKinds.Hotbar => new HotbarStation(),
+                StationKinds.Corpses => new CorpsesStation(),
                 _ => throw new NotSupportedException($"TODO(j4-station-kind): the journey catalog has no station of kind '{spec.Kind}' (station '{spec.Name}')"),
             };
         }

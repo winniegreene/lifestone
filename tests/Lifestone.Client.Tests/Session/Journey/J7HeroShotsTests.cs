@@ -30,9 +30,11 @@ public sealed class J7HeroShotsTests
     [Fact]
     public void The_hero_plans_stations_are_pinned_in_order()
     {
-        Assert.Equal(["build-verify", "buff", "bind", "hunt", "recall-home"], JourneyPlans.HeroArcher.Stations.Select(s => s.Name));
-        Assert.Equal(["build-verify", "buff", "bind", "hunt", "recall-home"], JourneyPlans.HeroBrawler.Stations.Select(s => s.Name));
-        Assert.Equal(["build-verify", "gear", "buff", "bind", "den-travel", "den-fight", "recall-home"], JourneyPlans.HeroMage.Stations.Select(s => s.Name));
+        // The M4 hero video (the owner's re-cut): the lower-right bar filled first, the Brawler's store, the mage's den death (its re-buff raises the stats on screen).
+        Assert.Equal(["build-verify", "hotbar", "buff", "bind", "hunt", "recall-home"], JourneyPlans.HeroArcher.Stations.Select(s => s.Name));
+        Assert.Equal(["build-verify", "hotbar", "buff", "bind", "hunt", "recall-home", "vendor"], JourneyPlans.HeroBrawler.Stations.Select(s => s.Name));
+        Assert.Equal(["build-verify", "hotbar", "gear", "buff", "bind", "den-travel", "corpses", "den-fight", "death", "recall-home"], JourneyPlans.HeroMage.Stations.Select(s => s.Name));
+        Assert.All(JourneyPlans.All.SelectMany(p => p.Stations), s => Assert.NotEqual(StationKinds.Hotbar, s.Kind)); // the gate's plans keep their stations
         Assert.Equal(JourneyPlans.HeroMage.Stations.Select(s => s.Name), JourneyPlans.HeroMage.Stations.Select(s => s.Kind));
         Assert.All(JourneyPlans.Hero.SelectMany(p => p.Stations), s => Assert.Contains(s.Kind, StationKinds.All));
         Assert.Equal(StationWhere.Forest, JourneyPlans.HeroArcher.Stations.Single(s => s.Name == "hunt").NeedsOverride!.Where);
@@ -78,6 +80,24 @@ public sealed class J7HeroShotsTests
         Assert.NotEmpty(PlayOptions.Parse(["--login-check=hunt", "--journey-shots"]).Errors);
         Assert.NotEmpty(PlayOptions.Parse(["--login-check=journey", "--journey=hero-mage", "--journey-shot-frames=4"]).Errors);
         Assert.NotEmpty(PlayOptions.Parse(["--login-check=journey", "--journey=hero-mage", "--journey-shots", "--journey-shot-frames=0"]).Errors);
+    }
+
+    [Fact]
+    public void Journey_film_parses_on_the_journey_check_alone_and_saves_no_frame_M4_hero_video()
+    {
+        var film = PlayOptions.Parse(["--login-check=journey", "--journey=hero-mage", "--journey-film"]);
+        Assert.Empty(film.Errors);
+        Assert.True(film.JourneyFilm);
+        Assert.Equal(JourneyShots.Off, film.JourneyShots);
+        Assert.Null(film.BuffShotPath);
+        Assert.False(PlayOptions.Parse(["--login-check=journey", "--journey=hero-mage"]).JourneyFilm);
+
+        // A saved frame stalls the filmed run (about 0.5 s at 1080p), so the film takes none.
+        Assert.Contains("--journey-shots", PlayOptions.Parse(["--login-check=journey", "--journey=hero-mage", "--journey-film", "--journey-shots"]).Errors.Single(), StringComparison.Ordinal);
+        Assert.Contains("--play-screenshot", PlayOptions.Parse(["--login-check=journey", "--journey=hero-mage", "--journey-film", "--play-screenshot=cache/x/hero.png"]).Errors.Single(), StringComparison.Ordinal);
+        Assert.NotEmpty(PlayOptions.Parse(["--login-check=hunt", "--journey-film"]).Errors);
+        Assert.True(OptionCatalog.Registry.IsKnown("--journey-film"));
+        Assert.True(OptionCatalog.Registry.AppliesTo("--journey-film", OptionScenes.Main));
     }
 
     [Fact]

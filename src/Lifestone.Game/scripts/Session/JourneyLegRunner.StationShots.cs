@@ -94,16 +94,17 @@ public sealed partial class JourneyLegRunner
 
         _camera.Restore(_mode);
         _cameraStation = station;
-        if (station is null || _stem is null)
+        if (station is null || (_stem is null && !_film))
         {
             return;
         }
 
-        var shots = _observer.Shots.Enabled;
+        var shots = _observer.Shots.Enabled || _film; // --journey-film: the hero camera with no frame saved
         var kind = station switch
         {
             JourneyStationNames.Hunt => ArcherPlan ? JourneyCameraKind.MissileSide : JourneyCameraKind.MeleeFramed,
             JourneyStationNames.DenFight when shots => JourneyCameraKind.SideTurn,
+            StationKinds.DenTravel when shots => JourneyCameraKind.SideTurn, // the hero video: Primary Portal Recall's cast (after the step-off) and the den's arrival, from the side
             _ => JourneyCameraKind.Retail,
         };
         if (_camera.Frame(_mode, kind, _runSeconds))
@@ -146,7 +147,7 @@ public sealed partial class JourneyLegRunner
             }
 
             _observer.StationEvent(station, name, _runSeconds);
-            Log.Info(LogCategory, $"journey: showpiece '{name}' in station {station}" + (_observer.Shots.Enabled ? $": a burst of {_observer.Shots.BurstFrames} frame(s) every {_observer.Shots.StepSeconds.ToString("0.##", CultureInfo.InvariantCulture)} s" : " (--journey-shots is off)"));
+            Log.Info(LogCategory, $"journey: showpiece '{name}' in station {station}" + (_observer.Shots.Enabled ? $": a burst of {_observer.Shots.BurstFrames} frame(s) every {_observer.Shots.StepSeconds.ToString("0.##", CultureInfo.InvariantCulture)} s" : _film ? " (--journey-film: filmed, no frame saved)" : " (--journey-shots is off)"));
         }
     }
 

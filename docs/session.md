@@ -512,8 +512,8 @@ string from F658 and writes the privilege words as 0.
 
 `IGameSessionView.Tools` (`PlayerTools`, ST12) gives a Player account the server mod's conveniences (DoD 10):
 `Status`, `Place(TeleportDestination)`, `WhereAmI`, `AddXp`, the quest verbs `StampQuest`, `EraseQuest` and `HasQuest`,
-`PurgeCharacter(name)`, `LearnSpells(ids)` and `SpawnItem(wcid, stack)`, each returning a `ToolHandle<T>` (an `ActionHandle` with a typed `Result`: `ToolStatus`, `PlaceResult`,
-`WhereResult`, `XpResult`, `QuestResult`, `CharPurgeResult`, `SpellLearnResult`, `ItemResult`), plus `Availability` and `LastStatus`.
+`PurgeCharacter(name)`, `LearnSpells(ids)`, `SpawnItem(wcid, stack)` and `RotCorpses(source)`, each returning a `ToolHandle<T>` (an `ActionHandle` with a typed `Result`: `ToolStatus`, `PlaceResult`,
+`WhereResult`, `XpResult`, `QuestResult`, `CharPurgeResult`, `SpellLearnResult`, `ItemResult`, `CorpsesResult`), plus `Availability` and `LastStatus`.
 
 - **The wire is the mod's own.** A request is the Talk line `ToolsWire.Request(...)` writes (`@lifestone <verb> ...
   #a<handle id>`), and the reducer reads the F7E0 reply with `ToolsWire.ParseReply` (server/mod/Shared, compiled into
@@ -554,6 +554,15 @@ string from F658 and writes the privilege words as 0.
   mod answers `unknown-verb`. Offline, the stand-in answers it over its own character list with the same rules, codes and sentences
   (`StandInCharPurge`; the mod's `CharPurgeRulesTests` runs one table through both): a pending-deletion stand-in character is dropped from the list (and from the
   list after the next log off), with placeholder counts (1, 1, 0). The live test is `ModCharPurgeLiveTests`.
+- **Corpses** (`ActionKind.ToolCorpsesRot`, appended after `UseManaStone`; wire `@lifestone corpses rot #a<id>`; M4 hero step). `RotCorpses(ActionSource)` asks the mod to set every player corpse
+  named `Corpse of <this character's name>` in the landblock the character is in to ACE's `Corpse.EmptyDecayTime` (15 s), so ACE's own decay removes it. It exists for the corpses of earlier generations
+  of a re-created journey character (`BSD Mage`, `Holtburg Brawler`, `Holtburg Archer`), which share the name, cannot be looted by the new character and cannot be removed from the database by an agent.
+  The result, `CorpsesResult(Found, Rotted, Landblock)`, is how many corpses matched, how many were set (`Rotted` is at most `Found`: a corpse already at 15 s or under, or already decayed, is found and left
+  alone) and the landblock searched (`uint`, `0x0105FFFF` for the Black Spawn Den); zero found is a confirmed answer. Corpses in other landblocks, creature corpses and other names are never touched,
+  and the mod writes nothing to the database: the corpse leaves about 15 to 20 s later, its contents are put on the ground and rot there on ACE's 5-minute item timer, and a corpse someone has open waits.
+  The reply comes a tick after the command (the mod runs it on the landblock's own queue). Data whose counts do not add up or whose landblock is not a cell id is a `ServerError` (`failed: ...`), not a result.
+  A mod built before the verb answers `unknown-verb`; installing it is `server\setup-server.ps1 -ModOnly` from the main checkout. The offline stand-in does not answer it (the offline session refuses it, as it
+  refuses every other server action it has no answer for). The tests are `PlayerToolsCorpsesTests` and, for the selection, the mod's `CorpseRotRulesTests`.
 - **`xp` is 64-bit** end to end (M3 1.1 s2a; nothing was widened): the parser, `XpRequest(long)`, `XpData`, ACE's `GrantXP(long)`, `PlayerTools.AddXp(long, ...)`, `XpResult`. Level 126's
   4,286,609,098 is one request. ACE adds only while the level is below 275 and at most the table's last row minus the total, so at level 275 `Added` is 0 and the reply is still `ok`;
   below it `Added` is less than `Requested` when a grant overshoots.
@@ -2757,7 +2766,7 @@ fields), so no journey logs off inside one; elsewhere than Holtburg it fails, na
 and the camera (J7): `--journey-shots` takes the station frames (`JourneyLegRunner.StationShots.cs`: the hunt's combat and power-bar frames, the fight's
 bolt, hit and kill, the death's frames its trigger allows (the corpse and decoy frames need UI the journey does not drive), the buff's mid-cast frame, named `<stem>-<station>-<slot>.png`) and the showpiece bursts
 (`ShowpieceWatch`: frost arrow, mace hit, portal recall and arrival, Cassius' Ring of Fire 1785, which the mage learns for the hero fight). The camera is
-retail's chase camera only, with the rotation a hero shot uses. Hero runs are not judged by the gate.
+retail's chase camera only, with the rotation a hero shot uses. Hero runs are not judged by the gate. `--journey-film` (the M4 hero video's takes, docs/hero-video.md §9) frames the same camera and saves no frame, so a screen capture records the run at full rate (a 1080p frame's save stalls the game about 0.5 s); den-travel's camera turns 35° with the shots or the film, and the hero mage's den-travel steps off a lifestone within 4 m before Primary Portal Recall (`stepped_off=`, the recall home's walk), so the cast is not filmed through the crystal. The hero plans also fill the lower-right bar first (`hotbar`, `HotbarPicks`), the Brawler's ends at the store, and the mage's clears its leftover den corpses (`corpses`: `@lifestone corpses rot`, then a wait for the dropped contents to rot) and runs the den death after the ring fight; with `--journey-film` the character page's attributes are open during the death's re-buff and the inventory with the paper doll while a hunt loots (`HeroPanels`).
 
 **One death (D37).** `DeathStages.All` is Gear, Bind, Den, Death, Regear, Vitae, Corpse, Rebuff, Fight: the mage dies once (`deaths=1`, was two) and the
 journey's death station never uses an unbuff suicide (`suicides=0`). The `death-mode` stage undresses (the equipment to the pack) and `death-wait` lies

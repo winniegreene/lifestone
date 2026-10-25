@@ -1,6 +1,6 @@
 # Milestone 4: fights and loot
 
-**Status: complete (2026-10-25, "Merge m4/4-2 (The end)"): built across items 1.1 to 4.1, the polish pass, P4, P5a, P5b and the fresh-gate item; the audit in §7 closed by item 4.2, one row per DoD item, every item met (2 met; the rest met with named gaps). Planned 2026-10-19 on master 52e5fb8.** Drafted 2026-10-17 from the accepted scoping memo
+**Status: complete (2026-10-25, "Merge m4/4-2 (The end)"): built across items 1.1 to 4.1, the polish pass, P4, P5a, P5b and the fresh-gate item; the audit in §7 closed by item 4.2, one row per DoD item, every item met (2 met; the rest met with named gaps). The hero video step after it (D29, D32) is done too ("Merge m4/hero (The hero video)": a 30 s cut, no on-screen text; m4-plan.md §8). Planned 2026-10-19 on master 52e5fb8.** Drafted 2026-10-17 from the accepted scoping memo
 (Shape A, "polished combat, not automation"), the ACE research pack, the testing-loop measurements and the
 independent review of M3's items 3.1 and 3.2. The plan of record (the read map, the seams, the waves, the slice tables,
 the gates, the decisions D1-D18, the "as run" record) is **[m4-plan.md](m4-plan.md)**; where this spec and the plan

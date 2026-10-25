@@ -122,6 +122,16 @@ public sealed record QuestResult(string Action, string Name, bool HeldBefore, in
 /// <param name="Possessions">Inventory and wielded item biotas removed with the character.</param>
 public sealed record CharPurgeResult(string Name, int Characters, int PlayerBiotas, int Possessions);
 
+/// <summary>
+/// The mod's <c>corpses rot</c> reply (<see cref="PlayerTools.RotCorpses"/>): what the server found among the corpses in the landblock the character is in, and
+/// what it set to rot. ACE's own decay removes each corpse that was set a few seconds later (its contents are put on the ground and rot too); a corpse in any other
+/// landblock is untouched.
+/// </summary>
+/// <param name="Found">How many player corpses in the landblock were named "Corpse of " and this character's name (every generation of a re-created character shares it).</param>
+/// <param name="Rotted">How many of them had their time to rot set to ACE's <c>Corpse.EmptyDecayTime</c> (15 seconds); at most <see cref="Found"/>, since a corpse already rotting is left alone.</param>
+/// <param name="Landblock">The landblock searched, the character's own: <c>0xXXYYFFFF</c> as the server's cell ids read (for example <c>0x0105FFFF</c>).</param>
+public sealed record CorpsesResult(int Found, int Rotted, uint Landblock);
+
 /// <summary>What the mod did with one spell of a <c>spell learn</c> request (<see cref="SpellLearnEntry.Outcome"/>).</summary>
 public enum SpellOutcomeKind
 {

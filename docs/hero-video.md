@@ -116,7 +116,7 @@ list and resolves every world shot's start).
 | Level | Properties |
 |---|---|
 | list | `title`, `fps` (60), `width`/`height` (1920×1080), `render` {`msaa`, `screenSpaceAA`, `scale3d`}, `preroll`, `clearance`, `args` (game arguments for every run), `shots`; for the edit: `crossfade` (s), `font`, `titleCard` {`shot`, `title`, `subtitle`, `in`, `out`}, `endCard` {`duration`, `title`, `subtitle`}, `poster` {`shot`, `t`, `title`}; `note` |
-| shot | `id`, `scene` (world or spell), `caption`, `start`, `duration`, `time` / `timeEnd` / `timeSpeed`, `dayGroup`, `fov` (60), `ease`, `timing`, `preroll`, `clearance`, `args`, `keys`; spell shots: `spell`, `fizzle`, `castAt`, `smooth`, `words`; for the edit: `captionIn`, `captionOut`, `captionPosition` (bottom, top), `transition` (fade, fadeblack, cut); `note` |
+| shot | `id`, `scene` (world, spell, or clip: for the edit only, see §9), `caption`, `start`, `duration`, `time` / `timeEnd` / `timeSpeed`, `dayGroup`, `fov` (60), `ease`, `timing`, `preroll`, `clearance`, `args`, `keys`; spell shots: `spell`, `fizzle`, `castAt`, `smooth`, `words`; clip shots: `source` (a captured take under `cache/`), `from` (its second); for the edit: `captionIn`, `captionOut`, `captionPosition` (bottom, top), `transition` (fade, fadeblack, cut); `note` |
 | world key | `pos` [east, north, up] metres from the start location's spot, `ground` (up is above the ground there), `yaw`/`pitch` or `look` [east, north, up] (`lookGround`), `fov`, `t` |
 | spell key | `t`, `yaw`, `pitch`, `distance`, `focus` (caster, target, mid, hands, projectile; resolved every frame), `offset`, `fov` |
 
@@ -263,3 +263,25 @@ measures the durations and the A/V sync. The capture flashes the in-band clock o
 cast confirmed (the projectile), the fight is won, the death (the tuskers killed the player) and the regear done; the anchors are
 the legs' own log lines (`docs/session.md` §30 to §32). `audioOffsetMs` is the measured offset between the recorded sound and the
 picture, applied by the edit; the edit is at most 30 s of action (m3-plan §4.11) and its sync is measured before it is sent.
+
+## 9. M4 live takes and clip shots
+
+The M4 hero video (the hero step after M4 4.2; D32: at most 30 s, the camera only as retail allows, real spawns only) is cut from live
+takes of the three hero journeys (`--journey=hero-archer|hero-brawler|hero-mage`, `docs/session.md` §41). The journeys' frame bursts
+(`--journey-shots`) cannot give motion at 1920x1080: saving one frame stalls the game about 0.5 s. So each take runs as M3's did: the
+game in an on-screen borderless window at a known place (not `-Offscreen`, which moves it off the screen), muted with
+`--audio-driver Dummy`, captured by ffmpeg ddagrab at 60 fps after a clock flash; `--journey-film` gives the hero camera (each station's
+turn and zoom through retail's chase camera) and saves no frame, and the log's `showpiece '<event>'` lines place the moments in the
+take. The take scripts live under `cache/m4/hero` (ignored by git): `capture.ps1` films one journey, `calibrate.ps1` finds the flash,
+`run-takes.ps1` runs the backend and the takes, `events.ps1` lists a take's events at their video times.
+
+A **clip shot** (`"scene": "clip"`) records nothing: `source` names a take under `cache/` and `from` the second it starts at, and the
+composer encodes its `duration` at the list's fps and size into the same near-lossless segment a recorded shot gets, so captions,
+crossfades, the cards, the 720p and the poster are unchanged. A clip list is for the composer only (the game's `ShotList` reads world
+and spell shots). The M4 list is `cache/video/m4-hero/m4-hero-shotlist.json`; the cut is 29.87 s (seven clips, the store joined by hard cuts). It has no text on screen (the owner's word): a list with no `titleCard`, captions or `endCard` fades in on its first shot and out on its last.
+
+**Window capture (the second round).** A screen-region capture films whatever covers the game window; a long take (the mage's death and
+re-buff, 12 minutes) caught other windows. `cache/m4/hero/capture2.ps1` records the game window itself with ffmpeg's `gfxcapture`
+(Windows Graphics Capture, the window's handle once it has been stable for 5 s), so a window on top does not reach the take; the game's
+`--video-sync-marker` (one white frame, logged with its unix time) aligns the take with the log. `run-takes.ps1 -Window` uses it. The
+M4 list's stats shot is an edit crop (1.67x) of a take made with ffmpeg before the composer, so the attribute numbers read at 720p.

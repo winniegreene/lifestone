@@ -42,7 +42,7 @@ public static class ToolsWire
     public const string ChatPrefix = "Lifestone: ";
 
     /// <summary>The usage line: every verb and its arguments.</summary>
-    public const string Usage = "status | where | net | places | xp <amount> | place poi \"<name>\" | place loc <cell> <x> <y> <z> [<qw> <qx> <qy> <qz>] | quest stamp <name> | quest erase <name> | quest has <name> | char purge \"<name>\" | spell learn <id>[,<id>...] | item <wcid> [<stack>] [palette=<n>] [shade=<f>]  [#id]";
+    public const string Usage = "status | where | net | places | xp <amount> | place poi \"<name>\" | place loc <cell> <x> <y> <z> [<qw> <qx> <qy> <qz>] | quest stamp <name> | quest erase <name> | quest has <name> | char purge \"<name>\" | spell learn <id>[,<id>...] | item <wcid> [<stack>] [palette=<n>] [shade=<f>] | corpses rot  [#id]";
 
     /// <summary>
     /// The longest reply text: 65,534 characters. ACE writes it as a String16L, whose length is a u16 (WriteString16L
@@ -62,7 +62,7 @@ public static class ToolsWire
 
     /// <summary>Every verb form, as <see cref="StatusData.Verbs"/> lists the ones a mod build carries out.</summary>
     public static IReadOnlyList<string> Verbs { get; } =
-        [ToolVerbs.Status, ToolVerbs.Where, ToolVerbs.Net, ToolVerbs.Places, ToolVerbs.Xp, ToolVerbs.Place + " " + ToolVerbs.PlacePoi, ToolVerbs.Place + " " + ToolVerbs.PlaceLoc, ToolVerbs.Quest + " " + ToolVerbs.QuestStamp, ToolVerbs.Quest + " " + ToolVerbs.QuestErase, ToolVerbs.Quest + " " + ToolVerbs.QuestHas, ToolVerbs.Char + " " + ToolVerbs.CharPurge, ToolVerbs.Spell + " " + ToolVerbs.SpellLearn, ToolVerbs.Item];
+        [ToolVerbs.Status, ToolVerbs.Where, ToolVerbs.Net, ToolVerbs.Places, ToolVerbs.Xp, ToolVerbs.Place + " " + ToolVerbs.PlacePoi, ToolVerbs.Place + " " + ToolVerbs.PlaceLoc, ToolVerbs.Quest + " " + ToolVerbs.QuestStamp, ToolVerbs.Quest + " " + ToolVerbs.QuestErase, ToolVerbs.Quest + " " + ToolVerbs.QuestHas, ToolVerbs.Char + " " + ToolVerbs.CharPurge, ToolVerbs.Spell + " " + ToolVerbs.SpellLearn, ToolVerbs.Item, ToolVerbs.Corpses + " " + ToolVerbs.CorpsesRot];
 
     /// <summary>
     /// The Talk text for <paramref name="request"/>: <c>@lifestone</c>, a space and <see cref="ToolRequestParser.Format"/>.

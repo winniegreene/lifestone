@@ -50,6 +50,9 @@ public sealed class ToolRequestParserTests
         new CharPurgeRequest("Lifestone Throwaway"),
         new CharPurgeRequest("Tou-Tou O'Brien 2", "p2"),
         new CharPurgeRequest(new string('c', ToolRequestParser.MaxCharacterNameLength)),
+        new CorpsesRotRequest(),
+        new CorpsesRotRequest("c1"),
+        new CorpsesRotRequest("0123456789abcdef"),
     ];
 
     public static TheoryData<ToolRequest> EveryRequest => [.. Requests];
@@ -83,6 +86,8 @@ public sealed class ToolRequestParserTests
     [InlineData("quest-erase", "@lifestone quest erase SentryTaskComplete")]
     [InlineData("quest-has", "@lifestone quest has BurFlagged(Gem) #h")]
     [InlineData("char-purge", "@lifestone char purge \"Lifestone Throwaway\" #p1")]
+    [InlineData("corpses-rot", "@lifestone corpses rot #k1")]
+    [InlineData("corpses-rot-bare", "@lifestone corpses rot")]
     [InlineData("spell", "@lifestone spell learn 1,2,3 #s1")]
     [InlineData("item", "@lifestone item 1628")]
     [InlineData("item-gold", "@lifestone item 57 palette=21 #g1")]
@@ -98,6 +103,8 @@ public sealed class ToolRequestParserTests
             "quest-erase" => new QuestRequest(QuestAction.Erase, "SentryTaskComplete"),
             "quest-has" => new QuestRequest(QuestAction.Has, "BurFlagged(Gem)", "h"),
             "char-purge" => new CharPurgeRequest("Lifestone Throwaway", "p1"),
+            "corpses-rot" => new CorpsesRotRequest("k1"),
+            "corpses-rot-bare" => new CorpsesRotRequest(),
             "spell" => new SpellLearnRequest([1, 2, 3], "s1"),
             "item" => new ItemRequest(1628),
             "item-gold" => new ItemRequest(57, null, "g1", 21),
@@ -171,6 +178,51 @@ public sealed class ToolRequestParserTests
         Assert.False(two.Ok);
         Assert.Equal((ToolErrors.BadArgs, "char", "p"), (two.Error.Code, two.Verb, two.Id));
         Assert.Contains("double quotes", two.Error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("corpses rot")]
+    [InlineData("CORPSES ROT")]
+    [InlineData("Corpses Rot")]
+    [InlineData("  corpses   rot  ")]
+    public void Corpses_rot_matches_ignoring_case_and_extra_spaces_and_takes_no_argument(string raw)
+    {
+        var parse = ToolRequestParser.Parse(raw);
+        Assert.True(parse.Ok, parse.Error?.Message);
+        Assert.Equal(new CorpsesRotRequest(), parse.Request);
+        Assert.Equal(("corpses", null), (parse.Verb, parse.Id));
+        Assert.Equal("corpses", parse.Request.Verb);
+        Assert.Equal(new CorpsesRotRequest("k9"), ToolRequestParser.Parse(raw + " #k9").Request);
+    }
+
+    [Theory]
+    // Only the sub-verb rot, with nothing after it: the reply names the verb and echoes the id.
+    [InlineData("corpses", "corpses", null)]
+    [InlineData("corpses #k1", "corpses", "k1")]
+    [InlineData("corpses purge #k2", "corpses", "k2")]
+    [InlineData("corpses delete", "corpses", null)]
+    [InlineData("corpses list", "corpses", null)]
+    [InlineData("corpses rotten", "corpses", null)]
+    [InlineData("corpses \"rot\"", "corpses", null)]
+    [InlineData("corpses rot now #k3", "corpses", "k3")]
+    [InlineData("corpses rot all", "corpses", null)]
+    [InlineData("corpses rot 5", "corpses", null)]
+    [InlineData("corpses rot \"BSD Mage\"", "corpses", null)]
+    [InlineData("corpses rot rot", "corpses", null)]
+    [InlineData("corpses rot BSD Mage #k4", "corpses", "k4")]
+    [InlineData("corpse rot", "corpse", null)]
+    public void Corpses_takes_rot_and_nothing_else(string raw, string verb, string? id)
+    {
+        var parse = ToolRequestParser.Parse(raw);
+        Assert.False(parse.Ok);
+        Assert.Null(parse.Request);
+        Assert.Equal((verb, id), (parse.Verb, parse.Id));
+        Assert.Equal(verb == "corpses" ? ToolErrors.BadArgs : ToolErrors.UnknownVerb, parse.Error.Code);
+        Assert.False(string.IsNullOrWhiteSpace(parse.Error.Message));
+        Assert.All(parse.Error.Message, c => Assert.InRange(c, ' ', '~'));
+        Assert.False(ToolsWire.TryParseRequest(raw, out var request, out var error));
+        Assert.Null(request);
+        Assert.Equal(parse.Error.Code, error.Code);
     }
 
     [Fact]
@@ -370,6 +422,9 @@ public sealed class ToolRequestParserTests
         new CharPurgeRequest(" Ann"),
         new CharPurgeRequest("Ann_2"),
         new CharPurgeRequest(new string('c', ToolRequestParser.MaxCharacterNameLength + 1)),
+        new CorpsesRotRequest("a_1"),
+        new CorpsesRotRequest(string.Empty),
+        new CorpsesRotRequest(new string('k', 17)),
     };
 
     [Theory]
@@ -387,7 +442,7 @@ public sealed class ToolRequestParserTests
             Assert.Contains(verb, ToolsWire.Usage, StringComparison.Ordinal);
         }
 
-        Assert.Equal(["status", "where", "net", "places", "xp", "place poi", "place loc", "quest stamp", "quest erase", "quest has", "char purge", "spell learn", "item"], ToolsWire.Verbs);
+        Assert.Equal(["status", "where", "net", "places", "xp", "place poi", "place loc", "quest stamp", "quest erase", "quest has", "char purge", "spell learn", "item", "corpses rot"], ToolsWire.Verbs);
     }
 
     [Fact]

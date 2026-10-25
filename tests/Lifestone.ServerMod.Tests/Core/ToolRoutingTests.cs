@@ -26,6 +26,7 @@ public sealed class ToolRoutingTests
         { "char purge \"Lifestone Throwaway\" #c1", "CharPurge", true },
         { "spell learn 1,2,3 #s1", "SpellLearn", true },
         { "item 1628 2 #i1", "Item", true },
+        { "corpses rot #k1", "CorpsesRot", true },
     };
 
     /// <summary>Requests that do not parse, with the error each gets.</summary>
@@ -74,12 +75,12 @@ public sealed class ToolRoutingTests
         // The samples above cover every concrete ToolRequest type, so the theory above reaches every one of them.
         var sampled = EveryVerb.Select(row => ToolRequestParser.Parse((string)row[0]).Request!.GetType()).ToHashSet();
         var all = typeof(ToolRequest).Assembly.GetTypes().Where(t => t.IsSubclassOf(typeof(ToolRequest)) && !t.IsAbstract).ToHashSet();
-        Assert.Equal(11, all.Count);
+        Assert.Equal(12, all.Count);
         Assert.Equal(all.OrderBy(t => t.Name, StringComparer.Ordinal), sampled.OrderBy(t => t.Name, StringComparer.Ordinal));
 
         // Status reports every verb form as carried out.
         Assert.Equal(ToolsWire.Verbs, ToolRouting.Implemented);
-        Assert.Equal(13, ToolRouting.Implemented.Count);
+        Assert.Equal(14, ToolRouting.Implemented.Count);
     }
 
     [Theory]
@@ -135,7 +136,7 @@ public sealed class ToolRoutingTests
         Assert.Equal(["Status"], Route(ToolRequestParser.Parse("status"), hasSession: false, isLoopback: false).Calls);
         Assert.Equal(["Net"], Route(ToolRequestParser.Parse("NET #x"), hasSession: false, isLoopback: false).Calls);
 
-        foreach (var (raw, verb) in new[] { ("places", "places"), ("where", "where"), ("xp 5", "xp"), ("place poi Holtburg", "place"), ("quest stamp SentryTaskComplete", "quest"), ("quest has SentryTaskComplete", "quest"), ("char purge \"Ann\"", "char") })
+        foreach (var (raw, verb) in new[] { ("places", "places"), ("where", "where"), ("xp 5", "xp"), ("place poi Holtburg", "place"), ("quest stamp SentryTaskComplete", "quest"), ("quest has SentryTaskComplete", "quest"), ("char purge \"Ann\"", "char"), ("corpses rot", "corpses") })
         {
             var run = Route(ToolRequestParser.Parse(raw), hasSession: false, inWorld: true);
             Assert.Equal(["Refuse " + ToolErrors.NeedsPlayer], run.Calls);
@@ -194,6 +195,9 @@ public sealed class ToolRoutingTests
         // The spellbook and the pack are the calling player's own: both need the player in the world.
         Assert.Equal(ToolScope.Player, ToolRouting.ScopeOf(new SpellLearnRequest([1])));
         Assert.Equal(ToolScope.Player, ToolRouting.ScopeOf(new ItemRequest(1628)));
+
+        // The corpses are the calling player's own, in the landblock the player is in: the player must be in the world.
+        Assert.Equal(ToolScope.Player, ToolRouting.ScopeOf(new CorpsesRotRequest()));
     }
 
     private static (List<string> Calls, Recorder Verbs, int PlayerAsks) Route(ToolRequestParse parse, bool hasSession = true, bool isLoopback = true, bool inWorld = true)
@@ -250,6 +254,8 @@ public sealed class ToolRoutingTests
         public void SpellLearn(string player, SpellLearnRequest request) => Record("SpellLearn " + player, request);
 
         public void Item(string player, ItemRequest request) => Record("Item " + player, request);
+
+        public void CorpsesRot(string player, CorpsesRotRequest request) => Record("CorpsesRot " + player, request);
 
         public void Unhandled(ToolRequest request) => Record("Unhandled " + request.Verb, request);
 

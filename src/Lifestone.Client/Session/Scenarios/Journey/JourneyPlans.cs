@@ -85,10 +85,16 @@ public static class StationKinds
     /// <summary>ShortcutLiveTests without the relogs (J3a).</summary>
     public const string Shortcuts = "shortcuts";
 
+    /// <summary>The hero plans' lower-right bar filled from the pack (the M4 hero video; <see cref="HotbarStation"/>).</summary>
+    public const string Hotbar = "hotbar";
+
+    /// <summary>The character's own leftover player corpses in its landblock set to rot (the M4 hero video; <see cref="CorpsesStation"/>, <c>@lifestone corpses rot</c>).</summary>
+    public const string Corpses = "corpses";
+
     /// <summary>Every kind, in the table's order.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
-        BuildVerify, Gear, Buff, CastFacts, KitRefused, HarmHeal, Bind, DenTravel, DenFight, Death, Hunt, Vendor, RecallHome, Chests, AppraiseItems, AppraiseVendor, VendorFacts, Shortcuts,
+        BuildVerify, Gear, Buff, CastFacts, KitRefused, HarmHeal, Bind, DenTravel, DenFight, Death, Hunt, Vendor, RecallHome, Chests, AppraiseItems, AppraiseVendor, VendorFacts, Shortcuts, Hotbar, Corpses,
     ];
 }
 
@@ -187,7 +193,7 @@ public static class JourneyPlans
     public static IReadOnlyList<JourneyPlan> All { get; } = [Mage, Melee, Archer];
 
 
-    /// <summary>The Archer's hero journey (<c>test-archer</c>): build-verify, buff, bind, the forest hunt (the one teleport; Greater Frost Arrows), Lifestone Recall home.</summary>
+    /// <summary>The Archer's hero journey (<c>test-archer</c>): build-verify, the bar, buff, bind, the forest hunt (the one teleport; Greater Frost Arrows), Lifestone Recall home.</summary>
     public static JourneyPlan HeroArcher { get; } = new(
         "hero-archer",
         FighterTemplate.ArcherName,
@@ -196,13 +202,14 @@ public static class JourneyPlans
         1,
         [
             new("build-verify", StationKinds.BuildVerify, null, 30),
+            new("hotbar", StationKinds.Hotbar, null, 20),
             new("buff", StationKinds.Buff, null, 120),
             new("bind", StationKinds.Bind, null, 60),
             new("hunt", StationKinds.Hunt, new(StationWhere.Forest, MinHealthPercent: FightHealthPercent, MinStaminaPercent: HuntStaminaPercent), 320),
             new("recall-home", StationKinds.RecallHome, null, 30),
         ]);
 
-    /// <summary>The Brawler's hero journey (<c>test-melee</c>): build-verify, buff, bind, the belt hunt (the one teleport; the Mace), Lifestone Recall home.</summary>
+    /// <summary>The Brawler's hero journey (<c>test-melee</c>): build-verify, the bar, buff, bind, the belt hunt (the one teleport; its D41 magic staff), Lifestone Recall home, the store (the loot sold at Renald the Elder).</summary>
     public static JourneyPlan HeroBrawler { get; } = new(
         "hero-brawler",
         FighterTemplate.BrawlerName,
@@ -211,10 +218,12 @@ public static class JourneyPlans
         1,
         [
             new("build-verify", StationKinds.BuildVerify, null, 30),
+            new("hotbar", StationKinds.Hotbar, null, 20),
             new("buff", StationKinds.Buff, null, 120),
             new("bind", StationKinds.Bind, null, 60),
             new("hunt", StationKinds.Hunt, new(StationWhere.Belt, MinHealthPercent: FightHealthPercent, MinStaminaPercent: HuntStaminaPercent), 300),
             new("recall-home", StationKinds.RecallHome, null, 30),
+            new("vendor", StationKinds.Vendor, null, 180),
         ]);
 
     /// <summary>The argument of a <see cref="StationKinds.DenFight"/> spec that names the spell the fight casts instead of Flame Bolt (<see cref="FightOptions.SpellId"/>).</summary>
@@ -226,7 +235,13 @@ public static class JourneyPlans
     /// <summary>The argument of a <see cref="StationKinds.Gear"/> spec whose kit carries Cassius' Ring of Fire's components (the hero mage's only; P5b-R12).</summary>
     public const string RingArgument = "ring";
 
-    /// <summary>The mage's hero journey (<c>test</c>): build-verify (teaches 1785), gear (the ring's components), buff, bind, den-travel (Primary Portal Recall once the portal is tied), the den fight with Cassius' Ring of Fire, Lifestone Recall home.</summary>
+    /// <summary>The argument of a <see cref="StationKinds.DenTravel"/> spec that steps off the lifestone before Primary Portal Recall's cast (the hero mage's only; <see cref="DenTravelStation.StepOff"/>).</summary>
+    public const string StepOffArgument = "step-off";
+
+    /// <summary>
+    /// The mage's hero journey (<c>test</c>): build-verify (teaches 1785), the bar, gear (the ring's components), buff, bind, den-travel (a step off the lifestone, then Primary Portal Recall once the portal is tied), the den's leftover corpses of
+    /// earlier generations set to rot (the owner's word), the den fight with Cassius' Ring of Fire, the gate's den death (retail's death strips the buffs, so the re-buff after the respawn raises the stats on screen: the owner's choice for the hero video), Lifestone Recall home.
+    /// </summary>
     public static JourneyPlan HeroMage { get; } = new(
         "hero-mage",
         MageTemplate.CharacterName,
@@ -235,11 +250,14 @@ public static class JourneyPlans
         1,
         [
             new("build-verify", StationKinds.BuildVerify, null, 30),
+            new("hotbar", StationKinds.Hotbar, null, 20),
             new("gear", StationKinds.Gear, null, 60, new Dictionary<string, string>(StringComparer.Ordinal) { [RingArgument] = "1" }),
             new("buff", StationKinds.Buff, null, 200),
             new("bind", StationKinds.Bind, null, 60),
-            new("den-travel", StationKinds.DenTravel, null, 60),
+            new("den-travel", StationKinds.DenTravel, null, 60, new Dictionary<string, string>(StringComparer.Ordinal) { [StepOffArgument] = "1" }),
+            new("corpses", StationKinds.Corpses, null, 400), // the first run waits out the dropped contents (CorpsesStation.ItemRotSeconds); later runs pass at once
             new("den-fight", StationKinds.DenFight, null, 150, new Dictionary<string, string>(StringComparer.Ordinal) { [SpellArgument] = ArenaProfile.RingOfFireId.ToString(System.Globalization.CultureInfo.InvariantCulture), [KillsArgument] = "3" }),
+            new("death", StationKinds.Death, null, 280),
             new("recall-home", StationKinds.RecallHome, null, 30),
         ]);
 

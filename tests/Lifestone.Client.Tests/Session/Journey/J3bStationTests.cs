@@ -202,6 +202,42 @@ public sealed class J3bStationTests
         Assert.Equal(0, t.Places);
     }
 
+    [Fact]
+    public void The_hero_den_travel_steps_off_the_lifestone_before_the_portal_recall_and_the_gates_does_not()
+    {
+        // The M4 hero video: the bind leaves the mage in the lifestone's use range, where P5b J7 filmed the recall's cast through the crystal.
+        var t = new J3bRig { RecallIntoLifestone = true };
+        var ctx = t.Context();
+        var (home, _) = t.RunStation(new RecallHomeStation(), ctx); // the mage in Holtburg, in its lifestone (the rig's walks do not move it)
+        Assert.True(home.Ok, home.Failure);
+        t.Travel.Requests.Clear();
+        t.Events.Clear();
+
+        var (run, status) = t.RunStation(new DenTravelStation(stepOffLifestone: true), ctx);
+        Assert.True(status == ScenarioStatus.Succeeded && run.Ok, run.Failure + " / " + run.VerdictFields());
+        Assert.Matches(@"^den=recall portal_tied=yes recalls=1 den_s=\d+\.\d stepped_off=yes$", run.VerdictFields());
+        var walk = Assert.Single(t.Travel.Requests);
+        Assert.Equal((TravelPurpose.Bind, "holtburg-lifestone-point", 0u), (walk.Purpose, walk.Destination.Name, walk.ObjectGuid));
+        Assert.True(t.Events.IndexOf("travel:Bind") < t.Events.IndexOf("cast:48"), string.Join(" > ", t.Events));
+        Assert.Single(t.R.H.Log.Lines, l => l.Contains("stepping off it before Primary Portal Recall's cast", StringComparison.Ordinal));
+
+        // The plan: only the hero mage's den-travel steps off; the gate's keeps its fields.
+        Assert.Equal("1", JourneyPlans.HeroMage.Stations.Single(s => s.Kind == StationKinds.DenTravel).Arguments[JourneyPlans.StepOffArgument]);
+        Assert.False(JourneyPlans.Mage.Stations.Single(s => s.Kind == StationKinds.DenTravel).Arguments.ContainsKey(JourneyPlans.StepOffArgument));
+        Assert.False(new DenTravelStation().StepOff);
+    }
+
+    [Fact]
+    public void A_hero_den_travel_with_no_lifestone_near_walks_nothing_and_says_so()
+    {
+        var t = new J3bRig(); // the Academy's lifestone stands 8 m from the mage
+        var (run, status) = t.RunStation(new DenTravelStation(stepOffLifestone: true), t.Context());
+
+        Assert.True(status == ScenarioStatus.Succeeded && run.Ok, run.Failure + " / " + run.VerdictFields());
+        Assert.Matches(@"^den=recall portal_tied=yes recalls=1 den_s=\d+\.\d stepped_off=no$", run.VerdictFields());
+        Assert.Empty(t.Travel.Requests);
+    }
+
     // ------------------------------------------------------------------------------------------------ recall home
 
     [Fact]

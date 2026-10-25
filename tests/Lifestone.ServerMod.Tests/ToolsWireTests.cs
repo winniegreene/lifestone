@@ -39,6 +39,8 @@ public sealed class ToolsWireTests
         new SpellOutcome(99999, SpellOutcomes.Unknown),
     ]);
 
+    internal static readonly CorpsesData CorpsesRotted = new(16, 16, "0x0105FFFF");
+
     internal static readonly ItemData ItemCreated = new(0x7A000123, 273, "Pyreal", 25, 25, 25000, false);
 
     internal static readonly NetData Net = new(123_456, 234_567, 2, 17, 4);
@@ -88,6 +90,12 @@ public sealed class ToolsWireTests
         Assert.DoesNotContain("palette", ToolsWire.Reply(ToolReply.Success(null, ToolVerbs.Item, ItemCreated), ItemCreated.Describe()), StringComparison.Ordinal);
         var unstackable = ItemCreated with { Requested = null, MaxStack = null, Stack = 1 };
         AssertSame(unstackable, RoundTrip(unstackable, ToolVerbs.Item, unstackable.Describe()));
+        AssertSame(CorpsesRotted, RoundTrip(CorpsesRotted, ToolVerbs.Corpses, CorpsesRotted.Describe()));
+        var someRotted = new CorpsesData(3, 1, "0x0105FFFF");
+        AssertSame(someRotted, RoundTrip(someRotted, ToolVerbs.Corpses, someRotted.Describe()));
+        var noCorpses = new CorpsesData(0, 0, "0xA9B4FFFF");
+        AssertSame(noCorpses, RoundTrip(noCorpses, ToolVerbs.Corpses, noCorpses.Describe()));
+        Assert.Contains("\"data\":{\"found\":16,\"rotted\":16,\"landblock\":\"0x0105FFFF\"}", ToolsWire.Reply(ToolReply.Success(null, ToolVerbs.Corpses, CorpsesRotted), CorpsesRotted.Describe()), StringComparison.Ordinal);
         AssertSame(Net, RoundTrip(Net, ToolVerbs.Net, Net.Describe()));
         AssertSame(Places, RoundTrip(Places, ToolVerbs.Places, Places.Describe()));
     }
@@ -325,6 +333,12 @@ public sealed class ToolsWireTests
         Assert.Equal("purged Lifestone Throwaway: 1 character record, 1 player biota, 12 possessions", CharPurged.Describe());
         Assert.Equal("purged X: 1 character record, 1 player biota, 1 possession", new CharPurgeData("X", 1, 1, 1).Describe());
         Assert.Equal("purged X: 0 character records, 1 player biota, 0 possessions", new CharPurgeData("X", 0, 1, 0).Describe());
+        Assert.Equal("found 16 corpses of yours in landblock 0x0105FFFF; 16 set to rot (ACE's decay removes them shortly)", CorpsesRotted.Describe());
+        Assert.Equal("found 1 corpse of yours in landblock 0x0105FFFF; 1 set to rot (ACE's decay removes it shortly)", new CorpsesData(1, 1, "0x0105FFFF").Describe());
+        Assert.Equal("found 3 corpses of yours in landblock 0x0105FFFF; 1 set to rot (ACE's decay removes it shortly); the others were already rotting", new CorpsesData(3, 1, "0x0105FFFF").Describe());
+        Assert.Equal("found 2 corpses of yours in landblock 0x0105FFFF; none set to rot (they are already rotting)", new CorpsesData(2, 0, "0x0105FFFF").Describe());
+        Assert.Equal("found 1 corpse of yours in landblock 0x0105FFFF; none set to rot (it is already rotting)", new CorpsesData(1, 0, "0x0105FFFF").Describe());
+        Assert.Equal("found 0 corpses of yours in landblock 0xA9B4FFFF", new CorpsesData(0, 0, "0xA9B4FFFF").Describe());
         Assert.Equal("added 4,286,609,098 experience (asked 4,286,609,098); total 4,286,609,098, unassigned 4,286,609,098, level 126", XpToLevel126.Describe());
         Assert.Equal("spells: 1 learned, 1 already known, 1 unknown (not in the spell table: 99999)", SpellsLearned.Describe());
         Assert.Equal("spells: 0 learned, 2 already known, 0 unknown", SpellLearnData.Of([new SpellOutcome(1, SpellOutcomes.Known, "A"), new SpellOutcome(1, SpellOutcomes.Known, "A")]).Describe());

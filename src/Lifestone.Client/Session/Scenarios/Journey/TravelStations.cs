@@ -236,6 +236,37 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
     /// <summary>The nearest lifestone (the description flag) within <paramref name="metres"/>, or 0.</summary>
     protected uint FindLifestone(float metres) => S.State.Self.Position is { } here && S.State.Objects.NearestWithFlags(WorldObjectTable.LifestoneFlag, in here, metres, out var guid) ? guid : 0;
 
+    /// <summary>True once <see cref="StepOffLifestone"/> walked.</summary>
+    protected bool SteppedOff { get; private set; }
+
+    /// <summary>
+    /// Walks off a lifestone the player stands within <paramref name="withinMetres"/> of, to Holtburg's lifestone point (<see cref="TravelPurpose.Bind"/>, as the bind's fallback; M4 4.2 FS);
+    /// nothing when no lifestone is that near. Outside Holtburg it fails, named: only Holtburg's lifestone has a known point (<c>TODO(d25-server-object-host)</c>). <see cref="SteppedOff"/> says whether it walked.
+    /// </summary>
+    /// <param name="withinMetres">How near a lifestone must be to step off it.</param>
+    /// <param name="where">How the player came to stand there, for the lines (e.g. "the recall arrived").</param>
+    /// <param name="why">Why it steps off, for the log line.</param>
+    protected IEnumerable<ActionHandle?> StepOffLifestone(float withinMetres, string where, string why)
+    {
+        var lifestone = FindLifestone(withinMetres);
+        if (lifestone == 0)
+        {
+            yield break;
+        }
+
+        var cell = S.State.Self.Position?.CellId ?? 0;
+        Require(
+            cell >> 16 == JourneyGrounds.HoltburgLandblock,
+            $"{Name}: {where} in lifestone {lifestone:X8} in cell 0x{cell:X8}, outside Holtburg, and only Holtburg's lifestone has a known point to step off to (TODO(d25-server-object-host))");
+        Log($"{where} in lifestone {lifestone:X8} (within {withinMetres} m): stepping off it {why}");
+        foreach (var h in Go(new TravelRequest(Destination("holtburg-lifestone-point", HoltburgLifestone.Item1, HoltburgLifestone.Item2), TravelPurpose.Bind), "off the lifestone"))
+        {
+            yield return h;
+        }
+
+        SteppedOff = true;
+    }
+
     /// <summary>The cast's refusal, if any: the chat's WeenieError since the cast, else the handle's server error code.</summary>
     protected static uint Refusal(TravelLeg leg, CastResult cast)
     {
@@ -428,9 +459,31 @@ public sealed class BindStation : IStation
 /// or when the facts already say it, the first-ever journey's path: <see cref="TravelPurpose.Ground"/> to the portal's front (cell 0x1B90002C, 122.40 84.43 30.01, the journey's one budgeted place), Primary Portal Tie 47 at the portal (weenie 7242,
 /// "You have successfully linked with the portal."), then the portal on foot (an object goal, <see cref="TravelPurpose.Seek"/>, and <c>Use</c>) into the den. Every other refusal is named and fails the station. Fields:
 /// <c>den=recall|portal portal_tied= recalls= den_s=</c>.
+/// <para><b>The hero's step-off</b> (the M4 hero video; <see cref="JourneyPlans.StepOffArgument"/>, the hero mage's plan only): the bind leaves the mage in the lifestone's use range, and a recall cast
+/// there is filmed through the crystal (the chase camera behind the mage looks into it). With the step-off, a mage within <see cref="StepOffMetres"/> of a lifestone first walks to Holtburg's
+/// lifestone point (as the recall home's step-off does) and casts there; the fields add <c>stepped_off=yes|no</c>. The gate's den-travel has no step-off and its fields are unchanged.</para>
 /// </summary>
 public sealed class DenTravelStation : IStation
 {
+    /// <summary>A den-travel without the hero's step-off (the gate's).</summary>
+    public DenTravelStation()
+        : this(stepOffLifestone: false)
+    {
+    }
+
+    /// <summary>A den-travel; with <paramref name="stepOffLifestone"/> the mage steps off a lifestone before the recall's cast (the hero mage's).</summary>
+    /// <param name="stepOffLifestone">True to step off a lifestone within <see cref="StepOffMetres"/> first.</param>
+    public DenTravelStation(bool stepOffLifestone) => StepOff = stepOffLifestone;
+
+    /// <summary>
+    /// A lifestone nearer than this before the cast is stepped off (Lifestone's own: Holtburg's lifestone point is 4.9 m from the lifestone's centre, and the bind's use range leaves the mage
+    /// about 2 m from it).
+    /// </summary>
+    public const float StepOffMetres = 4f;
+
+    /// <summary>True when the station steps off a lifestone before the recall's cast.</summary>
+    public bool StepOff { get; }
+
     /// <summary>Primary Portal Tie.</summary>
     public const uint PortalTieSpell = 47;
 
@@ -468,17 +521,18 @@ public sealed class DenTravelStation : IStation
     public IStationRun Start(JourneyContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return new Run(context);
+        return new Run(context, StepOff);
     }
 
-    private sealed class Run(JourneyContext context) : TravelLeg(StationName, context)
+    private sealed class Run(JourneyContext context, bool stepOff) : TravelLeg(StationName, context)
     {
         private string _how = "none";
         private int _recalls;
         private double _seconds;
 
         public override string VerdictFields() =>
-            string.Create(CultureInfo.InvariantCulture, $"den={_how} portal_tied={Context.Facts.PortalTied switch { true => "yes", false => "no", _ => "unknown" }} recalls={_recalls} den_s={_seconds:0.0}") + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
+            string.Create(CultureInfo.InvariantCulture, $"den={_how} portal_tied={Context.Facts.PortalTied switch { true => "yes", false => "no", _ => "unknown" }} recalls={_recalls} den_s={_seconds:0.0}")
+            + (stepOff ? " stepped_off=" + (SteppedOff ? "yes" : "no") : string.Empty) + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
 
         protected override IEnumerable<ActionHandle?> Body()
         {
@@ -486,6 +540,15 @@ public sealed class DenTravelStation : IStation
             var viaPortal = Context.Facts.PortalTied == false;
             if (!viaPortal)
             {
+                if (stepOff)
+                {
+                    Stage = "step-off";
+                    foreach (var h in StepOffLifestone(StepOffMetres, "the mage stands", "before Primary Portal Recall's cast (the hero's step-off: the crystal would fill the chase camera)"))
+                    {
+                        yield return h;
+                    }
+                }
+
                 Stage = "recall";
                 foreach (var h in MagicNow())
                 {
@@ -651,10 +714,9 @@ public sealed class RecallHomeStation : IStation
     private sealed class Run(JourneyContext context) : TravelLeg(StationName, context)
     {
         private RecallHome? _recall;
-        private bool _steppedOff;
 
         public override string VerdictFields() =>
-            (_recall?.Fields ?? "recalls=0 recall_s=0.0") + " stepped_off=" + (_steppedOff ? "yes" : "no") + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
+            (_recall?.Fields ?? "recalls=0 recall_s=0.0") + " stepped_off=" + (SteppedOff ? "yes" : "no") + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
 
         protected override IEnumerable<ActionHandle?> Body()
         {
@@ -690,23 +752,10 @@ public sealed class RecallHomeStation : IStation
             }
 
             Stage = "step-off";
-            var lifestone = FindLifestone(OnLifestoneMetres);
-            if (lifestone == 0)
-            {
-                yield break;
-            }
-
-            var cell = S.State.Self.Position?.CellId ?? 0;
-            Require(
-                cell >> 16 == JourneyGrounds.HoltburgLandblock,
-                $"recall-home: the recall arrived in lifestone {lifestone:X8} in cell 0x{cell:X8}, outside Holtburg, and only Holtburg's lifestone has a known point to step off to (TODO(d25-server-object-host))");
-            Log($"the recall arrived in lifestone {lifestone:X8} (within {OnLifestoneMetres} m): stepping off it before the station ends (TODO(d25-server-object-host): the client does not collide with it)");
-            foreach (var h in Go(new TravelRequest(Destination("holtburg-lifestone-point", HoltburgLifestone.Item1, HoltburgLifestone.Item2), TravelPurpose.Bind), "off the lifestone"))
+            foreach (var h in StepOffLifestone(OnLifestoneMetres, "the recall arrived", "before the station ends (TODO(d25-server-object-host): the client does not collide with it)"))
             {
                 yield return h;
             }
-
-            _steppedOff = true;
         }
     }
 }
