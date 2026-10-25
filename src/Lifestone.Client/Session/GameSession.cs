@@ -117,6 +117,9 @@ public sealed class GameSession : IGameSessionView, Lifestone.Client.RetailUi.Pa
     /// <inheritdoc/>
     public GameState State { get; }
 
+    /// <summary>The client-side cull (M5 item 0 c1): <see cref="ObjectCull.Pending"/> and <see cref="ObjectCull.Culled"/> for the soak line.</summary>
+    public ObjectCull Cull => _reducer.Cull;
+
     /// <inheritdoc/>
     public IEventBus Events => _bus;
 
@@ -351,6 +354,7 @@ public sealed class GameSession : IGameSessionView, Lifestone.Client.RetailUi.Pa
         }
 
         _reducer.ExpireParked();
+        _reducer.CullObjects(); // M5 0 c1: retail's client-side cull (ObjectCull)
         _actions.Update(now);
         _recorder?.FlushIfDue();
         LastTickMs = (Clock.Now - start) * 1000.0;

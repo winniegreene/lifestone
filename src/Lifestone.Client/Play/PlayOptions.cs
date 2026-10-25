@@ -157,6 +157,23 @@ public sealed record PlayOptions
     /// </summary>
     public bool AllSizes { get; init; }
 
+    /// <summary>The default seconds between two <c>[soak]</c> lines (<c>--soak-line-s</c>, M5 item 0 c3).</summary>
+    public const double DefaultSoakLineSeconds = 60.0;
+
+    /// <summary>The longest <c>--soak-line-s</c> accepted: a day.</summary>
+    public const double MaxSoakLineSeconds = 86400.0;
+
+    /// <summary>
+    /// <c>--soak-line-s=S</c>: seconds between two <c>[soak]</c> INFO lines (memory, collections, frames, the object counts, the link, Godot's errors, the log size; docs/session.md, the soak line).
+    /// Default 60; 0 = no line; a bad value is reported by name and the default is kept.
+    /// </summary>
+    public double SoakLineSeconds { get; init; } = DefaultSoakLineSeconds;
+
+    /// <summary>
+    /// <c>--log-copies=console|file|all</c> (M5 item 0 c3, <c>m5-log-triple</c>): where the log lines go besides <c>lifestone.log</c>, which has every line in every mode. Default <see cref="Lifestone.Client.Diagnostics.LogCopies.Console"/>.
+    /// </summary>
+    public Lifestone.Client.Diagnostics.LogCopies LogCopies { get; init; } = Lifestone.Client.Diagnostics.LogCopies.Console;
+
     /// <summary>The problems <see cref="Parse"/> found, one line each; the option keeps its default.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
 
@@ -282,6 +299,37 @@ public sealed record PlayOptions
             if (argument.Name == "--retail-unhide-flash")
             {
                 options = options with { RetailUnhideFlash = true };
+                continue;
+            }
+
+            if (argument.Name == "--soak-line-s")
+            {
+                var known = errors.Count;
+                var seconds = OptionValues.Double(argument, errors, DefaultSoakLineSeconds);
+                if (errors.Count == known && seconds is >= 0 and <= MaxSoakLineSeconds)
+                {
+                    options = options with { SoakLineSeconds = seconds };
+                }
+                else if (errors.Count == known)
+                {
+                    errors.Add($"--soak-line-s: '{argument.Value}' is not 0 to {MaxSoakLineSeconds:0} (0 = no line)");
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--log-copies")
+            {
+                options = options with
+                {
+                    LogCopies = OptionValues.Choice(
+                        argument,
+                        errors,
+                        options.LogCopies,
+                        ("console", Lifestone.Client.Diagnostics.LogCopies.Console),
+                        ("file", Lifestone.Client.Diagnostics.LogCopies.File),
+                        ("all", Lifestone.Client.Diagnostics.LogCopies.All)),
+                };
                 continue;
             }
 

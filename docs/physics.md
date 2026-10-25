@@ -403,6 +403,8 @@ with `ForceIntoCell` (retail recomputes the shadows only when the cell changes; 
 No host does yet (`TODO(d25-server-object-host)`): the live player walks through lifestones and NPCs that ACE and retail collide with. Seen at M4 4.2's
 live gate round 1: the recall into Holtburg's lifestone (docs/session.md, "Off the lifestone") and a stop of the Holtburg laps where ACE held the player
 against Alcott (a world-database NPC 1.3 m from the ring's start, which the dat-only ring check cannot see) while the client walked on, 1.02 m apart.
+Seen again in the M4 hero takes: the Brawler's vendor leg walked through Renald the Elder's closed shop door; the host
+and the door handling are planned in docs/milestones/m4-hero-visual-bugs.md §4.
 An object with physics BSPs (a door) poses its parts when it moves; `SetEthereal(false)` fails while another moving object
 overlaps it and is retried each update (CheckEthereal).
 

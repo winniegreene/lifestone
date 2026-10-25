@@ -139,6 +139,33 @@ public sealed class SliceCheckAndSmokeTests
         }
     }
 
+    [Fact]
+    public void A_first_runs_godot_errors_are_never_erased_by_a_clean_rerun_0_r6()
+    {
+        // M5 0 fix 0-R6: godot_errors is a fact (D19), not a flake. A failed step whose first row carries godot_errors above 0 is left out of the rerun
+        // list and out of the rerun branch, so its FAIL and its count stand whatever a rerun would say; a failure with no Godot errors still reruns.
+        var script = SliceCheck;
+        var stage = script[script.IndexOf("function Invoke-StepsStage", StringComparison.Ordinal)..];
+        stage = stage[..stage.IndexOf("function Invoke-SmokeStage", StringComparison.Ordinal)];
+        Assert.Contains("-not (Test-GodotErrors $rows[$_])", stage, StringComparison.Ordinal);
+        Assert.Contains("if ($outcome -eq 'FAIL' -and $Rerun -and -not (Test-GodotErrors $row))", stage, StringComparison.Ordinal);
+
+        var run = RunPowerShell(Function(script, "Test-GodotErrors") + """
+
+            Write-Output ('A=' + (Test-GodotErrors @{ Result = 'FAIL'; GodotErrors = '3' }))
+            Write-Output ('B=' + (Test-GodotErrors @{ Result = 'FAIL'; GodotErrors = '0' }))
+            Write-Output ('C=' + (Test-GodotErrors @{ Result = 'FAIL'; GodotErrors = 'n/a' }))
+            Write-Output ('D=' + (Test-GodotErrors @{ Result = 'FAIL' }))
+            Write-Output ('E=' + (Test-GodotErrors $null))
+            """);
+
+        Assert.Contains("A=True", run, StringComparison.Ordinal);
+        Assert.Contains("B=False", run, StringComparison.Ordinal);
+        Assert.Contains("C=False", run, StringComparison.Ordinal);
+        Assert.Contains("D=False", run, StringComparison.Ordinal);
+        Assert.Contains("E=False", run, StringComparison.Ordinal);
+    }
+
     // ------------------------------------------------------------------------------------------ C7: one smoke process, the step map
 
     [Fact]
@@ -646,6 +673,248 @@ public sealed class SliceCheckAndSmokeTests
         // The record loop: a clip records nothing, and its source must lie under cache\ (takes are renders of the user's data).
         Assert.Contains("if ((Get-Prop $shot 'scene' 'world') -eq 'clip')", HeroVideo, StringComparison.Ordinal);
         Assert.Contains("if (-not (Test-Inside $source @('cache')))", HeroVideo, StringComparison.Ordinal);
+    }
+
+    // ------------------------------------------------------------------------------------------ M5 item 0 c5: Godot's own errors counted by every check (D19), and the gate's frame cap
+
+    private static string GodotCount(string console)
+    {
+        var script = string.Join("\n", new[] { "Get-GodotErrorLines", "Get-GodotErrorCount", "Format-GodotErrorLine" }.Select(name => Function(Smoke, name))) + "\n$repoRoot = 'C:\\repo'\n";
+        var run = RunPowerShell(script + $"$console = @'\n{console}\n'@\nWrite-Output ('COUNT=' + (Get-GodotErrorCount $console))\nforeach ($l in (Get-GodotErrorLines $console)) {{ Write-Output ('LINE=' + $l) }}");
+        return run.Replace("\r\n", "\n");
+    }
+
+    [Fact]
+    public void One_godot_error_with_a_csharp_backtrace_counts_once_and_a_script_error_and_a_user_error_count_once_each_c5()
+    {
+        var run = GodotCount("""
+            2026-10-25T10:00:00.000Z INFO [core] frame pacing vsync=Enabled
+            ERROR: System.NullReferenceException: Object reference not set to an instance of an object.
+               at Lifestone.Game.Foo.Bar() in res://scripts/Foo.cs:line 12
+               at: void Godot.Foo.Process (res://scripts/Foo.cs:208)
+               C# backtrace (most recent call first):
+                   [0] void Godot.GD.PushError(string) (/root/godot/modules/mono/glue/GodotSharp/GodotSharp/Core/GD.cs:366)
+                   [1] void Lifestone.Game.Foo.Bar() (res://scripts/Foo.cs:12)
+            SCRIPT ERROR: Parse Error: Unexpected token
+               at: GDScript::reload (res://x.gd:3)
+            USER ERROR: a user error
+               at: push_error (core/variant/core.cpp:1)
+            WARNING: this is a warning and does not count
+            """);
+
+        Assert.Contains("COUNT=3", run, StringComparison.Ordinal); // not 12: the "at:" and "C# backtrace" lines belong to their error
+        Assert.Contains("LINE=ERROR: System.NullReferenceException:", run, StringComparison.Ordinal);
+        Assert.Contains("LINE=SCRIPT ERROR: Parse Error: Unexpected token", run, StringComparison.Ordinal);
+        Assert.Contains("LINE=USER ERROR: a user error", run, StringComparison.Ordinal);
+        Assert.Contains("COUNT=0", GodotCount("2026-10-25T10:00:00.000Z INFO [core] nothing wrong\nWARNING: only a warning"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_lifestone_error_entry_is_not_a_godot_error_even_when_log_to_godot_echoes_it_as_an_error_line_c5()
+    {
+        // Log.ToGodot prints a Lifestone ERROR through GD.PushError: Godot prints "ERROR: <utc>Z ERROR [category] ..." and an "at:" line. That entry is the "Errors logged" column's (Get-ErrorCount), once.
+        var run = GodotCount("""
+            2026-10-25T10:00:00.000Z ERROR [logincheck] the login check failed stage=done why="x"
+            ERROR: 2026-10-25T10:00:00.000Z ERROR [logincheck] the login check failed stage=done why="x"
+               at: void Lifestone.Game.Core.Log.ToGodot(Lifestone.Game.Core.LogLevel, string) (res://scripts/Core/Log.cs:208)
+               C# backtrace (most recent call first):
+                   [0] void Godot.GD.PushError(string) (/root/godot/modules/mono/glue/GodotSharp/GodotSharp/Core/GD.cs:366)
+            ERROR: Parent node is busy setting up children, `add_child()` failed.
+               at: add_child (scene/main/node.cpp:1721)
+            """);
+
+        Assert.Contains("COUNT=1", run, StringComparison.Ordinal);
+        Assert.Contains("LINE=ERROR: Parent node is busy", run, StringComparison.Ordinal);
+        Assert.DoesNotContain("LINE=ERROR: 2026", run, StringComparison.Ordinal);
+
+        // Lifestone's own count is as it was: the two entries that carry "Z ERROR [".
+        var own = RunPowerShell(Function(Smoke, "Get-ErrorCount") + "\n$t = \"2026-10-25T10:00:00.000Z ERROR [a] x`nERROR: 2026-10-25T10:00:00.000Z ERROR [a] x`nERROR: Parent node is busy\"\nWrite-Output ('OWN=' + (Get-ErrorCount $t))");
+        Assert.Contains("OWN=2", own, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_first_godot_error_line_in_a_row_keeps_no_path_outside_the_repository_c5()
+    {
+        var run = RunPowerShell(Function(Smoke, "Format-GodotErrorLine") + "\n$repoRoot = 'C:\\work\\checkout'\n"
+            + "Write-Output ('A=' + (Format-GodotErrorLine 'ERROR: cannot open D:\\elsewhere\\x.dat for C:\\work\\checkout\\cache\\y.log'))\n"
+            + "Write-Output ('B=' + (Format-GodotErrorLine ('ERROR: ' + ('x' * 400))).Length)");
+
+        Assert.Contains("A=ERROR: cannot open <path> for <repo>\\cache\\y.log", run, StringComparison.Ordinal);
+        Assert.Contains("B=160", run, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_godot_step_with_a_godot_error_fails_and_its_row_and_the_summary_carry_the_field_c5()
+    {
+        var script = string.Join("\n", new[] { "Get-GodotErrorLines", "Format-GodotErrorLine", "Get-DeclaredEngineErrors", "Split-ExpectedEngineErrors", "Register-GodotErrors", "Add-Result" }.Select(name => Function(Smoke, name))) + """
+
+            $repoRoot = 'C:\repo'
+            $script:results = [System.Collections.Generic.List[object]]::new()
+            $script:audioFailures = @{}
+            $script:godotErrors = @{}
+            Register-GodotErrors 'engine-checks' "[engine] all passed`nERROR: Condition x is true.`n   at: foo (a.cpp:1)" | Out-Null
+            Register-GodotErrors 'sky-checks' "[sky] all passed" | Out-Null
+            Add-Result 'engine-checks' $true 0 1.0 'passed' 'a.log' 0
+            Add-Result 'sky-checks' $true 0 1.0 'passed' 'b.log' 0
+            Add-Result 'build' $true 0 1.0 'built' 'c.log'
+            Add-Result 'replayed' $true 0 1.0 'from a child' 'd.log' -1 '' -GodotErrors '0'
+            foreach ($r in $script:results) { Write-Output ('ROW=' + $r.Step + '|' + $r.Outcome + '|' + $r.GodotErrors + '|' + $r.Detail) }
+            """;
+        var run = RunPowerShell(script).Replace("\r\n", "\n");
+
+        Assert.Contains("ROW=engine-checks|FAIL|1|passed; FAIL: godot_errors=1, first: ERROR: Condition x is true.", run, StringComparison.Ordinal);
+        Assert.Contains("ROW=sky-checks|PASS|0|passed", run, StringComparison.Ordinal);
+        Assert.Contains("ROW=build|PASS|n/a|built", run, StringComparison.Ordinal); // a step with no Godot run reads n/a
+        Assert.Contains("ROW=replayed|PASS|0|from a child", run, StringComparison.Ordinal);
+        Assert.Contains("passed godot_errors=0", run, StringComparison.Ordinal); // the console line carries the field
+
+        // The table, the summary line, summary.json and the child rows carry it too.
+        var smoke = Smoke;
+        Assert.Contains("| Step | Result | Exit | Seconds | Errors logged | godot_errors | Detail | Log |", smoke, StringComparison.Ordinal);
+        Assert.Contains("$($r.Errors) | $($r.GodotErrors) | $($r.Detail", smoke, StringComparison.Ordinal);
+        Assert.Contains("$godotLine = \"godot_errors=$godotTotal (judged 0 on each of", smoke, StringComparison.Ordinal);
+        Assert.Contains("godot_errors = $(if (\"$($_.GodotErrors)\" -match '^\\d+$') { [int]$_.GodotErrors } else { 'n/a' })", smoke, StringComparison.Ordinal);
+        Assert.Contains("godot_errors = [int]$godotTotal", smoke, StringComparison.Ordinal);
+        Assert.Contains("[string] $FrameJudge = '', [string] $GodotErrors = ''", smoke, StringComparison.Ordinal);
+        Assert.Contains("$note -GodotErrors $godot -ExpectedEngineErrors", smoke, StringComparison.Ordinal); // a replayed child row keeps its field
+
+        // Every path that runs Godot counts its console: Invoke-Godot (all the steps through it), terrain-golden and login (their own runs).
+        Assert.Contains("Register-GodotErrors $Step $text | Out-Null", Function(smoke, "Invoke-Godot"), StringComparison.Ordinal);
+        Assert.Contains("Register-GodotErrors $step $text | Out-Null", smoke[smoke.IndexOf("'terrain-golden' {", StringComparison.Ordinal)..smoke.IndexOf("'engine-checks' {", StringComparison.Ordinal)], StringComparison.Ordinal);
+        Assert.Contains("Register-GodotErrors $step $text | Out-Null", smoke[smoke.IndexOf("'login' {", StringComparison.Ordinal)..smoke.IndexOf("'offline-player' {", StringComparison.Ordinal)], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Smoke_max_fps_is_appended_to_every_godot_steps_game_arguments_only_when_given_c5()
+    {
+        var smoke = Smoke;
+        Assert.Matches(@"\[ValidateRange\(0, 1000\)\]\s+\[int\] \$MaxFps = 0,", smoke);
+        Assert.Contains("$arguments += \"-GameArgs:$GameArgs$(Get-MaxFpsArgs)\"", Function(smoke, "Invoke-Godot"), StringComparison.Ordinal);
+        Assert.Contains("\"-GameArgs:--login-check=enter$(Get-MaxFpsArgs)\"", smoke, StringComparison.Ordinal); // the login step starts the game through tools\play.ps1
+        Assert.Contains("@(if ($MaxFps -gt 0) { '-MaxFps'; \"$MaxFps\" })", smoke, StringComparison.Ordinal); // the -Parallel and -Lanes children get it too
+
+        var function = Function(smoke, "Get-MaxFpsArgs");
+        Assert.Equal("[ --max-fps=60]", RunPowerShell(function + "\n$MaxFps = 60\nWrite-Output ('[' + (Get-MaxFpsArgs) + ']')").Trim());
+        Assert.Equal("[]", RunPowerShell(function + "\n$MaxFps = 0\nWrite-Output ('[' + (Get-MaxFpsArgs) + ']')").Trim()); // outside the gate a run is as it was
+
+        // The option exists under that spelling.
+        Assert.Contains("new(\"--max-fps\", \"N\"", File.ReadAllText(RepositoryFiles.PathOf("src", "Lifestone.Client", "Options", "OptionCatalog.cs")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Slice_check_reports_and_judges_the_godot_errors_of_smokes_rows_and_summary_c5()
+    {
+        var read = Function(SliceCheck, "Read-SmokeRow");
+        string Row(string line) => RunPowerShell(read + $"\n$run = @{{ Lines = @('{line}') }}\n$r = Read-SmokeRow $run 'play-checks'\nWrite-Output ('R=' + $r.Result + '|' + $r.GodotErrors + '|' + $r.Detail)").Trim();
+
+        Assert.Equal("R=PASS|0|pass=80 fail=0", Row("[smoke] play-checks             PASS  (68.3 s) pass=80 fail=0 godot_errors=0"));
+        Assert.Equal("R=FAIL|2|passed; FAIL: godot_errors=2, first: ERROR: x", Row("[smoke] play-checks             FAIL  (68.3 s) passed; FAIL: godot_errors=2, first: ERROR: x godot_errors=2"));
+        Assert.Equal("R=PASS|n/a|built", Row("[smoke] play-checks             PASS  (68.3 s) built")); // a step with no Godot run has no field
+
+        var script = SliceCheck;
+        Assert.Contains("\"$detail godot_errors=$godot$($godotRow.Expected)\".Trim()", script, StringComparison.Ordinal); // the steps stage's line names the field
+        Assert.Contains("$verdict += \" godot_errors=$godotTotal\"", script, StringComparison.Ordinal); // the smoke stage names the total
+        Assert.Contains("$pass = $run.Code -eq 0 -and $godotTotal -notmatch '^[1-9]'", script, StringComparison.Ordinal); // and fails on any
+        Assert.Contains("^(?:SCRIPT |USER )?ERROR:", Function(script, "Get-StepFailureLines"), StringComparison.Ordinal); // a failing step shows Godot's first lines
+    }
+
+    // ------------------------------------------------------------------------------------------ M5 item 0 fix: declared engine errors
+
+    private static string DeclaredRow(string console)
+    {
+        var script = string.Join("\n", new[] { "Get-GodotErrorLines", "Format-GodotErrorLine", "Get-DeclaredEngineErrors", "Split-ExpectedEngineErrors", "Register-GodotErrors", "Add-Result" }.Select(name => Function(Smoke, name))) + """
+
+            $repoRoot = 'C:\repo'
+            $script:results = [System.Collections.Generic.List[object]]::new()
+            $script:audioFailures = @{}
+            $script:godotErrors = @{}
+            """ + $"\n$console = @'\n{console}\n'@\n" + """
+            Register-GodotErrors 'interior-engine-checks' $console | Out-Null
+            Add-Result 'interior-engine-checks' $true 0 1.0 'holds=37 fails=0' 'a.log' 0
+            $r = $script:results[0]
+            Write-Output ('ROW=' + $r.Outcome + '|' + $r.GodotErrors + '|' + $r.ExpectedEngineErrors + '|' + $r.Detail)
+            """;
+        return RunPowerShell(script).Replace("\r\n", "\n");
+    }
+
+    private const string DeclaredBegin = """
+        2026-10-25T22:04:58.811Z INFO  [interiorcheck] expected engine errors begin text="Too many instances using shader instance variables" count=2
+        2026-10-25T22:04:58.811Z INFO  [interiorcheck] expected engine errors begin text=global_shader_uniforms.instance_buffer_pos.has(p_instance) count=2
+        """;
+
+    private const string DeclaredEnd = "2026-10-25T22:04:58.934Z INFO  [interiorcheck] expected engine errors end";
+
+    private const string TooMany = "ERROR: Too many instances using shader instance variables. Increase buffer size in Project Settings.\n   at: instance_allocate (servers/rendering/renderer_rd/storage_rd/material_storage.cpp:1)";
+
+    private const string FreedTwice = "ERROR: Condition \"global_shader_uniforms.instance_buffer_pos.has(p_instance)\" is true. Returning: -1\n   at: x (y.cpp:2)";
+
+    [Fact]
+    public void Declared_engine_errors_seen_equal_to_declared_pass_with_godot_errors_zero_and_the_expected_count_in_the_row()
+    {
+        // The log holds stdout and stderr as two blocks (the markers come first, the ERROR lines after them), so the lines are matched by text, not by position.
+        var run = DeclaredRow($"{DeclaredBegin}\n{DeclaredEnd}\n{TooMany}\n{TooMany}\n{FreedTwice}\n{FreedTwice}");
+
+        Assert.Contains("ROW=PASS|0|4/4|holds=37 fails=0", run, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Declared_engine_errors_seen_unequal_to_declared_fail_the_step_naming_both_counts()
+    {
+        var fewer = DeclaredRow($"{DeclaredBegin}\n{DeclaredEnd}\n{TooMany}\n{TooMany}\n{FreedTwice}");
+        Assert.Contains("ROW=FAIL|0|3/4|", fewer, StringComparison.Ordinal);
+        Assert.Contains("FAIL: expected_engine_errors=3/4 (declared 2 but saw 1 of 'global_shader_uniforms.instance_buffer_pos.has(p_instance)')", fewer, StringComparison.Ordinal);
+
+        var more = DeclaredRow($"{DeclaredBegin}\n{DeclaredEnd}\n{TooMany}\n{TooMany}\n{TooMany}\n{FreedTwice}\n{FreedTwice}");
+        Assert.Contains("ROW=FAIL|0|5/4|", more, StringComparison.Ordinal);
+        Assert.Contains("declared 2 but saw 3 of 'Too many instances using shader instance variables'", more, StringComparison.Ordinal);
+
+        // A declaration that was never closed (the control did not finish) fails too.
+        var open = DeclaredRow($"{DeclaredBegin}\n{TooMany}\n{TooMany}\n{FreedTwice}\n{FreedTwice}");
+        Assert.Contains("ROW=FAIL|0|4/4|", open, StringComparison.Ordinal);
+        Assert.Contains("the declaration is not closed (no end marker)", open, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_undeclared_godot_error_fails_the_step_anywhere_in_it_and_with_no_declaration_every_error_counts()
+    {
+        var other = DeclaredRow($"{DeclaredBegin}\n{DeclaredEnd}\n{TooMany}\n{TooMany}\n{FreedTwice}\n{FreedTwice}\nERROR: Parent node is busy setting up children.\n   at: add_child (scene/main/node.cpp:1)");
+        Assert.Contains("ROW=FAIL|1|4/4|", other, StringComparison.Ordinal);
+        Assert.Contains("FAIL: godot_errors=1, first: ERROR: Parent node is busy setting up children.", other, StringComparison.Ordinal);
+
+        // The same errors with no declaration are all unexpected.
+        var undeclared = DeclaredRow($"{TooMany}\n{TooMany}");
+        Assert.Contains("ROW=FAIL|2||", undeclared, StringComparison.Ordinal);
+        Assert.Contains("FAIL: godot_errors=2, first: ERROR: Too many instances", undeclared, StringComparison.Ordinal);
+
+        // The console line and the summary carry the count seen against the declared one.
+        Assert.Contains("godot_errors=0 expected_engine_errors=4/4", DeclaredRow($"{DeclaredBegin}\n{DeclaredEnd}\n{TooMany}\n{TooMany}\n{FreedTwice}\n{FreedTwice}"), StringComparison.Ordinal);
+        Assert.Contains("expected_engine_errors = $(if ($_.ExpectedEngineErrors)", Smoke, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_interior_check_declares_its_negative_controls_errors_before_provoking_them_and_closes_the_declaration()
+    {
+        var source = File.ReadAllText(RepositoryFiles.PathOf("src", "Lifestone.Game", "scripts", "World", "Interiors", "InteriorEngineChecks.cs"));
+        var begin = source.IndexOf("\"expected engine errors begin\"", StringComparison.Ordinal);
+        var provoke = source.IndexOf("for (var i = 0; i < blocks + 8; i++)", StringComparison.Ordinal);
+        var end = source.IndexOf("\"expected engine errors end\"", StringComparison.Ordinal);
+
+        Assert.True(begin > 0 && begin < provoke && provoke < end, "begin, then the negative control's instances, then end");
+        Assert.Contains("(\"text\", \"Too many instances using shader instance variables\")", source, StringComparison.Ordinal);
+        Assert.Contains("(\"count\", overflow)", source, StringComparison.Ordinal);
+        Assert.Contains("var overflow = blocks + 8 + 2 - instancesWithBlocks;", source, StringComparison.Ordinal); // computed in the check from the buffer's blocks
+    }
+
+    [Fact]
+    public void Soak_watch_selects_no_step_and_is_not_an_unmatched_tools_path()
+    {
+        var map = File.ReadAllText(RepositoryFiles.PathOf("tools", "lib", "StepPaths.psd1"));
+        Assert.Contains("'tools/soak-watch.ps1'", map[map.IndexOf("NoGodot = @(", StringComparison.Ordinal)..map.IndexOf("Live = @{", StringComparison.Ordinal)], StringComparison.Ordinal);
+
+        var path = RepositoryFiles.PathOf("tools", "lib", "StepPaths.psd1");
+        var run = RunPowerShell(Function(SliceCheck, "Resolve-ChangedSteps") + $"\n$map = Import-PowerShellDataFile '{path}'\n$r = Resolve-ChangedSteps @('tools/soak-watch.ps1') $map\n"
+            + "Write-Output ('STEPS=' + $r.Steps.Count + ' UNMATCHED=' + $r.Unmatched.Count + ' EVERYTHING=' + $r.Everything)");
+        Assert.Contains("STEPS=0 UNMATCHED=0 EVERYTHING=False", run, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------------------------------------ helpers

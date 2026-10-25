@@ -101,6 +101,7 @@ public sealed class HeadlessRunner : IDisposable
         _scenario = scenario ?? throw new ArgumentNullException(nameof(scenario));
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _dataWorld = world as DataOnlyAttachments;
+        session.Cull.Cells = world; // M5 0 fix R1: the cull reads a dungeon cell's visible cells from the decoded cells (Focus decodes the player's cell and its visible cells)
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         ArgumentNullException.ThrowIfNull(assets);

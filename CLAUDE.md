@@ -4,9 +4,11 @@ Lifestone is a faithful, single-player Asheron's Call. It is a Godot 4.7 (.NET, 
 - renders the user's own retail dats;
 - talks the AC protocol to a bundled ACE server on localhost.
 
-Read `README.md` and `docs/goals.md` for the project. The next milestone is **M5, "patrons and outcomes"**, not
-yet planned: its planning session writes its spec and plan under `docs/milestones/` and points this paragraph at
-them. M4 ([docs/milestones/m4-fights-and-loot.md](docs/milestones/m4-fights-and-loot.md), "fights and loot"; its plan,
+Read `README.md` and `docs/goals.md` for the project. The current milestone is **M5, "the first dungeon"**
+([docs/milestones/m5-first-dungeon.md](docs/milestones/m5-first-dungeon.md), the spec; its plan, gates, decisions and
+open TODOs in [docs/milestones/m5-plan.md](docs/milestones/m5-plan.md)): a mage that plays the Black Spawn Den by
+itself for a day, cheat-free, with the person free to take the keys; planned 2026-10-25; item 0 done, item 1 next. M4
+([docs/milestones/m4-fights-and-loot.md](docs/milestones/m4-fights-and-loot.md), "fights and loot"; its plan,
 gates, decisions and open TODOs in [docs/milestones/m4-plan.md](docs/milestones/m4-plan.md), §9 the rows placed "M5"),
 M3 ([docs/milestones/m3-lights-and-sound.md](docs/milestones/m3-lights-and-sound.md), "fights and sound" in prose;
 its plan [docs/milestones/m3-plan.md](docs/milestones/m3-plan.md)) and M2

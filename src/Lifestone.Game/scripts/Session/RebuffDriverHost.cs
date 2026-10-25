@@ -30,6 +30,7 @@ public sealed partial class RebuffDriverHost : Node
     private Task<IReadOnlyDictionary<uint, SpellInfo>>? _loading;
     private object? _wiredHotkeys;
     private bool _saved;
+    private readonly Lifestone.Client.Session.Hosting.LegFaultGuard _guard = new("RebuffDriverHost", LogCategory, GodotLogSink.Instance);
 
     /// <summary>Adds the host to the scene.</summary>
     public static RebuffDriverHost Install(Main main, GameServices services, SessionHost host, RetailUiLayer? ui)
@@ -61,18 +62,33 @@ public sealed partial class RebuffDriverHost : Node
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
-        if (_host.Session is not { } session)
+        if (_guard.Tripped || _host.Session is not { } session)
         {
-            return;
+            return; // after a fault the driver stays stopped (the game runs on)
         }
 
-        WireKey(session);
-        if (_logic.NeedsSpells)
+        try
         {
-            LoadSpells();
-        }
+            WireKey(session);
+            if (_logic.NeedsSpells)
+            {
+                LoadSpells();
+            }
 
-        _logic.Tick(session);
+            _logic.Tick(session);
+        }
+        catch (Exception e) when (Lifestone.Client.Session.Hosting.LegFaultGuard.Guards(e))
+        {
+            // M5 item 0 c2: reported once; the driver is switched off and released, the game keeps running (no leg to fail here).
+            _guard.Catch("_Process", e);
+            if (_logic.Driver is { } driver)
+            {
+                driver.Enabled = false;
+            }
+
+            _logic.Stop(); // 0-R9: releases the driver and makes the Pause key a log line only
+            Log.Error(LogCategory, "auto-buff: the driver is stopped for this run after the fault above (the game keeps running)");
+        }
     }
 
     /// <inheritdoc/>

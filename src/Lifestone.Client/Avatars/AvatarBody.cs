@@ -114,6 +114,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
     private AcFrame _lastFrame;
     private bool _poseDirty = true;
     private CellFrame? _serverPosition;
+    private AvatarPlacement _placement;
 
     internal AvatarBody(uint guid, ModelAssembly setup, PartArrayAppearance appearance, AvatarSources sources, ITargetWorld world, IEffectRandom random, bool isCreature, double now)
     {
@@ -531,6 +532,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         {
             TeleportHook();
             Place(target);
+            _placement = AvatarPlacement.Teleport;
         }
         else if (!hasContact)
         {
@@ -540,6 +542,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         {
             Positions.StopInterpolating();
             Place(target);
+            _placement = AvatarPlacement.Far;
         }
         else
         {
@@ -904,6 +907,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
     public void Advance(double now, in AvatarStep step)
     {
         Time = now;
+        LastQuantum = 0;
         if (Parent is not null || Position.CellId == 0 || (State & AvatarStateBits.Frozen) != 0)
         {
             Active = false;
@@ -930,10 +934,28 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
 
         foreach (var (quantum, time) in _clock.Advance(now))
         {
+            LastQuantum = Math.Max(LastQuantum, quantum);
             UpdateObjectInternal(quantum, time, step);
         }
 
         PoseParts();
+    }
+
+    /// <summary>The longest object-clock step of the last <see cref="Advance"/>, in seconds (0 when it stepped nothing).</summary>
+    public double LastQuantum { get; private set; }
+
+    /// <summary>The last server position <see cref="MoveOrTeleport"/> took, or null.</summary>
+    public CellFrame? ServerPosition => _serverPosition;
+
+    /// <summary>The frame-to-frame jump and flip detector the avatar set runs on this object (<see cref="AvatarJumpWatch"/>).</summary>
+    internal AvatarJumpWatch JumpWatch { get; } = new();
+
+    /// <summary>How the object was placed since the last call (a teleport, a far position, a blip), and forgets it.</summary>
+    internal AvatarPlacement TakePlacement()
+    {
+        var placement = _placement;
+        _placement = AvatarPlacement.None;
+        return placement;
     }
 
     /// <summary>
@@ -1028,6 +1050,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
             {
                 Place(blip.Position);
                 Positions.Interpolation.CompleteBlip(placed: true);
+                _placement = AvatarPlacement.Blip;
             }
         }
 

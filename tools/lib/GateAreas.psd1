@@ -33,7 +33,7 @@
         }
         'mage'      = @{
             Paths   = @('src/Lifestone.Client/Session/Mage/', 'src/Lifestone.Client/Magic/', 'src/Lifestone.Client/Session/Scenarios/Journey/')
-            Classes = @()
+            Classes = @('DenMeasureLiveTests')   # M5 0 c4: Lane=solo, so the account lanes leave it out; named so that R12 sees it in an area
         }
         'servermod' = @{
             Paths   = @('server/mod/')

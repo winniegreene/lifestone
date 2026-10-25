@@ -260,6 +260,15 @@ came at a refresh, the goal's own left out) reads `none` before one was seen.
 Both arrive with 0 rungs, the same in twenty runs of the class (the straight run before its tracking near statics turned 24 and
 39 times, and stuck in about one belt run in four). Live: see m4-plan.md section 8, "the wayfinder's feel".
 
+**A route of one waypoint.** The start and the goal snapped to one lattice point: `Steer` takes the next vertex as `min(1, count - 1)`,
+so it never indexes past the list, and the arrival rule ends the run as for any route. A horizon route's one waypoint is its edge, so
+that one is steered to. This closes `TODO(m5-nav-one-waypoint)`: before it, the straight-run clause indexed waypoint 1 of a list of one
+and threw every frame (the last gate's melee journey wrote 8,642 traces).
+
+**An empty path.** A path with no waypoints is never stored: the plan ends the run Blocked with `no path: empty-path (the path source
+returned no waypoints)`, a named failure, not an exception. `Steer` repeats the check and ends Blocked with `empty-path (Steer was given
+no waypoints)`; that is unreachable today.
+
 ## The creature layer (nav-creature-avoid)
 
 The owner, 2026-10-24: the characters "seem unaware of the enemies and run right into them". `NavCreatures`

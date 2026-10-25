@@ -39,8 +39,9 @@ What Lifestone is not:
 | **[M2: Log in](docs/milestones/m2-log-in.md)** | **Done** | Log in to the local ACE server, in the retail interface and through retail portal space: your character, movement, server-spawned objects |
 | **[M3: Fights and sound](docs/milestones/m3-lights-and-sound.md)** | **Done** | A level-126 mage buffs in all three schools, fights and dies in the Black Spawn Den: casts, projectiles and impacts on screen, dynamic lights, the game's sound, the retail panels with live content |
 | **[M4: Fights and loot](docs/milestones/m4-fights-and-loot.md)** | **Done** | A fighter on the Low B belt and in the forest near Holtburg: melee and missile with the power bar, corpses looted, kits and potions, vendors and appraisal, the shortcut bar; the retail panels with live content; auto-buff; a wayfinder that walks planned routes; three self-driving characters that play whole journeys for the tests; a 30-second hero video cut from their live takes |
-| **M5: Patrons and outcomes** | Next (not yet planned) | Automation that reads its outcomes (a fizzled cast retried, Mana Conversion cast) and a patron bot |
-| More gameplay | Planned | NPCs and quests, the remaining panels, more of Dereth's rules through ACE |
+| **[M5: The first dungeon](docs/milestones/m5-first-dungeon.md)** | In progress (item 0 of 9 done) | The game starts to play itself: a mage hunts the Black Spawn Den on its own for a day, buffing, looting, selling, buying, dying and recovering without the server mod's help, with a key that hands the controls to you and back; dungeons as data; a day-long run on screen; the first batch of what a player at the keys needs (the Yes/No dialog, saved settings, editable spell bars, slash commands); doors and lifestones made solid |
+| M6: Dungeons and regions | Next | More hunting grounds written as data and proved live, the other classes in the autopilot, the second batch of the retail interface |
+| More gameplay | Planned | NPCs and quests, the remaining panels, more of Dereth's rules through ACE; later, the player-run service bots of retail (buff, tinker, dye and craft bots) run by the client, and quests the game does for you |
 | Built-in automation | Started | The loops that test the game today drive the same action API the automation will use; auto-buff is done, AFK hunting and looting is next ([automation vision](docs/automation-vision.md)) |
 | Polish | Planned | The remaining UI, larger window sizes, packaging |
 
@@ -244,6 +245,8 @@ run key; a wayfinder run stops as soon as you press a movement key.
 | `--time-of-day=F` | Time of day as a fraction of the day, 0 to 1 (default 0.5) |
 | `--time-speed=X` | Game seconds per real second (0 pauses; 1 is retail) |
 | `--vsync=off --max-fps=0` | Uncapped frame rate, for benchmarking (with `--vsync=off` alone the cap is the display's refresh rate) |
+| `--soak-line-s=S` | Seconds between `[soak]` lines in the log (default 60; 0 = none); the fields are in [docs/session.md](docs/session.md) section 44 |
+| `--log-copies=console\|file\|all` | Where log lines go besides `lifestone.log` (default `console`; `file` drops the console copy of Debug, Info and Warning lines; `all` = the three copies) |
 | `--load-radius=N` | Landblock rings to stream around you (default 8, as retail) |
 | `--retail-normals`, `--retail-sky-anchor` | Restore retail's rendering quirks (see [Principles](#principles)) |
 | `--retail-picking` | Retail's picking rules in play mode: a part's first hit polygon and per-part hit times, where a click can pick a different object than the nearest ([avatars.md](docs/avatars.md) section 18) |
@@ -449,9 +452,21 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
     prints every step and runs nothing.
   - **Time.** The gate that closed the fresh-characters item took 1,613 s, against about 4,860 s for the old order (the
     per-feature loopback classes and smoke legs, one after another).
+  - **Frame cap.** The journeys (the parallel phase's and any solo journey's) run with `-MaxFps 60`, so their Godot runs get
+    `--max-fps=60`; the gates ran at 239 to 241 fps uncapped. The frame judge (`login-check`, `login`), the throwaway's frames and
+    the leak scan stay uncapped: the judge checks frame time against the Holtburg 60 fps floor (`LoginCheckRunner.HoltburgMinimumFps`),
+    which a 60 cap would fail on the cap itself. `-Plan` prints the cap once (`[gate-plan] frame cap (M5 item 0)`).
+  - **Godot errors.** Each smoke-backed row carries `godot_errors=<n>`, Godot's own `ERROR:`, `SCRIPT ERROR:` and `USER ERROR:` lines
+    in that step's console (Lifestone's echoed errors do not count), and the gate judges it 0 (M5 D19, the one named exception to
+    report-only-first). A Godot row whose smoke row carries no count fails; headless, dotnet-test, build and re-create rows read
+    `godot_errors=n/a`.
 - **The audio check.** Every automated Godot run must log `audio service installed ... muted=true`; a smoke step whose
   run does not fails with `audio check`. Capture runs count as automated. `tools\play.ps1 -Audio` is refused with `-Offscreen`,
   since an offscreen run is the muted path.
+- **The soak watcher.** `tools\soak-watch.ps1 [-IntervalSeconds 300] [-DurationSeconds N] [-Once] [-OutFile cache\soak\x.csv]` is
+  read-only, beside a soak run: every interval it appends one CSV row and prints one `[soak-watch]` line (the Godot, `ACE.Server` and
+  `mariadbd` processes' memory, handles and threads, the size of the logs and database folders, the free space on the repository's
+  drive). It starts, stops and kills nothing and reads no file contents. The soak line's fields are in docs/session.md section 44.
 
 ### Slice check
 
@@ -464,6 +479,9 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
   suite. `-Stages build,test` runs a subset; `-Rerun` reruns a failed Godot step once (`PASS (rerun)`). A FAIL prints at most
   15 lines of the failure and the log path; full logs are in `cache\slice-check\`. It never starts the backend (`-Backend`
   accepts only `auto`).
+- **Godot errors.** The steps stage prints `godot_errors=<n|n/a>` at the end of each step's line, and the smoke stage prints the
+  total in its verdict and fails on any. `-Rerun` does not rerun a step whose first run reported `godot_errors` above 0: its FAIL
+  and its count stand.
 - **Which form, when.**
   - `-Gate` is G-A, the check before every live gate: build, default tests and the Exhaustive tier, no Godot step (a few minutes).
   - `-Changed` adds the backend-free Godot steps the diff selects (`tools\lib\StepPaths.psd1` maps folders to steps). It runs once
@@ -493,6 +511,12 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
 - The `record-audio` step (M3 1.3 s3, no backend) runs `--play-checks --record-audio=<dir>` on the stand-in server: the game's own sound is recorded from the Master bus
   (automated, so muted: M2 D8), read back by `WaveLevels` and judged non-silent (peak above -60 dBFS and an active 50 ms window). The per-source counters
   (`sources=`) are printed, not judged.
+- **Godot errors.** A Godot step also counts Godot's own errors, as `godot_errors=<n>` in its row: the console line, the summary
+  table's `godot_errors` column, `summary.json`'s `godot_errors`, and the summary's closing `godot_errors=<total>` line. A Godot step
+  with `godot_errors>0` fails, and its detail names the first such line. The "Errors logged" column stays Lifestone's own ERROR
+  count. A C# unhandled exception counts once; Lifestone's own ERROR entries that `Log.ToGodot` echoes through `GD.PushError` are
+  not Godot errors.
+- **`-MaxFps <n>`** appends `--max-fps=<n>` to every Godot step's game arguments (0 = none, the default; only the live gate passes 60).
 - The golden viewpoints render to `docs/screenshots/m1/golden/` (ignored by git) with the positions and times needed
   to take the same views in the retail client:
 

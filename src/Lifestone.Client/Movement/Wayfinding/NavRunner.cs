@@ -910,7 +910,8 @@ public sealed class NavRunner : IDisposable
         _mapVersion = _paths.Map?.Version ?? 0;
         if (path.Status == NavPathStatus.Failed || path.Waypoints.Count == 0)
         {
-            End(NavRunState.Blocked, "no path: " + (path.Reason ?? "empty"), now);
+            // An empty path is a named failure, never an exception (m5-nav-one-waypoint: the sibling edge of the one-waypoint route).
+            End(NavRunState.Blocked, "no path: " + (path.Reason ?? "empty-path (the path source returned no waypoints)"), now);
             return false;
         }
 
@@ -1019,7 +1020,16 @@ public sealed class NavRunner : IDisposable
     {
         var goal = _goal!;
         var waypoints = _path!.Waypoints;
-        var next = 1;
+        if (waypoints.Count == 0)
+        {
+            // Plan() ends an empty path before it is stored, so this is unreachable today; kept so no later caller can index an empty list.
+            End(NavRunState.Blocked, "no path: empty-path (Steer was given no waypoints)", _lastTime);
+            return;
+        }
+
+        // m5-nav-one-waypoint (closed in M5 item 0 c2): a route of one waypoint (the start and the goal snapped to one lattice point) has no next vertex
+        // past the first: steer at the goal itself (a horizon route's one waypoint is its edge) and let the arrival rule end the run.
+        var next = Math.Min(1, waypoints.Count - 1);
         while (next < waypoints.Count - 1 && route.ArcLengthAt(next) <= s + 0.01f)
         {
             next++;
@@ -1047,6 +1057,11 @@ public sealed class NavRunner : IDisposable
         {
             var lead = tight ? MathF.Max(LeadMinMetres, LeadSpeedFactor * _speed) : MathF.Max(TrackLeadMinMetres, TrackLeadSeconds * _speed);
             aim = route.PointAt(MathF.Min(s + lead, route.ArcLengthAt(next)));
+        }
+
+        if (waypoints.Count == 1 && _path.Status != NavPathStatus.Horizon)
+        {
+            aim = goal.Point;
         }
 
         var offset = aim.Global - here.Global;

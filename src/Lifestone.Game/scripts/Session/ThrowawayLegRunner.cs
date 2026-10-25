@@ -37,6 +37,8 @@ public sealed partial class ThrowawayLegRunner : Node
     private const double QuitFlushSeconds = 1.5;
 
     private SessionHost _host = null!;
+    private readonly Lifestone.Client.Session.Hosting.LegFaultGuard _guard = new("ThrowawayLegRunner", LogCategory, GodotLogSink.Instance);
+    private double _faultAt = double.MaxValue;
     private PlayMode _mode = null!;
     private RetailUiLayer _ui = null!;
     private ThrowawayLegScenario _scenario = null!;
@@ -108,6 +110,35 @@ public sealed partial class ThrowawayLegRunner : Node
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
+        try
+        {
+            StepFrame(delta);
+        }
+        catch (Exception e) when (Lifestone.Client.Session.Hosting.LegFaultGuard.Guards(e))
+        {
+            // M5 item 0 c2: reported once; the scenario's own recovery (the abort path of the time limit: log off if in the world) then runs and the verdict is ok=false.
+            if (_guard.Catch($"_Process (stage {_scenario.Stage})", e))
+            {
+                _faultAt = _runSeconds;
+                _aborted = true;
+                if (_host.Session is { } session)
+                {
+                    _scenario.Abort(session, _guard.Reason!);
+                }
+                else
+                {
+                    Finish(false, _guard.Reason);
+                }
+            }
+            else
+            {
+                Finish(false, _guard.Reason);
+            }
+        }
+    }
+
+    private void StepFrame(double delta)
+    {
         if (_finished)
         {
             return;
@@ -120,7 +151,11 @@ public sealed partial class ThrowawayLegRunner : Node
             return;
         }
 
-        SampleFrame(delta);
+        if (!_aborted)
+        {
+            SampleFrame(delta); // M5 0 fix 0-R5: not after a fault or the time limit, so a fault in the sampling cannot repeat and end the run before the abort's log off completes
+        }
+
         if (!double.IsNaN(_doneAt))
         {
             if (_runSeconds - _doneAt >= QuitFlushSeconds)
@@ -136,7 +171,7 @@ public sealed partial class ThrowawayLegRunner : Node
             _aborted = true;
             _scenario.Abort(session, $"the check took more than {WholeCheckSeconds:0} s");
         }
-        else if (_aborted && _runSeconds > WholeCheckSeconds + RecoverySeconds)
+        else if (_aborted && _runSeconds > Math.Min(WholeCheckSeconds, _faultAt) + RecoverySeconds)
         {
             Finish(false, "recovery after the time limit did not finish");
             return;

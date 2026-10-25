@@ -226,6 +226,19 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
     /// <summary>The report-only fields as the verdict line carries them: <c> level=&lt;n|?&gt; mage_char=&lt;present|absent|pending-delete&gt; fighter=&lt;present|absent|pending-delete&gt;</c> (they never fail the check).</summary>
     public string ReportFields => Fields(LevelField, MageField, FighterField);
 
+    /// <summary>The most objects the session's object table held at once while the player was in the world (M5 0 c1, the verdict line's <c>objects=</c>), or -1 before the player entered.</summary>
+    public int ObjectsMax { get; private set; } = -1;
+
+    /// <summary>
+    /// The report-only object fields (M5 0 c1, <c>m5-object-cull</c>) with their leading space: <c> objects=&lt;n|n/a&gt; drawn_in_cell=&lt;n|n/a&gt; light_rows=&lt;n|n/a&gt;</c>, each the most seen at once
+    /// in the run: <c>objects</c> the object table's count (<see cref="ObjectsMax"/>), <c>drawn_in_cell</c> the avatars DRAWN this frame in interior cells (not the soak line's <c>in_cell</c>, which counts every avatar whose body is in a cell, drawn or not; M5 0 fix 0-R7), <c>light_rows</c> the object light table's rows in use;
+    /// a field the run did not reach (negative) is <c>n/a</c>. They never fail the check.
+    /// </summary>
+    public static string ObjectFields(int objects, int drawnInCell, int lightRows) =>
+        string.Create(CultureInfo.InvariantCulture, $" objects={NotNegative(objects)} drawn_in_cell={NotNegative(drawnInCell)} light_rows={NotNegative(lightRows)}");
+
+    private static string NotNegative(int value) => value < 0 ? LoginCheckShell.NotApplicable : value.ToString(CultureInfo.InvariantCulture);
+
     /// <summary>The report-only fields (M3 1.1 s4, <c>fighter=</c> M4 1.1 s5) with their leading space, for appending to the verdict line.</summary>
     public static string Fields(string level, string mage, string fighter) => string.Create(CultureInfo.InvariantCulture, $" level={level} mage_char={mage} fighter={fighter}");
 
@@ -321,6 +334,11 @@ public sealed class LoginCheckScenario : IScenario, IDisposable
 
         var clock = session.Clock.Now;
         var state = session.State;
+        if (state.Self.Guid != 0 && state.Objects.Count > ObjectsMax)
+        {
+            ObjectsMax = state.Objects.Count;
+        }
+
         if (double.IsNaN(_stageStart))
         {
             _stageStart = clock;

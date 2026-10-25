@@ -197,6 +197,30 @@ public sealed class RebuffHostLogicTests
     }
 
     [Fact]
+    public void After_a_fault_stops_the_host_the_key_only_logs_that_the_driver_is_off_0_r9()
+    {
+        var t = new HostRig(auto: true);
+        t.Logic.SetSpells(t.Caster.Table);
+        t.Logic.Tick(t.View);
+        Assert.NotNull(t.Logic.Driver);
+        Assert.True(t.Logic.On);
+        var chatBefore = t.Chat().Count;
+
+        t.Logic.Stop(); // the host's frame faulted
+
+        Assert.True(t.Logic.Stopped);
+        Assert.False(t.Logic.On);
+        Assert.Null(t.Logic.Driver);
+        t.Logic.Toggle(t.View);
+        t.Logic.Toggle(t.View);
+        Assert.False(t.Logic.On); // the key flipped nothing
+        Assert.Null(t.Logic.Driver); // and made no driver
+        Assert.False(t.Logic.NeedsSpells);
+        Assert.Equal(chatBefore, t.Chat().Count); // no "auto-buff on" notice with nothing behind it
+        Assert.Equal(2, t.R.H.Log.Lines.Count(l => l.Contains("the driver is off for this run after an error", StringComparison.Ordinal))); // one log line per press
+    }
+
+    [Fact]
     public void The_option_turns_it_on_at_the_arrival_with_a_notice()
     {
         var t = new HostRig(auto: true);

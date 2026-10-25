@@ -417,14 +417,14 @@ public sealed class LiveGateRunnerTests
 
         string Line(string prefix) => run.Split('\n').Select(l => l.Trim()).Single(l => l.StartsWith(prefix, StringComparison.Ordinal));
         Assert.Equal("A_N=3", Line("A_N=")); // recreate, loopback, smoke: the journey has no second "no result" row
-        Assert.Equal("A_ROW=recreate|False|no \"headless done scenario=fighter-build ok=...\" line (exit 1) log=stub-recreate.log err=stub-recreate.err", Line("A_ROW=recreate|"));
+        Assert.Equal("A_ROW=recreate|False|no \"headless done scenario=fighter-build ok=...\" line (exit 1) log=stub-recreate.log err=stub-recreate.err godot_errors=n/a", Line("A_ROW=recreate|"));
         Assert.StartsWith("A_ROW=loopback|True|passed=3 failed=0 skipped=0 exit=0", Line("A_ROW=loopback|"), StringComparison.Ordinal); // the lane's other steps still run
         Assert.Equal("A_ROW=smoke|False|not run: the re-create on acct-a failed", Line("A_ROW=smoke|"));
         Assert.Equal("A_RAN=False", Line("A_RAN="));
         Assert.StartsWith("A_LINE=[gate] stub smoke FAIL not run: the re-create on acct-a failed (", Line("A_LINE="), StringComparison.Ordinal);
         Assert.Equal("A_STAMP=True", Line("A_STAMP="));
 
-        Assert.Equal("B_ROW=recreate-b|True|fresh=recreated purged=1 level=55", Line("B_ROW=recreate-b|"));
+        Assert.Equal("B_ROW=recreate-b|True|fresh=recreated purged=1 level=55 godot_errors=n/a", Line("B_ROW=recreate-b|"));
         Assert.StartsWith("B_ROW=smoke-b|True|passed=3 failed=0 skipped=0 exit=0", Line("B_ROW=smoke-b|"), StringComparison.Ordinal);
         Assert.Equal("B_RAN=True", Line("B_RAN="));
 
@@ -729,7 +729,7 @@ public sealed class LiveGateRunnerTests
 
         // Wiring: Invoke-Godot judges every run of a step in $audioSteps, the login step (play.ps1) too, and Add-Result turns the recorded reason into the step's FAIL.
         var script = Smoke;
-        Assert.Contains("Set-AudioVerdict $Step (Get-Content -LiteralPath $log -Raw)", Function(script, "Invoke-Godot"), StringComparison.Ordinal);
+        Assert.Contains("Set-AudioVerdict $Step $text", Function(script, "Invoke-Godot"), StringComparison.Ordinal);
         Assert.Contains("Set-AudioVerdict $step $text", script, StringComparison.Ordinal);
         Assert.Contains("$script:audioFailures.ContainsKey($Step)", Function(script, "Add-Result"), StringComparison.Ordinal);
         Assert.Contains("FAIL: audio check: $($script:audioFailures[$Step])", Function(script, "Add-Result"), StringComparison.Ordinal);
@@ -852,7 +852,7 @@ public sealed class LiveGateRunnerTests
     {
         var run = RunPowerShell($"Import-Module '{GateModule}' -Force\n" + """
             $pass = [pscustomobject]@{ Step = 'leak-scan'; Outcome = 'PASS'; Detail = ''; Seconds = 3; Log = '' }
-            $frame = [pscustomobject]@{ Step = 'login'; Outcome = 'FAIL'; Detail = 'x (frame-only failure)'; Seconds = 3; Log = '' }
+            $frame = [pscustomobject]@{ Step = 'login'; Outcome = 'FAIL'; Detail = 'x (frame-only failure)'; Seconds = 3; Log = ''; GodotErrors = '0' }
             function Show($tag, $rows) { Write-Output ($tag + '=' + (($rows | ForEach-Object { $_.Name + ':' + $_.Ok + ':' + $_.FrameOnly }) -join ',')) }
             $clean = [pscustomobject]@{ secrets = 0; scanned = 120; verdict = 'ALL PASS' }
             Show 'CLEAN' (Get-SmokeStepRows -StepName 'leak-scan' -Code 0 -SmokeRows @($pass) -Summary $clean)
@@ -1104,7 +1104,7 @@ public sealed class LiveGateRunnerTests
             $over75 = "ERROR: 2026-10-23T09:43:51.523Z ERROR [logincheck] the login check failed stage=done why=`"DoD 15: 1 frame(s) over 50 ms between Enter and walking, the longest 81.0 ms (each is logged above)`""
             $other = "ERROR: 2026-10-23T09:43:51.523Z ERROR [logincheck] the login check failed stage=done why=`"the character list was empty`""
             $mixed = $check + "`n" + $other
-            $rowOf = { param($step, $detail, $log) $r = [pscustomobject]@{ Step = $step; Outcome = 'FAIL'; Detail = $detail; Seconds = 1; Log = 'x.log' }
+            $rowOf = { param($step, $detail, $log) $r = [pscustomobject]@{ Step = $step; Outcome = 'FAIL'; Detail = $detail; Seconds = 1; Log = 'x.log'; GodotErrors = '0' }
                 $rd = { param($row) $log }.GetNewClosure()
                 $summary = [pscustomobject]@{ secrets = 0; scanned = 1; verdict = 'x' }
                 @(Get-SmokeStepRows -StepName $step -Code 1 -SmokeRows @($r) -Summary $summary -ReadLog $rd -LogPath 'l')[0] }
@@ -1177,6 +1177,90 @@ public sealed class LiveGateRunnerTests
     }
 
     // ------------------------------------------------------------------------------------------ helpers
+
+    // ------------------------------------------------------------------------------------------ M5 item 0 c5: the gate's frame cap and Godot's errors judged 0
+
+    [Fact]
+    public void The_gate_caps_the_journeys_and_the_leak_scan_at_60_fps_but_not_the_frame_judge_and_the_plan_names_both_c5()
+    {
+        foreach (var plan in new[] { Plan("-Loopback", "full"), Plan("-Serial", "-Loopback", "full"), Plan("-Loopback", "full", "-JourneySolo", "mage") })
+        {
+            var smokeCalls = plan.Where(l => l.Contains("smoke.ps1 -Only ", StringComparison.Ordinal)).ToList();
+            Assert.NotEmpty(smokeCalls);
+            foreach (var line in smokeCalls)
+            {
+                var judgesFrames = line.Contains("-Only login-check,login ", StringComparison.Ordinal) || line.Contains("-Only login-throwaway ", StringComparison.Ordinal);
+                if (line.Contains("-Only stray-output ", StringComparison.Ordinal)) // 0-R12: the leak scan runs no Godot, so a frame cap on it does nothing
+                {
+                    Assert.DoesNotContain("-MaxFps", line, StringComparison.Ordinal);
+                }
+                else if (judgesFrames) // they judge frame time and the Holtburg 60 fps floor: a 60 cap would fail them on the cap itself
+                {
+                    Assert.DoesNotContain("-MaxFps", line, StringComparison.Ordinal);
+                }
+                else // the journeys (parallel or solo)
+                {
+                    Assert.Contains(" -MaxFps 60", line, StringComparison.Ordinal);
+                }
+            }
+
+            Assert.Single(plan, l => l.Contains("frame cap (M5 item 0)", StringComparison.Ordinal)); // said once, not per step
+        }
+
+        Assert.Contains(Plan("-Loopback", "full"), l => l.Contains("-Only journey-mage", StringComparison.Ordinal) && l.Contains(" -MaxFps 60", StringComparison.Ordinal));
+        Assert.Contains(Plan("-Loopback", "full"), l => l.Contains("-Only login-throwaway ", StringComparison.Ordinal));
+        var cap = Plan("-Loopback", "full").Single(l => l.Contains("frame cap (M5 item 0)", StringComparison.Ordinal));
+        Assert.Contains("--max-fps=60", cap, StringComparison.Ordinal);
+        Assert.Contains("the leak scan runs no Godot and carries no cap", cap, StringComparison.Ordinal);
+        Assert.Contains("UNCAPPED on the frame-judge steps (login-check, login) and the throwaway's frames", cap, StringComparison.Ordinal);
+        Assert.Contains("Holtburg 60 fps floor", cap, StringComparison.Ordinal);
+        Assert.Contains("godot_errors=<n>", cap, StringComparison.Ordinal);
+        Assert.Contains("judged 0 on every Godot row", cap, StringComparison.Ordinal);
+        Assert.Contains("$script:GateMaxFps = 60", Runner, StringComparison.Ordinal);
+
+        // smoke's own runs outside the gate carry no cap: the parameter defaults to 0 and only the gate passes it.
+        Assert.Contains("[int] $MaxFps = 0", Smoke, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_gate_smoke_row_carries_godot_errors_and_is_judged_zero_a_missing_count_on_a_godot_step_fails_c5()
+    {
+        var run = RunPowerShell($"Import-Module '{GateModule}' -Force\n" + """
+            $summary = [pscustomobject]@{ secrets = 0; scanned = 1; verdict = 'ALL PASS' }
+            function Row($step, $outcome, $godot, $detail = 'done ok=true') {
+                $r = [pscustomobject]@{ Step = $step; Outcome = $outcome; Detail = $detail; Seconds = 3; Log = '' }
+                if ($null -ne $godot) { $r | Add-Member -NotePropertyName GodotErrors -NotePropertyValue $godot }
+                $r
+            }
+            function Show($tag, $rows) { Write-Output ($tag + '=' + (($rows | ForEach-Object { $_.Name + ':' + $_.Ok + ':' + $_.FrameOnly + ':' + $_.Detail }) -join ' // ')) }
+            Show 'ZERO' (Get-SmokeStepRows -StepName 'journey-mage' -Code 0 -SmokeRows @((Row 'journey-mage' 'PASS' '0')) -Summary $summary)
+            Show 'TWO' (Get-SmokeStepRows -StepName 'journey-mage' -Code 1 -SmokeRows @((Row 'journey-mage' 'FAIL' '2' 'done ok=true; FAIL: godot_errors=2, first: ERROR: x')) -Summary $summary)
+            Show 'PASSWITHERRORS' (Get-SmokeStepRows -StepName 'login-check' -Code 0 -SmokeRows @((Row 'login-check' 'PASS' '1')) -Summary $summary)
+            Show 'MISSING' (Get-SmokeStepRows -StepName 'journey-melee' -Code 0 -SmokeRows @((Row 'journey-melee' 'PASS' $null)) -Summary $summary)
+            Show 'NA' (Get-SmokeStepRows -StepName 'leak-scan' -Code 0 -SmokeRows @((Row 'stray-output' 'PASS' 'n/a' 'no new files')) -Summary $summary)
+            Show 'FRAME' (Get-SmokeStepRows -StepName 'frame-judge-1' -Code 1 -SmokeRows @((Row 'login' 'FAIL' '0' 'x (frame-only failure)')) -Summary $summary)
+            """);
+
+        Assert.Contains("ZERO=journey-mage:True:False:PASS done ok=true secrets=0 scanned=1 godot_errors=0", run, StringComparison.Ordinal);
+        Assert.Contains("TWO=journey-mage:False:False:FAIL done ok=true; FAIL: godot_errors=2, first: ERROR: x secrets=0 scanned=1 godot_errors=2 (FAIL: judged 0, a fact)", run, StringComparison.Ordinal);
+        Assert.Contains("PASSWITHERRORS=login-check:False:False:FAIL done ok=true secrets=0 scanned=1 godot_errors=1 (FAIL: judged 0, a fact)", run, StringComparison.Ordinal); // the gate judges the field itself, not only smoke's verdict
+        Assert.Contains("MISSING=journey-melee:False:False:FAIL done ok=true secrets=0 scanned=1 godot_errors=missing (FAIL: the smoke row carries no count", run, StringComparison.Ordinal);
+        Assert.Contains("NA=leak-scan:stray-output:True:False:PASS no new files secrets=0 scanned=1 godot_errors=n/a", run, StringComparison.Ordinal); // a smoke step that runs no Godot reads n/a and passes
+        Assert.Contains("FRAME=frame-judge-1:login:False:True:", run, StringComparison.Ordinal); // a frame-only failure with a zero count stays a flagged frame run
+    }
+
+    [Fact]
+    public void Headless_and_dotnet_test_rows_of_the_gate_read_godot_errors_n_a_c5()
+    {
+        var run = RunPowerShell(Stub("""
+            $steps = @((New-Stub 'tests' "Write-Output 'Failed: 0, Passed: 3, Skipped: 0'"))
+            $rows = @(Invoke-GateSteps -LaneSteps $steps -Root $d -LogDir $d -GateLog (Join-Path $d 'gate.log'))
+            Write-Output ('ROW=' + $rows[0].Ok + '|' + $rows[0].Detail)
+            """));
+
+        Assert.Contains("ROW=True|passed=3 failed=0 skipped=0 exit=0 godot_errors=n/a", run, StringComparison.Ordinal);
+        Assert.Contains("if (@('test', 'build', 'headless', 'recreate') -contains $s.Kind)", File.ReadAllText(GateModule), StringComparison.Ordinal);
+    }
 
     private sealed record PlanStep(string Phase, string Lane, string Name, string Command);
 

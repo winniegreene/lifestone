@@ -774,6 +774,14 @@ by the budget catches up on its next turn: its object clock steps the whole gap,
 is drawn from its latest pose, and the effect events go to an `IEffectEventSink` with the object's distance and bearing
 from the viewer, or are counted as dropped without one.
 
+**The jump watch** (`AvatarJumpWatch`, M4 hero visual bugs). After each server object's step the set compares its drawn
+position and pose (the parts' centroid in its own frame) with the last two frames and reports, for objects within 40 m
+of the player, a jump (more than 1 m in a frame without a teleport or a far placement, or a pose centroid more than 0.6 m) or a flip (there and back on consecutive frames) as a WARN
+`TODO(hero-creature-flicker)` with what moved it: the placement (teleport, far, blip), the sticky target, the
+interpolation queue and failures, the MoveTo, contact, the forward command and the quantum. The first 40 are logged, all
+are counted (`AvatarStats.CreatureJumps`, `CreatureFlips`). It is Lifestone's diagnostic for the hero takes' creature
+flicker (docs/milestones/m4-hero-visual-bugs.md), draws nothing differently and allocates nothing until it reports.
+
 ### 12.2 The frame
 
 `AvatarFrame` holds reused buffers, valid until the next advance:
@@ -899,6 +907,12 @@ interpreter's maximum speed (15 m/s without one) × the quantum, turning to face
 `StickTo` (the decompile never extends it) and ends on any report that is not Ok. `PositionManager.StickTo`, `UnStick`,
 `GetStickyObjectId` and `HandleUpdateTarget` reach it; hosts pass `GetStickyObjectId()` as
 `PositionContext.StickyObjectId`.
+
+**With ACE.** The client's sticky presses a creature against the client's player while ACE's position is where ACE's own
+sticky and collisions put it; without collision between server objects on the client (D24, D25) two creatures stuck to
+the player overlap here and stand apart on the server. When the stick ends, the interpolation manager's progress check
+(skipped while stuck) can fail at once and blip the creature to ACE's stale position, 1.5-3 m in a frame
+(`AvatarJumpWatchTests`; docs/milestones/m4-hero-visual-bugs.md §1.3).
 
 ### 14.4 Where retail and ACE differ
 

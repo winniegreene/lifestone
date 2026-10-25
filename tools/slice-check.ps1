@@ -302,7 +302,7 @@ function Get-StepFailureLines($run, [string] $step) {
     $rel = Get-SmokeRowLog $run $step
     if ($rel) {
         $path = Join-Path $run.Work $rel
-        foreach ($line in (Get-FirstLines (Get-LogLines $path) '\[\w+\] FAIL|Z ERROR \[|SCRIPT ERROR|Unhandled exception|killed after|no verdict' 10)) { $failure.Add($line) }
+        foreach ($line in (Get-FirstLines (Get-LogLines $path) '\[\w+\] FAIL|Z ERROR \[|^(?:SCRIPT |USER )?ERROR:|Unhandled exception|killed after|no verdict' 10)) { $failure.Add($line) }
     }
     foreach ($line in (Get-FirstLines $run.Lines '^\[smoke\] .*\bFAIL\b' 4)) { $failure.Add($line) }
     return @($failure | Select-Object -Unique)
@@ -313,7 +313,13 @@ function Read-SmokeRow($run, [string] $step) {
     foreach ($line in $run.Lines) {
         if ($line -match '^\[smoke\]\s+(\S+)\s+(PASS(?: \([^)]*\))?|FAIL|SKIP)\s+\(([\d.]+) s\)\s*(.*)$' -and $Matches[1] -eq $step) {
             $detail = $Matches[4] -replace ';?\s*frames in .*$', ''
-            return @{ Result = $Matches[2]; Seconds = [double]$Matches[3]; Detail = $detail.Trim() }
+            $detail = $detail -replace '\s*godot_errors=\d+(?: expected_engine_errors=\d+/\d+)?\s*$', ''
+            # M5 item 0 c5: smoke ends a Godot step's line with " godot_errors=<n>" (Godot's own ERROR: / SCRIPT ERROR: lines; judged 0, a fact); a step that ran no Godot has none (n/a).
+            $result = $Matches[2]; $seconds = [double]$Matches[3]
+            $tail = $Matches[4]
+            $expected = if ($tail -match 'expected_engine_errors=(\d+/\d+)\s*$') { " expected_engine_errors=$($Matches[1])" } else { '' }
+            $godot = if ($tail -match 'godot_errors=(\d+)(?: expected_engine_errors=\d+/\d+)?\s*$') { $Matches[1] } else { 'n/a' }
+            return @{ Result = $result; Seconds = $seconds; Detail = $detail.Trim(); GodotErrors = $godot; Expected = $expected }
         }
     }
     return $null
@@ -387,6 +393,11 @@ function Write-OfflineAdvisory {
     Write-Stage 'offline' 'SKIP' $detail 0
 }
 
+function Test-GodotErrors($row) {
+    # True when a smoke row carries godot_errors above 0 (a fact judged 0, D19): the step is never rerun, and the first run's count is what is reported.
+    return [bool]($row -and $row.ContainsKey('GodotErrors') -and "$($row.GodotErrors)" -match '^\d+$' -and [int]$row.GodotErrors -gt 0)
+}
+
 function Invoke-StepsStage([string[]] $stepList) {
     if ($stepList.Count -eq 0) { Write-Stage 'steps' 'SKIP' 'no backend-free step is touched by the diff' 0; return }
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -394,7 +405,8 @@ function Invoke-StepsStage([string[]] $stepList) {
     $run = Invoke-Smoke @('-Only', ($stepList -join ',')) 'steps'
     $rows = @{}
     foreach ($step in $stepList) { $rows[$step] = Read-SmokeRow $run $step }
-    $failed = @($stepList | Where-Object { -not $rows[$_] -or $rows[$_].Result -eq 'FAIL' })
+    # M5 0 fix 0-R6: a first run's Godot errors are a fact (D19), not a flake: such a step is not rerun, so a clean rerun cannot erase them.
+    $failed = @($stepList | Where-Object { (-not $rows[$_] -or $rows[$_].Result -eq 'FAIL') -and -not (Test-GodotErrors $rows[$_]) })
     $rerunRun = $null
     $rerunRows = @{}
     if ($failed.Count -gt 0 -and $Rerun) {
@@ -409,14 +421,18 @@ function Invoke-StepsStage([string[]] $stepList) {
         $seconds = if ($row) { $row.Seconds } else { 0 }
         $note = ''
         if ($row -and $row.Result -match '^PASS \((?<n>[^)]*)\)$') { $note = " ($($Matches['n']))" }
-        if ($outcome -eq 'FAIL' -and $Rerun) {
+        if ($outcome -eq 'FAIL' -and $Rerun -and -not (Test-GodotErrors $row)) {
             $rerunRow = $rerunRows[$step]
             $thisRun = $rerunRun
             if ($rerunRow -and $rerunRow.Result -like 'PASS*') { $outcome = 'PASS'; $note = ' (rerun)'; $detail = $rerunRow.Detail; $seconds += $rerunRow.Seconds }
             else { $detail = if ($rerunRow) { "$($rerunRow.Detail); failed again on rerun" } else { 'no result row on rerun; failed again' } }
         }
+        # M5 item 0 c5: the field of the run that decided the row (the rerun's when it passed it); a pass that somehow carries Godot errors is a FAIL (smoke already fails the step: a fact).
+        $godotRow = if ($thisRun -eq $rerunRun -and $rerunRows[$step]) { $rerunRows[$step] } else { $row }
+        $godot = if ($godotRow -and $godotRow.ContainsKey('GodotErrors')) { $godotRow.GodotErrors } else { 'n/a' }
+        if ($outcome -ne 'FAIL' -and $godot -match '^\d+$' -and [int]$godot -gt 0) { $outcome = 'FAIL'; $note = ''; $detail += "; FAIL: godot_errors=$godot" }
         $failure = if ($outcome -eq 'FAIL') { Get-StepFailureLines $thisRun $step } else { @() }
-        Write-Stage $step "$outcome$note" $detail $seconds $failure $thisRun.Log
+        Write-Stage $step "$outcome$note" "$detail godot_errors=$godot$($godotRow.Expected)".Trim() $seconds $failure $thisRun.Log
     }
 }
 
@@ -440,12 +456,18 @@ function Invoke-SmokeStage {
     }
     $summary = @($run.Lines | Where-Object { $_ -match ' - total [\d.]+ min - ' } | Select-Object -Last 1)
     $verdict = if ($summary -and $summary[0] -match ' - (total [\d.]+ min) - (.*)$') { "$($Matches[2]), $($Matches[1])" } else { "no summary (exit $($run.Code))" }
-    $pass = $run.Code -eq 0
+    # M5 item 0 c5: smoke's summary line "godot_errors=<total> (judged 0 on each of <n> Godot step(s)...)": the stage reports the total and fails on any (a fact).
+    $godotLine = @($run.Lines | Where-Object { $_ -match '^godot_errors=\d+' } | Select-Object -Last 1)
+    $godotTotal = if ($godotLine -and $godotLine[0] -match '^godot_errors=(\d+)') { $Matches[1] } else { 'n/a' }
+    $verdict += " godot_errors=$godotTotal"
+    $pass = $run.Code -eq 0 -and $godotTotal -notmatch '^[1-9]'
+    if ($run.Code -eq 0 -and -not $pass) { $verdict += ' (FAIL: judged 0)' }
     $failure = @()
     if (-not $pass) {
         $failure = @($run.Lines | Where-Object { $_ -match '^\|[^|]+\|\s*FAIL' } | ForEach-Object { ($_ -replace '\s+', ' ').Trim() })
         $failure += Get-FirstLines $run.Lines 'secrets=.*FAIL' 2
     }
+    if (-not $pass -and $godotLine) { $failure += $godotLine[0] }
     Write-Stage 'smoke' $(if ($pass) { 'PASS' } else { 'FAIL' }) $verdict $timer.Elapsed.TotalSeconds $failure $run.Log
 }
 

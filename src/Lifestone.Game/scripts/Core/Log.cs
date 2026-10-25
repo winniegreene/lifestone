@@ -38,6 +38,12 @@ public static class Log
     /// <summary>Minimum level written (default Info; <c>--log-level=debug</c> lowers it).</summary>
     public static LogLevel MinimumLevel { get; set; } = LogLevel.Info;
 
+    /// <summary>
+    /// Where the lines are copied besides <c>lifestone.log</c> (<c>--log-copies</c>, M5 item 0 c3, <c>m5-log-triple</c>): the console (default), none, or
+    /// the console and Godot's own <c>godot.log</c>. Errors always reach the console. Read from the command line by <see cref="Initialize"/>.
+    /// </summary>
+    public static Lifestone.Client.Diagnostics.LogCopies Copies { get; set; } = Lifestone.Client.Diagnostics.LogCopies.Console;
+
     /// <summary>Absolute path of the log file, or null before <see cref="Initialize"/>.</summary>
     public static string? FilePath { get; private set; }
 
@@ -45,6 +51,8 @@ public static class Log
     public static void Initialize()
     {
         _mainThreadId = System.Environment.CurrentManagedThreadId;
+        Copies = Lifestone.Client.Play.PlayOptions.Parse(OS.GetCmdlineUserArgs()).LogCopies; // --log-copies (a bad value is reported by GameOptions; the default stays)
+        Lifestone.Game.Diagnostics.GodotErrorLogger.Install(); // Godot's own errors counted in process, from the start (the soak line's godot_errors)
         try
         {
             var directory = ProjectSettings.GlobalizePath("user://logs");
@@ -146,11 +154,26 @@ public static class Log
     public static void Shutdown()
     {
         FlushToGodot();
+        Lifestone.Game.Diagnostics.GodotErrorLogger.Uninstall();
         lock (FileLock)
         {
             _file?.Flush();
             _file?.Dispose();
             _file = null;
+        }
+    }
+
+    /// <summary>The length of <c>lifestone.log</c> in bytes (the buffer flushed first), or null when there is no file. For the soak line's <c>log_bytes</c>.</summary>
+    public static long? FileLength()
+    {
+        FlushFile();
+        try
+        {
+            return FilePath is { } path ? new FileInfo(path).Length : null;
+        }
+        catch (IOException)
+        {
+            return null;
         }
     }
 
@@ -205,11 +228,15 @@ public static class Log
         // plain lines so the console log stays one line per entry.
         if (level == LogLevel.Error)
         {
-            GD.PushError(line);
+            // The echo is Lifestone's own line, not a Godot error: the tally skips it (M5 0 fix 0-R2; Godot calls the logger on this thread).
+            using (GodotErrorTally.Echo())
+            {
+                GD.PushError(line);
+            }
         }
-        else
+        else if (Copies != Lifestone.Client.Diagnostics.LogCopies.File)
         {
-            GD.Print(line);
+            GD.Print(line); // --log-copies=file: lifestone.log only (Godot's godot.log gets this line only with --log-copies=all)
         }
     }
 }

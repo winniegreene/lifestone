@@ -2843,3 +2843,132 @@ fields. A journey whose re-create failed is not run (one named FAIL row). `-Keep
 **G-A (D46).** Before a live gate, `slice-check -Gate`: the build, the default tests and the Exhaustive tier, no Godot step, and one line
 naming the offline steps the diff selects; the offline smoke runs once per item at its end (`-Changed`, or `-Smoke` at a wave's last item
 and the milestone end).
+
+## 43. The client-side object cull (M5 item 0 c1; D16; DoD 1)
+
+**The retail rule.** Retail's client drops an object the server has stopped sending by itself. `CObjectMaint::AddObjectToBeDestroyed`
+(11.6096 0x00509A40) stamps the object for destruction 25 seconds later and queues it; `CObjectMaint::UseTime` (0x00509480) deletes each
+due object whose stamp is still the queued one; `CObjectMaint::RemoveObjectToBeDestroyed` (0x00508F10) cancels. An object is queued when
+its cell is released from the client's loaded cells (`CObjectMaint::ReleaseObjCell`, 0x005086E0: every object there that is not static
+and has no parent, its children with it), when it is created or moved into a cell the client has not loaded (the lost cell,
+`CObjectMaint::GotoLostCell`, 0x00508CE0), or when it moves into a container that is neither the player's, the open ground container nor
+the trade partner's. It is cancelled when the object enters the world again or is deleted. `CObjectMaint::DestroyObjects` (0x00509700)
+is the log-off clear. D16 (m5-plan.md section 7): retail's time is 25 s, the same as ACE's assumption.
+
+**The ACE side.** ACE relies on the same 25 s (`Physics/Common/ObjectMaint.cs:21,41` @95ef426d) and sends no delete message (F747) for an
+object that left a player's view. Without the cull, a reloaded den filled with frozen ghosts, the light table filled at 256 and, after ACE
+recycled guids (6 hours), new objects merged into stale entries.
+
+**Lifestone's cull.** `ObjectCull` (`src/Lifestone.Client/Session/State/ObjectCull.cs`) is engine-free and owned by the reducer.
+`GameSession.Tick` ticks it (`GameStateReducer.CullObjects`) right after the parked messages expire, so the Godot game and the headless
+host share it. Times are on the session clock.
+
+**What counts as visible.** The reducer knows the player's cell, not the renderer's loaded cells. Outdoors, and in a building cell (one
+seen from outside), an object counts as visible while its cell's landblock is the player's or one of the eight around it, which is ACE's
+own visible set. In a dungeon cell (an EnvCell not seen from outside), an object is visible while its cell is the player's cell or in
+that cell's visible-cell list from the dat (ACE's `envCell.VisibleCells`, `ObjectMaint.cs:345-348, 365-373` @95ef426d). The set therefore
+moves with the player from cell to cell, and an object outside it for 25 s is culled, as retail's `ReleaseObjCell` does. The player's cell
+is the server's last position for the player (ACE echoes the player's own position to it), which is ACE's own view of that cell.
+
+The lists come from the host through `ObjectCull.Cells` (an `IWorldAttachments`: cheap reads of data the host has already loaded, never a
+load on the frame path). The Godot game gives it the portal view's `WorldAttachments` (the interior registry the streamer loads) in
+`PlayMode.AttachPortal`; the headless host gives it its `DataOnlyAttachments` in the `HeadlessRunner` constructor (its `Focus` decodes the
+player's cell and its visible cells as the player moves). While a list is not known yet (or reads empty), the landblock rule holds for
+that scan.
+
+**The scan.** The visible set is re-read once a second (retail's `CObjectMaint::UpdateVisibleObjectList`, 0x00508E60, has the same period),
+and a due object goes on the first tick at or after its time. Any message the reducer applies for a pending object (a create, a position,
+a motion, any update through the instance gate) cancels its entry. The next scan queues it again with a fresh 25 s if it is still outside,
+as retail re-stamps an object moved into a lost cell.
+
+**Never culled.** The player; an object with no world position of its own (contained or wielded: it leaves with its holder, holders before
+what they hold); a static object (retail keeps them); what the player holds or wields; the ground container the player has open and its
+contents.
+
+**The removal** is the delete message's own path (`GameStateReducer.RemoveObject`: the table, the inventory, the container views, the
+vendor, then `ObjectDeleted`), so the avatar set, the fight's tables and the wayfinder's creature feed follow. The object light table's
+rows fall with the avatars: the server objects layer's sweep gives a row back once its avatar is no longer drawn.
+
+**A recreated guid.** A culled guid that the server creates again is a fresh entry (`ObjectCreated` with `Recreated` false): its positions
+apply from its own stamps, not the ghost's.
+
+**Counts and the login check.** `GameSession.Cull.Pending` (waiting now) and `GameSession.Cull.Culled` (since the session started) feed
+the soak line (section 44). One INFO line goes to the log per cull batch, category `objects` ("culled objects the server stopped sending",
+with count, first, pending, culled_total, objects). The login check's `[logincheck] done` line ends with the report-only
+` objects=<n|n/a> drawn_in_cell=<n|n/a> light_rows=<n|n/a>` (`LoginCheckScenario.ObjectFields`): the most objects the session's table held,
+the most avatars DRAWN in interior cells at once, and the most object light-table rows in use at once. The soak line's `in_cell` is
+different: every avatar whose body is in a cell, drawn or not.
+
+**Tests.** `ObjectCullTests` (the cull's rules) and `ObjectCullAllocationTests` (its allocation); `ObjectCullCellsTests` (two dungeon cells
+that do not see each other; a step into a cell that sees the object; a building cell; a list not known yet; no lists, the whole-landblock
+rule and the TODO once); `ObjectCullDenTests` (in the same file: the Black Spawn Den, 0x0105, with the headless host's provider; it skips
+without the dats).
+
+**Open.** The m5-plan.md section 9 row `m5-object-cull` is closed. `TODO(m5-object-cull-cells)` is closed for both hosts; a host that supplies
+no lists (the Godot game without a portal view, and the tests) still logs it once while the player stands in an EnvCell.
+
+## 44. The soak line, one log and Godot's errors (M5 item 0 c3, c5; DoD 1, 13)
+
+**The soak line.** One INFO line, `[soak] ws_mb=... log_bytes=...`, every `--soak-line-s` seconds (default 60; 0 = none; a bad value is
+reported by name in the "bad argument" warning and the default is kept). It is written by `SoakLine`
+(`src/Lifestone.Game/scripts/Diagnostics/SoakLine.cs`), a node that `ObjectsLayer.Install` adds beside `ObjectsSystem`. Play mode binds the
+session, the avatar set (a function, since a log-off builds a new one) and the light table with `SoakLine.Bind`. The text is built by
+`SoakLineFormat` (Client, engine-free) from a reused `SoakSnapshot`, into one reused `StringBuilder`. The frame path does one
+`SoakFrameWindow.Add` (a ring of 16,384 doubles, with exact max, over-50 and over-75 counters) and one clock read, with no allocation
+(`SoakLineTests`). Everything else happens once per interval. An exception in the line is logged once as an error and never reaches the
+frame.
+
+**Fields (43, in this order).** `ws_mb private_mb` (process working set and private bytes) `managed_mb` (`GC.GetTotalMemory(false)`)
+`committed_mb frag_mb loh_mb` (`GC.GetGCMemoryInfo`; LOH = generation 3) `gen0 gen1 gen2 gc_pause_ms` (cumulative since the process began)
+`static_mb video_mb tex_mb` (Godot's static, video and texture memory) `nodes orphans resources` (Godot's object monitors) `objects` (the
+session's object table) `avatars` (the avatar set) `in_cell` (avatars whose body is in a cell, drawn or not) `light_rows`
+(`ObjectLightTable.InUse`) `cull_pending culled` (section 43: the cull's waiting entries, and its cumulative count) `frame_max_ms frame_p99_ms
+over_50 over_75` (the frames since the previous line; the p99 reads the last 16,384) `tick_ms pump_msgs` (`GameSession.LastTickMs`,
+`LastPumpMessages`) `sent recv resends naks dup gaps loss_pct` (the link's totals; `naks` = NAKs the client sent) `silence_max_s` (the longest
+time without a server datagram, sampled four times a second; n/a before any) `phase reconnects` `kills deaths cycles` `godot_errors`
+`log_bytes` (the length of lifestone.log).
+
+**n/a.** A field with no source reads `n/a`: `kills deaths cycles` always, until the item 4 driver reports them (`TODO(m5-soak-tallies)`,
+logged once in the "soak line on" line); the session fields (`objects phase reconnects tick_ms pump_msgs` and the link) in a scene without
+a session; `avatars in_cell light_rows cull_pending culled` before play mode binds. `godot_errors` is n/a only if Godot's logger could not be
+registered (`TODO(m5-soak-godot-errors)`).
+
+**The options.** `--soak-line-s=S` sets the interval (0 turns the line off). `--log-copies=console|file|all` sets where log lines go besides
+lifestone.log (below).
+
+**godot_errors.** `GodotErrorLogger` (Godot 4.7's `Logger`, registered with `OS.AddLogger` in `Log.Initialize`, so start-up errors count)
+counts every error, script error and shader error Godot logs, on any thread (interlocked); warnings do not count. Lifestone's own `Log.Error`
+lines are not counted: they reach Godot through `GD.PushError`, and `GodotErrorTally.Echo` skips them, so the count holds Godot's own errors
+(an uncaught C# exception counts once). Verified live: one `GD.PushError` moved the count from 0 to 1 and printed as `ERROR:` on the console.
+The smoke suite counts the same way (`godot_errors=<n>` in each Godot step's row, judged 0; see the README's smoke suite section). The tests
+are `GodotErrorTallyTests` and the soak line's `SoakLineTests`.
+
+**The watcher.** `tools/soak-watch.ps1` is read-only, and the lead starts it in the background beside a run: every `-IntervalSeconds` (300)
+it writes one CSV row to `-OutFile` (default `cache\soak\watch-<UTC>.csv`) and one `[soak-watch]` console line: the working set, private bytes,
+handles and threads of the Godot (`Godot*`), `ACE.Server` and `mariadbd` processes (n/a when absent; the largest working set when there are
+several), the MiB of the Godot user-data logs folder (default the isolated one), `server\runtime\logs`, `server\runtime\mariadb-data`, and
+the free GiB of the repository's drive. `-Once` takes one sample; `-DurationSeconds` ends the loop. It starts, stops and kills nothing, and
+reads no file contents. Run it from the main checkout (the server folders live there); `-GodotLogsDirectory`, `-ServerLogsDirectory` and
+`-DatabaseDirectory` override the defaults.
+
+**One log file (`m5-log-triple`).** `lifestone.log` has every line in every mode. `--log-copies=console|file|all` (default `console`):
+`console` = lifestone.log and the console, with Godot's `godot.log` off (`project.godot`: `debug/file_logging/enable_file_logging=false`,
+and the `.pc` variant, which would otherwise turn it on); `file` = lifestone.log only, with no console copy of Debug, Info and Warning lines
+(errors still go through `GD.PushError`, so the console and the error count see them); `all` = the three copies, since `tools\godot.ps1` adds
+Godot's `--log-file` under the user data folder (verified: the file is written although the project setting is off). Every check reads the
+console, because smoke redirects stdout, so the default keeps it. Nothing under `tools/` reads `godot.log` or `lifestone.log`. Rotation by
+size is M5 item 7's, not done here.
+
+**The leg guard (`Session/Hosting/LegFaultGuard.cs`, M5 item 0 c2).** Every leg runner's `_Process` (Journey, Fight, Hunt, Death, Buff,
+Throwaway and the login check's) is `try { StepFrame } catch (Exception e) when (Guards(e))`. The first fault is reported once, as a Lifestone
+error in the runner's category (`<runner>: <stage> threw <ExceptionType>: <message>`), followed by one more error entry holding the whole
+exception (type, message, stack). The guard trips and the runner starts its own fail path with that reason: log off if logged in (Journey,
+Fight, Hunt, Death, Buff: `Fail`), the scenario's abort recovery (Throwaway: `Abort`), the character sent back and logged off (the login
+check, in the playing stage: `StartRecovery`), else `Finish(false, reason)`. The verdict is ok=false naming the exception, and the process
+quits non-zero. After the first fault a runner steps only its fail path: observers and samplers no longer run, and the next frames do
+nothing. A fault in those frames is counted, never reported, and the runner finishes at once. The login check, when it is outside `playing`
+with the character in the world, sends a LogOff before its verdict. Out-of-memory is not caught. The play-mode re-buff driver
+(`RebuffDriverHost`) uses the same guard but has no leg to fail: on a fault it reports once, switches the driver off and disposes it, and the
+game keeps running; the Pause key then writes one log line ("the driver is off for this run after an error") and does nothing else. The
+headless host (`HeadlessRunner.Step`) already ends the run on a frame's exception, once: one error line (`the headless run stopped:
+<Type>: <message>`, no stack) and a finish with ok=false. It is not wired to the guard; the stack is the only thing it lacks.

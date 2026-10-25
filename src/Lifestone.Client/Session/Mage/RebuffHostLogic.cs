@@ -184,6 +184,7 @@ public sealed class RebuffHostLogic : IDisposable
     private readonly IArmourLedgerStore? _store;
     private IReadOnlyDictionary<uint, SpellInfo>? _spells;
     private bool _want;
+    private bool _stopped;
     private bool _bound;
     private bool _hasProfile;
     private IBuffProfile? _profile;
@@ -242,11 +243,31 @@ public sealed class RebuffHostLogic : IDisposable
         _notice?.Invoke(LifestoneNotices.Label("auto-buff is off: the spell table could not be read"));
     }
 
-    /// <summary>The Lifestone key: flips the switch and says so in the chat; a character without a profile gets the notice and stays off.</summary>
+    /// <summary>True once <see cref="Stop"/> ended the driver for this run (a fault in the host's frame): the key answers with one log line and nothing else.</summary>
+    public bool Stopped => _stopped;
+
+    /// <summary>
+    /// The host's frame faulted (M5 item 0 fix 0-R9): the switch goes off, the driver is released, and from now on the key only says in the log that the driver is off
+    /// for this run. No chat notice and no switch flip: nothing is behind the key.
+    /// </summary>
+    public void Stop()
+    {
+        _stopped = true;
+        _want = false;
+        Dispose();
+    }
+
+    /// <summary>The Lifestone key: flips the switch and says so in the chat; a character without a profile gets the notice and stays off. After <see cref="Stop"/> it only logs that the driver is off for this run.</summary>
     /// <param name="session">The session.</param>
     public void Toggle(IGameSessionView session)
     {
         ArgumentNullException.ThrowIfNull(session);
+        if (_stopped)
+        {
+            _log.Info(BuffCycle.LogCategory, "auto-buff key: the driver is off for this run after an error; the key does nothing");
+            return;
+        }
+
         Bind(session);
         if (!_bound)
         {

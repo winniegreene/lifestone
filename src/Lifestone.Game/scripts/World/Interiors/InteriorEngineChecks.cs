@@ -44,6 +44,12 @@ public partial class InteriorEngineChecks : Node
     /// <summary>Godot reserves this many vec4 slots of the global buffer per instance with instance uniforms (MAX_INSTANCE_UNIFORM_INDICES).</summary>
     private const int SlotsPerInstanceBlock = 16;
 
+    /// <summary>
+    /// Blocks of the global buffer that the global shader parameters themselves occupy (they share the buffer with the instance blocks): Godot 4.7 has one fewer instance block
+    /// than buffer_size / 16 while the lighting globals are set. Measured: 11 of the control's 12 competing instances lose their block, so 11 errors at creation and 11 at free. If a
+    /// global is added and the count moves, smoke fails with "declared 11 but saw 12": raise this constant.
+    /// </summary>
+    private const int GlobalParameterBlocks = 1;
     private const int FrontSlot = 5;
     private const int ClippedSlot = 6;
     private const int BandSlot = 7;
@@ -381,6 +387,13 @@ public partial class InteriorEngineChecks : Node
         await Frames(4);
         Expect(viewport.GetTexture().GetImage(), 416, $"after {blocks + 64} cell-variant instances (the buffer has {blocks} instance blocks), an instance-uniform probe still gets one: white", 255);
 
+        // The errors this control provokes are declared to the checks that read the log (tools/smoke.ps1: expected_engine_errors=<seen>/<declared>; any other Godot error fails the step).
+        // Every instance-uniform instance past the buffer's instance blocks makes Godot print one error when it is created and one when it is freed at exit: this control adds
+        // blocks + 8 filler instances and the first probe and the late probe hold blocks too, so (blocks + 8 + 2) instances compete for the blocks that exist.
+        var instancesWithBlocks = blocks - GlobalParameterBlocks;
+        var overflow = blocks + 8 + 2 - instancesWithBlocks;
+        Log.Info("interiorcheck", "expected engine errors begin", ("text", "Too many instances using shader instance variables"), ("count", overflow));
+        Log.Info("interiorcheck", "expected engine errors begin", ("text", "global_shader_uniforms.instance_buffer_pos.has(p_instance)"), ("count", overflow));
         Log.Info("interiors", "engine check negative control: Godot reports 'Too many instances using shader instance variables' for the next instances, and 'instance_buffer_pos' when they are freed at exit; that is expected", ("instances", blocks + 8));
         var probeMesh = MeshFactory.Build(MeshFactory.Prepare(Quad(100f, 0f)));
         for (var i = 0; i < blocks + 8; i++)
@@ -395,6 +408,7 @@ public partial class InteriorEngineChecks : Node
         await Frames(4);
         var c = viewport.GetTexture().GetImage().GetPixel(480, ViewportSize.Y / 2);
         Check(c.R8 < 255 - Tolerance, $"negative control: after {blocks + 8} more instance-uniform instances the next probe gets no block (not white)", "not 255", $"({c.R8}, {c.G8}, {c.B8})");
+        Log.Info("interiorcheck", "expected engine errors end");
     }
 
     private async Task Frames(int count)

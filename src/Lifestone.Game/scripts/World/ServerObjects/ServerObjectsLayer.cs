@@ -64,6 +64,7 @@ public sealed partial class ServerObjectsLayer : Node3D
     private long _originEpoch;
     private bool _translucencyLogged;
     private int _drawn;
+    private int _drawnInCell;
     private int _waiting;
     private int _drawnParts;
     private int _twinParts;
@@ -127,6 +128,12 @@ public sealed partial class ServerObjectsLayer : Node3D
 
     /// <summary>Objects drawn this frame (diagnostics and checks).</summary>
     public int DrawnObjects => _drawn;
+
+    /// <summary>Objects drawn in interior cells this frame: the avatars that hold a light-table row (M5 0 c1, the login check's <c>drawn_in_cell=</c>; the soak line's <c>in_cell</c> is a different count, every avatar whose body is in a cell, drawn or not).</summary>
+    public int DrawnInCell => _drawnInCell;
+
+    /// <summary>The object light table's rows in use (<see cref="ObjectLightTable.InUse"/>; the login check's <c>light_rows=</c>): a row is given back by the sweep once its avatar is no longer drawn, so the count falls with the avatar set (a culled or deleted object).</summary>
+    public int LightRowsInUse => _lights.InUse;
 
     /// <summary>The particles of the objects (diagnostics and checks), or null before the first active frame.</summary>
     public ServerObjectParticles? Particles => _particles;
@@ -198,6 +205,7 @@ public sealed partial class ServerObjectsLayer : Node3D
         _projectileWarm?.Poll();
         UploadsLastFrame = 0;
         _drawn = 0;
+        _drawnInCell = 0;
         _waiting = 0;
         _drawnParts = 0;
         _twinParts = 0;
@@ -431,6 +439,7 @@ public sealed partial class ServerObjectsLayer : Node3D
         if (any || avatar.Body.IsProjectile)
         {
             _drawn++;
+            _drawnInCell += inCell ? 1 : 0;
             state.DrawnFrame = _frameNo;
             avatars.NoteDrawn(avatar); // a projectile's first shown frame counts (AvatarStats.ProjectilesShown)
         }

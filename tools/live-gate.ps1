@@ -195,6 +195,7 @@ function Get-LoopbackFilter {
 
 # P5a F-gate: the account whose character a step logs in ('none': it logs in nobody; '': unknown, so it waits on any killed step). A killed step leaves its character in ACE's world for the release wait.
 $script:ReleaseSeconds = 80   # ACE's session timeout (60 s) + the log off, plus 5 s (LoginRetryPolicy.DefaultCharacterInWorldWaitSeconds is 75)
+$script:GateMaxFps = 60   # M5 item 0 c5: the frame cap of the gate's parallel-phase and solo-journey Godot runs (smoke -MaxFps; not the leak scan, which runs no Godot): the gates ran at 239 to 241 fps uncapped (m5-first-dungeon.md 5.8 risk 8); the frame judge and the throwaway frames are uncapped
 $script:JourneyAccounts = @{ mage = 'test'; melee = 'test-melee'; archer = 'test-archer' }
 function Get-GateStepAccount {
     param([string] $Lane, [string] $Name)
@@ -271,6 +272,7 @@ function Get-GatePlan {
     $laneClasses = { param($account) @($classes | Where-Object { $_.Account -eq $account -and -not $_.Soak -and (-not $_.Solo -or $inLane -contains $_.Name) } | ForEach-Object { $_.Name }) }
     $testArgs = { param($filter) @('test', $test, '--disable-build-servers', '--no-build', '--filter', $filter, '--logger', 'console;verbosity=detailed') }
     $smokeArgs = { param($only, $dir, $extra) @('-NoProfile', '-File', (Join-Path $Root 'tools\smoke.ps1'), '-Only', $only, '-Backend', 'require', '-NoBuild', '-OutDir', $dir, '-ResultsJson', (Join-Path $dir 'rows.json'), '-NoScan') + $extra }
+    $capped = @('-MaxFps', "$($script:GateMaxFps)")   # the journeys only (the leak scan runs no Godot, so it takes no cap: M5 0 fix 0-R12); the frame judge and the throwaway's frames stay uncapped (the Holtburg 60 fps floor would fail on the cap itself)
     $pwsh = 'pwsh'
     $expected = $script:ExpectedSeconds
     $steps.Add((New-GateStep 'SETUP' 'setup' 'build' 'build' @('build', (Join-Path $Root 'Lifestone.slnx'), '--disable-build-servers', '-nologo') '' '' 0 'dotnet' (2 * $expected['build']) @{} $expected['build']))
@@ -302,7 +304,7 @@ function Get-GatePlan {
             if ($journey -and $Solo -notcontains $journey) {
                 $slot++
                 $dir = Join-Path $out "journey-$journey"
-                $steps.Add((New-GateStep 'PARALLEL' $account 'smoke' 'smoke' (& $smokeArgs "journey-$journey" $dir @('-ContendedFrames', '-UserDataSlot', "g$slot")) $dir '' 0 $pwsh (Get-JourneyLimit $journey $(if ($filter) { $expected["loopback:$account"] } else { 0 })) @{} $expected["journey-$journey"] $needs))
+                $steps.Add((New-GateStep 'PARALLEL' $account 'smoke' 'smoke' (& $smokeArgs "journey-$journey" $dir (@('-ContendedFrames', '-UserDataSlot', "g$slot") + $capped)) $dir '' 0 $pwsh (Get-JourneyLimit $journey $(if ($filter) { $expected["loopback:$account"] } else { 0 })) @{} $expected["journey-$journey"] $needs))
             }
         }
         foreach ($i in 1..3) {
@@ -312,7 +314,7 @@ function Get-GatePlan {
         foreach ($journey in $script:JourneyNames) {
             if ($Solo -notcontains $journey) { continue }
             $dir = Join-Path $out "journey-$journey-solo"
-            $steps.Add((New-GateStep 'SOLO' 'solo' "journey-$journey-solo" 'smoke' (& $smokeArgs "journey-$journey" $dir @()) $dir '' 0 $pwsh (Get-JourneyLimit $journey 0) @{} $expected["journey-$journey"] $(if ($Keep) { '' } else { $script:JourneyAccounts[$journey] })))
+            $steps.Add((New-GateStep 'SOLO' 'solo' "journey-$journey-solo" 'smoke' (& $smokeArgs "journey-$journey" $dir $capped) $dir '' 0 $pwsh (Get-JourneyLimit $journey 0) @{} $expected["journey-$journey"] $(if ($Keep) { '' } else { $script:JourneyAccounts[$journey] })))
         }
         $filter = Get-LoopbackFilter "$base&Lane=solo" $selection @('LivePhaseBTests') @() @() @() '' -ClassClause   # LivePhaseB's two raw-net walks (Lane=solo on the methods)
         if ($filter) { $steps.Add((New-GateStep 'SOLO' 'solo' 'live-phase-b' 'test' (& $testArgs $filter) '' '' 0 'dotnet' (2 * $expected['live-phase-b']) @{} $expected['live-phase-b'])) }
@@ -395,6 +397,7 @@ if ($dry) {
         foreach ($a in @('test', 'test-melee', 'test-archer', 'test-tools')) { if (@($steps | Where-Object { $_.Phase -eq 'PARALLEL' -and $_.Lane -eq $a -and $_.Name -eq 'loopback' }).Count -eq 0) { Write-Output "[gate-plan] lane ${a}: no loopback class (its classes are the journey's stations, or not selected by -Loopback)" } }
     }
     else { Write-Output "[gate-plan] serial: the three journeys headless (judged by smoke.ps1 Get-JourneyVerdict; each after its re-create unless -KeepCharacters), then the frame judge; $(if ($CompareTo) { "compare with the Godot verdicts of gate tag $CompareTo" } else { 'no -CompareTo: the Godot verdicts are not printed beside them' })" }
+    Write-Output "[gate-plan] frame cap (M5 item 0): -MaxFps $($script:GateMaxFps) (--max-fps=$($script:GateMaxFps) in the game arguments; the gates ran at 239 to 241 fps uncapped) on the journeys (the parallel phase and any solo journey; the leak scan runs no Godot and carries no cap); UNCAPPED on the frame-judge steps (login-check, login) and the throwaway's frames, which judge frame time and the Holtburg 60 fps floor and would fail on the cap itself; godot_errors=<n> (Godot's own ERROR: and SCRIPT ERROR: lines) is read from smoke's rows and judged 0 on every Godot row (a fact, D19); headless and dotnet-test rows read n/a"
     Write-Output '[gate-plan] timeouts: every step about twice its expected time, named per step below; a step over its limit is killed and is a FAIL naming the step and the limit'
     Write-Output "[gate-plan] release: after a step is killed by its timeout the next step on the same account waits up to $($script:ReleaseSeconds) s for ACE to release the character (else it is refused with CharacterError 0x0D)"
     Write-Output '[gate-plan] backend: server\start-server.ps1 from the main checkout before the first step; server\stop-server.ps1 in a finally (not run by -Plan)'

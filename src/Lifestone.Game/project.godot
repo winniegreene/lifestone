@@ -19,6 +19,13 @@ config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 
 GameServices="*res://scripts/Core/GameServices.cs"
 
+[debug]
+
+; M5 item 0 c3 (m5-log-triple): Godot's own godot.log is off by default (lifestone.log is the file, the console the other copy).
+; --log-copies=all turns it back on through tools/godot.ps1 (Godot's --log-file). The .pc line overrides the PC default (on).
+file_logging/enable_file_logging=false
+file_logging/enable_file_logging.pc=false
+
 [display]
 
 window/size/viewport_width=1280

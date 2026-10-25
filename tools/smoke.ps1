@@ -158,6 +158,17 @@
     A Godot step also fails when Lifestone logged an ERROR line during it (the "Errors logged" column), except
     cli-bad-argument, whose ERROR is the point: false ERRORs (shutdown cancellations) once went unnoticed in passing runs.
 
+    M5 item 0 c5 (m5-plan.md D19, the risk m5-godot-errors-uncounted): the "Errors logged" column counts Lifestone's own ERROR lines only, so a
+    Godot step also counts Godot's own errors, as the column and field godot_errors=<n> (the step's row, the summary table, summary.json and the
+    console line): the lines of its captured console that start with ERROR:, SCRIPT ERROR: or USER ERROR: (Godot 4's forms), each error once (its
+    "   at:" and "C# backtrace" lines are not lines of their own), without the ERROR: lines that only carry a Lifestone ERROR entry
+    (Log.ToGodot prints those through GD.PushError: "ERROR: <utc>Z ERROR [category] ..."; the Errors logged column counts them). A Godot step with
+    godot_errors above 0 FAILS (a fact, judged from its first gate), and its detail names the first such line. Steps that run no Godot read n/a.
+    A check that provokes Godot errors on purpose (interior-engine-checks' negative control) DECLARES them in its log: '[interiorcheck] expected engine errors begin
+    text="<text>" count=<n>' per kind of error and '... expected engine errors end' after the control. Error lines containing a declared text are counted apart, as
+    expected_engine_errors=<seen>/<declared>, matched by text anywhere in the console (stdout and stderr are two blocks of the log: the markers' position says nothing);
+    the step fails when seen differs from declared, when a declaration is not closed, or when any other Godot error appears.
+
     The fly path is judged as the DoD states it: a frame over 50 ms fails the step. On a shared machine other processes
     (another Godot instance starting) can stall presentation for 50-140 ms with no Lifestone work in the frame (perf
     audit, dod8-verdict-polluted-by-environment), so the step first waits (up to 3 min) until no other Godot process
@@ -205,6 +216,10 @@
     -AllSizes is the opt-in: the retail-ui frames also at 1920x1080, the shell frames also at 1920x1080 and 2560x1440, and the
     shell's [uicheck] placement also at those sizes (--all-sizes). Never run by default.
 
+.PARAMETER MaxFps
+    M5 item 0 c5: appends --max-fps=<n> to the game arguments of every Godot step (the option is OptionCatalog's, 0 = none). The live gate passes 60
+    (the gates ran at 239 to 241 fps uncapped); without the parameter a run is as it was.
+
 .PARAMETER DotnetRoot
     The .NET SDK root (the folder holding dotnet.exe). Default, the first that exists: $env:LIFESTONE_DOTNET_ROOT, the
     per-user install %LOCALAPPDATA%\Microsoft\dotnet, $env:DOTNET_ROOT, then the folder of dotnet.exe on PATH
@@ -232,6 +247,8 @@ param(
     [int] $FlySpeed = 200,
     [switch] $JudgeLifestoneFramesOnly,
     [switch] $AllSizes,
+    [ValidateRange(0, 1000)]
+    [int] $MaxFps = 0,
     [string] $DotnetRoot = '',
     [switch] $SoloFrames,
     # M4 P4 gate: the parallel live phase. The live steps run beside other Godot runs (the gate's three lanes), so a frame-time failure with another run up is REPORTED
@@ -358,6 +375,8 @@ $childEnv = [ordered]@{
 
 $script:results = [System.Collections.Generic.List[object]]::new()
 $script:audioFailures = @{}
+# M5 item 0 c5: per step, the Godot errors its captured console held (Register-GodotErrors): @{ Total; First }. A step with no entry ran no Godot (godot_errors=n/a).
+$script:godotErrors = @{}
 $script:stepIndex = if ($StepNumber -gt 0) { $StepNumber - 1 } else { 0 }
 $script:enginePeak = 0
 $script:testTimesLine = ''
@@ -458,14 +477,16 @@ function Invoke-Godot {
         '-TimeoutSeconds', "$TimeoutSeconds")
     if ($Resolution) { $arguments += @('-Resolution', $Resolution) }
     if ($UserDataSlot) { $arguments += @('-UserDataSlot', $UserDataSlot) }
-    $arguments += "-GameArgs:$GameArgs"
+    $arguments += "-GameArgs:$GameArgs$(Get-MaxFpsArgs)"
     $before = Get-EngineProcessCount
     $script:enginePeak = 0
     $started = [Diagnostics.Stopwatch]::StartNew()
     $code = Invoke-Logged -FileName $pwshExe -Arguments $arguments -LogPath $log -TimeoutSeconds ($TimeoutSeconds + 60) -SampleEngines
     $others = [math]::Max($before, $script:enginePeak - 1)
-    Set-AudioVerdict $Step (Get-Content -LiteralPath $log -Raw)
-    return @{ Code = $code; Log = $log; Text = (Get-Content -LiteralPath $log -Raw); Others = $others; Seconds = $started.Elapsed.TotalSeconds }
+    $text = Get-Content -LiteralPath $log -Raw
+    Set-AudioVerdict $Step $text
+    Register-GodotErrors $Step $text | Out-Null
+    return @{ Code = $code; Log = $log; Text = $text; Others = $others; Seconds = $started.Elapsed.TotalSeconds }
 }
 
 function Test-RecordedSources([string] $Sources) {
@@ -590,7 +611,12 @@ function Get-PlayChecksRun {
       reached starts it; the second reads the same result. Returns @{ Run; Rel; Wav; Owner; Refused }.
     #>
     param([string] $Step, [System.Diagnostics.Stopwatch] $Timer)
-    if ($script:sharedPlay) { return $script:sharedPlay }
+    if ($script:sharedPlay) {
+        # The second row reads the same run: it carries the run's Godot errors too (the run is one fact; both rows name it).
+        $owner = $script:sharedPlay.Owner
+        if ($owner -ne $Step -and $script:godotErrors.ContainsKey($owner)) { $script:godotErrors[$Step] = $script:godotErrors[$owner] }
+        return $script:sharedPlay
+    }
     $wav = Join-Path (Join-Path $OutDir 'record-audio') 'record-audio.wav'
     $rel = [IO.Path]::GetRelativePath($repoRoot, $wav).Replace('\', '/')
     $shared = @{ Run = $null; Rel = $rel; Wav = $wav; Owner = $Step; Refused = $false }
@@ -688,6 +714,83 @@ function Get-FrameFields {
     return @{ Over50 = $over; Judge = $judge }
 }
 
+function Get-GodotErrorLines([string] $Text) {
+    <#
+      M5 item 0 c5 (D19): Godot's own error lines of a captured console, one per error: lines that start with ERROR:, SCRIPT ERROR: or USER ERROR: (Godot 4's forms). A C# unhandled
+      exception prints one ERROR: line and then indented "   at:" / "C# backtrace" lines, which do not start a line of their own, so each error counts once. An ERROR: line that only
+      carries a Lifestone ERROR entry (Log.ToGodot prints those through GD.PushError: "ERROR: <utc>Z ERROR [category] ...") is Lifestone's, counted by Get-ErrorCount, not here.
+    #>
+    if (-not $Text) { return @() }
+    return @([regex]::Matches($Text, '(?m)^(?:SCRIPT ERROR|USER ERROR|ERROR):(?>[ \t]*)(?!\S+Z ERROR \[)[^\r\n]*') | ForEach-Object { $_.Value.Trim() })
+}
+
+function Get-GodotErrorCount([string] $Text) {
+    return @(Get-GodotErrorLines $Text).Count
+}
+
+function Format-GodotErrorLine([string] $Line) {
+    <# The first Godot error line for a row: paths inside the repository as <repo>, any other drive path as <path> (the repository is public), at most 160 characters. #>
+    $text = $Line.Replace($repoRoot, '<repo>').Replace($repoRoot.Replace('\', '/'), '<repo>')
+    $text = [regex]::Replace($text, '(?i)\b[a-z]:[\\/][^\s"'')]*', '<path>')
+    if ($text.Length -gt 160) { $text = $text.Substring(0, 157) + '...' }
+    return $text
+}
+
+function Get-DeclaredEngineErrors([string] $Text) {
+    <#
+      M5 item 0 fix: a check that provokes Godot's own errors on purpose (InteriorEngineChecks' negative control) declares them in its log, before it provokes them:
+      '[interiorcheck] expected engine errors begin text="<text>" count=<n>' (one line per kind of error) and, once the control is over, '... expected engine errors end'.
+      Returns @{ Declared = @(@{ Text; Count }); Begins; Ends }. The declared texts have no double quote (the marker quotes them).
+    #>
+    $declared = @([regex]::Matches($Text, '\[interiorcheck\] expected engine errors begin text=(?:"(?<t>[^"\r\n]+)"|(?<t>\S+)) count=(?<n>\d+)') | ForEach-Object { @{ Text = $_.Groups['t'].Value; Count = [int]$_.Groups['n'].Value } })
+    return @{ Declared = $declared; Begins = $declared.Count; Ends = [regex]::Matches($Text, '\[interiorcheck\] expected engine errors end').Count }
+}
+
+function Split-ExpectedEngineErrors {
+    <#
+      Godot error lines against the declared ones. Stdout and stderr land in the log as two blocks (Invoke-Logged appends the stdout, then the stderr), so the markers' position
+      says nothing about where an error line lands: the lines are matched by their text anywhere in the console, and the number seen must equal the number declared.
+      Returns @{ Other = <lines no declaration covers>; Seen; DeclaredTotal; Problems = <strings> }.
+    #>
+    param([string[]] $Lines, $Declaration)
+    $other = [System.Collections.Generic.List[string]]::new($Lines)
+    $seen = 0; $total = 0; $problems = [System.Collections.Generic.List[string]]::new()
+    foreach ($d in $Declaration.Declared) {
+        $total += $d.Count
+        $matched = @($other | Where-Object { $_.Contains($d.Text) })
+        foreach ($m in $matched) { [void]$other.Remove($m) }
+        $seen += $matched.Count
+        if ($matched.Count -ne $d.Count) { $problems.Add("declared $($d.Count) but saw $($matched.Count) of '$($d.Text)'") }
+    }
+    if ($Declaration.Begins -gt 0 -and $Declaration.Ends -eq 0) { $problems.Add("the declaration is not closed (no end marker)") }
+    return @{ Other = @($other); Seen = $seen; DeclaredTotal = $total; Problems = @($problems) }
+}
+
+function Register-GodotErrors {
+    <#
+      Counts the Godot errors of one Godot run's console against $Step (a step with several runs adds them up; the first line is kept) and returns the run's count of
+      UNEXPECTED errors (godot_errors). Errors a check declared on purpose (Get-DeclaredEngineErrors) are counted apart as expected_engine_errors=<seen>/<declared>; a seen count that
+      differs from the declared one is a problem that fails the step, as is any error no declaration covers.
+    #>
+    param([string] $Step, [string] $Text)
+    $lines = @(Get-GodotErrorLines $Text)
+    $split = Split-ExpectedEngineErrors $lines (Get-DeclaredEngineErrors $Text)
+    if (-not $script:godotErrors.ContainsKey($Step)) { $script:godotErrors[$Step] = @{ Total = 0; First = ''; Seen = 0; Declared = 0; Problems = @() } }
+    $entry = $script:godotErrors[$Step]
+    $entry.Total += $split.Other.Count
+    $entry.Seen += $split.Seen
+    $entry.Declared += $split.DeclaredTotal
+    $entry.Problems = @($entry.Problems) + @($split.Problems)
+    if ($split.Other.Count -gt 0 -and -not $entry.First) { $entry.First = Format-GodotErrorLine $split.Other[0] }
+    return $split.Other.Count
+}
+
+function Get-MaxFpsArgs {
+    <# " --max-fps=<n>" when -MaxFps was given, else nothing: appended to every Godot step's game arguments. #>
+    if ($MaxFps -gt 0) { return " --max-fps=$MaxFps" }
+    return ''
+}
+
 function Get-ErrorCount([string] $text) {
     # Lifestone's own ERROR entries (Log.Error: '<utc>Z ERROR [category] ...'); Godot's engine messages are not counted.
     return ([regex]::Matches($text, 'Z ERROR \[')).Count
@@ -703,10 +806,28 @@ function Add-Result {
       column empty for a step that did not run (a SKIP, or a FAIL because the backend was not ready).
     #>
     param([string] $Step, [bool] $Pass, [int] $Code, [double] $Seconds, [string] $Detail, [string] $Log = '', [int] $Errors = -1,
-        [string] $PassNote = '', [switch] $Skipped, [switch] $NotRun, [string] $FrameOver50 = '', [string] $FrameJudge = '')
+        [string] $PassNote = '', [switch] $Skipped, [switch] $NotRun, [string] $FrameOver50 = '', [string] $FrameJudge = '', [string] $GodotErrors = '', [string] $ExpectedEngineErrors = '')
     if ($Errors -gt 0) {
         $Pass = $false
         $Detail = "$Detail; FAIL: $Errors ERROR line(s) logged"
+    }
+    # M5 item 0 c5 (D19): Godot's own errors in the step's console(s), a fact judged 0. A replayed row (-GodotErrors given) carries its child's field and its child's FAIL text already.
+    if ($Skipped) { $GodotErrors = 'n/a' }
+    elseif (-not $GodotErrors) {
+        if ($script:godotErrors.ContainsKey($Step)) {
+            $entry = $script:godotErrors[$Step]
+            $GodotErrors = "$($entry.Total)"
+            if ($entry.Declared -gt 0 -or @($entry.Problems).Count -gt 0) { $ExpectedEngineErrors = "$($entry.Seen)/$($entry.Declared)" }
+            if ($entry.Total -gt 0) {
+                $Pass = $false
+                $Detail = "$Detail; FAIL: godot_errors=$($entry.Total), first: $($entry.First)"
+            }
+            if (@($entry.Problems).Count -gt 0) {
+                $Pass = $false
+                $Detail = "$Detail; FAIL: expected_engine_errors=$ExpectedEngineErrors ($(@($entry.Problems) -join '; '))"
+            }
+        }
+        else { $GodotErrors = 'n/a' }
     }
     if (-not $Skipped -and $script:audioFailures.ContainsKey($Step)) {
         # M4 P4 gate: a Godot run of this step was not muted (or never said so): the step fails with the named reason (Get-AudioMuteVerdict).
@@ -723,13 +844,16 @@ function Add-Result {
             Exit    = if ($Skipped -or $NotRun) { '' } else { "$Code" }
             Seconds = [math]::Round($Seconds, 1)
             Errors  = if ($Errors -lt 0) { '' } else { "$Errors" }
+            GodotErrors = $GodotErrors
+            ExpectedEngineErrors = $ExpectedEngineErrors
             Detail  = $Detail
             FrameOver50 = $FrameOver50
             FrameJudge  = $FrameJudge
             Log     = if ($Log) { [IO.Path]::GetFileName($Log) } else { '' }
         })
     $colour = if ($outcome -eq 'FAIL') { 'Red' } elseif ($outcome -eq 'SKIP' -or $PassNote) { 'Yellow' } else { 'Green' }
-    Write-Host ("[smoke] {0,-24} {1}  ({2:0.0} s) {3}" -f $Step, $result, $Seconds, $Detail) -ForegroundColor $colour
+    $godotField = if ($GodotErrors -and $GodotErrors -ne 'n/a') { " godot_errors=$GodotErrors$(if ($ExpectedEngineErrors) { " expected_engine_errors=$ExpectedEngineErrors" })" } else { '' }
+    Write-Host ("[smoke] {0,-24} {1}  ({2:0.0} s) {3}{4}" -f $Step, $result, $Seconds, $Detail, $godotField) -ForegroundColor $colour
 }
 
 function Test-Wanted([string] $step) {
@@ -1219,7 +1343,7 @@ function Start-BatchChild {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     $psi = [System.Diagnostics.ProcessStartInfo]::new($pwshExe)
     $arguments = @('-NoProfile', '-File', $PSCommandPath, '-NoBuild', '-Only', $Step, '-OutDir', (Join-Path $dir $Step), '-StepNumber', "$Number", '-UserDataSlot', $Slot,
-        '-NoScan', '-ResultsJson', (Join-Path $dir "$Step.json"), '-Backend', 'auto', '-DotnetRoot', $DotnetRoot) + @(if ($AllSizes) { '-AllSizes' })
+        '-NoScan', '-ResultsJson', (Join-Path $dir "$Step.json"), '-Backend', 'auto', '-DotnetRoot', $DotnetRoot) + @(if ($AllSizes) { '-AllSizes' }) + @(if ($MaxFps -gt 0) { '-MaxFps'; "$MaxFps" })
     foreach ($a in $arguments) { $psi.ArgumentList.Add($a) }
     $psi.UseShellExecute = $false
     $psi.WorkingDirectory = $repoRoot
@@ -1300,7 +1424,7 @@ function Invoke-LaneBatch {
         $name = "lane-$account"
         $psi = [System.Diagnostics.ProcessStartInfo]::new($pwshExe)
         $arguments = @('-NoProfile', '-File', $PSCommandPath, '-NoBuild', '-Only', ($laneSteps -join ','), '-OutDir', (Join-Path $dir $name), '-StepNumber', "$($Numbers[$laneSteps[0]])",
-            '-UserDataSlot', $slots[$index], '-NoScan', '-ResultsJson', (Join-Path $dir "$name.json"), '-Backend', $Backend, '-ContendedFrames', '-DotnetRoot', $DotnetRoot) + @(if ($Skip.Count) { '-Skip'; ($Skip -join ',') })
+            '-UserDataSlot', $slots[$index], '-NoScan', '-ResultsJson', (Join-Path $dir "$name.json"), '-Backend', $Backend, '-ContendedFrames', '-DotnetRoot', $DotnetRoot) + @(if ($Skip.Count) { '-Skip'; ($Skip -join ',') }) + @(if ($MaxFps -gt 0) { '-MaxFps'; "$MaxFps" })
         foreach ($a in $arguments) { $psi.ArgumentList.Add($a) }
         $psi.UseShellExecute = $false
         $psi.WorkingDirectory = $repoRoot
@@ -1347,8 +1471,9 @@ function Add-ReplayedResult {
     $log = if ($row.Log) { Join-Path $(if ($Dir) { $Dir } else { Join-Path 'par' $Step }) $row.Log } else { '' }
     $errors = if ("$($row.Errors)" -ne '') { [int]$row.Errors } else { -1 }
     $exit = if ("$($row.Exit)" -ne '') { [int]$row.Exit } else { 0 }
+    $godot = if ($row.PSObject.Properties['GodotErrors'] -and "$($row.GodotErrors)" -ne '') { "$($row.GodotErrors)" } else { 'n/a' }
     if ($row.Outcome -eq 'SKIP') { Add-Result $Step $true $exit ([double]$row.Seconds) $row.Detail $log -Skipped }
-    else { Add-Result $Step ($row.Outcome -ne 'FAIL') $exit ([double]$row.Seconds) $row.Detail $log -1 $note }
+    else { Add-Result $Step ($row.Outcome -ne 'FAIL') $exit ([double]$row.Seconds) $row.Detail $log -1 $note -GodotErrors $godot -ExpectedEngineErrors $(if ($row.PSObject.Properties['ExpectedEngineErrors']) { "$($row.ExpectedEngineErrors)" } else { '' }) }
 }
 
 $strayBefore = if (Test-Wanted 'stray-output') { Get-StrayOutputs } else { @() }
@@ -1453,6 +1578,7 @@ try {
                 $code = Invoke-Logged -FileName $pwshExe -LogPath $log -TimeoutSeconds 420 `
                     -Arguments (@('-NoProfile', '-File', $goldenScript, '-NoBuild', '-TimeoutSeconds', '300', '-OutDir', $goldenDir) + @(if ($UserDataSlot) { '-UserDataSlot', $UserDataSlot }))
                 $text = Get-Content -LiteralPath $log -Raw
+                Register-GodotErrors $step $text | Out-Null
                 $verdict = if ($text -match '\[terrain-golden\] (PASS|FAIL[^\r\n]*|error[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
                 Add-Result $step ($code -eq 0) $code $timer.Elapsed.TotalSeconds "$verdict (report: terrain-golden\terrain-golden-report.txt)" $log (Get-ErrorCount $text)
             }
@@ -1677,13 +1803,14 @@ try {
                 # one the gate above found ready (or started with -Backend start): play.ps1 uses a ready backend as it is and stops only what it started itself.
                 $log = Join-Path $OutDir ('{0:00}-login.log' -f $script:stepIndex)
                 $startedAt = [DateTime]::UtcNow
-                $arguments = @('-NoProfile', '-File', $playScript, '-Offscreen', '-IsolateUserData', '-NoBuild', '-TimeoutSeconds', '420', '-Resolution', $defaultSize, '-GameArgs:--login-check=enter')
+                $arguments = @('-NoProfile', '-File', $playScript, '-Offscreen', '-IsolateUserData', '-NoBuild', '-TimeoutSeconds', '420', '-Resolution', $defaultSize, "-GameArgs:--login-check=enter$(Get-MaxFpsArgs)")
                 $enginesBefore = Get-EngineProcessCount
                 $script:enginePeak = 0
                 $code = Invoke-Logged -FileName $pwshExe -Arguments $arguments -LogPath $log -TimeoutSeconds 480 -SampleEngines
                 $text = Get-Content -LiteralPath $log -Raw
                 $loginRun = @{ Code = $code; Text = $text; Others = [math]::Max($enginesBefore, $script:enginePeak - 1) }
                 Set-AudioVerdict $step $text
+                Register-GodotErrors $step $text | Out-Null
                 $verdict = if ($text -match '\[logincheck\] (done ok=[^\r\n]*)') { $Matches[1] } else { 'no verdict line' }
                 $frameDir = Join-Path $repoRoot 'docs\screenshots\m2\login'
                 # Only frames this run wrote count (the folder keeps the earlier run's until they are overwritten).
@@ -1781,15 +1908,22 @@ $lines.Add("# Lifestone smoke run")
 $lines.Add('')
 $lines.Add("$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $repoRoot - total $([math]::Round($suiteTimer.Elapsed.TotalMinutes, 1)) min - $verdict")
 $lines.Add('')
-$lines.Add('| Step | Result | Exit | Seconds | Errors logged | Detail | Log |')
-$lines.Add('|---|---|---:|---:|---:|---|---|')
+$lines.Add('| Step | Result | Exit | Seconds | Errors logged | godot_errors | Detail | Log |')
+$lines.Add('|---|---|---:|---:|---:|---:|---|---|')
 foreach ($r in $script:results) {
-    $lines.Add("| $($r.Step) | $($r.Result) | $($r.Exit) | $($r.Seconds) | $($r.Errors) | $($r.Detail -replace '\|', '/') | $($r.Log) |")
+    $lines.Add("| $($r.Step) | $($r.Result) | $($r.Exit) | $($r.Seconds) | $($r.Errors) | $($r.GodotErrors) | $($r.Detail -replace '\|', '/') | $($r.Log) |")
 }
 $lines.Add('')
 $lines.Add($backendLine)
 $lines.Add('')
 $lines.Add($secretsLine)
+# M5 item 0 c5: Godot's own errors across the Godot steps (a fact: any above 0 failed its step); n/a steps ran no Godot.
+$godotRows = @($script:results | Where-Object { "$($_.GodotErrors)" -match '^\d+$' })
+$godotTotal = ($godotRows | ForEach-Object { [int]$_.GodotErrors } | Measure-Object -Sum).Sum
+if (-not $godotTotal) { $godotTotal = 0 }
+$godotLine = "godot_errors=$godotTotal (judged 0 on each of $($godotRows.Count) Godot step(s)$(if ($godotTotal -gt 0) { '; FAIL: ' + ((@($godotRows | Where-Object { [int]$_.GodotErrors -gt 0 } | ForEach-Object { "$($_.Step)=$($_.GodotErrors)" })) -join ', ') }))"
+$lines.Add('')
+$lines.Add($godotLine)
 if ($script:testTimesLine) { $lines.Add(''); $lines.Add("tests: $($script:testTimesLine) (test-times.txt, test-results\*.trx)") }
 # M4 1.1 s3: the live legs' 50 ms flags, per step (report-only; the worst-of-three rule reads them).
 $flagged = @($script:results | Where-Object { $_.FrameOver50 })
@@ -1814,9 +1948,11 @@ if ($StepNumber -eq 0) {
         ended_utc  = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
         verdict    = $verdict
         secrets    = $leaks.Hits
+        godot_errors = [int]$godotTotal
+        max_fps    = $MaxFps
         scanned    = $leaks.Scanned
         steps      = @($script:results | ForEach-Object {
-                $step = [ordered]@{ step = $_.Step; verdict = $_.Result; outcome = $_.Outcome; seconds = $_.Seconds; errors_logged = $(if ("$($_.Errors)" -ne '') { [int]$_.Errors } else { $null }) }
+                $step = [ordered]@{ step = $_.Step; verdict = $_.Result; outcome = $_.Outcome; seconds = $_.Seconds; errors_logged = $(if ("$($_.Errors)" -ne '') { [int]$_.Errors } else { $null }); godot_errors = $(if ("$($_.GodotErrors)" -match '^\d+$') { [int]$_.GodotErrors } else { 'n/a' }); expected_engine_errors = $(if ($_.ExpectedEngineErrors) { "$($_.ExpectedEngineErrors)" } else { $null }) }
                 if ($_.FrameOver50) { $step['frame_over_50'] = $_.FrameOver50; $step['frame_judge'] = $_.FrameJudge }
                 $step
             })

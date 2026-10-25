@@ -74,6 +74,7 @@ public sealed partial class JourneyLegRunner : Node
     }
 
     private SessionHost _host = null!;
+    private readonly Lifestone.Client.Session.Hosting.LegFaultGuard _guard = new("JourneyLegRunner", LogCategory, GodotLogSink.Instance);
     private PlayMode _mode = null!;
     private RetailUiLayer? _ui;
     private DatSet _dats = null!;
@@ -181,6 +182,26 @@ public sealed partial class JourneyLegRunner : Node
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
+        try
+        {
+            StepFrame(delta);
+        }
+        catch (Exception e) when (Lifestone.Client.Session.Hosting.LegFaultGuard.Guards(e))
+        {
+            // M5 item 0 c2: reported once; the leg ends through its own fail path (log off if logged in, a verdict of ok=false, a non-zero quit).
+            if (_guard.Catch($"_Process ({_phase})", e))
+            {
+                Fail(_host.Session, _guard.Reason!);
+            }
+            else
+            {
+                Finish(_guard.Reason);
+            }
+        }
+    }
+
+    private void StepFrame(double delta)
+    {
         if (_finished)
         {
             return;
@@ -188,8 +209,12 @@ public sealed partial class JourneyLegRunner : Node
 
         _runSeconds += delta;
         _delta = delta;
-        _observer.Frame(delta, _skipNextFrame); // the delta is the previous frame's: the frame after a saved review frame (the read-back stalls it) is left out
-        _windows.Frame(delta, _skipNextFrame); // the same rule for the attack, loot and vendor windows
+        if (!_failed) // M5 0 fix 0-R5: the observers stop with the fail path, so a fault in them cannot repeat and end the run before the log off completes
+        {
+            _observer.Frame(delta, _skipNextFrame); // the delta is the previous frame's: the frame after a saved review frame (the read-back stalls it) is left out
+            _windows.Frame(delta, _skipNextFrame); // the same rule for the attack, loot and vendor windows
+        }
+
         _skipNextFrame = false;
         if (_host.Session is not { } session)
         {

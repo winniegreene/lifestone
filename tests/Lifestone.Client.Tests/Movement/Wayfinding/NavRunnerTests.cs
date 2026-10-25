@@ -390,4 +390,62 @@ public sealed class NavRunnerTests(ITestOutputHelper output)
         Assert.Equal("movement route=s5-ladder laps=0 corrections=0 where_max_m=none result=FAIL", audit.SummaryLine()); // the verdict line unchanged
         Assert.Contains("corrections=0 where_max_m=none", runner.VerdictFields(), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void A_route_of_one_waypoint_steers_at_the_goal_and_arrives_without_indexing_past_the_list()
+    {
+        // m5-nav-one-waypoint: the start and the goal snapped to one lattice point leave one waypoint, and Steer used to index waypoints[1] every frame.
+        var rig = new S5Rig(50f, 50f);
+        var paths = new OneWaypointPaths(count: 1);
+        using var runner = new NavRunner(rig.H.Api.Move, rig.Body, paths);
+        runner.Start(S5Rig.To(50f, 53f), rig.Body.Now);
+
+        var state = runner.State;
+        while (!runner.IsDone && rig.Body.Now < 20)
+        {
+            rig.Body.Advance(S5Rig.Dt);
+            state = runner.Step(rig.Body.Now);
+            rig.H.Tick(S5Rig.Dt);
+        }
+
+        output.WriteLine($"{state}: {runner.VerdictFields()}; {string.Join(", ", rig.Body.Calls)}");
+        Assert.Equal(NavRunState.Arrived, state);
+        Assert.Null(runner.FailureReason);
+        Assert.Equal(1, paths.PlanCalls);
+        Assert.True(Vector2.Distance(rig.Body.Xy, new Vector2(50f, 53f)) <= NavGoal.DefaultStopTolerance + 0.15f, $"stopped at {rig.Body.Xy}");
+        Assert.Equal(0, runner.Rungs);
+    }
+
+    [Fact]
+    public void A_route_of_zero_waypoints_is_Blocked_naming_the_empty_path_and_does_not_throw()
+    {
+        var rig = new S5Rig(50f, 50f);
+        using var runner = new NavRunner(rig.H.Api.Move, rig.Body, new OneWaypointPaths(count: 0));
+        runner.Start(S5Rig.To(50f, 90f), rig.Body.Now);
+
+        rig.Body.Advance(S5Rig.Dt);
+        var state = runner.Step(rig.Body.Now);
+
+        Assert.Equal(NavRunState.Blocked, state);
+        Assert.Contains("no path: empty-path", runner.FailureReason, StringComparison.Ordinal);
+        Assert.Contains("no waypoints", runner.FailureReason, StringComparison.Ordinal);
+    }
+
+    /// <summary>A path source that answers a Found path of <c>count</c> waypoints: 0 (empty), or 1 (the goal alone, the snapped start and goal).</summary>
+    private sealed class OneWaypointPaths(int count) : INavPathSource
+    {
+        // A lattice, so Steer takes the straight run (the clause that indexed waypoints[next]); no planner, the source answers the path itself.
+        public NavMap? Map { get; } = S2TileKit.Map(S2TileKit.Flat(MovementTestKit.Block.LandBlockId));
+
+        public PathPlanner? Planner => null;
+
+        public int PlanCalls { get; private set; }
+
+        public NavPath Plan(in CellFrame from, NavGoal goal, NavScars scars)
+        {
+            PlanCalls++;
+            IReadOnlyList<NavWaypoint> waypoints = count == 0 ? [] : [new NavWaypoint(NavMap.ToCellFrame(goal.Point), false)];
+            return new NavPath(NavPathStatus.Found, waypoints, null, []);
+        }
+    }
 }

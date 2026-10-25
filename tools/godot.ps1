@@ -232,6 +232,14 @@ if ($Offscreen -and $Run -and -not $Audio -and $GodotArgs -notmatch '(^|\s)--aud
     $arguments.Add('--audio-driver'); $arguments.Add('Dummy')
 }
 if ($GodotArgs) { foreach ($a in (Split-LifestoneArguments $GodotArgs)) { $arguments.Add($a) } }
+# M5 item 0 c3 (m5-log-triple): Godot's own godot.log is off in project.godot (lifestone.log is the file, the console the other copy).
+# --log-copies=all in the game arguments asks for the old three copies, so give the engine its --log-file (the same file it wrote before).
+if ($Run -and $GameArgs -match '(^|\s)--log-copies(=|\s+)all(\s|$)' -and $GodotArgs -notmatch '(^|\s)--log-file(\s|=|$)') {
+    $godotLogRoot = if ($IsolateUserData) { $roaming } else { $env:APPDATA }
+    $godotLogFile = Join-Path $godotLogRoot 'Godot\app_userdata\Lifestone\logs\godot.log'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $godotLogFile) | Out-Null
+    $arguments.Add('--log-file'); $arguments.Add($godotLogFile)
+}
 $userArgList = [System.Collections.Generic.List[string]]::new()
 if ($Screenshot) {
     # Resolve relative to this PowerShell location; Godot prefers forward slashes.

@@ -31,6 +31,11 @@ namespace Lifestone.Client.Session.State;
 internal sealed partial class GameStateReducer
 {
     private double? _replayParkedAt;
+    private readonly List<uint> _culled = new(64);
+    private bool _cullTodoLogged;
+
+    /// <summary>The client-side cull (<see cref="ObjectCull"/>, M5 item 0 c1): ticked by <see cref="CullObjects"/>.</summary>
+    internal ObjectCull Cull { get; } = new();
 
     /// <summary>
     /// F745 ObjectCreate and F7DB UpdateObject. Re-expresses <c>SmartBox::HandleCreateObject</c> (11.4186 0x00454C80,
@@ -68,6 +73,7 @@ internal sealed partial class GameStateReducer
         if (existing is null || isUpdate || Sequence16.IsNewer(existing.Stamps.Instance, instance))
         {
             CreateNew(message, parent, recreated: existing is not null);
+            Cull.Seen(message.Guid);
             NoteObjectArrived(message.Guid);
             return;
         }
@@ -79,6 +85,7 @@ internal sealed partial class GameStateReducer
         }
 
         UpdateExisting(existing, message, parent);
+        Cull.Seen(message.Guid);
         NoteObjectArrived(message.Guid);
     }
 
@@ -107,13 +114,68 @@ internal sealed partial class GameStateReducer
                 return;
         }
 
-        _state.Objects.Remove(message.Guid);
-        ReleaseDeletedHeld(message.Guid);
-        ForgetInViews(message.Guid);
-        ForgetVendor(message.Guid);
-        Changed();
-        Publish(new ObjectDeleted(message.Guid));
+        RemoveObject(message.Guid);
     }
+
+    /// <summary>
+    /// Removes an object the way an applied F747 does, for the F747 itself and for the client-side cull: out of the table,
+    /// the inventory, the container views, the vendor, the cull's queue, then <see cref="ObjectDeleted"/>, which every
+    /// consumer follows (the avatar set, the light table, the fight's tables, the wayfinder's creature feed).
+    /// </summary>
+    private void RemoveObject(uint guid)
+    {
+        _state.Objects.Remove(guid);
+        Cull.Seen(guid);
+        ReleaseDeletedHeld(guid);
+        ForgetInViews(guid);
+        ForgetVendor(guid);
+        Changed();
+        Publish(new ObjectDeleted(guid));
+    }
+
+    /// <summary>
+    /// The client-side cull's tick (<see cref="ObjectCull"/>; retail's <c>CObjectMaint::UseTime</c>, 11.6096 0x00509480): the
+    /// session calls it once per tick, after the parked messages expire. Each due object leaves through
+    /// <see cref="RemoveObject"/>, holders before what they hold; one INFO line per batch (category <c>objects</c>).
+    /// Allocation-free when nothing is culled.
+    /// </summary>
+    internal void CullObjects()
+    {
+        _culled.Clear();
+        var count = Cull.Collect(_state, _clock.Now, _culled);
+        if (!_cullTodoLogged && Cull.CellsMissingSeen)
+        {
+            _cullTodoLogged = true;
+            _log.Info(ObjectsLogCategory, "TODO(m5-object-cull-cells): this host gives the cull no cell visibility (ObjectCull.Cells), so inside an interior cell the player's landblock and its eight neighbours count as visible, not a dungeon cell's visible cells");
+        }
+
+        if (count == 0)
+        {
+            return;
+        }
+
+        var first = _culled[0];
+        for (var i = 0; i < _culled.Count; i++)
+        {
+            var guid = _culled[i];
+            if (_state.Objects.Contains(guid))
+            {
+                RemoveObject(guid);
+            }
+        }
+
+        _log.Info(
+            ObjectsLogCategory,
+            "culled objects the server stopped sending",
+            new LogField("count", count),
+            new LogField("first", first.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)),
+            new LogField("pending", Cull.Pending),
+            new LogField("culled_total", Cull.Culled),
+            new LogField("objects", _state.Objects.Count));
+    }
+
+    /// <summary>The log category of the cull's lines.</summary>
+    internal const string ObjectsLogCategory = "objects";
 
     /// <summary>
     /// F748 UpdatePosition. Re-expresses <c>SmartBox::UnpackPositionEvent</c> (11.4186 0x004542C0, 11.6096 0x00454360:
@@ -802,6 +864,7 @@ internal sealed partial class GameStateReducer
     /// </summary>
     private void LeaveWorld()
     {
+        Cull.Clear(); // CObjectMaint::DestroyObjects (11.6096 0x00509700): the log off clears the cull's queue with the table
         if (_attack.State != AttackSequenceState.Idle || _attack.Number != 0)
         {
             // A sequence left Active by a log off (or a lost final 01A7 before it) must not carry into the next character (review 1.2-R4).
@@ -882,6 +945,7 @@ internal sealed partial class GameStateReducer
         switch (verdict)
         {
             case ObjectGateVerdict.Apply:
+                Cull.Seen(guid); // any applied message for a pending object cancels its cull (RemoveObjectToBeDestroyed)
                 return true;
             case ObjectGateVerdict.Park:
                 Park(guid, guid, kind, context, message);

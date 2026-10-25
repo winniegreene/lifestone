@@ -37,6 +37,8 @@ namespace Lifestone.Game.Sessions;
 /// <c>sounds_server</c> and <c>sounds_hooks</c> are voices started, the <c>*_handed</c> fields are calls handed to the sound player), each <c>n/a</c> when the run has no such counter, never 0
 /// (M3 2.1 s3: <c>sounds_hooks</c> over the walking legs is judged, at least 1 (<see cref="LoginCheckScenario.JudgeWalkingSounds"/>); the Academy arrival's <c>sounds_server</c> stays a report, D27 judges it in the buff leg,
 /// <see cref="BuffLegRunner"/>; <c>sounds_ui</c> is judged in <c>--retail-ui-checks</c> only).</para>
+/// <para>M5 0 c1 (<c>m5-object-cull</c>): the line ends with the report-only <c> objects= drawn_in_cell= light_rows=</c> (<see cref="LoginCheckScenario.ObjectFields"/>): the most objects the session's table held,
+/// the most avatars drawn in interior cells and the most object light-table rows in use at once, each <c>n/a</c> when the run did not reach the world.</para>
 /// <para>g7: the line ends with <c>shell=ok|missing vitals=&lt;h&gt;/&lt;s&gt;/&lt;m&gt; (read from the shell's meters) spew_portal=yes|no vitals_window=stacked|side</c> (<see cref="LoginCheckShell"/>, <see cref="ShellWatch"/>): all four are judged (docs/session.md section 27).</para>
 /// <para>The verdict line is <c>[logincheck] done ok=&lt;true|false&gt; enter_to_walk_max_ms=&lt;x&gt; teleports=&lt;n&gt; academy_objects=&lt;n&gt; logoff=&lt;ok|failed&gt; materialised=&lt;true|false|n/a&gt; objects_drawn=&lt;n|n/a&gt;</c>
 /// (fields the run did not reach are <c>n/a</c>; <c>academy_objects</c> is the census of the world content the server placed, <see cref="Lifestone.Client.Avatars.WorldContentCensus"/>;
@@ -114,6 +116,7 @@ public sealed partial class LoginCheckRunner : Node
     private readonly List<uint> _modes = [];
     private GameServices _services = null!;
     private SessionHost _host = null!;
+    private readonly Lifestone.Client.Session.Hosting.LegFaultGuard _guard = new("LoginCheckRunner", LogCategory, GodotLogSink.Instance);
     private PlayMode _mode = null!;
     private PortalSpaceHandles? _portal;
     private RetailUiLayer? _ui;
@@ -197,6 +200,8 @@ public sealed partial class LoginCheckRunner : Node
     private double _listSeenAt = double.NaN;
     private int _playerPartsMax;
     private int _objectsDrawnMax;
+    private int _inCellMax = -1;
+    private int _lightRowsMax = -1;
     private int _objectsWaitingMax;
     private int _particleObjectsMax;
     private int _playerParticleObjectsMax;
@@ -319,6 +324,99 @@ public sealed partial class LoginCheckRunner : Node
 
     /// <inheritdoc/>
     public override void _Process(double delta)
+    {
+        try
+        {
+            // M5 0 fix 0-R5: after the first fault only the fail path runs (StepAfterFault), never the sampling and observer code that may have thrown: a repeat fault there
+            // ended the run before the log off or the place-back completed.
+            if (_guard.Tripped)
+            {
+                StepAfterFault(delta);
+            }
+            else
+            {
+                StepFrame(delta);
+            }
+        }
+        catch (Exception e) when (Lifestone.Client.Session.Hosting.LegFaultGuard.Guards(e))
+        {
+            // M5 item 0 c2: reported once; a fault in the world takes the legs' failure path (the character is sent back and logged off), else the check ends as failed now.
+            // M5 0 fix 0-R5: a fault outside the playing stage, with the character in the world, logs it off first. A fault inside the fail path itself ends the run.
+            if (_guard.Catch($"_Process (stage {_scenario.Stage})", e))
+            {
+                try
+                {
+                    StartFailPath(_guard.Reason!);
+                }
+                catch (Exception failPathFault) when (Lifestone.Client.Session.Hosting.LegFaultGuard.Guards(failPathFault))
+                {
+                    Log.Error(LogCategory, "the fail path itself threw; ending the check", ("type", failPathFault.GetType().Name), ("message", failPathFault.Message));
+                    Finish(false, _guard.Reason);
+                }
+            }
+            else
+            {
+                Finish(false, _guard.Reason);
+            }
+        }
+    }
+
+    /// <summary>The first fault: a fault in the world while playing sends the character back and logs it off; a fault elsewhere in the world logs it off; otherwise the check ends as failed now.</summary>
+    private void StartFailPath(string reason)
+    {
+        if (_host.Session is not { } session || !double.IsNaN(_recoveryStart) || _recoveryLogOff is not null)
+        {
+            Finish(false, reason);
+        }
+        else if (_scenario.Stage == "playing")
+        {
+            StartRecovery(session, reason);
+        }
+        else if (double.IsNaN(_doneAt) && session.State.Self.Travel != SelfTravel.NotInWorld)
+        {
+            _recoveryReason = reason;
+            _recoveryBack = true; // no place-back is attempted from this stage: the verdict must not say the character could not be put back
+            _recoveryLogOff = session.Actions.LogOff(ActionSource.Host);
+            _recoveryLogOffAt = _runSeconds;
+            Log.Warn(LogCategory, "a fault outside the playing stage; logging the character off before the verdict", ("stage", _scenario.Stage));
+        }
+        else
+        {
+            Finish(false, reason);
+        }
+    }
+
+    /// <summary>The frames after the first fault: only the recovery steps (the place-back, then the log off) run, with the run's own time limit; nothing samples or observes.</summary>
+    private void StepAfterFault(double delta)
+    {
+        if (_finished)
+        {
+            return;
+        }
+
+        _runSeconds += delta;
+        if (_host.Session is not { } session)
+        {
+            Finish(false, _guard.Reason);
+        }
+        else if (!double.IsNaN(_recoveryStart))
+        {
+            StepRecovery(session);
+        }
+        else if (_recoveryLogOff is not null)
+        {
+            if (_recoveryLogOff.Outcome is not null || _runSeconds - _recoveryLogOffAt > LogOffRecoverySeconds)
+            {
+                Finish(false, _recoveryReason);
+            }
+        }
+        else
+        {
+            Finish(false, _guard.Reason); // the fail path had nothing to run
+        }
+    }
+
+    private void StepFrame(double delta)
     {
         if (_finished)
         {
@@ -1088,6 +1186,8 @@ public sealed partial class LoginCheckRunner : Node
         if (_mode.Layer is { Active: true } layer)
         {
             _objectsDrawnMax = Math.Max(_objectsDrawnMax, layer.DrawnObjects);
+            _inCellMax = Math.Max(_inCellMax, layer.DrawnInCell); // M5 0 c1: drawn_in_cell= and light_rows= (report-only)
+            _lightRowsMax = Math.Max(_lightRowsMax, layer.LightRowsInUse);
             _objectsWaitingMax = Math.Max(_objectsWaitingMax, layer.Waiting);
             if (layer.Particles is { } particles)
             {
@@ -1444,7 +1544,7 @@ public sealed partial class LoginCheckRunner : Node
         var inv = CultureInfo.InvariantCulture;
         var line = string.Create(
             CultureInfo.InvariantCulture,
-            $"done ok={(held ? "true" : "false")} enter_to_walk_max_ms={(reachedWalk ? _maxFrameMs.ToString("0.0", CultureInfo.InvariantCulture) : "n/a")} holtburg_min_fps={(double.IsNaN(_holtburgMinFps) ? "n/a" : _holtburgMinFps.ToString("0.0", inv))} corrections={(_scenario.Corrections is { } corrections ? corrections.ToString(inv) : "n/a")} where_max_m={(_scenario.WhereMaxMetres is { } whereMax ? whereMax.ToString("0.00", inv) : "n/a")} exit={exit} quest={_scenario.ExitQuestVerdict} legs={legsText} teleports={(_scenario.EnteredGuid != 0 && reachedAcademy ? _scenario.Teleports.ToString(CultureInfo.InvariantCulture) : "n/a")} leg_teleports={(legsWalked ? _scenario.LegTeleports.ToString(inv) : "n/a")} teleport_frame_max_ms={(_teleportWindowFrames > 0 ? _teleportFrameMaxMs.ToString("0.0", inv) : "n/a")} academy_objects={(reachedAcademy ? _scenario.AcademyObjects.ToString(CultureInfo.InvariantCulture) : "n/a")} logoff={(_scenario.LogOffOk ? "ok" : "failed")} materialised={(_rigAtPresent ? (_hiddenCreates >= 1 && _unhides >= 1 && _playerPartsMax >= 1 && _playerParticleObjectsMax >= 1 ? "true" : "false") : "n/a")} fade_ms={(_rigAtPresent && !double.IsNaN(_fadeMs) ? _fadeMs.ToString("0", inv) : "n/a")} objects_drawn={(reachedAcademy ? _objectsDrawnMax.ToString(CultureInfo.InvariantCulture) : "n/a")} academy_undrawn={(_academyCensus is null ? "n/a" : _academyCensus.Missing.Count.ToString(inv))} holtburg_objects_drawn_max={(holtburgRan ? _holtburgObjectsDrawnMax.ToString(inv) : "n/a")} holtburg_npcs={(holtburgRan ? _holtburgNpcsDrawnMax.ToString(inv) + "/" + _holtburgNpcsPlacedMax.ToString(inv) : "n/a")} holtburg_max_frame_ms={(holtburgRan ? _holtburgMaxFrameMs.ToString("0.0", inv) : "n/a")} tunnel_seconds={(_portal is null ? "n/a" : _arrivalTunnelSeconds.ToString("0.0", inv))} portal_seconds={(_portal is null ? "n/a" : _arrivalSequenceSeconds.ToString("0.0", inv))} tunnel_covered_frames={(_portal is null ? "n/a" : _tunnelCoveredFrames.ToString(inv))} logoff_tunnel={(_portal is null ? "n/a" : LogOffTunnelVerdict)} portal_sounds={(_portal is null ? "n/a" : PortalSoundsVerdict)} sound_enter={_enterCues} sound_exit={_exitCues} sound_hum={_humEvents} logoff_by={_scenario.LogOffVia}{LoginCheckShell.Fields(_shell.ShellUp, _ui is not null ? _shell.VitalsOnScreen : _scenario.Vitals, _shell.SpewPortal, _shell.ShownWindow)}{_scenario.ReportFields}{LoginCheckScenario.SoundFields(_soundLegs.Report(LoginCheckScenario.SoundArrivalLeg, RouteLibrary.HoltburgLapsName))}");
+            $"done ok={(held ? "true" : "false")} enter_to_walk_max_ms={(reachedWalk ? _maxFrameMs.ToString("0.0", CultureInfo.InvariantCulture) : "n/a")} holtburg_min_fps={(double.IsNaN(_holtburgMinFps) ? "n/a" : _holtburgMinFps.ToString("0.0", inv))} corrections={(_scenario.Corrections is { } corrections ? corrections.ToString(inv) : "n/a")} where_max_m={(_scenario.WhereMaxMetres is { } whereMax ? whereMax.ToString("0.00", inv) : "n/a")} exit={exit} quest={_scenario.ExitQuestVerdict} legs={legsText} teleports={(_scenario.EnteredGuid != 0 && reachedAcademy ? _scenario.Teleports.ToString(CultureInfo.InvariantCulture) : "n/a")} leg_teleports={(legsWalked ? _scenario.LegTeleports.ToString(inv) : "n/a")} teleport_frame_max_ms={(_teleportWindowFrames > 0 ? _teleportFrameMaxMs.ToString("0.0", inv) : "n/a")} academy_objects={(reachedAcademy ? _scenario.AcademyObjects.ToString(CultureInfo.InvariantCulture) : "n/a")} logoff={(_scenario.LogOffOk ? "ok" : "failed")} materialised={(_rigAtPresent ? (_hiddenCreates >= 1 && _unhides >= 1 && _playerPartsMax >= 1 && _playerParticleObjectsMax >= 1 ? "true" : "false") : "n/a")} fade_ms={(_rigAtPresent && !double.IsNaN(_fadeMs) ? _fadeMs.ToString("0", inv) : "n/a")} objects_drawn={(reachedAcademy ? _objectsDrawnMax.ToString(CultureInfo.InvariantCulture) : "n/a")} academy_undrawn={(_academyCensus is null ? "n/a" : _academyCensus.Missing.Count.ToString(inv))} holtburg_objects_drawn_max={(holtburgRan ? _holtburgObjectsDrawnMax.ToString(inv) : "n/a")} holtburg_npcs={(holtburgRan ? _holtburgNpcsDrawnMax.ToString(inv) + "/" + _holtburgNpcsPlacedMax.ToString(inv) : "n/a")} holtburg_max_frame_ms={(holtburgRan ? _holtburgMaxFrameMs.ToString("0.0", inv) : "n/a")} tunnel_seconds={(_portal is null ? "n/a" : _arrivalTunnelSeconds.ToString("0.0", inv))} portal_seconds={(_portal is null ? "n/a" : _arrivalSequenceSeconds.ToString("0.0", inv))} tunnel_covered_frames={(_portal is null ? "n/a" : _tunnelCoveredFrames.ToString(inv))} logoff_tunnel={(_portal is null ? "n/a" : LogOffTunnelVerdict)} portal_sounds={(_portal is null ? "n/a" : PortalSoundsVerdict)} sound_enter={_enterCues} sound_exit={_exitCues} sound_hum={_humEvents} logoff_by={_scenario.LogOffVia}{LoginCheckShell.Fields(_shell.ShellUp, _ui is not null ? _shell.VitalsOnScreen : _scenario.Vitals, _shell.SpewPortal, _shell.ShownWindow)}{_scenario.ReportFields}{LoginCheckScenario.SoundFields(_soundLegs.Report(LoginCheckScenario.SoundArrivalLeg, RouteLibrary.HoltburgLapsName))}{LoginCheckScenario.ObjectFields(_scenario.ObjectsMax, _inCellMax, _lightRowsMax)}");
         WriteMovementAudits();
         foreach (var leg in _scenario.Legs)
         {

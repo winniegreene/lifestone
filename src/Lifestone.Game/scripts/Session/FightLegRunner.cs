@@ -82,6 +82,7 @@ public sealed partial class FightLegRunner : Node
     private readonly record struct FrameParts(double SessionTickMs, int PumpMessages, double PumpMs, double RetailUiMs, double PlayModeMs, double PlayWorkMs, double PlayAdapterMs, int EventsApplied);
 
     private SessionHost _host = null!;
+    private readonly Lifestone.Client.Session.Hosting.LegFaultGuard _guard = new("FightLegRunner", LogCategory, GodotLogSink.Instance);
     private PlayMode _mode = null!;
     private RetailUiLayer? _ui;
     private RoutePlayHost _walkHost = null!;
@@ -265,6 +266,26 @@ public sealed partial class FightLegRunner : Node
 
     /// <inheritdoc/>
     public override void _Process(double delta)
+    {
+        try
+        {
+            StepFrame(delta);
+        }
+        catch (Exception e) when (Lifestone.Client.Session.Hosting.LegFaultGuard.Guards(e))
+        {
+            // M5 item 0 c2: reported once; the leg ends through its own fail path (log off if logged in, a verdict of ok=false, a non-zero quit).
+            if (_guard.Catch($"_Process ({_phase})", e))
+            {
+                Fail(_host.Session, _guard.Reason!);
+            }
+            else
+            {
+                Finish(_guard.Reason);
+            }
+        }
+    }
+
+    private void StepFrame(double delta)
     {
         if (_finished)
         {

@@ -239,6 +239,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
         LogSessionWarmUpWhenDone(main.GetTree());
         mode._layer = new ServerObjectsLayer(services, world, interiors, mode._lightTable);
         main.AddChild(mode._layer);
+        world.GetNodeOrNull<Lifestone.Game.Diagnostics.SoakLine>("SoakLine")?.Bind(session, () => mode._avatars, mode._lightTable); // M5 item 0 c3: the [soak] line's session, avatar and light-row sources
         mode._picking = new WorldPicking(camera.Camera, world, () => mode._avatars, () => mode._layer, () => ui is not null ? new Vector2(ui.LogicalSize.X, ui.LogicalSize.Y) : main.GetViewport().GetVisibleRect().Size, id => PickShape.FromMesh(services.GfxObjMeshes.Get(id)));
         mode.Selection.Attach(session.Events);
         ui?.SetSelectionProjector(mode._picking);
@@ -405,6 +406,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
         }
 
         _bridge = new PortalSessionBridge(_host.Session!, portal.Director);
+        _host.Session!.Cull.Cells = portal.Attachments; // M5 0 fix R1: the cull reads a dungeon cell's visible cells from the interior registry the streamer loads
         Log.Info(LogCategory, "the portal view is attached: portal space plays on arrival, on server teleports and on logoff");
     }
 

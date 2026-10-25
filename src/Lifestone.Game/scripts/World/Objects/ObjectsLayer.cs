@@ -35,6 +35,9 @@ public sealed class ObjectsLayer : ILandblockLayer
         var system = new ObjectsSystem();
         system.Initialize(services, world, options.ObjectKinds, options.ObjectRadius);
         world.AddChild(system);
+        var soak = new Lifestone.Game.Diagnostics.SoakLine { Name = "SoakLine" }; // M5 item 0 c3: the [soak] line, beside the objects system (PlayMode binds its session sources)
+        soak.Configure(options.Play.SoakLineSeconds);
+        world.AddChild(soak);
         world.RegisterLayer(new ObjectsLayer(system));
         if (world.GetParent()?.GetNodeOrNull<CanvasLayer>("Hud") is { } hud)
         {

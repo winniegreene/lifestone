@@ -7,6 +7,7 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Interiors;
 using Lifestone.Client.PortalSpace;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Data.Animation;
 using Lifestone.Data.Appearance;
 using Lifestone.Data.Effects;
 using Lifestone.Data.Models;
@@ -192,6 +193,15 @@ public sealed class AvatarStats
     /// <summary>Times the projectile window opened (<see cref="AvatarSet.ProjectileWindowOpen"/>: the first projectile alive after none).</summary>
     public long ProjectileWindows { get; internal set; }
 
+    /// <summary>
+    /// Server objects within 40 m of the player drawn more than a metre from where they were the frame before without a teleport or a far placement, or whose pose jumped (<see cref="AvatarJumpWatch"/>): the
+    /// first <see cref="AvatarSet.MaxJumpLogs"/> are logged with the state of their position and motion managers.
+    /// </summary>
+    public long CreatureJumps { get; internal set; }
+
+    /// <summary>Server objects drawn somewhere and back on consecutive frames, by position or by pose (the hero takes' flicker, <see cref="AvatarJumpWatch"/>).</summary>
+    public long CreatureFlips { get; internal set; }
+
     /// <summary>Avatars stepped by the last advance.</summary>
     public int SteppedLastFrame { get; internal set; }
 
@@ -308,6 +318,10 @@ public sealed class AvatarSet : ITargetWorld
     private int _cursor;
     private bool _lightSourcesFullLogged;
     private bool _multiLightLogged;
+    private long _jumpsLogged;
+
+    /// <summary>How many jumps and flips <see cref="AvatarJumpWatch"/> logs before it only counts them (<see cref="AvatarStats.CreatureJumps"/>, <see cref="AvatarStats.CreatureFlips"/>).</summary>
+    public const int MaxJumpLogs = 40;
 
     /// <param name="sources">The dats.</param>
     /// <param name="log">The log, or none.</param>
@@ -1075,6 +1089,10 @@ public sealed class AvatarSet : ITargetWorld
             if (!avatar.IsPlayer)
             {
                 avatar.Body.Advance(now, step);
+                if (avatar.Body.JumpWatch.Check(avatar.Body, avatar.Body.LastQuantum) is { } jump)
+                {
+                    ReportJump(avatar.Guid, jump);
+                }
             }
 
             stepped++;
@@ -1330,6 +1348,52 @@ public sealed class AvatarSet : ITargetWorld
         }
 
         _notices.Add(notice);
+    }
+
+    /// <summary>Counts a jump or flip and logs the first <see cref="MaxJumpLogs"/> with what moved the object (TODO(hero-creature-flicker)).</summary>
+    private void ReportJump(uint guid, in AvatarJump jump)
+    {
+        if (jump.Kind is AvatarJumpKind.RootFlip or AvatarJumpKind.PoseFlip)
+        {
+            Stats.CreatureFlips++;
+        }
+        else
+        {
+            Stats.CreatureJumps++;
+        }
+
+        if (_jumpsLogged >= MaxJumpLogs || !_log.IsEnabled(LogSeverity.Warning))
+        {
+            return;
+        }
+
+        _jumpsLogged++;
+        var c = CultureInfo.InvariantCulture;
+        _log.Write(
+            LogSeverity.Warning,
+            LogCategory,
+            "TODO(hero-creature-flicker): a server object was drawn far from its last frame (docs/milestones/m4-hero-visual-bugs.md); the fields name what moved it",
+            [
+                new LogField("guid", string.Create(c, $"0x{guid:X8}")),
+                new LogField("kind", jump.Kind.ToString()),
+                new LogField("metres", string.Create(c, $"{jump.Metres:0.00}")),
+                new LogField("turn_deg", string.Create(c, $"{jump.Turn:0}")),
+                new LogField("placed", jump.Placement.ToString()),
+                new LogField("sticky", jump.StickyTarget == 0 ? "none" : string.Create(c, $"0x{jump.StickyTarget:X8}{(jump.StickyInitialized ? "" : " (no report yet)")}")),
+                new LogField("interp_queued", jump.Interpolating),
+                new LogField("interp_fails", jump.InterpolationFails),
+                new LogField("moving_to", jump.MovingTo),
+                new LogField("contact", jump.Contact),
+                new LogField("forward", MotionCommandTable.NameOf(jump.Forward) ?? string.Create(c, $"0x{jump.Forward:X8}")),
+                new LogField("pending_motions", jump.PendingMotions),
+                new LogField("quantum_ms", string.Create(c, $"{jump.Quantum * 1000.0:0.0}")),
+                new LogField("from_server_m", string.Create(c, $"{jump.ServerMetres:0.00}")),
+                new LogField("from_player_m", string.Create(c, $"{jump.PlayerMetres:0.00}")),
+            ]);
+        if (_jumpsLogged == MaxJumpLogs)
+        {
+            _log.Write(LogSeverity.Warning, LogCategory, $"{MaxJumpLogs} server-object jumps or flips are logged; later ones are only counted (AvatarStats.CreatureJumps, CreatureFlips)", []);
+        }
     }
 
     private void Log(LogSeverity severity, uint guid, string message)

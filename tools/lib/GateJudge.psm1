@@ -83,6 +83,10 @@ function Get-SmokeStepRows {
     #>
     param([string] $StepName, [int] $Code, [object[]] $SmokeRows, $Summary, [scriptblock] $ReadLog, [string] $LogPath = '')
     $rows = [System.Collections.Generic.List[object]]::new()
+    # M5 item 0 c5 (D19): each Godot row carries smoke's godot_errors=<n> (Godot's own ERROR:/SCRIPT ERROR: lines in the step's console), judged 0 from its first gate (a fact). The steps that run Godot
+    # must have a number (a row without one fails: a verdict that reads nothing is not a pass); the other smoke steps read n/a.
+    $godotSteps = '^(login-check|login|login-throwaway|journey-(mage|melee|archer))$'
+    $godotNotes = [System.Collections.Generic.List[string]]::new()
     $smokeRows = @($SmokeRows | Where-Object { $_ })
     if ($smokeRows.Count -eq 0) { $rows.Add((New-GateRow $StepName $false "smoke wrote no rows (exit $Code; $LogPath)")) }
     foreach ($r in $smokeRows) {
@@ -91,8 +95,17 @@ function Get-SmokeStepRows {
         if ($r.Log -and $ReadLog) { $t = & $ReadLog $r; if ($t) { $logText = [string]$t } }
         $frameOnly = (-not $ok) -and $r.Outcome -ne 'SKIP' -and [bool](Test-FrameOnlyText -Detail ([string]$r.Detail) -LogText $logText)
         $over75 = [bool]($logText -match 'frame_max_ms=([\d.]+) \(at most 75 expected\)') -or ((-not $ok) -and $frameOnly -and (Get-FrameMaxMs -Detail ([string]$r.Detail) -LogText $logText) -gt 75.0)
+        $godotProperty = $r.PSObject.Properties['GodotErrors']
+        $godotValue = if ($godotProperty) { "$($godotProperty.Value)" } else { '' }
+        $godotNote = ' godot_errors=n/a'
+        if ($godotValue -match '^\d+$') {
+            $godotNote = " godot_errors=$godotValue"
+            if ([int]$godotValue -gt 0) { $ok = $false; $frameOnly = $false; $godotNote += ' (FAIL: judged 0, a fact)' }
+        }
+        elseif ($r.Outcome -ne 'SKIP' -and [string]$r.Step -match $godotSteps) { $ok = $false; $frameOnly = $false; $godotNote = ' godot_errors=missing (FAIL: the smoke row carries no count, so the step cannot be shown free of Godot errors)' }
+        $godotNotes.Add($godotNote)
         $name = if ($smokeRows.Count -gt 1 -or $r.Step -ne $StepName) { "${StepName}:$($r.Step)" } else { $StepName }
-        $label = if ($r.Outcome -eq 'SKIP') { 'SKIPPED (a gate step must run)' } else { $r.Outcome }
+        $label = if ($r.Outcome -eq 'SKIP') { 'SKIPPED (a gate step must run)' } elseif (-not $ok) { 'FAIL' } else { $r.Outcome }
         $rows.Add((New-GateRow $name $ok "$label $($r.Detail)".Trim() ([double]$r.Seconds) $frameOnly $over75))
     }
     if ($smokeRows.Count -gt 0) {
@@ -111,6 +124,7 @@ function Get-SmokeStepRows {
             $verdict = if ($Summary -and $Summary.PSObject.Properties['verdict']) { " verdict=$($Summary.verdict)" } else { '' }
             $rows.Add((New-GateRow "${StepName}:exit" $false "smoke exit $Code with every row clean$verdict; see summary.md"))
         }
+        for ($i = 0; $i -lt $godotNotes.Count; $i++) { $rows[$i].Detail = "$($rows[$i].Detail)$($godotNotes[$i])" }
     }
     return @($rows)
 }
@@ -396,6 +410,8 @@ function Invoke-GateSteps {
             $stampAccount = if ($account) { $account } else { [string]$s.Lane }
             Set-Content -LiteralPath (Get-GateRecreateStamp -LogDir $LogDir -Account $stampAccount) -Value (([pscustomobject]@{ Account = $stampAccount; Step = "$($s.Lane) $($s.Name)"; FailedUtc = [datetime]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture) }) | ConvertTo-Json -Compress) -Encoding utf8
         }
+        # M5 item 0 c5: the headless, dotnet-test, build and re-create rows run no Godot: godot_errors=n/a (the smoke rows carry smoke's own count, Get-SmokeStepRows).
+        if (@('test', 'build', 'headless', 'recreate') -contains $s.Kind) { foreach ($row in $rows) { if ($row.Detail -notmatch 'godot_errors=') { $row.Detail = "$($row.Detail) godot_errors=n/a" } } }
         AddRows $s $rows $timer.Elapsed.TotalSeconds
     }
     return @($results)
