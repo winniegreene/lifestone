@@ -1,6 +1,7 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Mage;
 
 namespace Lifestone.Client.Session.Fighter;
 
@@ -27,9 +28,12 @@ public enum LootStatus
 /// <see cref="LootDecision.NotResolved"/> and left.</para>
 /// <para><b>Outcomes.</b> <see cref="Looted"/> counts Confirmed moves; <see cref="Refused"/> a <see cref="ActionOutcomeKind.ServerError"/> or <see cref="ActionOutcomeKind.Refused"/> or any other ending that is not a confirmation
 /// or a timeout; <see cref="TimedOut"/> the 25 s timeouts. A refusal that names the burden (WeenieError 0x002A, "You are too encumbered to carry that!", or the same text as a transient string) ends the loop
-/// (<see cref="StoppedBy"/> is <c>burden</c>): every later item would be refused the same. Any other refusal is counted and the loop goes on with the next entry. There is no merge case: ACE never joins a stack at pick-up
-/// (the capture's arrows and coins), a looted stack is its own stack with a 0022 (<c>TODO(m4-loot-merge-stacks)</c>: <see cref="StacksBesideHeld"/> counts the looted stacks that have a held stack of their class; nothing here calls
-/// <see cref="IActionApi.MergeStack"/>).</para>
+/// (<see cref="StoppedBy"/> is <c>burden</c>): every later item would be refused the same. Any other refusal is counted and the loop goes on with the next entry. ACE never joins a stack at pick-up
+/// (the capture's arrows and coins; <c>Container.cs</c> 499-581 <c>TryAddToInventory</c> only adds the object, <c>Player_Inventory.cs</c> 1268ff <c>DoHandleActionPutItemInContainer</c> never looks for a stack), so a looted stack is its own
+/// stack with a 0022 and would take a pack slot. <b>Merging (M5 7, closes <c>TODO(m4-loot-merge-stacks)</c>):</b> once a pick-up of a stackable is Confirmed, the loop sends <see cref="IActionApi.MergeStack"/> (GameAction 0x0054,
+/// <c>HandleActionStackableMerge</c> <c>Player_Inventory.cs</c> 2849ff) from the new stack into the fullest other held stack of its weenie class that has room (pack or side pack, not an equipped one), for the smaller of the
+/// new stack and the room, and waits for its outcome before the next pick-up. A partial merge looks for the next stack with room. A refused or timed-out merge is logged, counted in <see cref="MergesRefused"/>, not tried again for that
+/// stack, and the loop goes on. <see cref="StacksBesideHeld"/> still counts the looted stacks that had a held stack of their class. The merge can be turned off with the constructor's <c>mergeStacks</c>.</para>
 /// <para><b>Allocation.</b> A <c>Step</c> allocates nothing but log lines, and those only on an event (a move sent or settled, an entry skipped, the end). The handled set grows with the entries.</para>
 /// <para><b>For the death loop (s1):</b> <c>new CorpseLooter(log, category, corpseGuid, LootRules.TakeAll)</c>, then <c>Step(session, session.Clock.Now)</c> each frame until <see cref="LootStatus.Done"/>.</para>
 /// </remarks>
@@ -70,6 +74,15 @@ public sealed class CorpseLooter
     private int _takenBurden;
     private int _burdenAtSend;
     private double _startedAt = double.NaN;
+    private readonly bool _mergeStacks;
+    private readonly List<uint> _scratch = new(64);
+    private readonly HashSet<uint> _mergeGaveUp = [];
+    private readonly HashSet<uint> _mergedAway = [];
+    private ActionHandle? _mergeHandle;
+    private bool _mergeDue;
+    private uint _mergeFrom;
+    private uint _mergeTo;
+    private int _mergeAmount;
 
     /// <summary>A loop over the container <paramref name="container"/>.</summary>
     /// <param name="log">Where the loop logs (one line per move, one per skip, one at the end).</param>
@@ -77,7 +90,8 @@ public sealed class CorpseLooter
     /// <param name="container">The viewed container's object id (a corpse or a chest).</param>
     /// <param name="rules">The rule, or null for <see cref="LootRules.TakeAll"/>.</param>
     /// <param name="unresolvedCapSeconds">How long an unresolved entry is waited for.</param>
-    public CorpseLooter(ILogSink log, string category, uint container, LootRules? rules = null, double unresolvedCapSeconds = UnresolvedCapSeconds)
+    /// <param name="mergeStacks">Whether a looted stackable is merged into a held stack of its class (the default; see the class remarks).</param>
+    public CorpseLooter(ILogSink log, string category, uint container, LootRules? rules = null, double unresolvedCapSeconds = UnresolvedCapSeconds, bool mergeStacks = true)
     {
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(category);
@@ -87,6 +101,7 @@ public sealed class CorpseLooter
         _container = container;
         _rules = rules ?? LootRules.TakeAll;
         _unresolvedCap = unresolvedCapSeconds;
+        _mergeStacks = mergeStacks;
     }
 
     /// <summary>The container being emptied.</summary>
@@ -116,20 +131,29 @@ public sealed class CorpseLooter
     /// <summary>The moves that got no answer within their timeout.</summary>
     public int TimedOut { get; private set; }
 
-    /// <summary>The looted stackables that had a held stack of their own class (<c>TODO(m4-loot-merge-stacks)</c>: they stay separate stacks).</summary>
+    /// <summary>The looted stackables that had a held stack of their own class when they landed (the merge into it is <see cref="StackMerges"/>).</summary>
     public int StacksBesideHeld { get; private set; }
 
     /// <summary>The weenie class id of the first looted stack that had a held stack of its class, or 0.</summary>
     public uint FirstStackBesideHeldWcid { get; private set; }
 
+    /// <summary>The merges the server confirmed (a looted stack joined into a held stack of its class; a partial merge and the merge of its remainder count one each).</summary>
+    public int StackMerges { get; private set; }
+
+    /// <summary>The merges that were refused, never sent (the model said they cannot merge) or timed out; the stack stays where it landed.</summary>
+    public int MergesRefused { get; private set; }
+
+    /// <summary>True when the looted stack <paramref name="guid"/> was wholly merged into another and is gone from the pack (its items are held, in the other stack).</summary>
+    public bool WasMergedAway(uint guid) => _mergedAway.Contains(guid);
+
     /// <summary>The entries left for <paramref name="reason"/>.</summary>
     public int SkippedBy(LootDecision reason) => _skipped[(int)reason];
 
-    /// <summary>The counts as one line (no names): <c>looted=2 skipped=0 (value=0 type=0 burden=0 held=0 unresolved=0) refused=0 timed_out=0 stopped_by=end</c>.</summary>
+    /// <summary>The counts as one line (no names): <c>looted=2 skipped=0 (value=0 type=0 burden=0 held=0 unresolved=0) refused=0 timed_out=0 stopped_by=end stack_merges=0 merges_refused=0</c>.</summary>
     public string Summary =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"looted={Looted} skipped={Skipped} (value={SkippedBy(LootDecision.Value)} type={SkippedBy(LootDecision.Type)} burden={SkippedBy(LootDecision.Burden)} held={SkippedBy(LootDecision.AlreadyHeld)} unresolved={SkippedBy(LootDecision.NotResolved)}) refused={Refused} timed_out={TimedOut} stopped_by={(StoppedBy.Length == 0 ? "running" : StoppedBy)}");
+            $"looted={Looted} skipped={Skipped} (value={SkippedBy(LootDecision.Value)} type={SkippedBy(LootDecision.Type)} burden={SkippedBy(LootDecision.Burden)} held={SkippedBy(LootDecision.AlreadyHeld)} unresolved={SkippedBy(LootDecision.NotResolved)}) refused={Refused} timed_out={TimedOut} stopped_by={(StoppedBy.Length == 0 ? "running" : StoppedBy)} stack_merges={StackMerges} merges_refused={MergesRefused}");
 
     /// <summary>One step of the loop on a session; <paramref name="now"/> is the session clock's seconds.</summary>
     public LootStatus Step(IGameSessionView session, double now)
@@ -154,12 +178,27 @@ public sealed class CorpseLooter
                 Settle(state, late);
             }
 
+            if (_mergeHandle is { Outcome: { } lateMerge })
+            {
+                SettleMerge(state, lateMerge);
+            }
+
             return LootStatus.Done;
         }
 
         if (double.IsNaN(_startedAt))
         {
             _startedAt = now;
+        }
+
+        if (_mergeHandle is not null)
+        {
+            if (_mergeHandle.Outcome is not { } mergeOutcome)
+            {
+                return LootStatus.Running;
+            }
+
+            SettleMerge(state, mergeOutcome);
         }
 
         if (_pending is not null)
@@ -174,6 +213,13 @@ public sealed class CorpseLooter
             {
                 return LootStatus.Done;
             }
+        }
+
+        if (_mergeDue)
+        {
+            _mergeDue = false;
+            _mergeHandle = actions.MergeStack(_mergeFrom, _mergeTo, _mergeAmount, ActionSource.Automation);
+            return LootStatus.Running;
         }
 
         if (state.Containers.Viewed is not { } view || view.Guid != _container)
@@ -209,8 +255,15 @@ public sealed class CorpseLooter
 
             _pendingItem = entry.Guid;
             _burdenAtSend = context.Burden;
-            _pending = actions.PickUp(entry.Guid, state.Self.Guid, 0, ActionSource.Host);
-            _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: taking '{item.Name}' 0x{entry.Guid:X8} (wcid {item.Weenie.WeenieClassId}, type 0x{item.ItemType:X}, value {item.Weenie.Value ?? 0}, burden {item.Weenie.Burden ?? 0})"));
+            var into = _rules.DestinationOf(item, state); // M5 7 D121: a side pack of the item's job, or 0 for the main pack
+            if (into != 0 && into != state.Self.Guid && !state.Self.Inventory.IsKnownContainer(into))
+            {
+                _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: the side pack 0x{into:X8} of '{item.Name}' 0x{entry.Guid:X8} is not held: into the main pack"));
+                into = 0;
+            }
+
+            _pending = actions.PickUp(entry.Guid, into == 0 ? state.Self.Guid : into, 0, ActionSource.Automation);
+            _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: taking '{item.Name}' 0x{entry.Guid:X8} (wcid {item.Weenie.WeenieClassId}, type 0x{item.ItemType:X}, value {item.Weenie.Value ?? 0}, burden {item.Weenie.Burden ?? 0}){(into == 0 || into == state.Self.Guid ? string.Empty : string.Create(CultureInfo.InvariantCulture, $" into the side pack 0x{into:X8}"))}"));
             return LootStatus.Running;
         }
 
@@ -251,7 +304,7 @@ public sealed class CorpseLooter
     }
 
     /// <summary>True when the loop was abandoned (or ended) with a pick-up still in flight: the owner steps it until this is false (or <see cref="DrainSeconds"/> pass) and then reads <see cref="Looted"/>.</summary>
-    public bool IsDraining => IsDone && _pending is not null;
+    public bool IsDraining => IsDone && (_pending is not null || _mergeHandle is not null);
 
     private void Settle(GameState state, ActionOutcome outcome)
     {
@@ -270,6 +323,10 @@ public sealed class CorpseLooter
                 {
                     _takenBurden = _burdenAtSend + (item!.Weenie.Burden ?? 0); // the burden the move started from plus the item's: the server's property may or may not show it yet
                     NoteStack(state, item);
+                    if (!late)
+                    {
+                        PlanMerge(state, guid);
+                    }
                 }
 
                 _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: took '{name}' 0x{guid:X8} ({Looted} so far{(late ? "; it settled after the loop was abandoned" : string.Empty)})"));
@@ -318,6 +375,57 @@ public sealed class CorpseLooter
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// Plans the merge of the looted stack <paramref name="guid"/> into the fullest other held stack of its weenie class that has room (not an equipped one): <c>_mergeDue</c> is set and the next <c>Step</c> sends it. Nothing is planned for
+    /// an item that does not stack, a stack that is gone, one whose merge was refused before, or when no other stack has room.
+    /// </summary>
+    private void PlanMerge(GameState state, uint guid)
+    {
+        if (!_mergeStacks || IsDone || _mergeGaveUp.Contains(guid) || !state.Objects.TryGet(guid, out var item) || item.Weenie.MaxStackSize is not > 1)
+        {
+            return;
+        }
+
+        if (!StackMerge.TryPlan(state, guid, _scratch, out var best, out var amount, out var bestSize, out var bestRoom))
+        {
+            return;
+        }
+
+        _mergeFrom = guid;
+        _mergeTo = best;
+        _mergeAmount = amount;
+        _mergeDue = true;
+        _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: merging '{item.Name}' 0x{guid:X8} (x{GearInventory.StackOf(state, item)}) into the held stack 0x{best:X8} (x{bestSize}, room {bestRoom}): x{amount}"));
+    }
+
+    private void SettleMerge(GameState state, ActionOutcome outcome)
+    {
+        var from = _mergeFrom;
+        var late = IsDone;
+        _mergeHandle = null;
+        if (outcome.Kind == ActionOutcomeKind.Confirmed)
+        {
+            StackMerges++;
+            var gone = !state.Self.Inventory.Find(from).Held;
+            if (gone)
+            {
+                _mergedAway.Add(from);
+            }
+
+            _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: merged 0x{from:X8} into 0x{_mergeTo:X8} ({StackMerges} so far; {outcome.Detail}{(gone ? string.Empty : "; part of it is left, looking for another stack")}{(late ? "; it settled after the loop was abandoned" : string.Empty)})"));
+            if (!gone)
+            {
+                PlanMerge(state, from);
+            }
+
+            return;
+        }
+
+        MergesRefused++;
+        _mergeGaveUp.Add(from);
+        _log.Warn(_category, string.Create(CultureInfo.InvariantCulture, $"loot: the merge of 0x{from:X8} into 0x{_mergeTo:X8} ended {outcome.Kind} ({outcome.Detail ?? "no detail"}); counted, the stack stays where it landed, going on"));
     }
 
     private void Skip(uint guid, WorldObject? item, LootDecision reason)

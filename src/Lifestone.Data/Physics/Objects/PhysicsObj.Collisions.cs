@@ -1,6 +1,7 @@
 using System.Numerics;
 using Lifestone.Data.Physics.Transitions;
 using Lifestone.Data.Physics.World;
+using Lifestone.Data.World;
 
 namespace Lifestone.Data.Physics.Objects;
 
@@ -13,12 +14,36 @@ public sealed partial class PhysicsObj
     private readonly List<uint> _endedCollisions = [];
     private Dictionary<uint, CollisionRecord>? _collisionTable;
     private bool _updating;
+    private bool _placementPassesPlayer;
 
     /// <summary>The objects the object is touching, by id (retail <c>collision_table</c>), with when each was last touched.</summary>
     public int CollisionCount => _collisionTable?.Count ?? 0;
 
     /// <summary>Retail <c>PhysicsTimer::curr_time</c>: the step's end inside <see cref="UpdateObject"/>, else the world's time.</summary>
     private double CollisionTime => _updating ? _stepTime : World.CurrentTime;
+
+    /// <summary>
+    /// <see cref="EnterWorld"/> with Slide (retail <c>CPhysicsObj::enter_world(slide)</c>, 11.4186 0x00516170, 11.6096
+    /// 0x00516C70) for a server object made around the client's own player: the placement slides it out of statics and other
+    /// objects as retail's does, but the world's <see cref="PhysicsWorld.Player"/> does not stop it. Retail creates the objects
+    /// of a cell before it places the player there, so the player's own placement slides the player out of them; a session
+    /// whose create arrives after the player is placed keeps that order by placing the object where the server has it and
+    /// then placing the player again (the hosts' <c>ReplaceAfterObjectCreate</c>). Added for the server-object host
+    /// (M5 item 5 F1, D71: additive; nothing else changes meaning).
+    /// </summary>
+    /// <returns>True when placed (or waiting for its landblock); false when no valid position was found.</returns>
+    public bool EnterWorldPastPlayer(in CellFrame position)
+    {
+        _placementPassesPlayer = true;
+        try
+        {
+            return EnterWorld(position, slide: true);
+        }
+        finally
+        {
+            _placementPassesPlayer = false;
+        }
+    }
 
     /// <summary>
     /// Retail <c>CPhysicsObj::FindObjCollisions</c> (11.4186 0x0050F050, 11.6096 0x0050FB20) for this object as an
@@ -34,15 +59,27 @@ public sealed partial class PhysicsObj
     /// without contact; with an ethereal object, or a creature the mover ignores, as an object collision that does not
     /// stop the mover; otherwise as an object collision.</item>
     /// </list>
+    /// Lifestone's addition (M5 item 5 fix F3, not retail): nothing for a mover whose transition meets the fixed world only
+    /// (<see cref="ObjectInfo.FixedWorldOnly"/>, the route planner's probes).
     /// </summary>
     internal TransitionState FindObjCollisions(Transition transition)
     {
+        if (transition.ObjectInfo.FixedWorldOnly)
+        {
+            return TransitionState.OK;
+        }
+
         if ((State & PhysicsState.Ethereal) != 0 && (State & PhysicsState.IgnoreCollisions) != 0)
         {
             return TransitionState.OK;
         }
 
         var info = transition.ObjectInfo;
+        if (info.Object is PhysicsObj { _placementPassesPlayer: true } && ReferenceEquals(this, World.Player))
+        {
+            return TransitionState.OK;
+        }
+
         var weenie = Weenie;
         if (weenie is not null && (info.State & ObjectInfoState.IsViewer) != 0 && weenie.IsCreature)
         {

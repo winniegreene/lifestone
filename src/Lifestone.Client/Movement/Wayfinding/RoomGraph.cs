@@ -24,7 +24,7 @@ public sealed record RoomExit(uint CellId, ushort PolygonId, Vector3 Sill, Vecto
 /// <c>m3-fight-planner-lean</c>).
 /// </summary>
 /// <remarks>
-/// <para><b>Plan.</b> <see cref="Plan"/> is a shortest-walk search (Dijkstra) over the doorway crossings: from the start point to a
+/// <para><b>Plan.</b> <see cref="Plan(uint, Vector3, uint, Vector3)"/> is a shortest-walk search (Dijkstra) over the doorway crossings: from the start point to a
 /// doorway's approach point, through its pair, on to the next, to the goal point; every crossing also costs
 /// <see cref="CrossingMetres"/> so that, of equal walks, the one with fewer doorways wins (the breadth-first rule the den's planner
 /// had). It returns a <see cref="CellRoute"/>: the cells and the waypoint pairs; the caller walks to the goal point after the last.</para>
@@ -32,6 +32,12 @@ public sealed record RoomExit(uint CellId, ushort PolygonId, Vector3 Sill, Vecto
 /// tile's doorway lane for the same door (<see cref="NavTileBuilder"/> cuts one per building portal a human fits) is found by its
 /// entry cell and its sill (<see cref="TryJoin(NavTile, uint, out NavDoorwayLane)"/>). <see cref="IndoorOutdoorRoute"/> composes
 /// the outdoor planner, the lane and this graph.</para>
+/// <para><b>Creatures.</b> <see cref="Creatures"/>, a run's creature layer (nav-creatures-indoor, as <see cref="PathPlanner.Creatures"/> outdoors), raises
+/// the cost of every straight walk of the search (start to approach, approach to push, push to the goal) by its exposure to the hostile creatures' discs
+/// (<see cref="NavCreatures.ExposureAlong(Vector2, float, Vector2, float, uint)"/>: 1 more a metre at a disc's edge rising to 5 at the creature, overlapping discs
+/// adding), so a walk through other doorways wins when its extra length is less than the exposure it saves, and a creature in the only way costs the
+/// route but never fails it. A creature counts only within <see cref="NavCreatures.StoreyBandMetres"/> of the walk's height (a creature a storey above or below
+/// costs nothing: M5 2 fix F2, review 2-R6). Without a layer (or an empty one) every plan is exactly as before.</para>
 /// <para><c>TODO(room-steps)</c>: the graph knows no steps. The shop's inner doors rise about a metre from the entry cells' floor (Holtburg 0x13F's
 /// portals to 0x140 sit at 95.0, its entries' at 94.0); whether that is stairs the human climbs is for the physics confirmation of the route (the runner) to say.</para>
 /// <para>Not retail: Lifestone's own wayfinder; <see cref="CrossingMetres"/> and <see cref="JoinToleranceMetres"/> are its own.</para>
@@ -52,6 +58,7 @@ public sealed class RoomGraph
 
     private readonly LandblockCellSet _cells;
     private readonly CellRoutePlanner _planner;
+    private readonly Vector2 _blockOrigin;
     private IReadOnlyList<RoomExit>? _exits;
 
     /// <summary>A graph over <paramref name="cells"/>: the doorways a standing human fits, those leaning up to <paramref name="maxLean"/> too.</summary>
@@ -63,7 +70,17 @@ public sealed class RoomGraph
         ArgumentNullException.ThrowIfNull(cells);
         _cells = cells;
         _planner = new CellRoutePlanner(cells, maxLean, headSlack);
+        _blockOrigin = NavPoint.BlockOrigin(LandblockId);
     }
+
+    /// <summary>
+    /// The creature layer the plans are costed with (nav-creatures-indoor), or null: a run's own layer (<see cref="NavRunner"/> sets it at each plan, so a
+    /// graph a source shares between runs takes the planning run's layer, and null for a run without a feed). Null or empty: the plans are today's.
+    /// </summary>
+    public NavCreatures? Creatures { get; set; }
+
+    /// <summary>M5 7 P7i: the short-lived costly floor patches (spots where walks stuck); empty: the plans are today's.</summary>
+    public RoomPatches Patches { get; } = new();
 
     /// <summary>The cells planned over.</summary>
     public LandblockCellSet Cells => _cells;
@@ -88,7 +105,18 @@ public sealed class RoomGraph
     /// (landblock-local points), or null when either cell is missing or no walkable doorways join them. The route's waypoints are the
     /// doorway pairs only (two per doorway, the first left out where the room is too thin); the goal point is the caller's last step.
     /// </summary>
-    public CellRoute? Plan(uint fromCell, Vector3 from, uint toCell, Vector3 to)
+    public CellRoute? Plan(uint fromCell, Vector3 from, uint toCell, Vector3 to) => Plan(fromCell, from, toCell, to, ignoreCreature: 0);
+
+    /// <summary>
+    /// <see cref="Plan(uint, Vector3, uint, Vector3)"/> with <see cref="Creatures"/>' discs costed, <paramref name="ignoreCreature"/> left out (a run's goal
+    /// creature, which the walk goes to; 0 for none).
+    /// </summary>
+    /// <param name="fromCell">The start's cell.</param>
+    /// <param name="from">The start, landblock-local.</param>
+    /// <param name="toCell">The goal's cell.</param>
+    /// <param name="to">The goal, landblock-local.</param>
+    /// <param name="ignoreCreature">The creature left out of the cost, or 0.</param>
+    public CellRoute? Plan(uint fromCell, Vector3 from, uint toCell, Vector3 to, uint ignoreCreature)
     {
         if (_cells.GetCell(fromCell) is null || _cells.GetCell(toCell) is null)
         {
@@ -100,6 +128,8 @@ public sealed class RoomGraph
             return new CellRoute([fromCell], []);
         }
 
+        var layer = Creatures is { Count: > 0 } creatures ? creatures : null;
+        var patches = Patches.Count > 0 ? Patches : null;
         var nodes = new List<Arrival> { new(fromCell, from, -1, 0f, null, null, IsGoal: false) };
         var best = new Dictionary<(uint Cell, int Via), float> { [(fromCell, -1)] = 0f };
         var queue = new PriorityQueue<int, float>();
@@ -120,7 +150,15 @@ public sealed class RoomGraph
 
             if (node.Cell == toCell)
             {
-                nodes.Add(new Arrival(node.Cell, to, index, node.Cost + Vector3.Distance(node.Point, to), null, null, IsGoal: true));
+                var last = node.Cost + Vector3.Distance(node.Point, to);
+                if (layer is not null)
+                {
+                    last += Exposure(layer, node.Point, to, ignoreCreature);
+                }
+
+                last += patches?.Cost(node.Point, to) ?? 0f;
+
+                nodes.Add(new Arrival(node.Cell, to, index, last, null, null, IsGoal: true));
                 queue.Enqueue(nodes.Count - 1, nodes[^1].Cost);
             }
 
@@ -144,10 +182,23 @@ public sealed class RoomGraph
                 if (pair.Approach is { } approach)
                 {
                     cost += Vector3.Distance(at, approach.Origin);
+                    if (layer is not null)
+                    {
+                        cost += Exposure(layer, at, approach.Origin, ignoreCreature);
+                    }
+
+                    cost += patches?.Cost(at, approach.Origin) ?? 0f;
+
                     at = approach.Origin;
                 }
 
                 cost += Vector3.Distance(at, pair.Push.Origin);
+                if (layer is not null)
+                {
+                    cost += Exposure(layer, at, pair.Push.Origin, ignoreCreature);
+                }
+
+                cost += patches?.Cost(at, pair.Push.Origin) ?? 0f;
                 var key = (portal.OtherCellId, Via: (int)((cell.Id & 0xFFFF) << 12) + i);
                 if (best.TryGetValue(key, out var known) && known <= cost)
                 {
@@ -164,7 +215,7 @@ public sealed class RoomGraph
     }
 
     /// <summary>
-    /// The walk of <see cref="Plan"/> as a scripted route (the Black Spawn Den's legs): a pass point before and after each doorway
+    /// The walk of <see cref="Plan(uint, Vector3, uint, Vector3)"/> as a scripted route (the Black Spawn Den's legs): a pass point before and after each doorway
     /// (<see cref="CellRoutePlanner.PushIntoCellMetres"/> tolerance), then a stop at the middle of <paramref name="toCell"/>
     /// (<see cref="RoomFrame"/>) within <paramref name="stopWithin"/>.
     /// </summary>
@@ -300,6 +351,10 @@ public sealed class RoomGraph
 
         return [.. exits];
     }
+
+    /// <summary>The layer's extra cost of the straight walk between two landblock-local points: counting only the creatures within a storey band of the walk's height (<see cref="NavCreatures.StoreyBandMetres"/>, M5 2 fix F2).</summary>
+    private float Exposure(NavCreatures layer, Vector3 a, Vector3 b, uint ignore) =>
+        layer.ExposureAlong(_blockOrigin + new Vector2(a.X, a.Y), a.Z, _blockOrigin + new Vector2(b.X, b.Y), b.Z, ignore);
 
     private static CellRoute Build(List<Arrival> nodes, int goal)
     {

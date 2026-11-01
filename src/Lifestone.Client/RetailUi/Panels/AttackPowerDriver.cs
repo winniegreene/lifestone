@@ -34,8 +34,8 @@ public interface IPowerBarNotices
 /// CancelAttack on a non-zero code while its repeat flag is up (<c>AbortAutomaticAttack</c> 0x0056BBD0); Lifestone does not (<c>TODO(m4-attack-done-cancel)</c>: the server has ended the run). Retail sends a second attack at the slider's power
 /// when the power held was greater (<c>EndAttackRequest</c>); Lifestone sends the first only (<c>TODO(m4-attack-second-send)</c>).</para>
 /// <para><b>Other sources.</b> Retail has no sender but its own window; Lifestone's hunt loop and tools send through the Action API as Host or Automation. <see cref="AttackRequested"/> begins the bar for them as
-/// <c>HandleCommenceAttackEvent</c> does for a reply: the mode by the option, an automatic build from 0 up to the power sent, and a run that repeats until a 0x01A7 with a code. The AutoRepeatAttack option box is ghosted
-/// (<c>TODO(m3-combat-options)</c>), so a run is taken as repeating: ACE repeats for this character whatever the option says.</para>
+/// <c>HandleCommenceAttackEvent</c> does for a reply: the mode by the option, an automatic build from 0 up to the power sent, and a run that repeats until a 0x01A7 with a code. The AutoRepeatAttack option box is settable now (M5 6 u1: the combat window's three boxes are sent with SetCharacterOptions), but the driver still does not read it
+/// (<c>TODO(m3-combat-options)</c>: read the option instead of assuming), so a run is taken as repeating: ACE repeats for this character whatever the option says.</para>
 /// <para>Not read: <c>PlayerInReadyPosition</c> (not mapped to 11.6096; the build never waits for the player's motions, <c>TODO(m4-ready-position)</c>) and <c>ObjectIsAttackable</c> (0x0056B340; <c>TODO(m3-attackable-rule)</c>: any selection counts).</para>
 /// </remarks>
 public sealed class AttackPowerDriver : IDisposable

@@ -126,7 +126,7 @@ public sealed class RebuffDriverTests(Xunit.Abstractions.ITestOutputHelper outpu
         var t = new RebuffRig();
         Assert.Equal(BuffStatus.Done, t.BuildBuffs());
         t.SkipTo(Margin - 2);
-        t.Caster.FizzleNext(_ => true, 2); // the first line due fizzles, and its retry one level down fizzles: a miss
+        t.Caster.FizzleNext(_ => true, 4); // the first line due fizzles three times at its level (D14: the first try and two more) and once one level down: a miss
 
         Assert.True(t.RunUntil(() => t.Driver.Passes >= 1 && Resting(t), 120));
         Assert.Equal(RebuffDriverState.BackingOff, t.Driver.State);
@@ -148,6 +148,25 @@ public sealed class RebuffDriverTests(Xunit.Abstractions.ITestOutputHelper outpu
         Assert.Null(t.Driver.LastFailure);
         Assert.Equal(RebuffDriverState.Idle, t.Driver.State);
         Assert.Equal(24, t.Driver.LastResult!.Active);
+    }
+
+    [Fact]
+    public void A_due_line_that_fizzles_twice_lands_on_its_third_try_at_the_same_level_with_no_miss_and_no_back_off()
+    {
+        // M5 1 K3 (D14): the driver's pass is BuffCycle's, so it inherits the owner's fizzle rule: the same level twice more before any level down.
+        var t = new RebuffRig();
+        Assert.Equal(BuffStatus.Done, t.BuildBuffs());
+        t.SkipTo(Margin - 2);
+        t.Caster.FizzleNext(_ => true, 2);
+
+        Assert.True(t.RunUntil(() => t.Driver.Passes >= 1 && Resting(t), 120));
+        Assert.Null(t.Driver.LastFailure);
+        Assert.Equal(RebuffDriverState.Idle, t.Driver.State);
+        Assert.Empty(t.Driver.LastResult!.Misses);
+        var fizzled = t.Caster.Answered.Where(a => a.Fizzled).ToList();
+        Assert.Equal(2, fizzled.Count);
+        Assert.Equal(fizzled[0].Spell, fizzled[1].Spell);
+        Assert.Contains(t.Caster.Answered, a => !a.Fizzled && a.Spell == fizzled[0].Spell && a.At > fizzled[1].At); // the third try, at the same level, landed
     }
 
     [Fact]

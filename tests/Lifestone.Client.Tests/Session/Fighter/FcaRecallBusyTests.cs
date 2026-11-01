@@ -1,4 +1,5 @@
 using Lifestone.Client.Session.Actions;
+using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Net.Messages;
@@ -107,8 +108,9 @@ public sealed class FcaRecallBusyTests
     }
 
     [Fact]
-    public void A_busy_answer_to_the_cast_after_the_wait_is_still_recall_cast_and_is_not_retried()
+    public void A_busy_answer_to_the_cast_after_the_wait_is_waited_out_and_resent_three_times_then_is_recall_cast_M5_1_fix_A_1_R6()
     {
+        // Before M5 1 fix A the first 0x001D ended the recall (recall:cast, one cast). The cast policy's busy rule (one second, three times) now resends it; the fourth busy answer is the end.
         var t = new C1cRecallRig(null);
         var answered = false;
         t.Caster.CastHook = _ =>
@@ -134,7 +136,8 @@ public sealed class FcaRecallBusyTests
         Assert.Equal(RecallStatus.Failed, t.Recall.Status);
         Assert.Equal("recall:cast", t.Recall.Failure);
         Assert.Contains("0x1D", t.Recall.Detail, StringComparison.Ordinal);
-        Assert.Single(t.R.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        Assert.Equal(CastRules.DefaultBusyRetries + 1, t.R.H.Net.Of(FakeSendKind.CastUntargetedSpell).Count); // the cast and its three resends
         Assert.DoesNotContain(t.R.H.Log.Lines, l => l.Contains("recall:busy-wait", StringComparison.Ordinal));
+        Assert.Contains(t.R.H.Log.Lines, l => l.Contains("busy (0x001D) 4 times", StringComparison.Ordinal));
     }
 }

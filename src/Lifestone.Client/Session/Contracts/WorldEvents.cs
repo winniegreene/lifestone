@@ -217,3 +217,66 @@ public enum SelfTravel
     /// <summary>A SetState cleared Hidden on the player: the player is in the world and may move.</summary>
     Present,
 }
+
+/// <summary>
+/// The server asked the player a yes-or-no question (GameEvent 0x0274; M5 6 w2): <see cref="GameState.PendingConfirmation"/> now holds it. Retail's handler is
+/// <c>CM_Character::DispatchUI_ConfirmationRequest</c> (11.6096 0x006A3BB0), which hands it to <c>CM_UI::Event_ConfirmationRequest</c> (address unknown) for the dialog.
+/// </summary>
+/// <param name="Type">The raw type word (ACE's <c>ConfirmationType</c>).</param>
+/// <param name="Context">The server's context word.</param>
+/// <param name="Text">The question.</param>
+public readonly record struct ConfirmationRequested(uint Type, uint Context, string Text) : IGameEvent;
+
+/// <summary>Why an open question closed (<see cref="ConfirmationClosed"/>).</summary>
+public enum ConfirmationCloseReason
+{
+    /// <summary>The server's GameEvent 0x0276 CharacterConfirmationDone (ACE sends it at its 30 s timeout or to withdraw the question).</summary>
+    ServerDone,
+
+    /// <summary>The player answered it (<see cref="IActionApi.RespondToConfirmation"/>); it closes locally when the answer is sent.</summary>
+    Answered,
+
+    /// <summary>The world was left (a log off, a reset): no question outlives the character.</summary>
+    WorldExit,
+
+    /// <summary>
+    /// A second request of the same type arrived while one was open, and the newer replaced it. ACE never sends that (it refuses a second request of a
+    /// type before sending it: <c>ConfirmationManager.cs:36-48</c>, @95ef426d), so a replacement is logged as a WARNING.
+    /// </summary>
+    Replaced,
+}
+
+/// <summary>An open question closed (M5 6 w2); <see cref="GameState.PendingConfirmation"/> no longer holds it.</summary>
+/// <param name="Type">Its type word.</param>
+/// <param name="Context">Its context word.</param>
+/// <param name="Reason">Why it closed.</param>
+/// <param name="Accepted">The answer when <paramref name="Reason"/> is <see cref="ConfirmationCloseReason.Answered"/>, otherwise null.</param>
+public readonly record struct ConfirmationClosed(uint Type, uint Context, ConfirmationCloseReason Reason, bool? Accepted) : IGameEvent;
+
+/// <summary>The kind of a public property update (GameMessages 0x02D0, 0x02D2, 0x02D4, 0x02D6, 0x02D8; <see cref="ObjectPropertyChanged"/>).</summary>
+public enum ObjectPropertyKind
+{
+    /// <summary>0x02D2 PublicUpdatePropertyBool (ACE <c>PropertyBool</c>).</summary>
+    Bool,
+
+    /// <summary>0x02D0 PublicUpdatePropertyInt64 (ACE <c>PropertyInt64</c>).</summary>
+    Int64,
+
+    /// <summary>0x02D4 PublicUpdatePropertyFloat (ACE <c>PropertyFloat</c>).</summary>
+    Float,
+
+    /// <summary>0x02D6 PublicUpdatePropertyString (ACE <c>PropertyString</c>).</summary>
+    String,
+
+    /// <summary>0x02D8 PublicUpdatePropertyDataId (ACE <c>PropertyDataId</c>).</summary>
+    DataId,
+}
+
+/// <summary>
+/// The server changed one public property of an object in the table (M5 6 w2): <see cref="WorldObject.Properties"/> holds the value, and for
+/// <see cref="ObjectPropertyKind.Bool"/> key 3 (ACE's <c>PropertyBool.Locked</c>) <see cref="WorldObject.Locked"/> too.
+/// </summary>
+/// <param name="Guid">The object.</param>
+/// <param name="Kind">The property's kind.</param>
+/// <param name="Key">The property id (ACE's numbering for the kind).</param>
+public readonly record struct ObjectPropertyChanged(uint Guid, ObjectPropertyKind Kind, uint Key) : IGameEvent;

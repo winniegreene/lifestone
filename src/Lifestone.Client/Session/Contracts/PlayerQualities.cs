@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Lifestone.Net.Messages;
+using Lifestone.Net.Types;
 
 namespace Lifestone.Client.Session.Contracts;
 
@@ -266,6 +267,9 @@ public sealed class PlayerQualities
 
     internal Dictionary<uint, SkillDesc> Skills { get; } = [];
 
+    /// <summary>The player's stored positions by ACE's <c>PositionType</c> (GameMessage 0x02DB PrivateUpdatePosition; M5 6 w2), e.g. LastOutsideDeath.</summary>
+    internal Dictionary<uint, AcPosition> Positions { get; } = [];
+
     /// <summary>PropertyInt 25 (ACE's <c>PropertyInt.Level</c>).</summary>
     public const uint LevelProperty = 25;
 
@@ -314,6 +318,18 @@ public sealed class PlayerQualities
     /// <summary>An instance-id property (PropertyInstanceId).</summary>
     public bool TryGetInstanceId(uint key, out uint value) => InstanceIds.TryGetValue(key, out value);
 
+    /// <summary>ACE's <c>PropertyBool.Afk</c>, set by GameMessage 0x02D1 after a SetAfkMode (M5 6 w2).</summary>
+    public const uint AfkProperty = 110;
+
+    /// <summary>
+    /// Whether the server says the player is away from the keyboard: ACE's <c>PropertyBool.Afk</c> from the last GameMessage 0x02D1 (ACE's
+    /// <c>HandleActionSetAFKMode</c> answers every 0x000F with it: @95ef426d <c>Player_Networking.cs:438-443</c>) or the description; false when neither said.
+    /// </summary>
+    public bool Afk => Bools.TryGetValue(AfkProperty, out var v) && v;
+
+    /// <summary>One of the player's stored positions (ACE's <c>PositionType</c>, e.g. 0x0E LastOutsideDeath), from GameMessage 0x02DB; false when none came.</summary>
+    public bool TryGetPosition(uint positionType, out AcPosition value) => Positions.TryGetValue(positionType, out value);
+
     /// <summary>A primary attribute (strength 1 ... self 6).</summary>
     public bool TryGetAttribute(uint id, out AttributeDesc value) => Attributes.TryGetValue(id, out value);
 
@@ -354,6 +370,7 @@ public sealed class PlayerQualities
         Attributes.Clear();
         Vitals.Clear();
         Skills.Clear();
+        Positions.Clear();
         Enchantments = [];
     }
 

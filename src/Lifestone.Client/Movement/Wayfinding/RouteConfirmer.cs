@@ -56,6 +56,11 @@ public readonly record struct RouteConfirmFailure(int Segment, CellFrame At, flo
 /// stands in the player's way.</para>
 /// <para><b>Sight.</b> <see cref="PhysicsWorld.SweepViewer"/> (a gravity-free sphere) serves only the runner's in-sight arrival test
 /// (<see cref="InSight"/>) and the wall check between doorway pairs (<see cref="WallBetween"/>).</para>
+/// <para><b>The fixed world only</b> (M5 item 5 fix F3): both probes pass the server objects the world holds since item 5 (D70; the ground probe is
+/// <see cref="PhysicsWorld.TryFixedGroundZ"/>, the placement body is <see cref="PhysicsObj.FixedWorldOnly"/>), so a closed door, an NPC or a creature on
+/// the path never refuses it: the runner meets them at walk time (a closed door: the door step; a creature: the creature layer and its replans; anything
+/// else: the stuck ladder). The live gate's round 1 refused every route through a closed door's sill this way. The player's own transitions still meet
+/// every server object.</para>
 /// <para>Not retail: the sampling and its constants are Lifestone's own. Game thread only (the world is).</para>
 /// </remarks>
 public sealed class RouteConfirmer : IDisposable
@@ -499,7 +504,7 @@ public sealed class RouteConfirmer : IDisposable
     {
         at = SampleAt(a, b, ga, gb, length, along, _prevZ);
         GroundSamples++;
-        if (!_world.TryGroundZ(at, _foot, out z, out _))
+        if (!_world.TryFixedGroundZ(at, _foot, out z, out _))
         {
             return false;
         }
@@ -513,7 +518,7 @@ public sealed class RouteConfirmer : IDisposable
         var drop = PhysicsWorld.GroundProbeRise + PhysicsWorld.GroundProbeDrop;
         at = SampleAt(a, b, ga, gb, length, along, _prevZ - drop);
         GroundSamples++;
-        if (!_world.TryGroundZ(at, _foot, out z, out _))
+        if (!_world.TryFixedGroundZ(at, _foot, out z, out _))
         {
             at = SampleAt(a, b, ga, gb, length, along, _prevZ);
             return false;
@@ -525,7 +530,7 @@ public sealed class RouteConfirmer : IDisposable
 
     private bool TryPlace(in CellFrame at, out string why)
     {
-        _probe ??= new PhysicsObj(_world, _body, id: 0, new ProbeWeenie());
+        _probe ??= new PhysicsObj(_world, _body, id: 0, new ProbeWeenie()) { FixedWorldOnly = true }; // F3: the planner judges the fixed world; the runner meets server objects
         if (_probe.Cell is not null)
         {
             _probe.LeaveWorld(); // each placement fresh, not a move from the last one

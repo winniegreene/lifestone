@@ -36,8 +36,33 @@ public enum ProfileRole
     /// <summary>Heal Self (M4 P5a): the Life Magic Boost spell that gives health back to the caster. Not a buff; never in the cycle.</summary>
     HealSelf,
 
+    /// <summary>Drain Health Other (M5 7 F7, the owner's D88): the Life Magic Transfer spell that takes a share of the target's health and gives most of it to the caster. Not a buff; never in the cycle; the fight casts it when its own health runs low.</summary>
+    LifeDrain,
+
     /// <summary>A travel spell (M4 P5a, plan D36): Lifestone Recall, Primary Portal Tie or Primary Portal Recall, Item Enchantment spells with no duration. Not buffs.</summary>
     Travel,
+
+    /// <summary>A debuff the mage casts on a creature before the bolts (M5 7 F8, D89: Fire Vulnerability Other, a Life Magic enchantment with a duration, the Slave's opener). Not a buff of the mage and never in the cycle; the duration is the enchantment's on the target.</summary>
+    Debuff,
+}
+
+/// <summary>
+/// M5 7 F24: the order a fight refreshes buff lines in when several are due, soonest group first (the owner's order after soak round 3's death): the protections, then the regenerations, then the masteries and attributes, then the wand's lines.
+/// A profile value (<see cref="ArenaProfile.RefreshGroupOf"/>), never a ground's constant.
+/// </summary>
+public enum RefreshGroup
+{
+    /// <summary>The protections: the armour item lines (Impenetrability, Bludgeon Bane) and <see cref="ArenaProfile.ProtectionLineNames"/>.</summary>
+    Protection,
+
+    /// <summary>The regenerations: the other life buffs (Regeneration, Rejuvenation, Mana Renewal).</summary>
+    Regeneration,
+
+    /// <summary>The masteries and attributes: the other creature buffs.</summary>
+    Attribute,
+
+    /// <summary>The wand's lines (Hermetic Link, Defender).</summary>
+    Wand,
 }
 
 /// <summary>
@@ -58,7 +83,11 @@ public sealed record ProfileSpell(int Position, uint Id, string Name, uint Power
 /// <param name="School">The spell school (the SpellTable's).</param>
 /// <param name="Role">What the line is for.</param>
 /// <param name="Spells">The spells in list order: levels I-VI, VII, VIII (Volley and Blast: see <see cref="ProfileSpell.Position"/>).</param>
-public sealed record ProfileLine(string Name, string DatRoot, MagicSchool School, ProfileRole Role, IReadOnlyList<ProfileSpell> Spells)
+/// <param name="ByPlay">
+/// M5 7 P7j (D143): true for a line the character learns by play (a scroll bought and read on a town trip, the ground's <c>learn</c> list), never by the build's <c>spell learn</c>: the build leaves it out of
+/// <see cref="IBuffProfile.SpellsToLearn"/>, and the buff cycle wants it, and casts only its levels, once the spellbook holds them (read from the state, never assumed).
+/// </param>
+public sealed record ProfileLine(string Name, string DatRoot, MagicSchool School, ProfileRole Role, IReadOnlyList<ProfileSpell> Spells, bool ByPlay = false)
 {
     /// <summary>True for the self and item buffs (an enchantment with a duration): the 24 buff lines the cycle casts. The mana lines and the war lines are not buffs.</summary>
     public bool IsBuff => Role is ProfileRole.CreatureBuff or ProfileRole.LifeBuff or ProfileRole.ItemBuffArmor or ProfileRole.ItemBuffWand;
@@ -92,17 +121,29 @@ public sealed record ProfileLine(string Name, string DatRoot, MagicSchool School
 /// </remarks>
 public static class ArenaProfile
 {
-    /// <summary>The tuskers' weenie class ids (D12): the only loop targets.</summary>
-    public static readonly IReadOnlyList<uint> TargetWcids = [1628, 1629];
-
-    /// <summary>The Aluvian den's portal (D12).</summary>
-    public const uint ArenaPortalWcid = 7242;
-
-    /// <summary>The cell the Aluvian den's portal lands in (D12).</summary>
-    public const uint ArenaCell = 0x01050375;
-
     /// <summary>The war line the loops fight with.</summary>
     public const string WarLineName = "Flame Bolt";
+
+    /// <summary>M5 7 F24: the creature and life lines that are protections (they cut the damage taken): the refresh casts them before the regenerations and the masteries. The armour item lines are protections by their role.</summary>
+    public static IReadOnlyList<string> ProtectionLineNames { get; } = ["Armor Self", "Bludgeon Protection Self", "Invulnerability Self", "Impregnability Self", "Magic Resistance Self"];
+
+    /// <summary>M5 7 F24: the refresh group of a buff line (from its role, and <see cref="ProtectionLineNames"/> for the self lines that protect).</summary>
+    /// <param name="line">The profile line.</param>
+    public static RefreshGroup RefreshGroupOf(ProfileLine line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        if (line.Role == ProfileRole.ItemBuffArmor || ProtectionLineNames.Contains(line.Name))
+        {
+            return RefreshGroup.Protection;
+        }
+
+        return line.Role switch
+        {
+            ProfileRole.LifeBuff => RefreshGroup.Regeneration,
+            ProfileRole.ItemBuffWand => RefreshGroup.Wand,
+            _ => RefreshGroup.Attribute,
+        };
+    }
 
     /// <summary>Every line, in the spec's order.</summary>
     public static IReadOnlyList<ProfileLine> Lines { get; } =
@@ -323,6 +364,16 @@ public static class ArenaProfile
             S(1605, "Aura of Defender Self VI", 250, 2700),
             S(2101, "Aura of Cragstone's Will", 300, 3600),
             S(4400, "Aura of Incantation of Defender Self", 350, 5400)),
+        // M5 7 P7j (D143, the owner): Aura of Spirit Drinker Self I-VI, an Item Enchantment aura on the caster (ACE's spell table: stat key 170 WeaponAuraElemental, +0.01 a level; EnchantmentManager.GetElementalDamageMod adds it to
+        // the caster's elemental bonus, which WorldObject_Weapon.GetCasterElementalDamageModifier gives only when the caster's element matches the spell's: the Fire Sceptre with Flame Bolt). Learned by play (ByPlay): IV from the Scrivener of
+        // Item Magic's scroll on a town trip (the den's learn list), V and VI from the Master and Grand Master Scriveners (item 8); never granted. Ids, names, powers and durations are the SpellTable's (BsdProfileSpellsTests); six levels, no VII.
+        L("Spirit Drinker", "Spirit Drinker", MagicSchool.ItemEnchantment, ProfileRole.ItemBuffWand, true,
+            S(3253, "Aura of Spirit Drinker Self I", 1, 1800),
+            S(3254, "Aura of Spirit Drinker Self II", 50, 1800),
+            S(3255, "Aura of Spirit Drinker Self III", 100, 1800),
+            S(3256, "Aura of Spirit Drinker Self IV", 150, 1800),
+            S(3257, "Aura of Spirit Drinker Self V", 200, 1800),
+            S(3258, "Aura of Spirit Drinker Self VI", 250, 2700)),
         L("Stamina to Mana Self", "Stamina to Mana Self", MagicSchool.LifeMagic, ProfileRole.ManaTransfer,
             S(1676, "Stamina to Mana Self I", 1, 0),
             S(1677, "Stamina to Mana Self II", 50, 0),
@@ -402,6 +453,26 @@ public static class ArenaProfile
             S(1171, "Harm Self VI", 275, 0),
             S(2071, "Harm Self VII", 325, 0),
             S(4309, "Incantation of Harm Self", 400, 0)),
+        L("Drain Health Other", "Drain Health Other", MagicSchool.LifeMagic, ProfileRole.LifeDrain,
+            S(1237, "Drain Health Other I", 38, 0),
+            S(1238, "Drain Health Other II", 88, 0),
+            S(1239, "Drain Health Other III", 138, 0),
+            S(1240, "Drain Health Other IV", 188, 0),
+            S(1241, "Drain Health Other V", 238, 0),
+            S(1242, "Drain Health Other VI", 288, 0),
+            S(2328, "Vitality Siphon", 325, 0),
+            S(4643, "Incantation of Drain Health Other", 400, 0)),
+        // M5 7 F10 (the owner's addition to D88): the stamina floor's other refill, cast at the target in reach when it gives more stamina an all-in second than Revitalize Self (FightPicker.StaminaDrainWins). Ids, names and powers are the
+        // SpellTable's (pinned by ArenaProfileTests); VII is "Vigor Siphon" (2330), as Drain Health's VII is "Vitality Siphon" (2328).
+        L("Drain Stamina Other", "Drain Stamina Other", MagicSchool.LifeMagic, ProfileRole.LifeDrain,
+            S(1249, "Drain Stamina Other I", 38, 0),
+            S(1250, "Drain Stamina Other II", 88, 0),
+            S(1251, "Drain Stamina Other III", 138, 0),
+            S(1252, "Drain Stamina Other IV", 188, 0),
+            S(1253, "Drain Stamina Other V", 238, 0),
+            S(1254, "Drain Stamina Other VI", 288, 0),
+            S(2330, "Vigor Siphon", 325, 0),
+            S(4645, "Incantation of Drain Stamina Other", 400, 0)),
         L("Lifestone Recall", "Lifestone Recall", MagicSchool.ItemEnchantment, ProfileRole.Travel,
             S(1635, "Lifestone Recall", 100, 0)),
         L("Primary Portal Tie", "Primary Portal Tie", MagicSchool.ItemEnchantment, ProfileRole.Travel,
@@ -412,6 +483,16 @@ public static class ArenaProfile
             S(2644, "Lifestone Tie", 100, 0)),
         L("Cassius' Ring of Fire", "Cassius' Ring of Fire", MagicSchool.WarMagic, ProfileRole.WarOption,
             S(RingOfFireId, "Cassius' Ring of Fire", 200, 0)),
+        // M5 7 F8 (D89): the opener. School, ids, names, powers and durations are the SpellTable's (pinned by ArenaProfileTests): Life Magic in this dat, an Enchantment with a duration on the target; level VII is "Inferno's Gift".
+        L("Fire Vulnerability Other", "Fire Vulnerability Other", MagicSchool.LifeMagic, ProfileRole.Debuff,
+            S(21, "Fire Vulnerability Other I", 25, 60),
+            S(1104, "Fire Vulnerability Other II", 75, 90),
+            S(1105, "Fire Vulnerability Other III", 125, 120),
+            S(1106, "Fire Vulnerability Other IV", 175, 150),
+            S(1107, "Fire Vulnerability Other V", 225, 180),
+            S(1108, "Fire Vulnerability Other VI", 275, 210),
+            S(2170, "Inferno's Gift", 325, 240),
+            S(4481, "Incantation of Fire Vulnerability Other", 400, 300)),
     ];
 
     /// <summary>
@@ -421,19 +502,19 @@ public static class ArenaProfile
     public const uint RingOfFireId = 1785;
 
     /// <summary>
-    /// Fire Vulnerability Other VII ("Inferno's Gift") and Heal Self VII ("Adja's Intervention"): the fight tab's spells that are no profile line (M3 4.2 p1); then, from M4 P5a, every spell of <see cref="Extras"/> (Harm Self I-VII, Lifestone Recall,
-    /// Primary Portal Tie, Primary Portal Recall, Lifestone Tie); the build learns them after the lines.
+    /// Heal Self VII ("Adja's Intervention"): the fight tab's spell that is no profile line (M3 4.2 p1); then, from M4 P5a, every spell of <see cref="Extras"/> (Harm Self I-VII, Lifestone Recall,
+    /// Primary Portal Tie, Primary Portal Recall, Lifestone Tie, and from M5 7 F8 the whole Fire Vulnerability Other line, whose VII "Inferno's Gift" (2170) the fight tab's first spell used to be listed here alone); the build learns them after the lines.
     /// </summary>
-    public static IReadOnlyList<uint> FightExtras { get; } = [2170, 2073, .. Extras.SelectMany(l => l.Spells).Select(s => s.Id)];
+    public static IReadOnlyList<uint> FightExtras { get; } = [2073, .. Extras.SelectMany(l => l.Spells).Select(s => s.Id)];
 
-    /// <summary>The extra line named <paramref name="name"/> ("Harm Self", "Lifestone Recall", "Primary Portal Tie", "Primary Portal Recall", "Lifestone Tie"), or null.</summary>
+    /// <summary>The extra line named <paramref name="name"/> ("Harm Self", "Lifestone Recall", "Primary Portal Tie", "Primary Portal Recall", "Lifestone Tie", "Fire Vulnerability Other"), or null.</summary>
     public static ProfileLine? ExtraNamed(string name) => Extras.FirstOrDefault(l => l.Name == name);
 
     /// <summary>The mage's buff profile (<see cref="IBuffProfile"/>): the lines, the cycle's casting order (Focus, Willpower and Creature Enchantment Mastery first) and the spells the build learns.</summary>
     public static IBuffProfile Buffs { get; } = new BuffProfile(MageTemplate.CharacterName, Lines, ["Focus Self", "Willpower Self", "Creature Enchantment Mastery Self"], FightExtras);
 
-    /// <summary>Every spell id of every line: what the mage learns (all levels, D10), in line order then list order.</summary>
-    public static IReadOnlyList<uint> SpellsToLearn { get; } = [.. Lines.SelectMany(l => l.Spells).Select(s => s.Id), .. FightExtras];
+    /// <summary>Every spell id of every line the build teaches: what the mage learns (all levels, D10), in line order then list order. A line learned by play (<see cref="ProfileLine.ByPlay"/>, M5 7 P7j) is left out: no grant.</summary>
+    public static IReadOnlyList<uint> SpellsToLearn { get; } = [.. Lines.Where(l => !l.ByPlay).SelectMany(l => l.Spells).Select(s => s.Id), .. FightExtras];
 
     /// <summary>The line named <paramref name="name"/> (the spec's name), or null.</summary>
     public static ProfileLine? LineNamed(string name) => LinesByName.GetValueOrDefault(name);
@@ -448,8 +529,10 @@ public static class ArenaProfile
 
     private static readonly FrozenDictionary<uint, ProfileSpell> SpellsById = Lines.SelectMany(l => l.Spells).ToFrozenDictionary(s => s.Id);
 
-    private static ProfileLine L(string name, string datRoot, MagicSchool school, ProfileRole role, params ProfileSpell[] spells) =>
-        new(name, datRoot, school, role, [.. spells.Select((s, i) => s with { Position = i + 1 })]);
+    private static ProfileLine L(string name, string datRoot, MagicSchool school, ProfileRole role, params ProfileSpell[] spells) => L(name, datRoot, school, role, false, spells);
+
+    private static ProfileLine L(string name, string datRoot, MagicSchool school, ProfileRole role, bool byPlay, params ProfileSpell[] spells) =>
+        new(name, datRoot, school, role, [.. spells.Select((s, i) => s with { Position = i + 1 })], byPlay);
 
     private static ProfileSpell S(uint id, string name, uint power, double duration) => new(0, id, name, power, duration);
 }

@@ -2,6 +2,7 @@ using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Vitals;
 using Lifestone.Data.Magic;
@@ -70,6 +71,7 @@ public sealed class BuffScenario : IScenario
     private BuffResult? _first;
     private BuffResult? _final;
     private RebuffDriver? _driver;
+    private bool _unattendedEnd;
     private RebuffPassNotices? _notices;
     private BuffResult? _driverResult;
     private double _cycleEndedAt = double.NaN;
@@ -95,8 +97,10 @@ public sealed class BuffScenario : IScenario
     /// <param name="bars">The spell bars step run after the gear (M3 4.2 p1), or null to leave the bars alone.</param>
     /// <param name="ledger">The armour lines' memory handed to the cycle (M4 4.1 lane b), or null for the session's (<see cref="ArmourBuffLedger.For"/>).</param>
     /// <param name="store">Where the ledger's remaining seconds are kept across a log-off, or null (the conservative rule).</param>
-    public BuffScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null, MageSpellBars? bars = null, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null)
-        : this(GearKit.Build(spells ?? throw new ArgumentNullException(nameof(spells)), account), spells, options, log, arrivalSeconds, endSession, cycle, bars, ledger, store)
+    /// <param name="noGrant">True (M5 3 F2, closes 3-R3, DoD 6: play grants nothing): the gear stage verifies the kit and never asks the mod for an item (<see cref="GearScenario.NoGrant"/>); false (the default, the standalone buff leg's and the tests'): the gear stage tops the kit up.</param>
+    /// <param name="ground">The ground whose kit the gear stage verifies (the journey's <c>--fight-ground</c>, as the gear station does), or null for the default ground.</param>
+    public BuffScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null, MageSpellBars? bars = null, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null, bool noGrant = false, HuntingGround? ground = null)
+        : this(GearKit.Build(spells ?? throw new ArgumentNullException(nameof(spells)), account, ground: ground), spells, options, log, arrivalSeconds, endSession, cycle, bars, ledger, store, noGrant)
     {
     }
 
@@ -111,7 +115,8 @@ public sealed class BuffScenario : IScenario
     /// <param name="bars">The spell bars step run after the gear (M3 4.2 p1: tab I the buffs, tab II the fight), or null to leave the bars alone (the tests').</param>
     /// <param name="ledger">The armour lines' memory handed to the cycle (M4 4.1 lane b), or null for the session's (<see cref="ArmourBuffLedger.For"/>).</param>
     /// <param name="store">Where the ledger's remaining seconds are kept across a log-off, or null (the conservative rule).</param>
-    public BuffScenario(GearKit kit, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null, MageSpellBars? bars = null, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null)
+    /// <param name="noGrant">True (M5 3 F2, closes 3-R3): the gear stage verifies the kit and sends no grant (<see cref="GearScenario.NoGrant"/>).</param>
+    public BuffScenario(GearKit kit, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null, MageSpellBars? bars = null, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null, bool noGrant = false)
     {
         ArgumentNullException.ThrowIfNull(kit);
         ArgumentNullException.ThrowIfNull(spells);
@@ -125,12 +130,12 @@ public sealed class BuffScenario : IScenario
         _bars = bars;
         _ledger = ledger;
         _store = store;
-        _gear = new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells);
+        _gear = new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) { NoGrant = noGrant };
         foreach (var line in ArenaProfile.Lines)
         {
-            if (line.IsBuff)
+            if (line.IsBuff && !line.ByPlay)
             {
-                _wanted++;
+                _wanted++; // M5 7 P7j: a line learned by play is counted by the cycle's result once the spellbook holds it
             }
         }
     }
@@ -175,7 +180,10 @@ public sealed class BuffScenario : IScenario
     public Action<string>? Notice { get; init; }
 
     /// <summary>True when the run uses the re-buff driver in place of the forced pass (<c>--buff-auto on</c>).</summary>
-    public bool DriverOn => _options.Auto;
+    public bool DriverOn => _options.Auto && !_unattendedEnd;
+
+    /// <summary>M5 7 F24: the autopilot's own station ended with the ordered cycle (no driver pass, no forced pass).</summary>
+    public bool UnattendedEnd => _unattendedEnd;
 
     /// <summary>What the driver's pass left (null before it ended, and without the driver).</summary>
     public BuffResult? DriverResult => _driverResult;
@@ -256,7 +264,7 @@ public sealed class BuffScenario : IScenario
         var mana = best?.ManaMin is { } m ? m.ToString(CultureInfo.InvariantCulture) : "n/a";
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{Token(gear, "gear")} {Token(gear, "worn")} buffs={best?.Active ?? 0}/{best?.Wanted ?? _wanted} levels={(best is null ? "n/a" : best.Levels)} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(_forcedLanded ? "yes" : "no")} min_remaining_s={min} transfers={best?.TransfersFired ?? 0}/{best?.TransfersTried ?? 0} revitalizes={best?.Revitalizes ?? 0} fizzles={best?.Fizzles ?? 0} mana_min={mana} cycle_s={Math.Floor(_first?.CycleSeconds ?? 0).ToString("0", CultureInfo.InvariantCulture)} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={_first?.Surpassed ?? 0}{DriverFields()}{SwapVerdict()}{BarsField()}");
+            $"{Token(gear, "gear")} {Token(gear, "worn")} buffs={best?.Active ?? 0}/{best?.Wanted ?? _wanted} levels={(best is null ? "n/a" : best.Levels)} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(_forcedLanded ? "yes" : "no")} min_remaining_s={min} transfers={best?.TransfersFired ?? 0}/{best?.TransfersTried ?? 0} revitalizes={best?.Revitalizes ?? 0} fizzles={best?.Fizzles ?? 0} mana_min={mana} cycle_s={Math.Floor(_first?.CycleSeconds ?? 0).ToString("0", CultureInfo.InvariantCulture)} {BuffLegVerdict.CastFieldsOf(_first, _final, _driverResult, _first is null && _final is null && _driverResult is null ? _cycle?.Result : null)} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={_first?.Surpassed ?? 0}{DriverFields()}{SwapVerdict()}{BarsField()}");
     }
 
     /// <summary>
@@ -385,7 +393,7 @@ public sealed class BuffScenario : IScenario
                         _log.Info(LogCategory, "gear done (" + _gearFields + "): " + (_bars is null ? "magic combat mode next" : "the spell bars next"));
                         if (_bars is null)
                         {
-                            _pending = actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
+                            _pending = actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation);
                             Stage = "mode-magic";
                         }
                         else
@@ -404,7 +412,7 @@ public sealed class BuffScenario : IScenario
                     case ScenarioStatus.Failed:
                         return Fail(session, "bars: " + _bars.Failure);
                     case ScenarioStatus.Succeeded:
-                        _pending = actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
+                        _pending = actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation);
                         Stage = "mode-magic";
                         break;
                 }
@@ -436,6 +444,17 @@ public sealed class BuffScenario : IScenario
                         return Fail(session, "cycle: " + _cycle.Result?.Failure);
                     case BuffStatus.Done:
                         _first = _cycle.Result;
+                        if (_options.Auto && _options.DriverUnattended)
+                        {
+                            // M5 7 F24 (soak round 3: the autopilot's station sat idle 30 s at the lifestone, "the re-buff driver next, with a margin of 1885 s", the driver's first check one interval and its lead later): the autopilot's own station
+                            // proves no driver; the lines are up (or missed, which the judge fails), so the station ends as soon as the ordered cycle does.
+                            _final = _first;
+                            _unattendedEnd = true;
+                            _log.Info(LogCategory, "the ordered cycle is done (" + CycleCast + " casts); the autopilot's own station: no driver wait, the station ends now (F24)");
+                            var unattendedJudged = Judge();
+                            return unattendedJudged is not null ? Fail(session, unattendedJudged) : ToPeace(session, clock);
+                        }
+
                         if (_options.Auto)
                         {
                             StartDriver(session, clock);
@@ -664,9 +683,16 @@ public sealed class BuffScenario : IScenario
     /// <summary>After the passes: the mage returns to non-combat; a fighter runs the swap's Out half (peace, the caster to the pack, the weapon back).</summary>
     private ScenarioStatus ToPeace(IGameSessionView session, double clock)
     {
+        if (_swap is null && _options.DriverUnattended && !_endSession)
+        {
+            // M5 7 F25 (D93): the autopilot's own station; the next station on the ground wants the magic mode again, so the stance holds
+            _log.Info(LogCategory, "the stance holds: the magic mode stays up for the autopilot's next station (F25)");
+            return Conclude(session);
+        }
+
         if (_swap is null)
         {
-            _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
+            _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation);
             Stage = "mode-peace";
             return ScenarioStatus.Running;
         }
@@ -700,6 +726,11 @@ public sealed class BuffScenario : IScenario
         if (best.Active < best.Wanted)
         {
             return $"buffs: {best.Active} of {best.Wanted} lines are active ({best.Levels})";
+        }
+
+        if (_unattendedEnd)
+        {
+            return null; // M5 7 F24: no driver and no forced pass were asked; the lines being up is the verdict
         }
 
         if (_driverResult is not null)

@@ -22,6 +22,12 @@ namespace Lifestone.Client.RetailUi.Chat;
 /// <c>ListenToElementMessage</c> (11.4186 0x004D57C0: message 0x10000003 from element 0x1000004A deletes that row; the layout's media for the row send it).
 /// </para>
 /// <para>
+/// <b>How long a row stays (M5 7, the "In Portal Space" fragment by the vitals in early town frames).</b> A row lives by its own media: the row template's state 0x10000002 holds a 5 s pause and then the message 0x10000003, which
+/// <c>ListenToElementMessage</c> (11.6096 0x004D6420) answers by deleting the row. Nothing else clears the box: <c>gmSmartBoxUI::UseTime</c> (11.6096 0x004D7A90) posts the portal notice at every new rotation segment of the tunnel
+/// (0.6 to 1.8 s apart) and nothing at the arrival, so the last notice stays up to 5 s into the world, behind whatever window covers the box's place. That is retail's behaviour, kept; the live review frames wait for the box to be
+/// empty instead (<see cref="Panels.GamePaperDoll.WorldReviewWait"/>).
+/// </para>
+/// <para>
 /// The window is made mouse-invisible so the world below stays clickable (retail makes two calls on it in <c>PostInit</c>, which read as that; unverified).
 /// </para>
 /// </remarks>
@@ -74,6 +80,9 @@ public sealed class GameSpewBox : IUiNoticeSink, IUiElementListener, IUiGlobalLi
 
     /// <summary>The most rows shown at once (<c>m_maxConcurrentItems</c>).</summary>
     public int MaxRows { get; }
+
+    /// <summary>The rows the box shows now (each expires 5 s after it was made, by its own media).</summary>
+    public int RowCount => _list?.Items.Count ?? 0;
 
     /// <summary>The rows' texts, newest first.</summary>
     public IReadOnlyList<string> Lines => _list is null ? [] : [.. _list.Items.OfType<UiTextElement>().Select(r => r.Text)];

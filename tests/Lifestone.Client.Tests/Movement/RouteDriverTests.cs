@@ -171,6 +171,33 @@ public sealed class RouteDriverTests(ITestOutputHelper output)
         Assert.Contains("teleport", driver.FailureReason, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void M5_7_D153_keys_let_go_by_a_lost_focus_are_pressed_again_and_the_walk_goes_on()
+    {
+        // The gate's Holtburg walk of 2026-10-31 13:04 UTC: 0.7 s into the walk every held key was let go (a lost window focus, CommandInterpreter::LoseKeyboardFocus) while the driver
+        // still believed it held forward, so it stood still 2.95 m short of goal 0 and failed as stuck. Check, act, check (D141): the driver asks each frame and presses again.
+        var (controller, _, _) = FlatController(x: 20f, y: 60f);
+        Run(controller, 0.5);
+        var route = new ScriptedRoute("far-east", [new RouteGoal(At(Block, 60f, 60f, 0f), 0.5f, Stop: true, DwellSeconds: 0)]);
+        var driver = new RouteDriver(controller, route);
+        var notices = new List<string>();
+        driver.KeysPressedAgain += notices.Add;
+        Assert.Equal(RouteStatus.Running, Drive(controller, driver, 0.7));
+        Assert.True(controller.IsHeld(MotionCommands.WalkForward));
+
+        controller.LoseKeyboardFocus(); // what the window's focus-out does: every held key let go behind the driver's back
+        Assert.False(controller.IsHeld(MotionCommands.WalkForward));
+        Assert.Equal(MotionCommands.Ready, controller.Motion.Raw.ForwardCommand);
+
+        var status = Drive(controller, driver, 30.0);
+        output.WriteLine($"{status} at {controller.Now:F2} s; {string.Join(" | ", notices)}; {driver.FailureReason}");
+        Assert.Equal(RouteStatus.Done, status);
+        Assert.Equal(1, driver.KeysPressedAgainCount);
+        Assert.Contains("route 'far-east' lap 0 goal 0: forward found let go by something else, pressed again (#1)", Assert.Single(notices), StringComparison.Ordinal);
+        Assert.True(controller.Position.GetOffset(At(Block, 60f, 60f, 0f)).Length() <= 0.6f, $"ended at {controller.Position}");
+        Assert.Null(controller.IsHeld(MotionCommands.Ready)); // no list for Ready: the controller cannot say
+    }
+
     private static RouteGoal Goal(float x, float y) => new(At(Block, x, y, 0f), 1.0f, Stop: false, DwellSeconds: 0);
 
     /// <summary>Ticks the controller and then the driver each frame until the route ends or <paramref name="limit"/> seconds pass.</summary>

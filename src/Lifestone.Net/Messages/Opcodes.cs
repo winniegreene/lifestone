@@ -51,6 +51,39 @@ public static class MessageOpcodes
     /// <summary>S→C PublicUpdateInstanceId (ACE <c>GameMessagePublicUpdateInstanceID</c>; M3 1.2 s0).</summary>
     public const uint PublicUpdateInstanceId = 0x02DA;
 
+    /// <summary>S→C PublicUpdatePropertyInt64 {u8 sequence, u32 object, u32 key, i64 value} (ACE <c>GameMessagePublicUpdatePropertyInt64</c>; M5 6 w1).</summary>
+    public const uint PublicUpdatePropertyInt64 = 0x02D0;
+
+    /// <summary>S→C PrivateUpdatePropertyBool {u8 sequence, u32 key, u32 value} (ACE <c>GameMessagePrivateUpdatePropertyBool</c>; M5 6 w1).</summary>
+    public const uint PrivateUpdatePropertyBool = 0x02D1;
+
+    /// <summary>S→C PublicUpdatePropertyBool {u8 sequence, u32 object, u32 key, u32 value} (ACE <c>GameMessagePublicUpdatePropertyBool</c>; M5 6 w1).</summary>
+    public const uint PublicUpdatePropertyBool = 0x02D2;
+
+    /// <summary>S→C PrivateUpdatePropertyFloat. ACE never sends it (the class <c>GameMessagePrivateUpdatePropertyFloat</c> has no caller at 95ef426d), so there is no decoder: it reaches OnUnknown (M5 6 w1).</summary>
+    public const uint PrivateUpdatePropertyFloat = 0x02D3;
+
+    /// <summary>S→C PublicUpdatePropertyFloat {u8 sequence, u32 object, u32 key, f64 value} (ACE <c>GameMessagePublicUpdatePropertyFloat</c>; M5 6 w1).</summary>
+    public const uint PublicUpdatePropertyFloat = 0x02D4;
+
+    /// <summary>S→C PrivateUpdatePropertyString. ACE never sends it (the class <c>GameMessagePrivateUpdatePropertyString</c> has no caller at 95ef426d), so there is no decoder: it reaches OnUnknown (M5 6 w1).</summary>
+    public const uint PrivateUpdatePropertyString = 0x02D5;
+
+    /// <summary>S→C PublicUpdatePropertyString {u8 sequence, u32 key, u32 object, pad, String16L value}: the key comes BEFORE the object here, unlike the other public updates (ACE <c>GameMessagePublicUpdatePropertyString</c>; M5 6 w1).</summary>
+    public const uint PublicUpdatePropertyString = 0x02D6;
+
+    /// <summary>S→C PrivateUpdatePropertyDataId {u8 sequence, u32 key, u32 value} (ACE <c>GameMessagePrivateUpdateDataID</c>, sent for a player's MotionTable at <c>Player_Character.cs:556</c>; M5 6 w1).</summary>
+    public const uint PrivateUpdatePropertyDataId = 0x02D7;
+
+    /// <summary>S→C PublicUpdatePropertyDataId {u8 sequence, u32 object, u32 key, u32 value} (ACE <c>GameMessagePublicUpdatePropertyDataID</c>, sent by <c>Player.UpdateProperty(obj, PropertyDataId, ...)</c>, <c>Player_Properties.cs:1165</c>, for tailoring and core plating; the lead's capture note said ACE never sends it, but it does; M5 6 w1).</summary>
+    public const uint PublicUpdatePropertyDataId = 0x02D8;
+
+    /// <summary>S→C PrivateUpdatePosition {u8 sequence, u32 position type, 32-byte position} (ACE <c>GameMessagePrivateUpdatePosition</c>; seen in the recordings once, LastOutsideDeath; M5 6 w1).</summary>
+    public const uint PrivateUpdatePosition = 0x02DB;
+
+    /// <summary>S→C PrivateUpdatePropertyInstanceId {u8 sequence, u32 key, u32 value} (ACE <c>GameMessagePrivateUpdateInstanceID</c>; CurrentAttacker in a fight; M5 6 w1).</summary>
+    public const uint PrivateUpdatePropertyInstanceId = 0x02D9;
+
     /// <summary>S→C AdminEnvirons (ACE <c>GameMessageAdminEnvirons</c>; M3 1.2 s0).</summary>
     public const uint AdminEnvirons = 0xEA60;
 
@@ -183,6 +216,21 @@ public static class GameEventTypes
 
     /// <summary>CommunicationTransientString.</summary>
     public const uint TransientString = 0x02EB;
+
+    /// <summary>FriendsListUpdate (ACE <c>GameEventFriendsListUpdate</c>; M5 6 w1).</summary>
+    public const uint FriendsListUpdate = 0x0021;
+
+    /// <summary>CharacterTitle (ACE <c>GameEventCharacterTitle</c>; M5 6 w1).</summary>
+    public const uint CharacterTitle = 0x0029;
+
+    /// <summary>CharacterConfirmationRequest {u32 ConfirmationType, u32 context, String16L text} (ACE <c>GameEventConfirmationRequest</c>; M5 6 w1).</summary>
+    public const uint CharacterConfirmationRequest = 0x0274;
+
+    /// <summary>CharacterConfirmationDone {u32 ConfirmationType, u32 context} (ACE <c>GameEventConfirmationDone</c>; M5 6 w1).</summary>
+    public const uint CharacterConfirmationDone = 0x0276;
+
+    /// <summary>SetTurbineChatChannels, ten u32 (ACE <c>GameEventSetTurbineChatChannels</c>; M5 6 w1).</summary>
+    public const uint SetTurbineChatChannels = 0x0295;
 
     /// <summary>InventoryPutObjInContainer (ACE <c>GameEventItemServerSaysContainId</c>; M3 1.2 s0).</summary>
     public const uint InventoryPutObjInContainer = 0x0022;
@@ -372,6 +420,33 @@ public static class GameActionTypes
 
     /// <summary>RemoveSpellFavorite {u32 spell, u32 bar} (ACE <c>GameActionRemoveSpellFavorite</c>, retail <c>CM_Character::Event_RemoveSpellFavorite</c>, 11.4186 0x006A1890, 11.6096 0x006A26B0).</summary>
     public const uint RemoveSpellFavorite = 0x01E4;
+
+    /// <summary>SetSingleCharacterOption {u32 option, u32 value} (<c>CM_Character::Event_PlayerOptionChangedEvent</c>, 11.6096 0x006A2330; ACE <c>GameActionSetSingleCharacterOption</c>; M5 6 w1).</summary>
+    public const uint SetSingleCharacterOption = 0x0005;
+
+    /// <summary>SetAfkMode {u32 afk} (<c>CM_Communication::Event_SetAFKMode</c>, 11.6096 0x006A4D00; ACE <c>GameActionSetAFKMode</c>; M5 6 w1).</summary>
+    public const uint SetAfkMode = 0x000F;
+
+    /// <summary>SetAfkMessage {String16L message} (<c>CM_Communication::Event_SetAFKMessage</c>, 11.6096 0x006A5260; ACE <c>GameActionSetAFKMessage</c>; M5 6 w1).</summary>
+    public const uint SetAfkMessage = 0x0010;
+
+    /// <summary>TeleToLifestone (no payload; <c>CM_Character::Event_TeleToLifestone</c>, 11.6096 0x006A29B0; ACE <c>GameActionTeleToLifestone</c>; M5 6 w1).</summary>
+    public const uint TeleToLifestone = 0x0063;
+
+    /// <summary>SetCharacterOptions, the player module block (<c>CM_Character::Event_CharacterOptionsEvent</c>, 11.6096 0x006A1EE0; ACE <c>GameActionSetCharacterOptions</c>; M5 6 w1).</summary>
+    public const uint SetCharacterOptions = 0x01A1;
+
+    /// <summary>Emote {String16L text} (<c>CM_Communication::Event_Emote</c>, 11.6096 0x006A4F40; ACE <c>GameActionEmote</c>; M5 6 w1).</summary>
+    public const uint Emote = 0x01DF;
+
+    /// <summary>SetInscription {u32 item, String16L inscription} (M5 7 D137): retail <c>CM_Writing::Event_SetInscription</c> (11.6096 0x006AA810); ACE <c>GameActionSetInscription</c>.</summary>
+    public const uint SetInscription = 0x00BF;
+
+    /// <summary>ConfirmationResponse {u32 type, u32 context, u32 accepted} (<c>CM_Character::Event_ConfirmationResponse</c>, 11.6096 0x006A2030; ACE <c>GameActionConfirmationResponse</c>; M5 6 w1).</summary>
+    public const uint ConfirmationResponse = 0x0275;
+
+    /// <summary>TeleToMarketPlace (no payload; <c>CM_Character::Event_TeleToMarketplace</c>, 11.6096 0x006A2A40; ACE <c>GameActionTeleToMarketPlace</c>; M5 6 w1).</summary>
+    public const uint TeleToMarketPlace = 0x028D;
 
     /// <summary>Jump (56 bytes, retail <c>JumpPack</c>).</summary>
     public const uint Jump = 0xF61B;

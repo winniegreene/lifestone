@@ -91,9 +91,9 @@ public sealed class FighterBuffCycleTests
                 while (seen < sends.Count)
                 {
                     var send = sends[seen++];
-                    if (send.Kind == FakeSendKind.CastUntargetedSpell)
+                    if (send.Kind is FakeSendKind.CastUntargetedSpell or FakeSendKind.CastTargetedSpell)
                     {
-                        Casts.Add((uint)send.Guid);
+                        Casts.Add(send.Kind == FakeSendKind.CastTargetedSpell ? (uint)send.Index : send.Guid); // a SelfTargeted buff goes out at the player (0x004A), as retail sends it
                         R.UseDone();
                     }
                     else if (send.Kind == FakeSendKind.ChangeCombatMode)

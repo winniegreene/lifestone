@@ -269,23 +269,33 @@ public sealed class VendorTrackerTests
     }
 
     [Fact]
-    public void Too_few_pyreals_is_a_00A0_with_no_text_and_the_detail_names_the_shortfall()
+    public void Too_few_pyreals_is_refused_before_the_send_typed_not_enough_coin()
     {
         var (rig, handle) = BuyOneKit(coins: 5);
 
-        // ACE: Vendor.cs 546-552 sends no text; the refusal is 00A0 {the player's guid, 0} and UseDone 0.
+        // M5 7 D141: the 0062's rates price the kit at 14 and the player holds 5, so the buy is never sent (ACE would answer a bare 00A0, Vendor.cs 546-552).
+        var outcome = handle.Outcome!.Value;
+        Assert.Equal((ActionOutcomeKind.Refused, ActionReason.NotEnoughCoin), (outcome.Kind, outcome.Reason));
+        Assert.Contains("costs 14", outcome.Detail, StringComparison.Ordinal);
+        Assert.Contains("holds 5", outcome.Detail, StringComparison.Ordinal);
+        Assert.Equal(0, rig.Sent(FakeSendKind.Buy));
+    }
+
+    [Fact]
+    public void A_00A0_with_no_text_the_model_cannot_explain_is_a_ServerError_with_no_typed_reason()
+    {
+        // The model's pyreals cover the price, so the buy goes; ACE refuses it anyway with its bare 00A0 (Vendor.cs 546-552 sends no text): a ServerError whose reason is not guessed.
+        var (rig, handle) = BuyOneKit();
+
         rig.Tick(0.005);
         rig.Refusal();
         rig.UseDone();
         rig.Tick();
 
         var outcome = handle.Outcome!.Value;
-        Assert.Equal(ActionOutcomeKind.ServerError, outcome.Kind);
-        Assert.Equal(0u, outcome.Code);
-        Assert.Contains("too few pyreals", outcome.Detail, StringComparison.Ordinal);
-        Assert.Contains("14", outcome.Detail, StringComparison.Ordinal);
+        Assert.Equal((ActionOutcomeKind.ServerError, 0u, ActionReason.None), (outcome.Kind, outcome.Code, outcome.Reason));
+        Assert.Contains("no reason given", outcome.Detail, StringComparison.Ordinal);
         Assert.Null(handle.Result);
-        Assert.Equal(5, rig.State.Self.Qualities.CoinValue);
     }
 
     [Fact]
@@ -384,10 +394,11 @@ public sealed class VendorTrackerTests
         rig.UseDone(); // nothing bought, no 00A0
         rig.Tick();
 
-        var outcome = handle.Outcome!.Value;
-        Assert.Equal(ActionOutcomeKind.Confirmed, outcome.Kind);
+        var outcome = handle.Outcome!.Value; // M5 7 D141's after-check: a trade that changed nothing is not Confirmed
+        Assert.Equal((ActionOutcomeKind.ServerError, ActionReason.NoEffect), (outcome.Kind, outcome.Reason));
+        Assert.Contains("changed nothing", outcome.Detail, StringComparison.Ordinal);
         Assert.Contains("not in the open stock", outcome.Detail, StringComparison.Ordinal);
-        Assert.Equal(0, handle.Result!.Actual);
+        Assert.Null(handle.Result);
     }
 
     [Fact]

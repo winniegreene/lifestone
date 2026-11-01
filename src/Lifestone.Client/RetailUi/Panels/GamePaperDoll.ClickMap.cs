@@ -30,7 +30,10 @@ public sealed partial class GamePaperDoll
 {
     /// <summary>
     /// The click map: for each slot element its <see cref="EquipMask"/> and the drop it accepts (retail: <c>gmPaperDollUI</c> 0x10000024 and its <c>UIElement_ItemList</c> slots; <c>CreateClickMap</c> 0x004A4BC0 is the figure's, whose body-part select and
-    /// examine is <see cref="ExamineFigureAtMouse"/>, M4 3.2 s4c). Re-expressed from <see cref="SlotTable"/> and the layout; retail's drop code has no address in the docs (<c>TODO(m4-retail-drag)</c>).
+    /// examine is <see cref="ExamineFigureAtMouse"/>, M4 3.2 s4c). Re-expressed from <see cref="SlotTable"/> and the layout, and since M5 7 (D122) checked against retail's drop code: <c>gmPaperDollUI::HandleDropRelease</c> (11.6096 0x004A50F0) hands a slot's drop to
+    /// <c>AcceptDragObject</c> (0x004A3E80: the item's locations against the slot's, a melee weapon also on the shield slot; worn by <c>CPlayerSystem::AutoWear</c> for the clothing, armour and cloak slots, else wielded by <c>AutoWield</c> on the
+    /// slot's side) and the figure's to <c>AcceptPaperDollDragObject</c> (0x004A4DE0, <see cref="GamePaperDollFigureDrop"/>). The generic drag (<c>UIElementManager::StartDragandDrop</c> 0x0045E120, <c>UIElement_ItemList::AcceptDragObject</c>
+    /// 0x004E4EE0) stays <c>TODO(m4-retail-drag)</c> in <see cref="UiDrag"/>.
     /// </summary>
     public static IReadOnlyList<PaperDollClickEntry> ClickMap => _clickMap ??= BuildClickMap(); // built on first use: static initializers of two partial files run in no fixed order
 
@@ -149,18 +152,49 @@ public sealed partial class GamePaperDoll
     /// The right button over the figure's click-mask button (<c>ListenToElementMessage</c> 0x004A5FA0, message 28 with parameter 8): the body part under the mouse (the click-map image, <see cref="MaskOfColor"/>) names the worn item (or the
     /// player), which is selected and examined (<c>ClientUISystem::ExamineObject</c>): <see cref="GameExaminePanel.Open"/>. False when the click map is not ready, the mouse is over no part or there is no examine panel.
     /// </summary>
-    private bool ExamineFigureAtMouse()
+    private bool ExamineFigureAtMouse() => GameExaminePanel.Of(_context) is { } examine && MaskAtMouse() is { } mask && ExamineMask(mask, examine);
+
+    /// <summary>
+    /// The left button over the figure (<c>ListenToElementMessage</c> 0x004A5FA0, message 28 with parameter 7; closes <c>TODO(m4-paperdoll-figure-select)</c>, M5 7 D122): the worn item under the mouse
+    /// (<c>GetPaperDollItemUnderMouse</c>), or the player where no item covers the part, becomes the selected object (<c>ACCWeenieObject::SetSelectedObject</c>) through <see cref="SelectRequester"/>. Retail first
+    /// runs a pending target mode on the player instead (<c>ClientUISystem::ExecuteTargetModeForItem</c>); the shell has no target mode, so that branch is a named stub (<c>TODO(m5-paperdoll-target-mode)</c>).
+    /// False when the click map is not ready, the mouse is over no part or nothing can select.
+    /// </summary>
+    private bool SelectFigureAtMouse() => SelectRequester is not null && MaskAtMouse() is { } mask && SelectMask(mask);
+
+    /// <summary>Selects what covers <paramref name="mask"/> (a test calls this with a location mask instead of a pixel).</summary>
+    internal bool SelectMask(uint mask)
     {
-        if (_clickMask is null || GameExaminePanel.Of(_context) is not { } examine)
+        if (SelectRequester is not { } select)
         {
             return false;
+        }
+
+        var session = _context.Session;
+        var guid = UpperItemAt(session.State.Self.Inventory.Equipped, mask, session.State.Self.Guid);
+        if (guid == 0)
+        {
+            return false;
+        }
+
+        _context.Manager.LogOnce("paperdoll:target-mode", LogSeverity.Warning, "TODO(m5-paperdoll-target-mode): retail's left click on the figure runs a pending target mode on the player first (ClientUISystem::ExecuteTargetModeForItem); the shell has no target mode, so the click selects");
+        select(guid);
+        return true;
+    }
+
+    /// <summary>The body-part mask under the mouse on the figure's click map (<c>CreateClickMap</c> 0x004A4BC0), or null when the map is not ready or the mouse is off it.</summary>
+    private uint? MaskAtMouse()
+    {
+        if (_clickMask is null)
+        {
+            return null;
         }
 
         var did = _context.CharGen?.View3D?.UiAssetDid(ClickMapEnum) ?? 0;
         if (did == 0 || _context.Manager.Services.Images is not { } images || images.TryGetImage(did, out var image) != UiImageLookup.Ready || image is null)
         {
-            _context.Manager.LogOnce("paperdoll:clickmap", LogSeverity.Warning, "TODO(m4-paperdoll-figure-click): the figure's click map (CreateClickMap 0x004A4BC0, UI asset enum 0x1000000C) is not available; the body-part click examines nothing");
-            return false;
+            _context.Manager.LogOnce("paperdoll:clickmap", LogSeverity.Warning, "TODO(m4-paperdoll-figure-click): the figure's click map (CreateClickMap 0x004A4BC0, UI asset enum 0x1000000C) is not available; the body-part click selects and examines nothing");
+            return null;
         }
 
         var (mx, my) = _context.Manager.Input.MousePosition;
@@ -169,12 +203,11 @@ public sealed partial class GamePaperDoll
         var y = my - screen.Y0;
         if (x < 0 || y < 0 || x >= image.Width || y >= image.Height)
         {
-            return false;
+            return null;
         }
 
         var at = (y * image.Width + x) * 4;
-        var mask = MaskOfColor(image.Pixels[at], image.Pixels[at + 1], image.Pixels[at + 2]);
-        return ExamineMask(mask, examine);
+        return MaskOfColor(image.Pixels[at], image.Pixels[at + 1], image.Pixels[at + 2]);
     }
 
     /// <summary>Examines what covers <paramref name="mask"/> (a test calls this with a location mask instead of a pixel).</summary>
@@ -234,7 +267,10 @@ public sealed class GamePaperDollDrop(UiLoginContext context, PaperDollSlot slot
         }
 
         var valid = obj.ItemFields().ValidLocations;
-        var choice = GameDrops.WieldMask(inventory, slot.Mask, valid);
+
+        // gmPaperDollUI::AcceptDragObject (0x004A3E80): a melee weapon dropped on the shield slot is wielded there, in the off hand (the left side), and only there.
+        var offHand = slot.Mask == (uint)EquipMask.Shield && (valid & (uint)EquipMask.MeleeWeapon) != 0;
+        var choice = offHand ? (uint)EquipMask.Shield : GameDrops.WieldMask(inventory, slot.Mask, valid);
         if (choice == 0 || (inventory.TryGetEquipped(item, out var worn) && (worn.Location & slot.Mask) != 0))
         {
             return DropVerdict.DoesNotFit;
@@ -276,5 +312,81 @@ public sealed class GamePaperDollDrop(UiLoginContext context, PaperDollSlot slot
         Drops++;
         LastAction = context.Session.Actions.Wield(drag.ItemId, (EquipMask)mask, ActionSource.Ui);
         context.Manager.Services.Log.Info("retailui", string.Create(CultureInfo.InvariantCulture, $"drag: item 0x{drag.ItemId:X8} dropped on the {slot.Name} slot: {LastAction.Summary}"));
+    }
+}
+
+/// <summary>
+/// The figure as a drop target (M5 7 D122; <c>gmPaperDollUI::HandleDropRelease</c> 0x004A50F0 over the click mask 0x100001D6, then
+/// <c>AcceptPaperDollDragObject</c> 0x004A4DE0): a carried item that is clothing, armour or a cloak (valid locations within 0x8007FFF) is
+/// worn (<c>CPlayerSystem::AutoWear</c>: its locations whole, as a double click wears it, <see cref="WieldSlotChoice"/>); anything else is
+/// refused with retail's "You can't put that item there" (notice 0x1A, a chat line through <see cref="Notice"/>).
+/// </summary>
+public sealed class GamePaperDollFigureDrop(UiLoginContext context) : IUiDropTarget
+{
+    /// <summary>The wearable locations the figure takes: clothing, armour and the cloak.</summary>
+    public const uint WearLocations = 0x8007FFF;
+
+    /// <summary>Retail's refusal (<c>AcceptPaperDollDragObject</c>).</summary>
+    public const string CannotPutThere = "You can't put that item there";
+
+    /// <summary>Where the refusal is shown (the shell's chat); null logs it only.</summary>
+    public Action<string>? Notice { get; set; }
+
+    /// <summary>The last wear a drop sent, or null.</summary>
+    public ActionHandle? LastAction { get; private set; }
+
+    /// <inheritdoc/>
+    public bool HighlightsCell => false;
+
+    /// <summary>The verdict for <paramref name="item"/> and the mask it would be worn at (0 unless <see cref="DropVerdict.Ok"/>).</summary>
+    public DropVerdict Check(uint item, out uint mask)
+    {
+        mask = 0;
+        var session = context.Session;
+        var inventory = session.State.Self.Inventory;
+        if (item == 0 || !inventory.Find(item).Held)
+        {
+            return DropVerdict.NotHeld;
+        }
+
+        if (inventory.TryGetEquipped(item, out _))
+        {
+            return DropVerdict.AlreadyThere; // a worn item let go over the body stays worn, without a word
+        }
+
+        if (!session.State.Objects.TryGet(item, out var obj) || (obj.ItemFields().ValidLocations & WearLocations) == 0)
+        {
+            return DropVerdict.DoesNotFit;
+        }
+
+        mask = WieldSlotChoice.Choose(inventory, obj.ItemFields().ValidLocations);
+        return DropVerdict.Ok;
+    }
+
+    /// <inheritdoc/>
+    public bool Accepts(in UiDragPayload drag, UiItem? cell) => Check(drag.ItemId, out _) == DropVerdict.Ok;
+
+    /// <inheritdoc/>
+    public string? Refusal(in UiDragPayload drag, UiItem? cell)
+    {
+        var verdict = Check(drag.ItemId, out _);
+        if (verdict == DropVerdict.DoesNotFit && Notice is { } notice)
+        {
+            notice(CannotPutThere);
+        }
+
+        return GameDrops.Describe(verdict);
+    }
+
+    /// <inheritdoc/>
+    public void Drop(in UiDragPayload drag, UiItem? cell)
+    {
+        if (Check(drag.ItemId, out var mask) != DropVerdict.Ok)
+        {
+            return;
+        }
+
+        LastAction = context.Session.Actions.Wield(drag.ItemId, (EquipMask)mask, ActionSource.Ui);
+        context.Manager.Services.Log.Info("retailui", string.Create(CultureInfo.InvariantCulture, $"drag: item 0x{drag.ItemId:X8} dropped on the figure: {LastAction.Summary}"));
     }
 }

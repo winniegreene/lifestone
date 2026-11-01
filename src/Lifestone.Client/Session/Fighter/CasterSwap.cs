@@ -48,6 +48,8 @@ public enum SwapStatus
 /// <para><b>The busy wait</b> (M4 fresh-gate fix, gate round 1, as M4 P5b fix FC-a1 did for <see cref="RecallHome"/>): ACE refuses an item move sent into the player's busy chain (<c>Player.IsBusy</c>), and the fresh Brawler's
 /// unwield, sent 30 ms after the vitals keeper's fourth Mana Potion, was refused so. Before each action the swap waits while <see cref="IActionApi.BusyReason"/> names a busy chain (a potion's Ready on the Heal lane, a move's
 /// chain), at most <see cref="BusyWaitSeconds"/> (<c>swap:busy-wait</c> past it, nothing sent), then sends once; a refusal after that is still the step's failure, never retried.</para>
+/// <para><b>Source</b> (M5 1 fix B, review 1-R7): every send of the swap (the wields, the unwields and the mode changes) is <see cref="ActionSource.Automation"/>, so the kill switch and dry run reach a swap as they reach the casts around it. A switch armed
+/// between two steps leaves the swap where it stood (a refused step is a failure, named; the restore it then tries is refused too): the keeper and the recall freeze or skip their restore under the switch (K4), the harm-heal script runs its swap out and ends Failed.</para>
 /// <para>The mage wields its wand already and never swaps: <see cref="For"/> gives a swap only to a template whose kit holds a caster in the pack.</para>
 /// </remarks>
 public sealed class CasterSwap
@@ -286,20 +288,20 @@ public sealed class CasterSwap
         var ammo = FighterItems.WieldedAmmunition(_state);
         if (ammo != 0)
         {
-            action = () => _actions.Unwield(ammo, ActionSource.Host);
+            action = () => _actions.Unwield(ammo, ActionSource.Automation);
             return "unwield-ammo:" + Hex(ammo);
         }
 
         if (FighterItems.WieldedLauncher(_state, _scratch) is { } launcher)
         {
-            action = () => _actions.Unwield(launcher.Guid, ActionSource.Host);
+            action = () => _actions.Unwield(launcher.Guid, ActionSource.Automation);
             return "unwield-weapon:" + Hex(launcher.Guid);
         }
 
         var inHand = EquippedAt(MeleeSlots | HeldSlot, excludeWcid: _kit.CasterWcid);
         if (inHand != 0)
         {
-            action = () => _actions.Unwield(inHand, ActionSource.Host);
+            action = () => _actions.Unwield(inHand, ActionSource.Automation);
             return "unwield-weapon:" + Hex(inHand);
         }
 
@@ -310,13 +312,13 @@ public sealed class CasterSwap
 
         if (!wielded)
         {
-            action = () => _actions.Wield(caster, EquipMask.Held, ActionSource.Host);
+            action = () => _actions.Wield(caster, EquipMask.Held, ActionSource.Automation);
             return "wield-caster:" + Hex(caster);
         }
 
         if (_state.Self.Qualities.CombatMode != CombatModes.Magic)
         {
-            action = () => _actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
+            action = () => _actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation);
             return "magic-mode:" + Hex(0);
         }
 
@@ -331,13 +333,13 @@ public sealed class CasterSwap
         action = null;
         if (_state.Self.Qualities.CombatMode is not (0 or CombatModes.NonCombat))
         {
-            action = () => _actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
+            action = () => _actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation);
             return "peace:" + Hex(0);
         }
 
         if (FighterItems.Find(_state, _scratch, _kit.CasterWcid, out var caster, out var wielded) && wielded)
         {
-            action = () => _actions.Unwield(caster, ActionSource.Host);
+            action = () => _actions.Unwield(caster, ActionSource.Automation);
             return "unwield-caster:" + Hex(caster);
         }
 
@@ -355,7 +357,7 @@ public sealed class CasterSwap
                 return step + ":gone"; // a recorded item that is no longer held: the step fails by name below
             }
 
-            action = () => _actions.Wield(guid, location, ActionSource.Host);
+            action = () => _actions.Wield(guid, location, ActionSource.Automation);
             return step + ":" + Hex(guid);
         }
 

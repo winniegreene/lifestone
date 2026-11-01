@@ -52,6 +52,14 @@ internal sealed class ObjectInfo
     public bool VelocityKilled;
 
     /// <summary>
+    /// True when the transition meets the fixed world only (terrain, cells, buildings and landblock statics) and passes every moving
+    /// object's shadow (<see cref="Objects.PhysicsObj.FindObjCollisions"/> answers OK): Lifestone's route planner's probes, which judge the
+    /// world the route is built in while the runner meets doors, creatures and NPCs at walk time (M5 item 5 fix F3). Not retail: retail has
+    /// no route planner; every retail transition leaves this false. Set after <see cref="Init"/>, which clears it.
+    /// </summary>
+    public bool FixedWorldOnly;
+
+    /// <summary>
     /// Retail <c>OBJECTINFO::init</c> (11.4186 0x0050CF30, 11.6096 0x0050DA00): the object, its transition flags, scale and
     /// step heights; ethereal from its state, and step-down for everything but missiles. The weenie's flags
     /// (IsImpenetrable, IsPlayer, IsPK, IsPKLite) arrive in <paramref name="state"/>.
@@ -67,6 +75,7 @@ internal sealed class ObjectInfo
         Ethereal = (objectState & PhysicsState.Ethereal) != 0;
         StepDown = (objectState & PhysicsState.Missile) == 0;
         VelocityKilled = false;
+        FixedWorldOnly = false;
     }
 
     /// <summary>

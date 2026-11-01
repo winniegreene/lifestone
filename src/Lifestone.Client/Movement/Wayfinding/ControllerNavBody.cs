@@ -33,5 +33,8 @@ public sealed class ControllerNavBody : INavBody
     public bool ServerDriving => _controller.ControlledByServer && _controller.IsMovingTo;
 
     /// <inheritdoc/>
+    public string? ServerMoveToEnd => _controller.LastServerMoveToEnd;
+
+    /// <inheritdoc/>
     public double Now => _controller.Now;
 }

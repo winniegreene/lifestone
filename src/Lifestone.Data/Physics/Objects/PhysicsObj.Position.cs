@@ -127,6 +127,22 @@ public sealed partial class PhysicsObj
     }
 
     /// <summary>
+    /// What <see cref="SetPosition"/> does when <paramref name="position"/>'s landblock is not attached, for a caller of
+    /// <see cref="ForceIntoCell"/> (which answers <see cref="SetPositionError.NoCell"/> and leaves the object where it
+    /// was): the null-cell branch of retail <c>CPhysicsObj::SetPositionInternal(p, sps, transit)</c> (11.4186 0x00515BD0,
+    /// 11.6096 0x005166D0): out of its cell and shadows (<c>prepare_to_leave_visibility</c>), the position stored
+    /// (<c>store_position</c>) and into the lost cell (<c>CObjectMaint::GotoLostCell</c>) with
+    /// <see cref="PlacementPending"/> set; <see cref="PhysicsWorld.Attach"/> places it again
+    /// (<c>reenter_visibility</c>). Added for the server-object host (M5 item 5, D71: additive).
+    /// </summary>
+    public void WaitForLandblock(in CellFrame position)
+    {
+        PrepareToLeaveVisibility();
+        StorePosition(position);
+        GotoLostCell();
+    }
+
+    /// <summary>
     /// Retail <c>CPhysicsObj::recalc_cross_cells</c> (11.4186 0x00515A30, 11.6096 0x00516530): recomputes the cells the
     /// object's shadows are in, from its position (an object outside the world casts none).
     /// </summary>

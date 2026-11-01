@@ -202,6 +202,32 @@ public sealed class AvatarMaterialiseTests(ITestOutputHelper output)
         Assert.Equal(samples.OrderByDescending(x => x), samples);
     }
 
+    // M5 7: the live doll frames of 2026-10-29 15:34 UTC were taken during the login's arrival, the player still hidden in its pink bubbles. Materialised is what
+    // the review frames now wait for: false while hidden and while the fade runs, true from the frame the translucency is back at the object's own.
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(0.4f)]
+    public void The_player_is_materialised_only_once_unhidden_and_the_fade_is_over(float baseTranslucency)
+    {
+        var set = NewSet(CreatedHidden(Player, self: true, translucency: baseTranslucency));
+        var body = set.Player!.Body;
+        var t0 = Run(set, 0, 0.5, 1 / 60.0, (_, _) => Assert.False(body.Materialised), guid: Player);
+        set.SetState(Player, Shown);
+        var first = double.NaN;
+        Run(set, t0, t0 + 1.25, 1 / 60.0, (now, draw) =>
+        {
+            Assert.Equal(draw.Translucency <= baseTranslucency, body.Materialised);
+            if (body.Materialised && double.IsNaN(first))
+            {
+                first = now - t0;
+            }
+        }, guid: Player);
+        Assert.InRange(first, FadeTime * (1 - baseTranslucency) - 1e-6, FadeTime * (1 - baseTranslucency) + 2 / 60.0 + 1e-6); // the ramp reaches the base, one frame late
+        Assert.True(body.Materialised);
+        set.SetState(Player, HiddenState);
+        Assert.False(body.Materialised);
+    }
+
     [Fact]
     public void A_first_person_player_is_not_drawn_while_it_materialises_but_the_value_still_ramps()
     {

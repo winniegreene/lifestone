@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Screens;
@@ -42,9 +44,15 @@ public readonly record struct PaperDollSlot(uint ElementId, uint Mask, int Side,
 /// opens as retail does: the nine armour slots hidden, the viewport and the click mask shown.
 /// </para>
 /// <para>
+/// <b>The sigil slots</b> (closes <c>TODO(m3-aetheria)</c>): <c>gmPaperDollUI::UpdateAetheria</c> (11.6096 0x004A41C0), from
+/// <c>RecvNotice_PlayerDescReceived</c> (0x004A4750) and <c>OnQualityChanged</c> (0x004A4800), shows the blue, yellow and red
+/// sigil slots by bits 1, 2 and 4 of the player's int property 322 (the Aetheria slots the character has unlocked); with
+/// none, all three are hidden. They showed always before, three empty round glyphs at the top of the slots.
+/// </para>
+/// <para>
 /// Not built, each a named TODO logged once: <c>TODO(m3-paperdoll-part-lighting)</c> (<c>ApplyPartSelectionLighting</c> 0x004A4010: the body part lights
-/// when the cursor is over an item), <c>TODO(m3-aetheria)</c> (<c>UpdateAetheria</c> 0x004A41C0: the three sigil slots appear only with an Aetheria-bearing item), <c>TODO(m4-paperdoll-figure-select)</c> (the right button examines since M4 3.2 s4c) (the click mask over the
-/// figure: select and examine the item under the cursor, <c>CreateClickMap</c> 0x004A4BC0; <c>TODO(m3-paperdoll-clickmap)</c> is closed for the slots in M4 2.2 s3, see <see cref="ClickMap"/>), <c>TODO(m3-paperdoll-tooltips)</c> (<c>UpdateItemSlotTooltip</c> 0x004A5200), <c>TODO(m3-paperdoll-checkbox-targets)</c> (which two
+/// when the cursor is over an item), <c>TODO(m5-paperdoll-target-mode)</c> (the figure's left click selects the item under the cursor and the right button examines it, M5 7 D122 and M4 3.2 s4c; retail's
+/// pending target mode first is not built; <c>CreateClickMap</c> 0x004A4BC0; <c>TODO(m3-paperdoll-clickmap)</c> is closed for the slots in M4 2.2 s3, see <see cref="ClickMap"/>), <c>TODO(m3-paperdoll-checkbox-targets)</c> (which two
 /// elements the checkbox's handler toggles is read from raw member offsets: taken as the viewport and the click-mask button).
 /// </para>
 /// </remarks>
@@ -67,6 +75,9 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
 
     /// <summary>True: the figure is built (<see cref="PaperDollFigure"/>, served to the viewport by the host's <see cref="ICg3DViewHost.AttachFigure"/>); a page whose host cannot serve it opens on the slots view (<see cref="FigureServed"/> false).</summary>
     public const bool FigureBuilt = true;
+
+    /// <summary>The player's int property of unlocked Aetheria slots (322, <c>AetheriaBitfield</c>): bits 1, 2 and 4 are the blue, yellow and red sigil slots.</summary>
+    public const uint AetheriaBitfieldProperty = 0x142;
 
     /// <summary>The weapon slot's locations: melee, missile, held and two-handed.</summary>
     public const uint WeaponLocations = 0x3500000;
@@ -109,6 +120,7 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
     private readonly uint[] _shown;
     private readonly IDisposable[] _subscriptions;
     private readonly GamePaperDollDrop[] _drops;
+    private readonly bool[] _tipped;
     private bool _dirty = true;
     private bool _slotsView;
     private bool _todosLogged;
@@ -127,6 +139,7 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
         _checkbox = checkbox;
         _lists = lists;
         _shown = new uint[lists.Length];
+        _tipped = new bool[lists.Length];
         _drops = new GamePaperDollDrop[lists.Length];
         var drag = context.Manager.Input.Drag;
         for (var i = 0; i < lists.Length; i++)
@@ -138,6 +151,13 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
             lists[i].DragSource = true;
             _drops[i] = new GamePaperDollDrop(context, SlotTable[i]);
             drag.RegisterTarget(lists[i], _drops[i]);
+        }
+
+        // M5 7 D122: the figure takes a dropped wearable (HandleDropRelease over the click mask; AcceptPaperDollDragObject).
+        FigureDrop = new GamePaperDollFigureDrop(context);
+        if (clickMask is not null)
+        {
+            drag.RegisterTarget(clickMask, FigureDrop);
         }
 
         // PostInit (0x004A56D0) hides the armour slots and shows the figure; a host that cannot serve the figure (no view data or view host) leaves the page on the slots view.
@@ -155,9 +175,14 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
         }
 
         ApplyView(slotsView: !FigureBuilt || !_hasHost);
+        UpdateAetheria();
         page.RegisterForElementMessages(this);
         var events = context.Session.Events;
-        _subscriptions = [events.Subscribe<InventoryChanged>(OnInventoryChanged), events.Subscribe<ObjectCreated>(OnObjectCreated), events.Subscribe<ObjectDescChanged>(OnObjectDescChanged)];
+        _subscriptions =
+        [
+            events.Subscribe<InventoryChanged>(OnInventoryChanged), events.Subscribe<ObjectCreated>(OnObjectCreated), events.Subscribe<ObjectDescChanged>(OnObjectDescChanged),
+            events.Subscribe<QualitiesChanged>(OnQualitiesChanged),
+        ];
     }
 
     /// <summary>The panel id (7).</summary>
@@ -174,6 +199,12 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
 
     /// <summary>The figure's view model, or null before the page first showed (or when the host cannot serve it).</summary>
     public PaperDollFigure? Figure => _figure;
+
+    /// <summary>The figure's drop target (a wearable dropped on the body is worn).</summary>
+    public GamePaperDollFigureDrop FigureDrop { get; }
+
+    /// <summary>Makes an object the selected one (<c>ACCWeenieObject::SetSelectedObject</c>): the shell's <see cref="Selection.GameSelection.SelectRequester"/>; null selects nothing.</summary>
+    public Action<uint>? SelectRequester { get; set; }
 
     /// <summary>The "slots" checkbox, or null when the layout lacks it.</summary>
     public UiButton? Checkbox => _checkbox;
@@ -273,6 +304,40 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
         LogTodos();
         Refresh();
         ServeFigure();
+        LogShown();
+    }
+
+    /// <summary>
+    /// One line each time the page shows (M5 7 D122: the owner saw no worn item on the live doll while the offline one shows the kit): the worn list's entries with their
+    /// locations, what each filled slot shows, and any worn item whose world object has not arrived (a slot leaves those out), with the view.
+    /// </summary>
+    private void LogShown()
+    {
+        var session = _context.Session;
+        var equipped = session.State.Self.Inventory.Equipped;
+        var worn = new StringBuilder();
+        var missing = new StringBuilder();
+        for (var j = 0; j < equipped.Count; j++)
+        {
+            var item = equipped[j];
+            var known = session.State.Objects.TryGet(item.Guid, out var obj);
+            worn.Append(CultureInfo.InvariantCulture, $"{(worn.Length == 0 ? "" : ", ")}{(known ? obj!.Name : "?")} 0x{item.Guid:X8}@0x{item.Location:X}");
+            if (!known)
+            {
+                missing.Append(CultureInfo.InvariantCulture, $"{(missing.Length == 0 ? "" : ", ")}0x{item.Guid:X8}");
+            }
+        }
+
+        var shown = new StringBuilder();
+        for (var i = 0; i < _lists.Length; i++)
+        {
+            if (_shown[i] != 0)
+            {
+                shown.Append(CultureInfo.InvariantCulture, $"{(shown.Length == 0 ? "" : ", ")}{SlotTable[i].Name}=0x{_shown[i]:X8}{(_lists[i].Visible ? "" : " (hidden)")}");
+            }
+        }
+
+        _context.Manager.Services.Log.Info("retailui", $"paperdoll shown view={(_slotsView ? "slots" : "figure")} equipped={equipped.Count} [{worn}] slots=[{shown}] no_object=[{missing}]");
     }
 
     /// <summary>The page hid: it draws nothing until it shows again.</summary>
@@ -325,10 +390,15 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
                 continue;
             }
 
+            var tipStale = !_tipped[i] || _shown[i] != want;
             if (want != 0 && objects.TryGet(want, out var obj))
             {
                 cell.ShowItem(want, GameInventoryPage.IconOf(obj));
                 _shown[i] = want;
+                if (tipStale)
+                {
+                    UpdateItemSlotTooltip(cell, i, obj.Name);
+                }
             }
             else
             {
@@ -338,7 +408,13 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
                 }
 
                 _shown[i] = 0;
+                if (tipStale)
+                {
+                    UpdateItemSlotTooltip(cell, i, null);
+                }
             }
+
+            _tipped[i] = true;
         }
     }
 
@@ -355,6 +431,11 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
         if (message.MessageId == UiMessageIds.MouseDown && message.ElementId == ClickMaskId && message.Param1 == UiMouseActions.Right)
         {
             return ExamineFigureAtMouse() ? UiListenResult.Handled : UiListenResult.Default;
+        }
+
+        if (message.MessageId == UiMessageIds.MouseDown && message.ElementId == ClickMaskId && message.Param1 == UiMouseActions.Left)
+        {
+            return SelectFigureAtMouse() ? UiListenResult.Handled : UiListenResult.Default;
         }
 
         return UiListenResult.Default;
@@ -376,6 +457,11 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
             _lists[i].ItemExamined -= OnSlotExamined;
             drag.UnregisterTarget(_lists[i]);
             _lists[i].DragSource = false;
+        }
+
+        if (_clickMask is not null)
+        {
+            drag.UnregisterTarget(_clickMask);
         }
 
         _attachment?.Dispose();
@@ -404,6 +490,90 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
         }
     }
 
+    /// <summary>
+    /// What the live review frames (M5 7 D129, <c>--doll-review-frames</c>) still wait for, or null when a frame may be taken: the player placed in the world
+    /// (<paramref name="playerPlaced"/>), no portal tunnel (<paramref name="tunnelVisible"/>), the shell built and painted, the inventory page open and drawn
+    /// (its window and every ancestor shown), and this doll drawn in it (its page and the always-shown weapon slot shown, the figure served when the host can).
+    /// The 15:19 UTC live run of 2026-10-29 took both frames in the login's portal space, with the page open by the saved layout and nothing of it drawn yet.
+    /// The player must also have materialised (<paramref name="playerMaterialised"/>): the 15:34 UTC run took both frames 0.4 s into the arrival (portal state 6,
+    /// before LoginComplete), when the player is still hidden and shows, as in retail, only as the Hidden script's pink bubbles with no body inside.
+    /// </summary>
+    public static string? ReviewFrameWait(GamePlayScreen? shell, bool playerPlaced, bool tunnelVisible, bool playerMaterialised = true)
+    {
+        if (WorldReviewWait(shell, playerPlaced, tunnelVisible, playerMaterialised) is { } world)
+        {
+            return world;
+        }
+
+        var host = shell!.PanelHost!;
+        if (!host.IsOpen || host.CurrentPanel != Panel || host.Window is not { IsShown: true })
+        {
+            return "the inventory page to show";
+        }
+
+        var doll = shell.PanelControllers?.ControllersOf(Panel).OfType<GamePaperDoll>().FirstOrDefault();
+        if (doll is null || !doll._page.IsShown || doll.SlotList(0x100001DF) is not { IsShown: true } || (doll._hasHost && !doll.FigureServed))
+        {
+            return "the paper doll to be drawn";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The part of a live review frame's wait that is the world's, shared by the doll's and the examination's frames (M5 7 D129, S6): the player placed, no portal tunnel, the player materialised, the shell built
+    /// and painted with its panel host, and the spew box empty (its last portal notice lives 5 s into the world: <see cref="Chat.GameSpewBox"/>). Null when all hold.
+    /// </summary>
+    public static string? WorldReviewWait(GamePlayScreen? shell, bool playerPlaced, bool tunnelVisible, bool playerMaterialised = true)
+    {
+        if (!playerPlaced)
+        {
+            return "the player to be placed in the world";
+        }
+
+        if (tunnelVisible)
+        {
+            return "the portal tunnel to end";
+        }
+
+        if (!playerMaterialised)
+        {
+            return "the player to materialise (hidden in the arrival's bubbles until LoginComplete, then the 0.75 s fade)";
+        }
+
+        if (shell is not { IsBuilt: true, ShellPainted: true, PanelHost: not null })
+        {
+            return "the shell to be built and painted";
+        }
+
+        if (shell.Chat?.Spew is { RowCount: > 0 } spew)
+        {
+            // M5 7: the last "In Portal Space - Please Wait..." row stays 5 s into the world (its media; retail clears nothing at the arrival), peeking out by the vitals; a review frame waits it out.
+            return "the spew box's last notice to expire (" + spew.Lines[0] + ")";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The "slots" checkbox clicked from code (M5 7 D129, the live review frames): the box toggles as a click toggles it and the doll's own handler
+    /// (<see cref="ListenToElementMessage"/>'s button-click branch, <c>gmPaperDollUI::ListenToElementMessage</c> 0x004A5FA0) swaps the views by its new state. False when the layout has no checkbox.
+    /// </summary>
+    public bool ClickSlotsCheckbox()
+    {
+        if (_checkbox is null)
+        {
+            return false;
+        }
+
+        _checkbox.SetBoolProperty(UiPropertyIds.ButtonHighlighted, !_checkbox.Highlighted);
+        ListenToElementMessage(new UiElementMessage(_checkbox, UiMessageIds.ButtonClick, 0, 0));
+        return true;
+    }
+
+    /// <summary>The "slots" checkbox's effect without a click (a review frame of each view): <paramref name="slots"/> shows the armour slots, else the figure.</summary>
+    public void ShowSlotsView(bool slots) => ApplyView(slots);
+
     /// <summary>Shows the armour slots (and hides the figure and its click mask) or the reverse, and the checkbox to match.</summary>
     private void ApplyView(bool slotsView)
     {
@@ -427,6 +597,37 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
         {
             _figureTodoLogged = true;
             _context.Manager.Services.Log.Warn("retailui", "TODO(m3-paperdoll-figure): the host gave the paperdoll no figure view (CharGenSetup.View3D / ViewHost); the viewport 0x100001D5 shows what is behind the UI (placeholder)");
+        }
+    }
+
+    /// <summary>
+    /// <c>gmPaperDollUI::UpdateAetheria</c> (11.6096 0x004A41C0): each sigil slot shows only when its bit of the player's
+    /// <see cref="AetheriaBitfieldProperty"/> is set (1 blue, 2 yellow, 4 red).
+    /// </summary>
+    private void UpdateAetheria()
+    {
+        _context.Session.State.Self.Qualities.TryGetInt(AetheriaBitfieldProperty, out var bits);
+        for (var i = 0; i < _lists.Length; i++)
+        {
+            var bit = SlotTable[i].Mask switch
+            {
+                0x10000000 => 1,
+                0x20000000 => 2,
+                0x40000000 => 4,
+                _ => 0,
+            };
+            if (bit != 0)
+            {
+                _lists[i].SetVisible((bits & bit) != 0);
+            }
+        }
+    }
+
+    private void OnQualitiesChanged(in QualitiesChanged change)
+    {
+        if (change.Change == QualityChange.Description || (change.Change == QualityChange.Int && change.Key == AetheriaBitfieldProperty))
+        {
+            UpdateAetheria();
         }
     }
 
@@ -461,9 +662,6 @@ public sealed partial class GamePaperDoll : IGamePanel, IUiElementListener, IDis
         _todosLogged = true;
         var log = _context.Manager.Services.Log;
         log.Warn("retailui", "TODO(m3-paperdoll-part-lighting): the body part under an item does not light when the cursor is over it (ApplyPartSelectionLighting 0x004A4010)");
-        log.Warn("retailui", "TODO(m3-aetheria): the sigil slots always show (retail's UpdateAetheria 0x004A41C0 shows them only for an Aetheria-bearing item)");
-        log.Warn("retailui", "TODO(m4-paperdoll-figure-select): the left button over the figure selects nothing (retail sets the selected object, gmPaperDollUI::ListenToElementMessage 0x004A5FA0); the right button examines the worn item under the mouse (M4 3.2 s4c closed TODO(m4-paperdoll-figure-click))");
-        log.Warn("retailui", "TODO(m3-paperdoll-tooltips): the slots have no tooltips (UpdateItemSlotTooltip 0x004A5200)");
         log.Warn("retailui", "TODO(m3-paperdoll-sharp): the figure's view does not use CreatureMode::UseSharpMode (PostInit 0x004A56D0); it draws with creature mode's ordinary filtering");
         log.Warn("retailui", "TODO(m3-paperdoll-checkbox-targets): the slots checkbox toggles the viewport and the click-mask button; retail's handler names them only by member offset");
     }

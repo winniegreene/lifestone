@@ -51,8 +51,10 @@ internal sealed class ShellWarmUp
             Strings = real.Strings,
             RetailGlitches = real.RetailGlitches,
             ExamineIcon = real.ExamineIcon,
+            ExamineSetDetails = real.ExamineSetDetails,
             Images = real.Images,
             EnumMaps = real.EnumMaps,
+            EnumNames = real.EnumNames,
             ViewportHost = new NoViewportHost(),
         };
         _manager = new UiElementManager(services, scale);

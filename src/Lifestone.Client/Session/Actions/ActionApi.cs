@@ -280,6 +280,24 @@ internal sealed class ActionApi : IActionApi, IDisposable
     /// <summary>Actions sent and waiting for their confirmation (tests, the inspector).</summary>
     internal int InFlightCount => CountIn(_inFlight, TrackerState.InFlight);
 
+    /// <summary>M5 7 P7n (D145): the actions of <paramref name="source"/> waiting for their turn or sent and waiting for their confirmation (the autopilot's audit waits for a stopped run's own to end).</summary>
+    /// <param name="source">Who asked.</param>
+    internal (int Queued, int InFlight) PendingOf(ActionSource source)
+    {
+        var (queued, inFlight) = (0, 0);
+        foreach (var tracker in _queued)
+        {
+            queued += tracker.State == TrackerState.Queued && tracker.Handle.Source == source ? 1 : 0;
+        }
+
+        foreach (var tracker in _inFlight)
+        {
+            inFlight += tracker.State == TrackerState.InFlight && tracker.Handle.Source == source ? 1 : 0;
+        }
+
+        return (queued, inFlight);
+    }
+
     /// <summary>True when LoginComplete was already sent for the player's current arrival.</summary>
     internal bool LoginCompleteSentThisArrival => _arrival > 0 && _loginCompleteArrival == _arrival;
 
@@ -438,6 +456,22 @@ internal sealed class ActionApi : IActionApi, IDisposable
     }
 
     /// <inheritdoc/>
+    public uint LastAttackTarget { get; private set; }
+
+    /// <inheritdoc/>
+    public double LastAttackTargetAt { get; private set; } = double.NaN;
+
+    // A targeted cast, a melee or a missile attack names its object (M5 7: --examine-capture-creatures follows the fight's targets); the player's own guid (a self cast by guid) is not one.
+    private void NoteTarget(uint target)
+    {
+        if (target != 0 && target != State.Self.Guid)
+        {
+            LastAttackTarget = target;
+            LastAttackTargetAt = FrameTime;
+        }
+    }
+
+    /// <inheritdoc/>
     public ActionHandle Cast(uint spellId, ActionSource source = ActionSource.Host)
     {
         CheckThread("IActionApi.Cast");
@@ -451,6 +485,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
         CheckThread("IActionApi.Cast");
         var handle = NewHandle(ActionKind.CastSpell, source, "Cast spell=" + spellId + " target=" + ActionText.Hex(target));
         var problem = spellId == 0 ? "no spell to cast" : target == 0 ? "no target to cast at" : null;
+        NoteTarget(target);
         return Accept(new CastTracker(handle, spellId, target), problem is null ? null : Refused(problem));
     }
 
@@ -471,6 +506,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
     public ActionHandle Attack(uint target, AttackHeight height, float power, ActionSource source = ActionSource.Host)
     {
         CheckThread("IActionApi.Attack");
+        NoteTarget(target);
         var handle = NewHandle(ActionKind.Attack, source, "Attack target=" + ActionText.Hex(target) + " height=" + (uint)height + " power=" + power.ToString("0.###", CultureInfo.InvariantCulture));
         var problem = AttackProblem(target, height, power, "power");
         if (problem is null)
@@ -485,6 +521,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
     public ActionHandle MissileAttack(uint target, AttackHeight height, float accuracy, ActionSource source = ActionSource.Host)
     {
         CheckThread("IActionApi.MissileAttack");
+        NoteTarget(target);
         var handle = NewHandle(ActionKind.MissileAttack, source, "MissileAttack target=" + ActionText.Hex(target) + " height=" + (uint)height + " accuracy=" + accuracy.ToString("0.###", CultureInfo.InvariantCulture));
         var problem = AttackProblem(target, height, accuracy, "accuracy");
         if (problem is null)
@@ -676,6 +713,15 @@ internal sealed class ActionApi : IActionApi, IDisposable
     }
 
     /// <inheritdoc/>
+    public ActionHandle SetInscription(uint item, string inscription, ActionSource source = ActionSource.Ui)
+    {
+        CheckThread("IActionApi.SetInscription");
+        var text = inscription ?? string.Empty;
+        var handle = NewHandle(ActionKind.SetInscription, source, "SetInscription item=0x" + item.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + " chars=" + ActionText.Count(text.Length));
+        return Accept(new SetInscriptionTracker(handle, item, text), item == 0 ? Refused("no item to inscribe") : null);
+    }
+
+    /// <inheritdoc/>
     public ActionHandle AddSpellFavorite(uint spellId, int index, int bar, ActionSource source = ActionSource.Host)
     {
         CheckThread("IActionApi.AddSpellFavorite");
@@ -701,6 +747,52 @@ internal sealed class ActionApi : IActionApi, IDisposable
         }
 
         ApplyLocal(SessionNotices.SessionOptionSet, mask, string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{word}:{(value ? 1 : 0)}"));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle RespondToConfirmation(uint type, uint context, bool accepted, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.RespondToConfirmation");
+        var handle = NewHandle(ActionKind.RespondToConfirmation, source, "RespondToConfirmation type=" + type + " context=" + context + " accepted=" + (accepted ? 1 : 0));
+        return Accept(new RespondToConfirmationTracker(handle, type, context, accepted));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle SetCharacterOptions(uint options1, uint options2, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.SetCharacterOptions");
+        var handle = NewHandle(ActionKind.SetCharacterOptions, source, "SetCharacterOptions options1=" + ActionText.Hex(options1) + " options2=" + ActionText.Hex(options2));
+        return Accept(new SetCharacterOptionsTracker(handle, options1, options2));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle RecallLifestone(ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.RecallLifestone");
+        return Accept(new RecallTracker(NewHandle(ActionKind.RecallLifestone, source, "RecallLifestone"), marketplace: false));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle RecallMarketplace(ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.RecallMarketplace");
+        return Accept(new RecallTracker(NewHandle(ActionKind.RecallMarketplace, source, "RecallMarketplace"), marketplace: true));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle Emote(string text, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.Emote");
+        var handle = NewHandle(ActionKind.Emote, source, "Emote (" + ActionText.Count((text ?? string.Empty).Length) + " characters)");
+        return Accept(new EmoteTracker(handle, text ?? string.Empty), string.IsNullOrWhiteSpace(text) ? Refused("nothing to emote") : null);
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle SetAfk(bool afk, string? message, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.SetAfk");
+        var handle = NewHandle(ActionKind.SetAfk, source, "SetAfk afk=" + (afk ? 1 : 0) + (afk && message is not null ? " with a message" : string.Empty));
+        return Accept(new SetAfkTracker(handle, afk, message));
     }
 
     /// <inheritdoc/>
@@ -878,11 +970,12 @@ internal sealed class ActionApi : IActionApi, IDisposable
             return CompleteNow(tracker, Refused(OfflineRefusal));
         }
 
+        tracker.Accepted(this); // M5 7 D141: what the before-check compares with at the action's turn (an object seen now and gone then)
         if (now)
         {
-            if (tracker.Refusal(this) is { } notNow)
+            if (tracker.CheckRefusal(this) is { } notNow)
             {
-                return CompleteNow(tracker, Refused(notNow));
+                return CompleteNow(tracker, Refused(notNow, tracker.RefusalReason));
             }
 
             tracker.State = TrackerState.InFlight;
@@ -976,6 +1069,9 @@ internal sealed class ActionApi : IActionApi, IDisposable
 
     private static ActionOutcome Refused(string why) => new(ActionOutcomeKind.Refused, 0, why);
 
+    // M5 7 D141: a tracker's before-check refusal carries the reason it named.
+    private static ActionOutcome Refused(string why, ActionReason reason) => new(ActionOutcomeKind.Refused, 0, why, reason);
+
     private static int CountIn(List<ActionTracker> list, TrackerState state)
     {
         var count = 0;
@@ -1015,6 +1111,52 @@ internal sealed class ActionApi : IActionApi, IDisposable
             new LogField("movementReleased", released));
     }
 
+    /// <summary>
+    /// M5 7 D145 (/stop): cancels every automation action still waiting in its lane (<see cref="ActionOutcomeKind.Cancelled"/> with <paramref name="reason"/>), as the kill switch does, without turning the switch on: the autopilot
+    /// stood down and the person's own actions go on being accepted. An action already sent is left to finish (it cannot be called back). Returns how many were cancelled.
+    /// </summary>
+    internal int CancelQueuedAutomation(string reason)
+    {
+        var cancelled = new ActionOutcome(ActionOutcomeKind.Cancelled, 0, reason);
+        var count = 0;
+        var queued = _queued.Count;
+        for (var i = 0; i < queued; i++)
+        {
+            // An index loop over the actions there now: a completion runs continuations, which may queue new actions (counted by QueuedAutomation after).
+            var tracker = _queued[i];
+            if (tracker.State == TrackerState.Queued && tracker.Handle.Source == ActionSource.Automation)
+            {
+                Complete(tracker, cancelled);
+                count++;
+            }
+        }
+
+        if (!_updating)
+        {
+            Compact();
+        }
+
+        return count;
+    }
+
+    /// <summary>M5 7 D145: the automation actions waiting in their lanes now (the check after a /stop: none should be left).</summary>
+    internal int QueuedAutomation
+    {
+        get
+        {
+            var n = 0;
+            foreach (var tracker in _queued)
+            {
+                if (tracker.State == TrackerState.Queued && tracker.Handle.Source == ActionSource.Automation)
+                {
+                    n++;
+                }
+            }
+
+            return n;
+        }
+    }
+
     private ActionHandle CompleteNow(ActionTracker tracker, ActionOutcome outcome)
     {
         Complete(tracker, outcome);
@@ -1032,10 +1174,16 @@ internal sealed class ActionApi : IActionApi, IDisposable
             return;
         }
 
+        if (outcome.Kind == ActionOutcomeKind.ServerError && outcome.Reason == ActionReason.None && ActionReasons.FromCode(outcome.Code) is var typed and not ActionReason.None)
+        {
+            outcome = outcome with { Reason = typed }; // M5 7 D141: a server code with one meaning is typed for every action, whatever its tracker
+        }
+
         var now = Clock.Now;
         _actionLog.Add(new ActionLogEntry(handle.Id, handle.Kind, handle.Source, handle.Summary, outcome, handle.QueuedAt, now, tracker.RateLimited));
         var line = "action #" + ActionText.Count(handle.Id) + " " + handle.Kind + " (" + handle.Source + ") " + outcome.Kind + ": " + handle.Summary +
-            (outcome.Detail is null ? string.Empty : ": " + outcome.Detail);
+            (outcome.Detail is null ? string.Empty : ": " + outcome.Detail) +
+            (outcome.Reason == ActionReason.None ? string.Empty : " [reason=" + outcome.Reason + "]"); // M5 7 D141: the typed reason, for the log's grep
         var milliseconds = Math.Round((now - handle.QueuedAt) * 1000.0, 1);
         switch (outcome.Kind)
         {
@@ -1174,10 +1322,10 @@ internal sealed class ActionApi : IActionApi, IDisposable
                 continue;
             }
 
-            if (tracker.Refusal(this) is { } refusal)
+            if (tracker.CheckRefusal(this) is { } refusal)
             {
                 tracker.State = TrackerState.Done;
-                _completing.Add((tracker, Refused(refusal)));
+                _completing.Add((tracker, Refused(refusal, tracker.RefusalReason)));
                 continue;
             }
 

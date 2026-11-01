@@ -171,7 +171,10 @@ public sealed class MageSpellBars
 
         foreach (var line in BuffCycle.OrderedLines)
         {
-            tab.Add(line.Spells[6].Id); // VII
+            if (!line.ByPlay)
+            {
+                tab.Add(line.Spells[6].Id); // VII (M5 7 P7j: a line learned by play has no VII and is not the build's: it is not on the bars)
+            }
         }
 
         return tab;

@@ -109,7 +109,7 @@ public sealed class AvatarWireTests
             WeenieClassId = 1,
             IconId = 0x06001036,
             ItemType = 0x10,
-            ObjectDescriptionFlags = 0,
+            ObjectDescriptionFlags = 0x18, // BF_PLAYER | BF_ATTACKABLE
         };
         var obj = new WorldObject(new CreateObjectMsg(0x50000001, ModelData.Empty, physics, weenie), isSelf: true, createdAt: 3)
         {
@@ -121,6 +121,7 @@ public sealed class AvatarWireTests
         Assert.Equal(0x50000001u, create.Guid);
         Assert.True(create.IsSelf);
         Assert.True(create.IsCreature);
+        Assert.Equal(0x18u, create.DescriptionFlags); // the weenie description's flags reach the create (M5 item 5 h2: the server-object host's player rule)
         Assert.Equal((0x02000001u, 0x09000001u, 0x34000004u), (create.SetupId, create.MotionTableId, create.PhysicsScriptTableId));
         Assert.Equal((uint)PhysicsState.Gravity, create.PhysicsState); // the current state, not the create's
         Assert.Equal(1.1f, create.Scale);

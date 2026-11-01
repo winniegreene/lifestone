@@ -62,6 +62,12 @@ internal sealed class CollisionInfo
     /// <summary>True when the transition collided with the environment (cells, terrain, buildings).</summary>
     public bool CollidedWithEnvironment;
 
+    /// <summary>Lifestone diagnostic: a step-up (<c>CTransition::step_up</c>) was tried and refused during this transition.</summary>
+    public bool StepRefused;
+
+    /// <summary>Lifestone diagnostic: an edge slide (cliff or precipice) stopped or turned the object during this transition.</summary>
+    public bool EdgeRefused;
+
     /// <summary>Frames the object has stood still while falling (the stationary-fall failsafe counts to 3).</summary>
     public int FramesStationaryFall;
 
@@ -85,6 +91,8 @@ internal sealed class CollisionInfo
         CollideObjectCount = 0;
         LastCollidedObject = null;
         CollidedWithEnvironment = false;
+        StepRefused = false;
+        EdgeRefused = false;
         ContactPlaneCellId = 0;
         FramesStationaryFall = 0;
     }

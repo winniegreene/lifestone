@@ -26,43 +26,43 @@ internal sealed class MergeStackTracker(ActionHandle handle, uint from, uint to,
     {
         if (Item == to)
         {
-            return "cannot merge the stack " + ActionText.Hex(Item) + " into itself";
+            return Refuse(ActionReason.NotSameItem, "cannot merge the stack " + ActionText.Hex(Item) + " into itself");
         }
 
         if (!place.Held)
         {
-            return "the source stack " + ActionText.Hex(Item) + " is not held by the player";
+            return Refuse(ActionReason.NotHeld, "the source stack " + ActionText.Hex(Item) + " is not held by the player");
         }
 
         var inventory = api.State.Self.Inventory;
         if (!inventory.Find(to).Held)
         {
-            return "the target stack " + ActionText.Hex(to) + " is not held by the player";
+            return Refuse(ActionReason.NotHeld, "the target stack " + ActionText.Hex(to) + " is not held by the player");
         }
 
         if (!api.State.Objects.TryGet(Item, out var source) || !api.State.Objects.TryGet(to, out var target))
         {
-            return "a stack to merge has no world object yet";
+            return Refuse(ActionReason.TargetGone, "a stack to merge has no world object yet");
         }
 
         if (source.Weenie.WeenieClassId != target.Weenie.WeenieClassId)
         {
-            return "the stacks " + ActionText.Hex(Item) + " and " + ActionText.Hex(to) + " are different items (ACE: YouCannotMergeDifferentStacks)";
+            return Refuse(ActionReason.NotSameItem, "the stacks " + ActionText.Hex(Item) + " and " + ActionText.Hex(to) + " are different items (ACE: YouCannotMergeDifferentStacks)");
         }
 
         if (SizeOf(inventory, source) is not { } sourceSize || SizeOf(inventory, target) is not { } targetSize)
         {
-            return "a stack to merge has no stack size (the item does not stack)";
+            return Refuse(ActionReason.NotStackable, "a stack to merge has no stack size (the item does not stack)");
         }
 
         if (amount > sourceSize)
         {
-            return "the source stack " + ActionText.Hex(Item) + " holds " + ActionText.Count(sourceSize) + ", not " + ActionText.Count(amount);
+            return Refuse(ActionReason.StackShort, "the source stack " + ActionText.Hex(Item) + " holds " + ActionText.Count(sourceSize) + ", not " + ActionText.Count(amount));
         }
 
         if (target.Weenie.MaxStackSize is { } max && (long)targetSize + amount > max)
         {
-            return "the target stack " + ActionText.Hex(to) + " holds " + ActionText.Count(targetSize) + " of at most " + ActionText.Count(max) + ": " + ActionText.Count(amount) + " more does not fit";
+            return Refuse(ActionReason.StackFull, "the target stack " + ActionText.Hex(to) + " holds " + ActionText.Count(targetSize) + " of at most " + ActionText.Count(max) + ": " + ActionText.Count(amount) + " more does not fit");
         }
 
         return null;
@@ -88,7 +88,25 @@ internal sealed class MergeStackTracker(ActionHandle handle, uint from, uint to,
         }
 
         var inventory = api.State.Self.Inventory;
-        if (!inventory.TryGetStack(to, out var targetNow, out _) || targetNow != _targetExpected)
+        if (!inventory.TryGetStack(to, out var targetNow, out _))
+        {
+            return;
+        }
+
+        if (e.Guid == to && e.Kind == InventoryChangeKind.StackChanged && targetNow != _targetExpected)
+        {
+            // M5 7 D141's after-check: ACE sends the target's 0197 last (the source's 0024 or 0197 comes first), so a target that changed to another size is the server's answer, not a step on the way:
+            // the counts are not the ones asked (a stale model, or another change to the stack). It fails at once, typed, instead of waiting out the timeout.
+            Resolve(new ActionOutcome(
+                ActionOutcomeKind.ServerError,
+                0,
+                "the merge of " + ActionText.Count(amount) + " into " + ActionText.Hex(to) + " left the target at " + ActionText.Count(targetNow) + ", not the " + ActionText.Count(_targetExpected) + " asked (the source was " +
+                ActionText.Count(_sourceBefore) + ")",
+                ActionReason.ContraryResult));
+            return;
+        }
+
+        if (targetNow != _targetExpected)
         {
             return;
         }

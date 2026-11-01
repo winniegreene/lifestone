@@ -3,6 +3,8 @@
     tools\live-gate.ps1 imports it; LiveGateRunnerTests import it too and execute these functions with stub steps (no backend, no game).
 #>
 
+Import-Module (Join-Path $PSScriptRoot 'GateHost.psm1') -Force   # M5 item 4 c2: Wait-GateForeignGodot (the solo steps' wait for a foreign Godot)
+
 function Test-FrameOnlyText {
     <#
       True when a failed smoke row failed on frame windows only: every Lifestone ERROR line in its log is a frame line (D42), or the row says so (P4 rfix-c, fault 3: the leg and check ERROR lines
@@ -85,7 +87,7 @@ function Get-SmokeStepRows {
     $rows = [System.Collections.Generic.List[object]]::new()
     # M5 item 0 c5 (D19): each Godot row carries smoke's godot_errors=<n> (Godot's own ERROR:/SCRIPT ERROR: lines in the step's console), judged 0 from its first gate (a fact). The steps that run Godot
     # must have a number (a row without one fails: a verdict that reads nothing is not a pass); the other smoke steps read n/a.
-    $godotSteps = '^(login-check|login|login-throwaway|journey-(mage|melee|archer))$'
+    $godotSteps = '^(login-check|login|login-throwaway|journey-(mage|melee|archer)|autopilot-mage)$'
     $godotNotes = [System.Collections.Generic.List[string]]::new()
     $smokeRows = @($SmokeRows | Where-Object { $_ })
     if ($smokeRows.Count -eq 0) { $rows.Add((New-GateRow $StepName $false "smoke wrote no rows (exit $Code; $LogPath)")) }
@@ -157,14 +159,19 @@ function Get-JourneyReportOnly {
       The report-only fields of a journey's done line: route_m, rungs, blocked, sightless, vitals_passes, run_s and every keeper* field; n/a when the line carries none. granted too, but only on the melee journey
       (M4 4.2 J2: teleports, recalls, recovery_places and the mage's and archer's granted became judges, in Get-JourneyVerdict; the done line itself is in the row). Then bars, from the buff station's line
       (P5b fix FA, review section 2 item 5: the mage's spell bars, set:<n> or ok; n/a when the journey has no such field). Then the window frames of the station lines (J2; judged, shown here beside the others:
-      station:field=x pairs, n/a when no station carries one).
+      station:field=x pairs, n/a when no station carries one). Then, in a bracket of its own, the den-fight station's returns, slots_standing, legs_recovered, kills_unpaired, slots_expired (M5 item 2 k1 and F3, report-only)
+      and loot, looted, kept, loot_value (M5 item 3 m2 and c2b, report-only); n/a for a field the station line lacks. M5 item 3 c2b: places joins the done line's fields beside granted (every journey; report-only, judged from item 4's gate),
+      and two brackets of their own follow: the logistics station's trigger, granted, places, loot, sold, bought, spent, notes_sold, spent_xp, raises and the death station's deaths, corpse_recovered, route, items_back, vitae_grants,
+      rebuffed, relines, trip_abort (n/a for a field a line lacks, or a station the journey does not run). M5 item 5 c1 appends four more (report-only here; door_opened= of the melee journey is judged by Get-JourneyVerdict from M5 item 7's gate): den-fight-physics (the den-fight
+      station's creature_jumps, creature_flips, transit_ms_max, place_ms_max, transits_max), vendor and vendor-facts (door_opened) and recall-home (stepped_off). mana_wait_max_s<=10, storeys_visited>=2 and basement_entries=0 (the last two from item 3's gate, on the mage's den-fight
+      station) are judged by Get-JourneyVerdict, not here.
     #>
     param([string] $Text)
     $line = Get-JourneyDoneLine $Text
     if (-not $line) { return ' [report-only: no journey done line]' }
     $melee = [regex]::IsMatch($line, '(?:^|\s)name=melee(?:\s|$)')
     $parts = [System.Collections.Generic.List[string]]::new()
-    foreach ($k in @('route_m', 'rungs', 'blocked', 'sightless', 'granted', 'vitals_passes', 'run_s')) {
+    foreach ($k in @('route_m', 'rungs', 'blocked', 'sightless', 'granted', 'places', 'vitals_passes', 'run_s')) {
         if ($k -eq 'granted' -and -not $melee) { continue }
         $m = [regex]::Match($line, '(?:^|\s)' + $k + '=(\S+)')
         $parts.Add("$k=$(if ($m.Success) { $m.Groups[1].Value } else { 'n/a' })")
@@ -178,7 +185,93 @@ function Get-JourneyReportOnly {
         foreach ($w in [regex]::Matches($station.Value, '(?<![\w])((?:attack|loot|vendor)_frame_max_ms)=([\d.]+|n/a)')) { $windows += "$($station.Groups[1].Value):$($w.Groups[1].Value)=$($w.Groups[2].Value)" }
     }
     $parts.Add("windows=$(if ($windows.Count) { $windows -join ',' } else { 'n/a' })")
-    return ' [report-only ' + ($parts -join ' ') + ']'
+    # M5 item 3 c2b: the stations' report-only brackets, n/a for a field the line lacks. storeys_visited and basement_entries left the den-fight bracket: they are judged (Get-JourneyVerdict, the mage's, from item 3's gate).
+    $bracket = {
+        param([string] $station, [string[]] $names)
+        $stationLine = [regex]::Match([string]$Text, '(?m)journey station=' + [regex]::Escape($station) + ' [^\r\n]*')
+        $fields = foreach ($k in $names) {
+            $m = if ($stationLine.Success) { [regex]::Match($stationLine.Value, '(?<![\w])' + $k + '=(\S+)') } else { $null }
+            "$k=$(if ($m -and $m.Success) { $m.Groups[1].Value } else { 'n/a' })"
+        }
+        return ' [report-only ' + $station + ' ' + ($fields -join ' ') + ']'
+    }
+    $denFight = & $bracket 'den-fight' @('returns', 'slots_standing', 'legs_recovered', 'kills_unpaired', 'slots_expired', 'loot', 'looted', 'kept', 'loot_value')
+    $logistics = & $bracket 'logistics' @('trigger', 'granted', 'places', 'loot', 'sold', 'bought', 'spent', 'notes_sold', 'spent_xp', 'raises')
+    $death = & $bracket 'death' @('deaths', 'corpse_recovered', 'route', 'items_back', 'vitae_grants', 'rebuffed', 'rebuffed_pretrip', 'relines', 'trip_abort')
+    # M5 item 5 c1 (report-only here; door_opened= of the melee journey is judged by Get-JourneyVerdict from M5 item 7's gate, m5-plan.md section 5 item 3): the den-fight station's physics fields, the melee journey's door_opened= on its vendor and vendor-facts stations
+    # and the recall-home station's stepped_off=; each read by key, n/a for a field the line lacks or a station the journey does not run.
+    $physics = & $bracket 'den-fight' @('creature_jumps', 'creature_flips', 'transit_ms_max', 'place_ms_max', 'transits_max')
+    $physics = $physics -replace '^ \[report-only den-fight ', ' [report-only den-fight-physics '
+    $vendor = & $bracket 'vendor' @('door_opened')
+    $vendorFacts = & $bracket 'vendor-facts' @('door_opened')
+    $recall = & $bracket 'recall-home' @('stepped_off')
+    return ' [report-only ' + ($parts -join ' ') + ']' + $denFight + $logistics + $death + $physics + $vendor + $vendorFacts + $recall
+}
+
+function Get-AutopilotVerdict {
+    <#
+      M5 item 4 c1 (D19; m5-plan.md section 5 items 3 and 4): the judge of the autopilot step (smoke.ps1 autopilot-mage), from the Godot leg's own lines: '[logincheck] autopilot done ok=yes|no cycles=<n> stop=<name> <the totals> s=<n>'
+      (Session/Autopilot/AutopilotScenario.cs; the headless host prints the same line without its prefix), one '[logincheck] autopilot cycle n=<k> state=death|trip|stopped why=<name:count,...|none> <fields> s=<n>' line per cycle,
+      the leg's '[logincheck] autopilot leg done ok= seconds= cycles= stop= frames_saved= frames_not_taken= failure=' and D58's 'test-interrupt: typed' / 'test-handback: typed' lines ('pressed' before M5 7 D145). Every field is read BY KEY, never by position
+      (item 5 appends fields to existing lines; the lookbehind keeps 'places=' from reading 'recovery_places=').
+      JUDGED, the run itself: an autopilot done line is present and says ok=yes. JUDGED from M5 item 7's gate (m5-plan.md section 5 item 3): cycles>=2 on the done line (a value under 2, or the field missing or not a number, fails
+      the step, named: "cycles=<n> (judged >=2)"; the cycle lines' count is not a stand-in: a verdict reads what it names). godot_errors=0 is judged by the row (Get-SmokeStepRows), as for every Godot step.
+      REPORT-ONLY, returned as ReportOnly ('name=value(rule:yes|NO)' items): reconnects=0, interrupted=1, resumed=1, deaths>=1, trips>=1, granted=0 and places=0 (a rule marked NO or n/a is shown, never failed), then stop=, the
+      cycle lines' count and states and triggers (the why= names with their counts added up), and whether D58's two lines were logged. A done-line field the line lacks is read from the cycle lines (their sum) and marked 'cycle-lines'.
+      Returns @{ Ok; Detail; ReportOnly; Frames; Cycles; Done }; Frames is the leg's frames_saved and frames_not_taken (report-only: the lane is contended).
+    #>
+    param([string] $Text)
+    $text = [string]$Text
+    $done = [regex]::Match($text, '(?<![\w-])autopilot done (?<line>ok=[^\r\n]*)')
+    $cycleLines = @([regex]::Matches($text, '(?<![\w-])autopilot cycle (?<line>n=[^\r\n]*)') | ForEach-Object { $_.Groups['line'].Value })
+    $leg = [regex]::Match($text, '(?<![\w-])autopilot leg done (?<line>ok=[^\r\n]*)')
+    $frames = if ($leg.Success) {
+        $saved = [regex]::Match($leg.Groups['line'].Value, '(?<![\w])frames_saved=(\S+)'); $not = [regex]::Match($leg.Groups['line'].Value, '(?<![\w])frames_not_taken=(\S+)')
+        "saved=$(if ($saved.Success) { $saved.Groups[1].Value } else { 'n/a' }) not_taken=$(if ($not.Success) { $not.Groups[1].Value } else { 'n/a' })"
+    } else { 'n/a (no autopilot leg done line)' }
+    $logged = { param([string] $pattern) if ([regex]::IsMatch($text, $pattern)) { 'yes' } else { 'no' } }
+    $handOff = "test_interrupt=$(& $logged '(?m)test-interrupt: (pressed|typed)') test_handback=$(& $logged '(?m)test-handback: (pressed|typed)')"
+    if (-not $done.Success) {
+        return @{ Ok = $false; Detail = 'no autopilot done line'; ReportOnly = "n/a (no autopilot done line); cycle_lines=$($cycleLines.Count) $handOff"; Frames = $frames; Cycles = $null; Done = '' }
+    }
+    $line = $done.Groups['line'].Value
+    $key = { param([string] $l, [string] $k) $m = [regex]::Match($l, '(?<![\w])' + $k + '=(\S+)'); if ($m.Success) { $m.Groups[1].Value } else { $null } }
+    $why = @()
+    $ok = & $key $line 'ok'
+    if ($ok -ne 'yes') { $why += "autopilot done ok is $(if ($ok) { $ok } else { 'n/a' }), not yes" }
+    $number = { param([string] $k)
+        $v = & $key $line $k
+        if ($v -match '^\d+$') { return @{ Value = [int]$v; From = '' } }
+        $found = @($cycleLines | ForEach-Object { & $key $_ $k } | Where-Object { $_ -match '^\d+$' })
+        if ($found.Count -gt 0) { return @{ Value = [int](($found | ForEach-Object { [int]$_ } | Measure-Object -Sum).Sum); From = ' cycle-lines' } }
+        return $null
+    }
+    # Item 7's gate: cycles>=2 is judged, by the done line's own field (the cycle lines are never counted in its place).
+    $cyclesOnLine = & $key $line 'cycles'
+    if ($cyclesOnLine -notmatch '^\d+$') { $why += 'cycles=n/a (judged >=2)' }
+    elseif ([int]$cyclesOnLine -lt 2) { $why += "cycles=$cyclesOnLine (judged >=2)" }
+    $items = foreach ($rule in @(@('reconnects', 'eq', 0), @('interrupted', 'eq', 1), @('resumed', 'eq', 1), @('deaths', 'ge', 1), @('trips', 'ge', 1), @('granted', 'eq', 0), @('places', 'eq', 0))) {
+        $name = $rule[0]
+        $n = & $number $name
+        $word = if ($rule[1] -eq 'ge') { ">=$($rule[2])" } else { "=$($rule[2])" }
+        if ($null -eq $n) { "$name=n/a($word`:n/a)" }
+        else {
+            $holds = if ($rule[1] -eq 'ge') { $n.Value -ge $rule[2] } else { $n.Value -eq $rule[2] }
+            "$name=$($n.Value)($word`:$(if ($holds) { 'yes' } else { 'NO' })$($n.From))"
+        }
+    }
+    $states = @($cycleLines | ForEach-Object { $s = & $key $_ 'state'; if ($s) { $s } else { 'n/a' } })
+    $triggers = @{}
+    foreach ($c in $cycleLines) {
+        $w = & $key $c 'why'
+        if (-not $w -or $w -eq 'none') { continue }
+        foreach ($pair in ($w -split ',')) { $kv = $pair -split ':', 2; $count = if ($kv.Count -eq 2 -and $kv[1] -match '^\d+$') { [int]$kv[1] } else { 1 }; $triggers[$kv[0]] = [int]$triggers[$kv[0]] + $count }
+    }
+    $triggerText = if ($triggers.Count) { (($triggers.Keys | Sort-Object | ForEach-Object { "${_}:$($triggers[$_])" }) -join ',') } else { 'none' }
+    $stop = & $key $line 'stop'
+    $report = ($items -join ' ') + " stop=$(if ($stop) { $stop } else { 'n/a' }) cycle_lines=$($cycleLines.Count) states=$(if ($states.Count) { $states -join ',' } else { 'none' }) triggers=$triggerText $handOff"
+    $cyclesValue = & $key $line 'cycles'
+    return @{ Ok = ($why.Count -eq 0); Detail = ('autopilot done ' + $line + $(if ($why.Count) { '; ' + ($why -join '; ') } else { '' })); ReportOnly = $report; Frames = $frames; Cycles = $(if ($cyclesValue -match '^\d+$') { [int]$cyclesValue } else { $null }); Done = $line }
 }
 
 function Get-JourneyComparison {
@@ -307,6 +400,13 @@ function Invoke-GateSteps {
         if ($needs -and (Test-Path -LiteralPath (Get-GateRecreateStamp -LogDir $LogDir -Account $needs))) {
             AddRows $s @(New-GateRow $s.Name $false "not run: the re-create on $needs failed") 0
             continue
+        }
+        # M5 item 4 c2 (m5-gate-foreign-godot): a solo step does not start while a Godot process that is not the gate's is up. It is named (pid, start time, game arguments), waited for up to the step's bound, and then
+        # the step is one FAIL row `foreign-godot: ...` instead of a smoke wait that ends in a 10-minute timeout. -1 = no check (the parallel lanes run beside each other's Godot on purpose).
+        $foreign = if ($s.PSObject.Properties['ForeignGodotSeconds']) { [int]$s.ForeignGodotSeconds } else { -1 }
+        if ($foreign -ge 0) {
+            $w = Wait-GateForeignGodot -Seconds $foreign -Label "$($s.Lane) $($s.Name)" -Say { param($l) Say $l }
+            if (-not $w.Ok) { AddRows $s @(New-GateRow $s.Name $false $w.Detail) 0; continue }
         }
         $release = Get-GateReleaseWait -LogDir $LogDir -Account $account
         if ($release.Seconds -gt 0) {
@@ -453,4 +553,4 @@ function Get-MissingGateRows {
     return @($made)
 }
 
-Export-ModuleMember -Function Get-GateJourneyVerdict, Get-JourneyDoneLine, Get-JourneyReportOnly, Get-JourneyComparison, Get-RecreateVerdict, Get-GateReleaseWait, Test-FrameOnlyText, Get-FrameMaxMs, Get-TestCounts, Get-SmokeStepRows, Invoke-GateSteps, Start-GateLaneJob, Receive-GateLaneJob, Get-MissingGateRows
+Export-ModuleMember -Function Get-AutopilotVerdict, Get-GateJourneyVerdict, Get-JourneyDoneLine, Get-JourneyReportOnly, Get-JourneyComparison, Get-RecreateVerdict, Get-GateReleaseWait, Test-FrameOnlyText, Get-FrameMaxMs, Get-TestCounts, Get-SmokeStepRows, Invoke-GateSteps, Start-GateLaneJob, Receive-GateLaneJob, Get-MissingGateRows

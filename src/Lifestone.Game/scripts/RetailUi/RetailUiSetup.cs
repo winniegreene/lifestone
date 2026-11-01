@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Godot;
+using Lifestone.Client.Play;
 using Lifestone.Client.RetailUi;
+using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Flow;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Game.Audio;
@@ -139,6 +141,9 @@ public static class RetailUiSetup
                 host: host,
                 soundMuted: () => AudioService.Current?.IsSilent ?? true);
             main.AddChild(layer);
+            var memoryLayouts = UseMemoryLayouts(options, services, automated);
+            Log.Info("retailui", memoryLayouts ? "the window layout store is in memory: it starts empty and is gone with the process (--layout-store)" : "the window layout store is the user data (--layout-store)");
+            layer.Manager.Services.ScreenLayouts = memoryLayouts ? new MemoryScreenLayoutStore() : new GodotScreenLayoutStore(); // the in-game shell's window layout, per world, character and window size (M5 6 u1, D33; the store 6-R2)
             var note = CreateNote();
             note.Visible = false;
             main.AddChild(note);
@@ -164,6 +169,19 @@ public static class RetailUiSetup
             return null;
         }
     }
+
+    /// <summary>
+    /// Whether the window layout files stay in memory (<c>--layout-store</c>, M5 6 fix, 6-R2). Auto: the checks and the review frames start from an empty store and share it across the run's logins (a place a
+    /// check moves is not carried into the next run, and a layout an earlier run saved is not read); live play and <c>--login-check=keep</c> (which proves the file round trip) use the user data.
+    /// </summary>
+    private static bool UseMemoryLayouts(RetailUiOptions options, GameServices services, bool framesRun) => options.LayoutStore switch
+    {
+        LayoutStoreKind.Memory => true,
+        LayoutStoreKind.Disk => false,
+        _ => framesRun
+            || services.Options.Checks == GameCheckSuite.Play
+            || PlayOptions.Parse(OS.GetCmdlineUserArgs()).LoginCheck is not (LoginCheckKind.None or LoginCheckKind.Keep),
+    };
 
     /// <summary>Keeps the note's text and visibility to what the screen on show says is a placeholder (a stand-in, or a screen that is built in part).</summary>
     private sealed class NoteController(CanvasLayer note, UiFlow flow)

@@ -78,7 +78,7 @@ public sealed class StandInFightTests
         }
     }
 
-    private static readonly string[] OneBolt = ["F745", "F755", "F74B", "F755", "F74E"];
+    private static readonly string[] OneBolt = ["02E9", "F745", "F755", "F74B", "F755", "F74E"]; // M5 1 K2: the cast's mana (02E9) comes with the effect, before the projectile
 
     private static IEnumerable<string> MagicLines(CastRig rig) => rig.Chat.Where(l => l.ChatType == FightTally.MagicChatType).Select(l => l.Text);
 
@@ -113,7 +113,7 @@ public sealed class StandInFightTests
         var toward = Vector3.Normalize(new Vector3((float)(target.X - start.X), (float)(target.Y - start.Y), (float)(target.Z - start.Z)));
         Assert.True(Vector3.Dot(toward, Vector3.Normalize(bolt.Velocity)) > 0.99f, "the bolt flies at the target");
         Assert.Equal(1, fight.World.BoltsLaunched);
-        Assert.Equal(["F745", "F755"], fight.Tags.Take(2));
+        Assert.Equal(["02E9", "F745", "F755"], fight.Tags.Take(3));
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public sealed class StandInFightTests
         fight.Rig.Session.Actions.Cast(Bolt, ActionSource.Host);
         fight.Rig.Run(6.0);
 
-        Assert.Equal(["F745", "F755", "F747"], fight.Tags);
+        Assert.Equal(["02E9", "F745", "F755", "F747"], fight.Tags);
         Assert.Equal(StandInWorld.MaxMissileRange / FlameBoltSpeed, fight.Rig.First("F747") - fight.Rig.First("F745"), 0.03);
         Assert.Equal((0, 1), (fight.World.BoltsHit, fight.World.BoltsMissed));
     }

@@ -1,4 +1,6 @@
 using System.Globalization;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Tests.Session.Grounds;
 using System.Numerics;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement.Wayfinding;
@@ -85,18 +87,34 @@ public sealed class J5bJourneyPlannerTests(DatSetFixture fixture, ITestOutputHel
         // From inside the chest room to the lifestone: the indoor-outdoor source and its exit route (F1-2; Godot gave it to the outdoor planner: start-blocked).
         Assert.IsType<IndoorOutdoorPathSource>(planner.SourceFor(0xA9B4016A, Lifestone & 0xFFFF0000u, map));
 
+        // M5 7 P7k (live check 2): from Cindrue's entry hall to an outdoor goal in the next landblock (the Scrivener, planned to 0xA9B30000): the start's rooms, not the goal landblock's,
+        // with the choice named for the leg's log line.
+        var hallOut = Assert.IsType<IndoorOutdoorPathSource>(planner.SourceFor(0xA9B40117, 0xA9B30000, map, out var why));
+        Assert.Equal(0xA9B40000u, hallOut.Rooms.LandblockId);
+        Assert.Contains("start room's landblock", why, StringComparison.Ordinal);
+        Assert.Contains("landblock 0xA9B3", why, StringComparison.Ordinal);
+        Assert.Equal(0xA9B40000u, Assert.IsType<IndoorOutdoorPathSource>(planner.SourceFor(Lifestone, 0xA9B40117, map, out why)).Rooms.LandblockId);
+        Assert.Contains("the goal is a room", why, StringComparison.Ordinal);
+
+        // A room start and a room goal in two landblocks: the goal's rooms, and the plan fails by its own name (TODO(cross-landblock-rooms)), not the unreachable room the journey recovers from.
+        var across = planner.SourceFor(0xA9B30100, 0xA9B40117, map, out why);
+        Assert.Contains("TODO(cross-landblock-rooms)", why, StringComparison.Ordinal);
+        var failed = across.Plan(new CellFrame(0xA9B30100, new AcFrame(new Vector3(100, 100, 100), Quaternion.Identity)), NavGoal.ToPoint(new NavPoint(0xA9B40000, new Vector3(155.42f, 134.31f, 66.01f)), 0xA9B40117), new NavScars());
+        Assert.Equal(NavPathStatus.Failed, failed.Status);
+        Assert.StartsWith(IndoorOutdoorPathSource.IndoorStartOtherLandblock + ":0xA9B30100", failed.Reason, StringComparison.Ordinal);
+
         // The headless host's source is the planner's (the den needs no nav map, so no body is built here).
         using var host = new HeadlessJourneyRunnerHost(Dats, new RecordingLogSink());
         Assert.IsType<RoomPathSource>(host.SourceFor(Lifestone, J1JourneyRig.DenCell));
-        Assert.Same(host.DenGraph(), host.Planner.DenGraph());
+        Assert.Same(host.GroundGraph(DenGround.Profile), host.Planner.GroundGraph(DenGround.Profile));
     }
 
     [RequiresDatsFact]
     public void The_Godot_hosts_den_graph_comes_from_its_worker_once()
     {
         var built = 0;
-        var graph = DenRooms.GraphOf(new JourneyLegPlanner(Dats).CellsOf(J1JourneyRig.DenCell));
-        var godot = new JourneyLegPlanner(Dats, den: () =>
+        var graph = GroundRooms.GraphOf(new JourneyLegPlanner(Dats).CellsOf(J1JourneyRig.DenCell), DenGround.Profile);
+        var godot = new JourneyLegPlanner(Dats, graphSource: _ =>
         {
             built++;
             return graph;
@@ -111,7 +129,7 @@ public sealed class J5bJourneyPlannerTests(DatSetFixture fixture, ITestOutputHel
     {
         var rig = new J1JourneyRig(J1JourneyRig.DenCell);
         var log = new RecordingLogSink();
-        var planner = new JourneyLegPlanner(null, den: () => throw new InvalidOperationException("the journey built no den room graph (TODO(m4-journey-den-graph))"));
+        var planner = new JourneyLegPlanner(null, graphSource: _ => throw new InvalidOperationException("the journey built no den room graph (TODO(m4-journey-den-graph))"));
         var body = new J5bScriptedBody(rig) { Settled = true };
         using var leg = new JourneyRunLeg(planner, body, Request(0x01050383, new Vector3(10, 10, 0)), "spot-1", rig.View.Clock.Now, log);
         Assert.Equal(TravelStatus.Failed, leg.Step(rig.View, rig.Now));
@@ -247,7 +265,7 @@ public sealed class J5bJourneyPlannerTests(DatSetFixture fixture, ITestOutputHel
     }
 
     /// <summary>
-    /// Live (Godot): the mage was recalled into the den before the den fight started, and the fight's offline walker (<see cref="DenWalk"/>) waits for a teleport
+    /// Live (Godot): the mage was recalled into the den before the den fight started, and the fight's offline walker (<see cref="GroundWalk"/>) waits for a teleport
     /// it never saw: <c>fight: no walk could be planned: the den walker is not placed: no teleport of the player reached it</c>, and the death after it timed out.
     /// The Godot host now gives the den fight and the death the M3 fight leg's walk over the player's own body (<see cref="GameFightWalk"/>), which the play places
     /// wherever the server has the player. Here the server places the player in the den first; a body that follows the server (the headless host's, standing in
@@ -268,8 +286,8 @@ public sealed class J5bJourneyPlannerTests(DatSetFixture fixture, ITestOutputHel
         Assert.Null(probe.Failure);
         Assert.Equal("done", probe.Stage);
         Assert.Contains("from 0x01050375 to 0x0105", probe.Walk, StringComparison.Ordinal);
-        Assert.Equal("the den walker is not placed: no teleport of the player reached it", probe.OfflineFailure);
-        Assert.NotEqual(BlackSpawnDen.Arrival.CellId, host.Body.Walker!.Position.CellId);
+        Assert.Equal("the ground walker is not placed: no teleport of the player reached it", probe.OfflineFailure);
+        Assert.NotEqual(DenGround.Arrival.CellId, host.Body.Walker!.Position.CellId);
     }
 
     private static TravelRequest Request(uint cell, Vector3 at, bool height = true) =>
@@ -372,7 +390,7 @@ public sealed class J5bJourneyPlannerTests(DatSetFixture fixture, ITestOutputHel
                 case "holtburg":
                     if (host.Body.Placed && host.Body.Walker!.Position.CellId >> 16 == 0xA9B4)
                     {
-                        session.Tools.Place(Destination("den", BlackSpawnDen.Arrival.CellId, BlackSpawnDen.Arrival.Origin), ActionSource.Host); // the recall, before the station
+                        session.Tools.Place(Destination("den", DenGround.Arrival.CellId, DenGround.Arrival.Origin), ActionSource.Host); // the recall, before the station
                         return Go("recalled", session);
                     }
 
@@ -381,13 +399,16 @@ public sealed class J5bJourneyPlannerTests(DatSetFixture fixture, ITestOutputHel
                     if (host.Body.Placed && host.Body.Walker!.Position.CellId >> 16 == 0x0105)
                     {
                         // The station starts now, after the recall: an offline walker never sees a teleport; the walk over the player's body needs none.
-                        using (var offline = DenWalk.Create(dats, log))
+                        using (var offline = GroundWalk.Create(dats, DenGround.Profile, log))
                         {
                             offline.Prepare(session, now);
                             OfflineFailure = offline.BeginLeg(session, now, out _) ? "began a leg" : offline.Failure;
                         }
 
-                        _walk = new GameFightWalk(new RoutePlayHost(() => host.Body.Placed ? host.Body.Walker : null, () => 0), host.DenGraph(), log);
+                        // The offline walker bound the session's keys to its own controller and let them go on its disposal; the player's body gets them back (the walk below presses its keys through them, a NavRunner's way; in the game the play binds them once).
+                        host.Body.Move!.Bind(host.Body.Walker!.Controller, host.Body.Walker.Controller.Options.RunByDefault);
+
+                        _walk = new GameFightWalk(new RoutePlayHost(() => host.Body.Placed ? host.Body.Walker : null, () => 0), host.GroundGraph(DenGround.Profile), DenGround.Profile, log);
                         _walk.Prepare(session, now);
                         if (!_walk.BeginLeg(session, now, out var description))
                         {

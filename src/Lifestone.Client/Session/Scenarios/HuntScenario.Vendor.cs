@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Numerics;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
@@ -100,6 +101,9 @@ public sealed partial class HuntScenario
     private readonly HashSet<uint> _heldKnown = [];
     private readonly List<uint> _heldScratch = [];
     private bool _vendorTripBegun;
+    private int _stuckEndsAtOpen;
+    private bool _renaldOpenRetried;
+    private DoorWatch? _doorWatch;
     private bool _vendorPlace;
     private int _vendorSide;
     private bool _vendorWindow;
@@ -151,6 +155,30 @@ public sealed partial class HuntScenario
     public string VendorFields() =>
         string.Create(CultureInfo.InvariantCulture, $"sold={_tally.Sold} bought={_tally.Bought} pyreals={_tally.Pyreals} appraised={_appraisals.Appraised} sell={Token(SellOutcome)} buy={Token(BuyOutcome)} buy_pyreals={_buyCost}");
 
+    /// <summary>
+    /// <c>yes</c> only when a door the vendor trip's walk itself Used (the runner's Use through <see cref="SessionDoorFeed"/>, by guid) turned Ethereal during the trip (M5 item 5, d2 and F2's 5-R2: the vendor station's
+    /// <c>door_opened=</c>, <see cref="DoorWatch"/>, as the vendor-facts station's), else <c>no</c>: another lane's door, ACE opening a door, a door found open and the vendor's own Use never count
+    /// (also <c>no</c> for a trip by place loc, which walks through no door). Report-only.
+    /// </summary>
+    public string DoorOpenedField => _doorWatch?.Field ?? "no";
+
+    /// <summary>
+    /// Starts the trip's <see cref="DoorWatch"/>: the trip's walk goes through the journey seam's runner, which opens a closed shop door (purpose=door); the watch reads whether it did. The previous trip's watch is
+    /// disposed first, so no subscription piles up (M5 5 F2, 5-R8).
+    /// </summary>
+    /// <param name="session">The session.</param>
+    internal void BeginDoorWatch(IGameSessionView session)
+    {
+        if (_doorWatch is { } previous)
+        {
+            previous.Dispose();
+            _subscriptions.Remove(previous);
+        }
+
+        _doorWatch = new DoorWatch(session);
+        _subscriptions.Add(_doorWatch);
+    }
+
     /// <summary>A value on the detail line has no spaces.</summary>
     private static string Token(string text)
     {
@@ -183,6 +211,8 @@ public sealed partial class HuntScenario
         {
             return null; // M4 P5b: the shops are their own station in a journey (the stage is logged once as skipped; sell=n/a buy=n/a)
         }
+
+        BeginDoorWatch(session);
 
         _wantSell = _options.Sell;
         _wantBuy = _options.BuyKits > 0;
@@ -253,26 +283,41 @@ public sealed partial class HuntScenario
     /// </summary>
     private double VendorUseMetres => _visit == VendorVisit.Renald ? RenaldUseMetres : ThelnothUseMetres;
 
-    /// <summary>The radius every walk to Renald the Elder ends in (the hunt's and the vendor-facts station's, M4 P5b fix FC-b2): 6.5 m from his front room, asking for no sight.</summary>
+    /// <summary>
+    /// The centre-to-centre radius Renald the Elder counts as in reach after a walk (the hunt's arrival check and the vendor-facts station's, M4 P5b fix FC-b2): 6.5 m from his front room. Since M5 7 P7p no walk ends
+    /// at this radius any more: every walk to him is a point goal to <see cref="ShopLeg.RenaldStand"/> (an object goal within 6.5 m stood about 5.05 m out, cylinder to cylinder, outside ACE's 5 m use radius).
+    /// </summary>
     public const double RenaldUseMetres = 6.5;
 
     /// <summary>The radius every walk to Thelnoth Cort ends in: 3 m (his cellar is his shop's own cell).</summary>
     public const double ThelnothUseMetres = 3.0;
 
     /// <summary>
-    /// The shop door on foot (M4 P5b, lane J2a; closes the live walk of <c>m4-vendor-approach</c>): the travel seam's object goal is the vendor within its use radius, the point is the vendor's own x and y in the room the
-    /// walk ends in (Renald's front room <see cref="RenaldFrontRoomCell"/>, Thelnoth's cellar); the vendor's guid when it is in view, else a point goal.
+    /// The shop door on foot (M4 P5b, lane J2a; closes the live walk of <c>m4-vendor-approach</c>). Thelnoth: the travel seam's object goal is the vendor within its use radius, the point his own x and y in his cellar; his
+    /// guid when he is in view, else a point goal. Renald (M5 7 P7p): a point goal to <see cref="ShopLeg.RenaldStand"/> in his front room <see cref="RenaldFrontRoomCell"/>, the den profile's stop point, inside his use
+    /// radius: the old object goal within <see cref="RenaldUseMetres"/> ended about 5.05 m out, cylinder to cylinder, and ACE's MoveTo from there ran into the barrels by his counter (the item-end gate).
     /// </summary>
-    private ScenarioStatus VendorGoOnFoot(IGameSessionView session)
+    /// <param name="session">The session.</param>
+    /// <param name="why">Why the walk is made, for the log (the first walk, or the recovery after a refused open).</param>
+    private ScenarioStatus VendorGoOnFoot(IGameSessionView session, string why = "the first walk")
     {
         _vendorSide = 0;
         _vendorPlace = true;
         _vendorGuid = 0;
         var renald = _visit == VendorVisit.Renald;
-        var shop = renald ? RenaldShop : ThelnothShop;
-        var cell = renald ? RenaldFrontRoomCell : shop.Location.Position.CellId;
+        if (renald)
+        {
+            var (standCell, standPoint) = ShopLeg.RenaldStand;
+            var stand = RenaldShop with { Name = "Renald the Elder's stand (on foot)", Location = RenaldShop.Location with { Position = new CellPosition(standCell, standPoint) } };
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vendors: on foot to Renald the Elder ({why}): a point goal to his stand 0x{standCell:X8} ({standPoint.X:0.##}, {standPoint.Y:0.##}, {standPoint.Z:0.##}), the den profile's stop_point, inside his 5 m use radius (no MoveTo of ACE's is needed)"));
+            BeginPlace(session, stand, "vendor-arrive", home: false, TravelPurpose.Vendor);
+            return ScenarioStatus.Running;
+        }
+
+        var shop = ThelnothShop;
+        var cell = shop.Location.Position.CellId;
         var goal = shop with { Name = shop.Name + " (on foot)", Location = shop.Location with { Position = shop.Location.Position with { CellId = cell } } };
-        var guid = FindVendor(session, renald ? RenaldWcid : ThelnothWcid);
+        var guid = FindVendor(session, ThelnothWcid);
         var at = goal.Location.Position.Local;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vendors: on foot to {VisitName}: cell 0x{cell:X8}, the vendor's point ({at.X:0.##}, {at.Y:0.##}, {at.Z:0.##}), {(guid == 0 ? "a point goal (the vendor is not in view yet)" : $"the object goal 0x{guid:X8} within {VendorUseMetres:0} m")}"));
         BeginPlace(session, goal, "vendor-arrive", home: false, TravelPurpose.Vendor, guid, VendorUseMetres);
@@ -353,7 +398,8 @@ public sealed partial class HuntScenario
         _vendorGuid = guid;
         _saleVendor = _visit == VendorVisit.Renald ? guid : 0;
         _vendorWindow = true;
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vendors: opening {VisitName} 0x{guid:X8}"));
+        _stuckEndsAtOpen = session.Actions.Move.ServerMoveToStuckEnds;
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vendors: opening {VisitName} 0x{guid:X8} (server MoveTos ended stuck so far: {_stuckEndsAtOpen})"));
         _pending = session.Actions.OpenVendor(guid, ActionSource.Host);
         return Enter("vendor-open");
     }
@@ -412,6 +458,16 @@ public sealed partial class HuntScenario
 
         if (opened.Kind != ActionOutcomeKind.Confirmed)
         {
+            var stuckNow = session.Actions.Move.ServerMoveToStuckEnds;
+            if (_visit == VendorVisit.Renald && OnFoot && !_renaldOpenRetried && ShopLeg.RefusedAfterStuckMoveTo(opened, _stuckEndsAtOpen, stuckNow))
+            {
+                // M5 7 P7p (D141, check, act, check): ACE's walk-to-use ended stuck (TODO(m5-moveto-stuck)) and the open was refused; the named recovery, once: his stand, then one more open.
+                _renaldOpenRetried = true;
+                _vendorWindow = false;
+                _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vendors: opening {VisitName}: {Describe(opened)} after ACE's MoveTo ended {session.Actions.Move.LastServerMoveToEnd ?? "unknown"} (stuck ends {_stuckEndsAtOpen} -> {stuckNow}): recovery: walking to his stand and opening once more"));
+                return VendorGoOnFoot(session, "the recovery after a refused open");
+            }
+
             return VendorAbort(session, $"opening {VisitName}: " + Describe(opened));
         }
 

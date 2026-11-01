@@ -45,6 +45,12 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
     /// <summary>The WeenieError ACE's UseDone carries for a cast without the mana (<c>YouDontHaveEnoughManaToCast</c>).</summary>
     internal const uint ManaCode = 0x0401;
 
+    /// <summary>
+    /// M5 7 D124: ACE's <c>TargetNotAcquired</c> (<c>WeenieError.cs</c>:389 @95ef426d). ACE sends it as a UseDone code when the target is gone at the cast's start, after the turn or at the wind-up (<c>Player_Magic.cs</c>:137-140, 173-179,
+    /// 197-203), and as a WeenieError (028A) when it is gone at the release (<c>DoCastSpell</c>, 751-757), followed by <c>FinishCast</c>'s UseDone 0 (935-985): no projectile, the target died during the wind-up.
+    /// </summary>
+    internal const uint NotAcquiredCode = 0x042C;
+
     /// <summary>How far from the player a projectile may appear and still be taken for the player's: ACE spawns it a body's width in front of the caster, so a few metres, not the ten of the first cut (M3 1.2 fix R2).</summary>
     internal const float ProjectileRangeMetres = 5f;
 
@@ -57,6 +63,16 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
     private Expectation _expect = Expectation.Unknown;
     private uint _self;
     private bool _finished;
+    private bool _targetSeen;
+
+    /// <summary>The vital id of the mana maximum (ACE <c>PropertyAttribute2nd.MaxMana</c>).</summary>
+    internal const uint MaxManaVital = 5;
+
+    /// <summary>ACE's Mana Conversion skill id.</summary>
+    internal const uint ManaConversionSkill = 16;
+
+    /// <summary>ACE's <c>SkillAdvancementClass.Trained</c> (2; specialised is 3).</summary>
+    internal const uint TrainedClass = 2;
 
     /// <summary>What a spell's outcome is looked for in.</summary>
     internal enum Expectation : byte
@@ -77,10 +93,13 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
     /// <summary>What the tracker looked for (known after the send).</summary>
     internal Expectation Expected => _expect;
 
+    /// <summary>The target the cast went out with (<see cref="SendTarget"/>), once sent.</summary>
+    private uint _sentAt;
+
     /// <inheritdoc/>
-    internal override string WouldSend => target == 0
+    internal override string WouldSend => (_sentAt != 0 ? _sentAt : target) == 0
         ? "GameAction 0x0048 CastUntargetedSpell " + spellId
-        : "GameAction 0x004A CastTargetedSpell " + spellId + " at " + ActionText.Hex(target);
+        : "GameAction 0x004A CastTargetedSpell " + spellId + " at " + ActionText.Hex(_sentAt != 0 ? _sentAt : target);
 
     /// <inheritdoc/>
     internal override bool HoldsLane => !_finished;
@@ -89,7 +108,50 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
     internal override bool ConsumesUseDone => true;
 
     /// <inheritdoc/>
-    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api);
+    internal override void Accepted(ActionApi api) => _targetSeen = target != 0 && api.State.Objects.TryGet(target, out _);
+
+    /// <inheritdoc/>
+    /// <remarks>M5 7 D141's before-check: in the world; the target, seen when the cast was asked, still in the object table; and the mana the state holds against the spell's cost where the cost is certain (<see cref="ManaRefusal"/>).</remarks>
+    internal override string? Refusal(ActionApi api) =>
+        WorldTrackers.NotInWorld(api) ?? TargetGone(api, target, _targetSeen, "cast's target") ?? (ManaRefusal(api, spellId) is { } mana ? Refuse(ActionReason.NotEnoughMana, mana) : null);
+
+    /// <summary>
+    /// M5 7 D141: why ACE would certainly refuse the cast for its mana (UseDone 0x0401), or null. ACE (<c>Player_Magic.cs</c> 566-585, <c>Creature_Magic.cs</c> 14-53 @95ef426d) charges the spell's base mana
+    /// (plus a ManaMod per armour piece or fellow, only ever more) when Mana Conversion is untrained or the spell ignores it, so mana under the base is a certain refusal; a trained caster's cost is a roll that
+    /// can fall to 1, so only no mana at all is certain (<see cref="Casting.ManaConversionModel.LandingChance"/>: the casting layer gates the tries in between, <c>CastAttempt</c>). Unknown (no spell table, no
+    /// vitals, the skill not described) or a spell the wielded caster carries (ACE charges its ItemManaCost instead): never refused here, the server judges.
+    /// </summary>
+    internal static string? ManaRefusal(ActionApi api, uint spellId)
+    {
+        var q = api.State.Self.Qualities;
+        if (api.FindSpell(spellId) is not { } info || !q.TryGetVitalLevels(MaxManaVital, out var mana, out _))
+        {
+            return null;
+        }
+
+        foreach (var held in api.State.Self.Inventory.Equipped)
+        {
+            if (api.State.Objects.TryGet(held.Guid, out var item) && item.Weenie.SpellId == spellId)
+            {
+                return null; // the caster's own spell: ACE charges the item's ItemManaCost (Creature_Magic.cs 20-22)
+            }
+        }
+
+        var ignores = (info.Flags & SpellFlags.IgnoresManaConversion) != 0;
+        bool? trained = q.TryGetSkill(ManaConversionSkill, out var skill) ? skill.AdvancementClass >= TrainedClass : null;
+        if ((ignores || trained == false) && mana < info.BaseMana)
+        {
+            return "not enough mana: " + ActionText.Count(mana) + " held, the spell " + spellId + " costs " + ActionText.Count(info.BaseMana) +
+                (ignores ? " (it ignores Mana Conversion)" : " (Mana Conversion untrained)") + "; ACE would answer 0x0401";
+        }
+
+        if (mana == 0 && info.BaseMana > 0)
+        {
+            return "not enough mana: none held, the spell " + spellId + " costs at least 1 (base " + ActionText.Count(info.BaseMana) + "); ACE would answer 0x0401";
+        }
+
+        return null;
+    }
 
     /// <summary>What the outcome of <paramref name="info"/> cast at <paramref name="at"/> (0: no target) is looked for in (a pure rule, tested).</summary>
     internal static Expectation Classify(SpellInfo? info, uint at, uint self)
@@ -125,22 +187,33 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
         // A Lifestone guard; --retail-cast-any-mode sends it as retail's client would.
         if (!api.RetailCastAnyMode && api.State.Self.Qualities.CombatMode != CombatModes.Magic)
         {
-            return new ActionOutcome(ActionOutcomeKind.Refused, 0, StanceGuards.CastRefusal);
+            return new ActionOutcome(ActionOutcomeKind.Refused, 0, StanceGuards.CastRefusal, ActionReason.NotInMagicStance);
         }
 
         _self = api.State.Self.Guid;
-        _expect = Classify(api.FindSpell(spellId), target, _self);
-        if (target == 0)
+        var info = api.FindSpell(spellId);
+        _expect = Classify(info, target, _self);
+        _sentAt = SendTarget(info, target, _self);
+        if (_sentAt == 0)
         {
             session!.SendCastUntargetedSpell(spellId);
         }
         else
         {
-            session!.SendCastTargetedSpell(target, spellId);
+            session!.SendCastTargetedSpell(_sentAt, spellId);
         }
 
         return null;
     }
+
+    /// <summary>
+    /// The target a cast goes out with (a pure rule, tested): retail's <c>ClientMagicSystem::CastSpell</c> (11.6096 0x00568DE0, 11.4186 0x00568040) sends a spell with <c>SpellFlags.SelfTargeted</c>
+    /// as a targeted cast at the player's own id (<c>FreeHandsAndCastSpell</c>, 0x00567C90 / 0x00566EF0), and only a spell with no target type untargeted. ACE plays a cast's target effect only when the
+    /// cast names a target (<c>WorldObject_Magic.cs</c> <c>DoSpellEffects</c> 355-367 @95ef426d), so the untargeted send this replaces lost every creature and life self buff's effect on the player
+    /// (the orbs and the shells; m5-buff-effects-drawn). A cast asked for at a target keeps it; with no table entry or no player id it goes out as asked.
+    /// </summary>
+    internal static uint SendTarget(SpellInfo? info, uint target, uint self) =>
+        target == 0 && self != 0 && info is not null && (info.Flags & SpellFlags.SelfTargeted) != 0 ? self : target;
 
     /// <inheritdoc/>
     internal override void OnEnchantment(in EnchantmentChanged e)
@@ -279,12 +352,13 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
     /// <inheritdoc/>
     internal override bool OnChat(in ChatReceived e, ActionApi api)
     {
-        if (e.Line.Kind != ChatKind.WeenieError || e.Line.ChatType != FizzleCode)
+        if (e.Line.Kind != ChatKind.WeenieError || e.Line.ChatType is not (FizzleCode or NotAcquiredCode))
         {
             return false;
         }
 
-        Resolve(new ActionOutcome(ActionOutcomeKind.ServerError, FizzleCode, "the spell fizzled (WeenieError 0x0402)"));
+        // M5 7 D124: the release's 0x042C settles the cast as that code (the UseDone 0 that follows still frees the lane, HoldsLane), not as "ended without a projectile".
+        Resolve(new ActionOutcome(ActionOutcomeKind.ServerError, e.Line.ChatType, Describe(e.Line.ChatType)));
         return true;
     }
 
@@ -323,7 +397,8 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
         Resolve(new ActionOutcome(
             ActionOutcomeKind.ServerError,
             0,
-            "the server ended the cast without " + (_expect == Expectation.Projectile ? "a projectile" : "the enchantment") + hint + seen));
+            "the server ended the cast without " + (_expect == Expectation.Projectile ? "a projectile" : "the enchantment") + hint + seen,
+            hint.Length > 0 ? ActionReason.NotInMagicStance : ActionReason.NoEffect)); // M5 7 D141: the contrary result, typed
     }
 
     private static string Describe(uint code) => code switch
@@ -331,6 +406,7 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
         ComponentsCode => "the player lacks a spell component (WeenieError 0x0400)",
         ManaCode => "not enough mana (WeenieError 0x0401)",
         FizzleCode => "the spell fizzled (WeenieError 0x0402)",
+        NotAcquiredCode => "the target was not acquired: ACE no longer holds it, it died during the wind-up (WeenieError 0x042C TargetNotAcquired)",
         _ => "WeenieError " + ActionText.Hex(code),
     };
 }
@@ -358,8 +434,13 @@ internal sealed class SetCombatModeTracker(ActionHandle handle, CombatMode mode)
             return notInWorld;
         }
 
-        // A request for the mode the player is in completes Local (Send), whatever it wields; any other is checked against the wielded weapon.
-        return api.State.Self.Qualities.CombatMode == (int)mode ? null : CombatModeGuard.Check(mode, api.State);
+        // A request for the mode the player is in completes Local (Send), whatever it wields; any other is checked against the wielded weapon. M5 7 D139 (l): a magic request with no caster held leads with the plain reason.
+        if (api.State.Self.Qualities.CombatMode == (int)mode || CombatModeGuard.Check(mode, api.State) is not { } problem)
+        {
+            return null;
+        }
+
+        return mode == CombatMode.Magic && CombatModeGuard.Read(api.State) is { Caster: null, Unknown: 0 } ? Refuse(ActionReason.NoCasterHeld, NoCasterHeld + ": " + problem) : problem;
     }
 
     /// <inheritdoc/>
@@ -382,6 +463,42 @@ internal sealed class SetCombatModeTracker(ActionHandle handle, CombatMode mode)
             Resolve(new ActionOutcome(ActionOutcomeKind.Confirmed, 0, "combat mode " + e.Previous + " -> " + e.Mode));
         }
     }
+
+    /// <summary>
+    /// M5 7 D139 (l): the server's answer that is not the mode asked fails the change at once. ACE sends the combat mode (PropertyInt 40) once per <c>SetCombatMode</c>, for the mode it sets (<c>Creature_Combat.cs</c> 120,
+    /// 176, 201, 246 @95ef426d), and a refused request is answered by setting peace (<c>Player_Combat.cs</c> 812-822 melee with a caster or launcher, 824-835 missile with no launcher, 872-882 magic with no caster): the update
+    /// is sent even when the player is at peace already, which the reducer stores without a <see cref="CombatModeChanged"/>, so the tracker reads every update of property 40 (round 13, 2026-10-30 03:07:24 UTC: three recalls
+    /// waited 5 s each for a magic mode ACE had answered with peace).
+    /// </summary>
+    internal override void OnQuality(in QualitiesChanged e, ActionApi api)
+    {
+        if (e.Change != QualityChange.Int || e.Key != CombatModes.Property || Resolution is not null)
+        {
+            return;
+        }
+
+        var now = api.State.Self.Qualities.CombatMode;
+        if (now == (int)mode)
+        {
+            Resolve(new ActionOutcome(ActionOutcomeKind.Confirmed, 0, "combat mode " + now));
+            return;
+        }
+
+        // Peace is ACE's refusal of a combat mode; another combat mode is taken for a stale answer (an earlier request's, a stance swap's) unless what the hands hold now makes the asked mode impossible.
+        var impossible = CombatModeGuard.Check(mode, api.State) is not null;
+        if (now != CombatModes.NonCombat && !impossible)
+        {
+            return;
+        }
+
+        // M5 7 D141: typed: no caster held for a magic request, else a contrary result (the server's answer is not the mode asked).
+        var noCaster = mode == CombatMode.Magic && CombatModeGuard.Read(api.State).Caster is null;
+        var why = noCaster ? NoCasterHeld + ": " : string.Empty;
+        Resolve(new ActionOutcome(ActionOutcomeKind.ServerError, 0, why + "the server answered combat mode " + now + ", not the " + (uint)mode + " asked (ACE sets peace for a mode the wielded item does not allow, Player_Combat.cs 812-882)", noCaster ? ActionReason.NoCasterHeld : ActionReason.ContraryResult));
+    }
+
+    /// <summary>M5 7 D139 (l): the plain reason a magic mode fails with no caster in the hands; its typed reason is <see cref="ActionReason.NoCasterHeld"/> (M5 7 D141).</summary>
+    internal const string NoCasterHeld = "no caster held";
 
     /// <inheritdoc/>
     internal override bool OnChat(in ChatReceived e, ActionApi api)

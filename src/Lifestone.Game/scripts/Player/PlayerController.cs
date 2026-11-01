@@ -68,6 +68,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
     private double _maxOwnMs;
     private readonly PipelineCompilationWatch _pipelines = new();
     private readonly GcFrameWatch _gcWatch = new();
+    private readonly RenderFrameWatch _renderWatch = new(); // M5 7 D151: the render, physics and process-CPU shares of a slow frame
     private string _notice = string.Empty;
     private bool _loggedNoticePlaceholder;
 
@@ -229,6 +230,25 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
             ("autonomous_position", _walker.Sink is DryRunMovementSink dry2 ? dry2.AutonomousPositionCount : -1));
     }
 
+    /// <summary>
+    /// A server object put into the world on the placed player (the lifestone's create after a recall's teleport, a creature created on the player's spot) puts the player out of it
+    /// by retail's sliding placement, the headless body's call (<see cref="OfflineWalker.ReplaceAfterObjectsEntered"/>; M5 item 5 F1, <c>TODO(m5-create-overlap)</c>): the walker's
+    /// transition would hold a body that is already inside an object (measured, 0.00 m).
+    /// </summary>
+    private void ReplaceAfterObjectsEntered()
+    {
+        var moved = _walker.ReplaceAfterObjectsEntered((_avatars.ServerObjects as Lifestone.Client.Physics.ServerObjectPhysicsHost)?.Stats);
+        if (moved > 0.01f)
+        {
+            Log.Info(
+                "play",
+                "a server object appeared on the player: placed out of it (TODO(m5-create-overlap): retail creates the objects before it places the player)",
+                ("moved_m", moved.ToString("F2", CultureInfo.InvariantCulture)),
+                ("cell", $"0x{_walker.Position.CellId:X8}"),
+                ("at", _walker.Position.Origin));
+        }
+    }
+
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
@@ -244,6 +264,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
         _streamer.SetFocus(Position.CellId);
         _interiors?.SetPlayerCell(Lifestone.Client.World.AcCoordinates.IsEnvCell(Position.CellId) ? Position.CellId : 0); // the layer meshes the player's cell when it needs more than the viewer's
         _streamer.Pump(_services.MainThread.Scheduler);
+        ReplaceAfterObjectsEntered();
         if (_walker.Controller.Tick(now))
         {
             _steps++;
@@ -293,6 +314,15 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
     public event Action<string>? HumanKey;
 
     /// <summary>
+    /// M5 7 D145: the movement keys' lock while the autopilot runs (<c>MoveIntents.KeyLock</c>; the play host sets it when it binds the session's movement, null when it unbinds): a locked movement-map action reaches nothing.
+    /// </summary>
+    public Lifestone.Client.Session.Contracts.HumanKeyLock? KeyLock
+    {
+        get => _movement.Lock;
+        set => _movement.Lock = value;
+    }
+
+    /// <summary>
     /// An action of retail's movement map (4) or camera maps (5, and 6 while the alternate camera mode is held) fired
     /// (<c>IInputActionCallback::OnAction</c>): movement actions go to the command interpreter's intents (<see cref="MovementBindings"/>), camera
     /// actions to the camera (<see cref="CameraBindings"/>).
@@ -313,6 +343,9 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
 
     /// <summary>The session's Action API, which a double click Uses an object through (<see cref="IActionApi.Use"/>); set with <see cref="Picking"/>.</summary>
     public IActionApi? Actions { get; set; }
+
+    /// <summary>The retail UI's target mode (M5 7 S6): while one is on, a left press on the world runs it on the object under the pointer instead of selecting (<c>UIElement_SmartBoxWrapper::MouseDown</c> 11.6096 0x004E6390); null without the UI.</summary>
+    public Lifestone.Client.RetailUi.Core.UiTargetMode? TargetMode { get; set; }
 
     /// <summary>The last Use a double click made (the checks wait for the server to answer it), or null.</summary>
     public ActionHandle? LastUse { get; private set; }
@@ -341,6 +374,12 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
         }
 
         var picked = picking.TryPick(x, y, out var guid) ? guid : 0u;
+        if (TargetMode is { Active: true } target)
+        {
+            target.Execute(picked); // HandleTargetedUseLeftClick (0x004E6010): the mode runs on the object (nothing over empty space) and the selection stays; the press ends the mode
+            return;
+        }
+
         selection.Select(picked);
         if (doubleClick && picked != 0 && Actions is { } actions)
         {
@@ -415,6 +454,12 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
         _frames++;
         var compiled = _pipelines.Step();
         var gc = _gcWatch.Step();
+        if (_frames == 1)
+        {
+            _renderWatch.Measure(GetViewport());
+        }
+
+        _renderWatch.Step();
         if (_frames > WarmupFrames)
         {
             _maxFrameMs = Math.Max(_maxFrameMs, ms);
@@ -439,6 +484,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
                     .. gc.Fields(), // M4 P4 g3fix: the collector's pause and collections in this frame's interval, so the line names a GC pause as the cause (TODO(m4-throwaway-teleport-frame))
                     .. gc.LastCollectionFields(), // M4 P5b: and how big that collection was
                     .. compiled.Fields(),
+                    .. _renderWatch.Fields(), // M5 7 D151: a frame with little process time, no GC and no pipeline: was it drawing, or waiting (process_cpu_ms small)?
                 ]);
         }
     }

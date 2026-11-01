@@ -39,6 +39,7 @@ public sealed class SessionContractTests
         nameof(AppraisalReceived), // M4 3.2 lane s2 (Appraisal.cs)
 
         nameof(VendorOpened), nameof(VendorStockChanged), nameof(VendorClosed), nameof(CoinValueChanged), // M4 3.2 lane s1 (VendorEvents.cs)
+        nameof(ConfirmationRequested), nameof(ConfirmationClosed), nameof(ObjectPropertyChanged), // M5 6 w2 (WorldEvents.cs)
     ];
 
     private static Type[] ClientTypes => typeof(IGameSessionView).Assembly.GetTypes();

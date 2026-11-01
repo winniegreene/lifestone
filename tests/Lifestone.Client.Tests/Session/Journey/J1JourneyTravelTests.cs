@@ -1,4 +1,7 @@
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Tests.Session.Grounds;
 using Lifestone.Client.Session.Scenarios.Journey;
 
 namespace Lifestone.Client.Tests.Session.Journey;
@@ -9,7 +12,9 @@ namespace Lifestone.Client.Tests.Session.Journey;
 /// </summary>
 public sealed class J1JourneyTravelTests
 {
-    private static TravelRequest Ground(StationWhere where) => new(JourneyGrounds.For(where, (_, _, _) => 10f)!, TravelPurpose.Ground);
+    private static readonly HuntingGround Dungeon = GroundCatalog.Get(FightOptions.DefaultGround);
+
+    private static TravelRequest Ground(StationWhere where) => new(JourneyGrounds.For(where, (_, _, _) => 10f, Dungeon)!, TravelPurpose.Ground);
 
     private static TravelRequest Home() => new(JourneyGrounds.Holtburg, TravelPurpose.Home);
 
@@ -39,7 +44,7 @@ public sealed class J1JourneyTravelTests
     {
         var t = new J1JourneyRig();
         t.Context();
-        t.Facts.PortalTied = true;
+        t.Facts.SetPortalTie(DenGround.Profile.Key, PortalTie.Tied);
         var leg = t.Travel!.GoTo(t.View, Ground(StationWhere.Den), t.Now);
         Assert.Equal(TravelMeans.Recall, leg.Means);
         Assert.Equal(TravelStatus.Arrived, t.RunLeg(leg));
@@ -47,26 +52,10 @@ public sealed class J1JourneyTravelTests
 
         Assert.Equal([48u], t.Casts);
         Assert.Equal(0x0105u, t.Landblock);
-        Assert.Equal((0, 1, true), (t.Facts.Teleports, t.Facts.Recalls, t.Facts.PortalTied));
+        Assert.Equal((0, 1, PortalTie.Tied), (t.Facts.Teleports, t.Facts.Recalls, t.Facts.PortalTieOf(DenGround.Profile.Key)));
         Assert.StartsWith("recalls=1 ", leg.Fields, StringComparison.Ordinal);
         Assert.Empty(t.PlacesTo);
         Assert.False(t.Travel.Busy);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData(false)]
-    public void The_den_goes_by_the_budgeted_place_when_the_portal_is_not_known_tied(bool? tied)
-    {
-        var t = new J1JourneyRig();
-        t.Context();
-        t.Facts.PortalTied = tied;
-        var leg = t.Travel!.GoTo(t.View, Ground(StationWhere.Den), t.Now);
-        Assert.Equal(TravelMeans.Place, leg.Means);
-        Assert.Equal(TravelStatus.Arrived, t.RunLeg(leg));
-        Assert.Equal(["Black Spawn Den"], t.PlacesTo);
-        Assert.Equal((1, 0), (t.Facts.Teleports, t.Facts.Recalls));
-        Assert.Empty(t.Casts);
     }
 
     [Fact]
@@ -74,11 +63,11 @@ public sealed class J1JourneyTravelTests
     {
         var t = new J1JourneyRig { PortalTied = false };
         t.Context();
-        t.Facts.PortalTied = true; // the journey believed it (a tie lost since)
+        t.Facts.SetPortalTie(DenGround.Profile.Key, PortalTie.Tied); // the journey believed it (a tie lost since)
         var leg = t.Travel!.GoTo(t.View, Ground(StationWhere.Den), t.Now);
         Assert.Equal(TravelStatus.Failed, t.RunLeg(leg));
         Assert.StartsWith("travel:recall:cast: ACE refused: YouMustLinkToPortalToRecall 0x04A3", leg.Failure, StringComparison.Ordinal);
-        Assert.Equal((false, 0), (t.Facts.PortalTied, t.Facts.Recalls));
+        Assert.Equal((PortalTie.Untied, 0), (t.Facts.PortalTieOf(DenGround.Profile.Key), t.Facts.Recalls));
     }
 
     [Fact]
@@ -185,7 +174,10 @@ public sealed class J1JourneyTravelTests
         Assert.Equal(0xA5B00032u, belt.Location.Position.CellId);
         Assert.Equal(10.5f, belt.Location.Position.Local.Z);
         Assert.Equal(0x9FB50039u, JourneyGrounds.For(StationWhere.Forest, (_, _, _) => 1f)!.Location.Position.CellId);
-        Assert.Equal(0x01050375u, JourneyGrounds.Den.Location.Position.CellId);
+        Assert.Equal(0x01050375u, JourneyGrounds.For(StationWhere.Den, null, Dungeon)!.Location.Position.CellId);
+        var tusker = GroundCatalog.Get("tusker-temple-fort-tethana");
+        Assert.Equal(tusker.Arrival.Cell, JourneyGrounds.For(StationWhere.Den, null, tusker)!.Location.Position.CellId); // the den is the journeys ground, not the default
+        Assert.Throws<ArgumentNullException>(() => JourneyGrounds.For(StationWhere.Den, null));
         Assert.Equal(0xA9B40019u, JourneyGrounds.Holtburg.Location.Position.CellId);
     }
 }

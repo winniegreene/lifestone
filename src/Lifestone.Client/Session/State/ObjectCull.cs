@@ -43,6 +43,17 @@ namespace Lifestone.Client.Session.State;
 /// <para><b>Never culled.</b> The player; an object with no world position (contained or wielded: it follows its holder,
 /// culled with it); a static object (retail's <c>ReleaseObjCell</c> skips them); an object the player holds (pack, side
 /// pack or equipped) or wields; the ground container the player has open and its contents.</para>
+/// <para><b>Contained objects leaving the player</b> (M5 7 P7d, D139 row f: the orphans). The scan above never queues an
+/// object with no world position, so retail queues one explicitly: its GM 0x0024 handler in
+/// <c>UIQueueManager::ProcessNetBlobData</c> (11.6096 0x0055BCD0, a predicted address; 11.4186 0x0055B000) calls
+/// <c>ACCWeenieObject::ServerSaysRemove</c>, then <c>ACCWeenieObject::AddContentsToDestructionQueue</c> (0x0058D7D0: the
+/// object's containers and items) and <c>AddObjectToBeDestroyed</c> for the object itself; and
+/// <c>CPlayerSystem::RecvNotice_ServerSaysMoveItem</c> (0x00564000) does the same for an object moved into a container that
+/// is neither the player's, the open ground container nor the trade partner's, and takes an object moved back into one of
+/// them off the queue (<c>RemoveObjectToBeDestroyed</c>). The reducer calls <see cref="Doom"/> and <see cref="Restore"/> at
+/// those points. A doomed object leaves on the first tick at or after its time with whatever it holds, unless by then the
+/// player holds it, it is in the open ground container, or it stands in the world by a position of its own (the scan owns
+/// it then). Unlike <see cref="Seen"/>, no other message cancels a doom (a fresh CreateObject does).</para>
 /// <para>Allocation-free per tick in the steady state (no growth past the initial capacities, no culls).</para>
 /// </remarks>
 public sealed class ObjectCull
@@ -54,6 +65,7 @@ public sealed class ObjectCull
     public const double ScanSeconds = 1.0;
 
     private readonly Dictionary<uint, double> _due = new(1024);
+    private readonly Dictionary<uint, double> _doomed = new(256);
     private readonly List<uint> _expired = new(256);
     private readonly HashSet<uint> _pvs = new(256);
     private double _nextScan = double.NegativeInfinity;
@@ -82,8 +94,61 @@ public sealed class ObjectCull
     /// <summary>Cull batches since the session started (one log line each).</summary>
     public long Batches { get; private set; }
 
+    /// <summary>Contained objects queued by <see cref="Doom"/> that wait out their time now (M5 7 P7d).</summary>
+    public int DoomPending => _doomed.Count;
+
+    /// <summary>Times <see cref="Doom"/> queued an object since the session started (a re-stamp counts again).</summary>
+    public long Doomed { get; private set; }
+
+    /// <summary>
+    /// Orphans dropped since the session started (M5 7 P7d, D139 row f): doomed objects that left when their time came, with what they held,
+    /// plus the contents a container's F747 took with it (<see cref="NoteContentsDropped"/>).
+    /// </summary>
+    public long OrphansDropped { get; private set; }
+
+    /// <summary>The doomed objects the last batch removed, with what they held (the reducer logs it).</summary>
+    public int LastOrphans { get; private set; }
+
+    /// <summary>The doomed objects whose time came in the last <see cref="Collect"/> but that were kept (back with the player, in the open ground container, or placed in the world).</summary>
+    public int LastDoomedKept { get; private set; }
+
     /// <summary>True while <paramref name="guid"/> waits out its cull time.</summary>
     public bool IsPending(uint guid) => _due.ContainsKey(guid);
+
+    /// <summary>True while the contained object <paramref name="guid"/> waits out its destruction time (<see cref="Doom"/>).</summary>
+    public bool IsDoomed(uint guid) => _doomed.ContainsKey(guid);
+
+    /// <summary>
+    /// Retail's <c>AddObjectToBeDestroyed</c> for an object that left the player's holdings or moved into a container the player does not
+    /// see (GM 0x0024, GE 0x0022): it leaves <see cref="CullSeconds"/> after <paramref name="now"/> with what it holds, unless it is back
+    /// with the player by then. Replaces an earlier stamp.
+    /// </summary>
+    internal void Doom(uint guid, double now)
+    {
+        var due = now + CullSeconds;
+        _doomed[guid] = due;
+        Doomed++;
+        if (due < _earliestDue)
+        {
+            _earliestDue = due;
+        }
+    }
+
+    /// <summary>Retail's <c>RemoveObjectToBeDestroyed</c> for a doomed object that came back (into the player's holdings, or created anew). True when it was doomed.</summary>
+    internal bool Restore(uint guid) => _doomed.Count != 0 && _doomed.Remove(guid);
+
+    /// <summary>The object left the table (an F747 or the cull): both queues forget it (<c>CObjectMaint::DeleteObject</c> takes it out of the destruction table).</summary>
+    internal void Gone(uint guid)
+    {
+        Seen(guid);
+        if (_doomed.Count != 0)
+        {
+            _doomed.Remove(guid);
+        }
+    }
+
+    /// <summary>Counts the contents a container's F747 took with it (<see cref="OrphansDropped"/>).</summary>
+    internal void NoteContentsDropped(int count) => OrphansDropped += count;
 
     /// <summary>The server sent something for <paramref name="guid"/>: its pending cull is cancelled (<c>RemoveObjectToBeDestroyed</c>).</summary>
     internal void Seen(uint guid)
@@ -98,6 +163,7 @@ public sealed class ObjectCull
     internal void Clear()
     {
         _due.Clear();
+        _doomed.Clear();
         _dungeon = false;
         _viewCell = 0;
         _nextScan = double.NegativeInfinity;
@@ -113,6 +179,8 @@ public sealed class ObjectCull
     /// <param name="into">Receives the ids to remove, holders before what they hold; not cleared.</param>
     internal int Collect(GameState state, double now, List<uint> into)
     {
+        LastOrphans = 0;
+        LastDoomedKept = 0;
         if (now < _nextScan && now < _earliestDue)
         {
             return 0;
@@ -145,10 +213,27 @@ public sealed class ObjectCull
             }
         }
 
+        var placedDue = _expired.Count;
+        if (_doomed.Count != 0)
+        {
+            foreach (var (guid, due) in _doomed)
+            {
+                if (due <= now)
+                {
+                    _expired.Add(guid);
+                }
+                else if (due < earliest)
+                {
+                    earliest = due;
+                }
+            }
+        }
+
         _earliestDue = earliest;
         var start = into.Count;
-        foreach (var guid in _expired)
+        for (var i = 0; i < placedDue; i++)
         {
+            var guid = _expired[i];
             _due.Remove(guid);
             if (state.Objects.TryGet(guid, out var o) && Placed(o, state) && (playerCell == 0 || !IsVisible(o.Position!.Value.CellId, playerCell)) && !Exempt(o, state))
             {
@@ -156,12 +241,36 @@ public sealed class ObjectCull
             }
         }
 
+        AddFollowers(state, into, start, start);
+        var placedEnd = into.Count;
+        for (var i = placedDue; i < _expired.Count; i++)
+        {
+            // M5 7 P7d: a doomed contained object leaves unless it came back to the player or the open ground container, or stands in the world
+            // by a position of its own (the scan owns it then); one that already left as a follower above is not counted twice.
+            var guid = _expired[i];
+            _doomed.Remove(guid);
+            if (!state.Objects.TryGet(guid, out var o) || Contains(into, start, guid))
+            {
+                continue;
+            }
+
+            if (Exempt(o, state) || Placed(o, state))
+            {
+                LastDoomedKept++;
+                continue;
+            }
+
+            into.Add(guid);
+        }
+
+        AddFollowers(state, into, placedEnd, start);
+        LastOrphans = into.Count - placedEnd;
+        OrphansDropped += LastOrphans;
         if (into.Count == start)
         {
             return 0;
         }
 
-        AddFollowers(state, into, start);
         var added = into.Count - start;
         Culled += added;
         Batches++;
@@ -280,16 +389,20 @@ public sealed class ObjectCull
         return state.Self.Inventory.Contains(guid);
     }
 
-    /// <summary>Appends what the culled objects from <paramref name="start"/> on hold (contents, wielded and parented objects), at any depth, except what the player holds.</summary>
-    private static void AddFollowers(GameState state, List<uint> into, int start)
+    /// <summary>
+    /// Appends what the objects of <paramref name="into"/> from <paramref name="from"/> on hold (contents, wielded and parented objects), at any
+    /// depth, except what the player holds; an id already listed from <paramref name="dedupeFrom"/> on is not added again. Also the reducer's
+    /// path for a deleted container's contents (M5 7 P7d).
+    /// </summary>
+    internal static void AddFollowers(GameState state, List<uint> into, int from, int dedupeFrom)
     {
-        for (var i = start; i < into.Count; i++)
+        for (var i = from; i < into.Count; i++)
         {
             var holder = into[i];
             foreach (var o in state.Objects.All)
             {
                 var held = o.ContainerId == holder || o.WielderId == holder || (o.Parent is { } parent && parent.ParentGuid == holder);
-                if (held && o.Guid != holder && !Exempt(o, state) && !Contains(into, start, o.Guid))
+                if (held && o.Guid != holder && !Exempt(o, state) && !Contains(into, dedupeFrom, o.Guid))
                 {
                     into.Add(o.Guid);
                 }

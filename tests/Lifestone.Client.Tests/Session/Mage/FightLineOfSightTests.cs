@@ -1,4 +1,7 @@
 using System.Numerics;
+using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Tests.Session.Grounds;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
@@ -51,17 +54,48 @@ public sealed class FightLineOfSightTests(DatSetFixture fixture, ITestOutputHelp
     }
 
     [RequiresDatsFact]
+    public void The_headless_ground_walk_answers_the_clear_line_from_its_physics_world_so_a_guard_below_the_arrival_is_behind_rock_and_a_slave_in_sight_is_not()
+    {
+        // F3: GroundWalk answered the interface's default true (blocked_picks=0, wall_hits=94 of 144 casts in the lead's 30-minute read). It now sweeps its own world as GameFightWalk does.
+        var ground = DenGround.Profile;
+        using var walk = GroundWalk.Create(fixture.Dats, ground, NullLogSink.Instance);
+        var arrival = ground.Arrival.Frame;
+        var guards = ground.Respawn.Slots.Where(slot => slot.Wcid == TuskerGuardWcid).Select(slot => walk.Planner.RoomFrame(slot.Cell)).Where(f => f is { } frame && frame.Frame.Origin.Z <= -5f).Select(f => f!.Value).ToList();
+        Assert.NotEmpty(guards); // the Guards on z -6, from the profile's own slots
+        foreach (var guard in guards)
+        {
+            output.WriteLine($"guard 0x{guard.CellId:X8} z={guard.Frame.Origin.Z:0.0}: clear={walk.HasClearLine(in arrival, in guard)}");
+            Assert.False(walk.HasClearLine(in arrival, in guard), $"a Guard in 0x{guard.CellId:X8} on z {guard.Frame.Origin.Z:0.0} is behind the rock");
+        }
+
+        // A Slave on the arrival floor in sight: the profile's own Slave slots on the arrival's storey, the first the arrival sees; the tour's table (The_tour_cells_see_each_other_as_the_table_says) says the arrival sees no plaza's middle, so a Slave
+        // is taken from the cell the arrival stands in or a standing neighbour; the fallback pair 0377 and 036F see each other.
+        var storey = ground.StoreyOf(arrival.CellId);
+        var slaves = ground.Respawn.Slots.Where(slot => slot.Wcid == TuskerSlaveWcid && ground.StoreyOf(slot.Cell) == storey).Select(slot => walk.Planner.RoomFrame(slot.Cell)).Where(f => f is not null).Select(f => f!.Value).ToList();
+        Assert.NotEmpty(slaves);
+        var inSight = slaves.Where(slave => walk.HasClearLine(in arrival, in slave)).ToList();
+        var pairFrom = walk.Planner.RoomFrame(0x01050377)!.Value;
+        var pairTo = walk.Planner.RoomFrame(0x0105036F)!.Value;
+        output.WriteLine($"slaves on the arrival floor: {slaves.Count}, in sight of the arrival: {inSight.Count}; 0377 to 036F clear={walk.HasClearLine(in pairFrom, in pairTo)}");
+        Assert.Contains(ground.Respawn.Slots, slot => slot.Wcid == TuskerSlaveWcid && slot.Cell == 0x0105036F); // the pair's far end is a Slave's spot on the arrival floor
+        Assert.True(walk.HasClearLine(in pairFrom, in pairTo), "within the tour's plaza pair the line is clear");
+    }
+
+    private const uint TuskerSlaveWcid = 1628;
+    private const uint TuskerGuardWcid = 1629;
+
+    [RequiresDatsFact]
     public void The_tour_cells_see_each_other_as_the_table_says()
     {
         var world = Den();
-        var floor = DenRooms.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(fixture.Dats), new LandblockCoord(1, 5)));
+        var floor = GroundRooms.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(fixture.Dats), new LandblockCoord(1, 5)), DenGround.Profile);
         var cells = new List<uint> { 0x01050375 };
-        foreach (var low in DenWalk.Tour)
+        foreach (var low in DenGround.SpawnLowWords)
         {
             cells.Add(0x01050000u | low);
         }
 
-        var planner = new RoomGraph(floor, DenRooms.MaxLean);
+        var planner = new RoomGraph(floor, DenGround.Profile.Walk.DoorwayLean);
         var lines = new List<string>();
         foreach (var a in cells)
         {
@@ -91,10 +125,10 @@ public sealed class FightLineOfSightTests(DatSetFixture fixture, ITestOutputHelp
     /// <summary>The tour's room frames, longest pairs first (the picks the loop sweeps are creature-to-player lines of this length).</summary>
     private List<(uint A, uint B, CellFrame From, CellFrame To, float Length)> TourPairs()
     {
-        var floor = DenRooms.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(fixture.Dats), new LandblockCoord(1, 5)));
-        var planner = new RoomGraph(floor, DenRooms.MaxLean);
+        var floor = GroundRooms.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(fixture.Dats), new LandblockCoord(1, 5)), DenGround.Profile);
+        var planner = new RoomGraph(floor, DenGround.Profile.Walk.DoorwayLean);
         var cells = new List<uint> { 0x01050375 };
-        foreach (var low in DenWalk.Tour)
+        foreach (var low in DenGround.SpawnLowWords)
         {
             cells.Add(0x01050000u | low);
         }

@@ -141,6 +141,12 @@ public interface IActionApi
     /// <remarks>A literal <c>Cast(id, 0)</c> binds this overload (0 converts to <see cref="ActionSource"/>) unless the int overload below takes it: see <see cref="Cast(uint, int, ActionSource)"/>.</remarks>
     ActionHandle Cast(uint spellId, ActionSource source = ActionSource.Host);
 
+    /// <summary>The object the last targeted cast, melee attack or missile attack aimed at (not the player), or 0 before any (M5 7: what <c>--examine-capture-creatures</c> follows).</summary>
+    uint LastAttackTarget => 0;
+
+    /// <summary>When <see cref="LastAttackTarget"/> was last set, on the action layer's frame clock, or NaN.</summary>
+    double LastAttackTargetAt => double.NaN;
+
     /// <summary>
     /// Casts a spell at a target (GameAction 0x004A {target, spell}, retail <c>CM_Magic::Event_CastTargetedSpell</c>, 11.6096 0x006A3E60). Lane Magic.
     /// Completes as <see cref="Cast(uint, ActionSource)"/> does (a bolt or streak has a projectile, a self spell cast at the player's own guid an enchantment, a buff on another
@@ -539,4 +545,83 @@ public interface IActionApi
     /// <param name="items">The player's items to sell.</param>
     /// <param name="source">Who is asking.</param>
     VendorTradeHandle Sell(uint vendor, IReadOnlyList<uint> items, ActionSource source = ActionSource.Host) => throw new NotSupportedException("IActionApi.Sell is not implemented by this view (M4 3.2 s1)");
+
+    // ---- M5 6 w2: the first retail tranche (DoD 11). Each has a throwing default: a view that cannot send it does not implement it. ----
+
+    /// <summary>
+    /// Answers the server's open question (<see cref="GameState.PendingConfirmation"/>; GameAction 0x0275 {type, context, accepted}, retail <c>CM_Character::Event_ConfirmationResponse</c>,
+    /// 11.6096 0x006A2030). ACE sends nothing back for an answer, so it completes as <see cref="ActionOutcomeKind.Sent"/>, and the question closes locally at once
+    /// (<see cref="ConfirmationClosed"/>, <see cref="ConfirmationCloseReason.Answered"/>). Refused at once outside the world, and when no question of that type and context is open. Lane Immediate.
+    /// </summary>
+    /// <param name="type">The question's type word (<see cref="PendingConfirmation.Type"/>).</param>
+    /// <param name="context">The question's context word (<see cref="PendingConfirmation.Context"/>).</param>
+    /// <param name="accepted">Yes or no.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle RespondToConfirmation(uint type, uint context, bool accepted, ActionSource source = ActionSource.Host) =>
+        throw new NotSupportedException("IActionApi.RespondToConfirmation is not implemented by this view (M5 6)");
+
+    /// <summary>
+    /// Sets both character option words (D32; GameAction 0x01A1, retail <c>CM_Character::Event_CharacterOptionsEvent</c>, 11.6096 0x006A1EE0): the block goes out built from the read model
+    /// (the filters, the shortcut bar, the favourite bars, the desired components), and once it is sent the reducer applies the words as the character's own
+    /// (<see cref="PlayerQualities.CharacterOptions1"/>, <see cref="PlayerQualities.CharacterOptions2"/>; any <see cref="SetSessionOption"/> override is dropped) and publishes
+    /// <see cref="QualitiesChanged"/> (<see cref="QualityChange.Options"/>). ACE stores the words and answers nothing; the next PlayerDescription returns them. Completes as
+    /// <see cref="ActionOutcomeKind.Sent"/>. Refused at once outside the world and before the description arrived. Lane Immediate.
+    /// </summary>
+    /// <param name="options1">The first word (retail's <c>PlayerModule::options_</c>).</param>
+    /// <param name="options2">The second word.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle SetCharacterOptions(uint options1, uint options2, ActionSource source = ActionSource.Host) =>
+        throw new NotSupportedException("IActionApi.SetCharacterOptions is not implemented by this view (M5 6)");
+
+    /// <summary>
+    /// <c>/lifestone</c>: GameAction 0x0063 TeleToLifestone (retail <c>CM_Character::Event_TeleToLifestone</c>, 11.6096 0x006A29B0). ACE plays the recall motion and then teleports the
+    /// player to the sanctuary (<c>Player_Location.cs:132-195</c>, @95ef426d): <see cref="ActionOutcomeKind.Confirmed"/> on the teleport; a refusal (WeenieError YoureTooBusy,
+    /// YouHaveBeenInPKBattleTooRecently, ExitTrainingAcademyToUseCommand or YouHaveMovedTooFar, or the line "Your spirit has not been attuned to a sanctuary location.") is a
+    /// <see cref="ActionOutcomeKind.ServerError"/> naming it; 38 s (ACE's delay is the motion's length, not read here: <c>TODO(m5-6-recall-anim-length)</c>). Never retried. Lane Magic.
+    /// </summary>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle RecallLifestone(ActionSource source = ActionSource.Host) =>
+        throw new NotSupportedException("IActionApi.RecallLifestone is not implemented by this view (M5 6)");
+
+    /// <summary>
+    /// <c>/marketplace</c>: GameAction 0x028D TeleToMarketPlace (retail <c>CM_Character::Event_TeleToMarketplace</c>, 11.6096 0x006A2A40). ACE plays the recall motion, waits 14 s and
+    /// teleports the player to the marketplace (<c>Player_Location.cs:199-262</c>, @95ef426d): <see cref="ActionOutcomeKind.Confirmed"/> on the teleport; a refusal (as
+    /// <see cref="RecallLifestone"/>'s WeenieErrors, plus OlthoiCanOnlyRecallToLifestone) is a <see cref="ActionOutcomeKind.ServerError"/> naming it; 24 s. Never retried. Lane Magic.
+    /// </summary>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle RecallMarketplace(ActionSource source = ActionSource.Host) =>
+        throw new NotSupportedException("IActionApi.RecallMarketplace is not implemented by this view (M5 6)");
+
+    /// <summary>
+    /// <c>/e</c>: GameAction 0x01DF Emote (retail <c>CM_Communication::Event_Emote</c>, 11.6096 0x006A4F40). ACE echoes the emote to the player as GameMessage 0x01E0
+    /// (<c>Player.cs:822-831</c>, @95ef426d), which makes it <see cref="ActionOutcomeKind.Confirmed"/>; the gag line is a <see cref="ActionOutcomeKind.ServerError"/>. 5 s. Refused at once for an
+    /// empty text. Lane Chat (rate-limited with Talk and Tell).
+    /// </summary>
+    /// <param name="text">The emote, as typed after <c>/e</c>.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle Emote(string text, ActionSource source = ActionSource.Host) =>
+        throw new NotSupportedException("IActionApi.Emote is not implemented by this view (M5 6)");
+
+    /// <summary>
+    /// <c>/afk</c>: away with <paramref name="message"/> sends GameAction 0x0010 SetAfkMessage then 0x000F SetAfkMode 1; away without one, or back, sends 0x000F alone (retail
+    /// <c>CM_Communication::Event_SetAFKMessage</c> 11.6096 0x006A5260, <c>Event_SetAFKMode</c> 0x006A4D00). ACE answers every 0x000F with GameMessage 0x02D1 Afk
+    /// (<c>Player_Networking.cs:438-443</c>, @95ef426d): <see cref="ActionOutcomeKind.Confirmed"/> when <see cref="PlayerQualities.Afk"/> reads <paramref name="afk"/> after it. 5 s. Lane Chat.
+    /// </summary>
+    /// <param name="afk">True to go away, false to come back.</param>
+    /// <param name="message">The away message, or null for none (ACE then keeps its default line); ignored when coming back.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle SetAfk(bool afk, string? message, ActionSource source = ActionSource.Host) =>
+        throw new NotSupportedException("IActionApi.SetAfk is not implemented by this view (M5 6)");
+
+    /// <summary>
+    /// Writes (or with an empty <paramref name="inscription"/>, clears) the inscription of <paramref name="item"/>: GameAction 0x00BF SetInscription (retail <c>CM_Writing::Event_SetInscription</c>, 11.6096 0x006AA810, sent by the
+    /// examination window's inscription box when it loses the focus, <c>ItemExamineUI::HandleInscriptionLosingFocus</c> 0x004AE9A0; M5 7 D137). ACE answers nothing (<c>Player_Inventory.cs</c> 3634ff
+    /// <c>HandleActionSetInscription</c>, @95ef426d: an inscribable item in the player's inventory or equipped, uninscribed or inscribed by this character), so it completes <see cref="ActionOutcomeKind.Sent"/>; the next appraisal shows it.
+    /// Refused at once for item 0. Lane Immediate.
+    /// </summary>
+    /// <param name="item">The item's guid.</param>
+    /// <param name="inscription">The text; empty clears the inscription and the scribe.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle SetInscription(uint item, string inscription, ActionSource source = ActionSource.Ui) =>
+        throw new NotSupportedException("IActionApi.SetInscription is not implemented by this view (M5 7)");
 }

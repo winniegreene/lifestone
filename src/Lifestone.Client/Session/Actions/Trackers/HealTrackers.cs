@@ -55,7 +55,9 @@ internal abstract class HealLaneTracker : ActionTracker
     internal override bool ConsumesUseDone => true;
 
     /// <inheritdoc/>
-    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api);
+    /// <remarks>M5 7 D141's before-check: in the world, and the kit or the potion held by the player (ACE answers an item it cannot find with a bare UseDone and nothing else: "nothing happened").</remarks>
+    internal override string? Refusal(ActionApi api) =>
+        WorldTrackers.NotInWorld(api) ?? (api.State.Self.Inventory.Find(Item).Held ? null : Refuse(ActionReason.NotHeld, "the item " + ActionText.Hex(Item) + " to use is not held by the player"));
 
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
@@ -181,10 +183,25 @@ internal abstract class HealLaneTracker : ActionTracker
                 ActionOutcomeKind.ServerError,
                 _refusalCode,
                 "the server refused the use (" + (_refusalCode != 0 ? Describe(_refusalCode) + ": " : string.Empty) + _refusalText + ")" +
-                (_refusalCode == FullHealthCode || _refusalCode == 0 ? "; TODO(m4-heal-full-vital-live): a full vital's refusal is read from ACE's source, not captured live" : string.Empty));
+                (_refusalCode == FullHealthCode || _refusalCode == 0 ? "; TODO(m4-heal-full-vital-live): a full vital's refusal is read from ACE's source, not captured live" : string.Empty),
+                RefusalReasonOf(_refusalCode, _refusalText));
         }
 
-        return new ActionOutcome(ActionOutcomeKind.ServerError, 0, "nothing happened: UseDone 0, but " + Missing + " and no refusal line (the item not held, or no target?)");
+        return new ActionOutcome(ActionOutcomeKind.ServerError, 0, "nothing happened: UseDone 0, but " + Missing + " and no refusal line (the item not held, or no target?)", ActionReason.NoEffect);
+    }
+
+    /// <summary>
+    /// M5 7 D141: the typed reason of a refusal line: a full vital (the 0x04FF line, or ACE's "is already at full stamina!" / "is already at full mana!", <c>Healer.cs</c> 94-100 @95ef426d), else the code's own
+    /// meaning (<see cref="ActionReasons.FromCode"/>).
+    /// </summary>
+    internal static ActionReason RefusalReasonOf(uint code, string? text)
+    {
+        if (code == FullHealthCode || (text is not null && (text.EndsWith(" is already at full stamina!", StringComparison.Ordinal) || text.EndsWith(" is already at full mana!", StringComparison.Ordinal))))
+        {
+            return ActionReason.VitalFull;
+        }
+
+        return ActionReasons.FromCode(code);
     }
 
     /// <summary>A code as the detail names it: <c>WeenieError 0x04FC YouArentTrainedInHealing: You aren't trained in healing!</c>.</summary>

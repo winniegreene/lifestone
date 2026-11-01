@@ -21,61 +21,42 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
 {
     private const string Account = "kit-test-account";
 
-    // The component ids the profile's 247 spells, Lifestone Recall and Lifestone Tie (M4 P5b J3b: 21, 23, 32 and 59 are the recall's and the tie's) hold for Account (SpellFormulaRules.CustomizeForAccount): scarabs, herbs, powders, potions, talismans, all twelve coloured tapers, Platinum and Mana.
-    private static readonly uint[] PinnedComponentIds =
-    [
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 15, 17, 18, 21, 23, 25, 26, 30, 32, 33, 34, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 55, 56, 57, 59, 60, 61, 62,
-        63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 112, 193,
-    ];
-
-    // Weenie class id -> stack, in kit order, for Account (the rule in GearKit's remarks).
-    private const string PinnedStacks =
-        "691:5 689:5 686:7 688:9 687:12 690:18 774:87 775:5 778:38 776:9 780:6 772:23 779:31 777:31 769:3 767:3 782:17 783:84 626:9 788:3 789:17 790:41 792:6 753:5 754:6 755:49 756:11 757:9 758:6 759:41 760:6 761:16 762:36 763:5 764:9 741:5 748:5 740:5 746:3 750:5 751:9 743:5 "
-        + "1650:100 1649:71 1648:83 1653:100 1645:100 1654:48 1643:100 1647:67 1651:100 1644:100 1652:100 1646:66 8897:5 20631:691 37155:5";
-
     private GearKit KitFor(string account) => GearKit.Build(SpellTableData.Load(fixture.Dats).Spells, account);
 
     [RequiresDatsFact]
-    public void The_customised_component_list_for_a_fixed_account_is_pinned()
+    public void The_kit_for_a_fixed_account_is_the_vendor_kit_the_four_foci_and_the_stock_lines_and_burns_six_component_ids()
     {
+        // M5 3 m1 (D8): the 38 customised ids and the 57 component lines are retired; the foci formula burns the Copper Scarab (the travel spells), the Pyreal Scarab (VI), the Platinum Scarab (VII) and the Prismatic Taper.
         var kit = KitFor(Account);
         output.WriteLine(kit.Describe());
-        Assert.Equal(PinnedComponentIds, kit.CustomisedComponentIds);
-        Assert.Equal(PinnedStacks, string.Join(' ', kit.Components.Select(c => c.Wcid + ":" + c.Stack)));
-        Assert.Equal(57, kit.Components.Count());
-        Assert.Equal(63, kit.Slots);
-        Assert.Equal(56, kit.CustomisedComponentIds.Count);
+        Assert.Equal<uint>([1, 3, 4, 6, 112, 188], kit.CustomisedComponentIds); // M5 7 F16: the Lead Scarab (1) of the emergency drain joins the four; M5 7 P7j: the Silver Scarab (4) of Spirit Drinker IV, the learn list's level
+        Assert.Equal("20631:1000 379:30 690:400 8897:100 686:20 7299:6 691:100 688:20 687:20", string.Join(' ', kit.Components.Select(c => c.Wcid + ":" + c.Stack))); // M5 7 F25 (D93): the buff's Silver (IV) and Gold (V) Scarabs, carried
+        Assert.Equal(["Wand", "Faran Robe with Hood", "Leather Gauntlets", "Pack", "Foci of Enchantment", "Foci of Artifice", "Foci of Verdancy", "Foci of Strife", "Prismatic Taper", "Mana Potion", "Pyreal Scarab", "Platinum Scarab", "Copper Scarab", "Diamond Scarab", "Lead Scarab", "Silver Scarab", "Gold Scarab"], kit.Items.Select(i => i.Name));
+        Assert.Equal(19, kit.Slots); // M5 7 F25: the Silver and Gold Scarab lines are two more stacks; // M5 7 F16: the Lead Scarab line is one more stack; 13 lines (M5 7 F13, D87: the hooded robe and the gloves are two worn lines; M5 7 F10: the ring's Diamond Scarab), and the Pyreal Scarab's 400 are four stacks of 100 (M5 7 F3, D87; F10: 300 -> 400)
+        Assert.Equal(17, kit.Items.Count); // M5 7 G3: the side-pack line; M5 7 F16: the Lead Scarab line; M5 7 F25: the Silver and Gold Scarab lines
+        Assert.Equal(9, kit.Components.Count()); // M5 7 F10: and the Diamond Scarab line; M5 7 F25: the Silver and Gold Scarab lines
     }
 
     [RequiresDatsFact]
-    public void The_account_changes_the_tapers_and_the_name_is_lower_cased_as_ACE_stores_it()
+    public void The_account_no_longer_changes_the_kit_the_foci_formula_is_the_same_for_every_name()
     {
+        // M5 3 m1: the customised taper hash (SpellFormulaRules.CustomizeForAccount) only applies to the full formula; the foci formula (SpellFormula.cs:338-381) does not read the account, so no account name changes a line.
         var spells = SpellTableData.Load(fixture.Dats).Spells;
         var kit = GearKit.Build(spells, Account);
-        Assert.Equal(PinnedStacks, string.Join(' ', GearKit.Build(spells, Account.ToUpperInvariant()).Components.Select(c => c.Wcid + ":" + c.Stack)));
-
-        // Another account hashes to other taper colours, so the taper stacks differ while everything but the tapers is the same.
-        var other = GearKit.Build(spells, "another-account");
-        var tapers = kit.Components.Where(c => ComponentWeenies.TryGetByWcid(c.Wcid, out var w) && ComponentWeenies.IsColouredTaper(w.ComponentId)).Select(c => c.Stack).ToArray();
-        var otherTapers = other.Components.Where(c => ComponentWeenies.TryGetByWcid(c.Wcid, out var w) && ComponentWeenies.IsColouredTaper(w.ComponentId)).Select(c => c.Stack).ToArray();
-        Assert.NotEqual(tapers, otherTapers);
-        Assert.Equal(
-            kit.Components.Where(c => !IsTaper(c)).Select(c => c.Wcid + ":" + c.Stack),
-            other.Components.Where(c => !IsTaper(c)).Select(c => c.Wcid + ":" + c.Stack));
+        Assert.Equal(kit.Items, GearKit.Build(spells, Account.ToUpperInvariant()).Items);
+        Assert.Equal(kit.Items, GearKit.Build(spells, "another-account").Items);
+        Assert.Throws<ArgumentException>(() => GearKit.Build(spells, string.Empty));
     }
 
-    private static bool IsTaper(GearItem item) => ComponentWeenies.TryGetByWcid(item.Wcid, out var w) && w.ComponentId is >= 63 and <= 74;
-
     [RequiresDatsFact]
-    public void Every_taper_colour_and_the_foci_formulas_prismatic_taper_are_in_the_kit()
+    public void No_coloured_taper_is_in_the_kit_and_the_foci_formulas_prismatic_taper_is()
     {
         var kit = KitFor(Account);
         var taperWcids = Enumerable.Range(63, 12).Select(id => ComponentWeenies.TryGetByComponent((uint)id, out var w) ? w.Wcid : 0).ToArray();
         Assert.DoesNotContain(0u, taperWcids);
-        Assert.All(taperWcids, wcid => Assert.NotNull(kit.ItemOf(wcid)));
-        Assert.Equal(12, taperWcids.Distinct().Count());
-        Assert.Equal((GearKit.PrismaticTaperWcid, GearKit.PrismaticTaperBurden, 1000), (kit.ItemOf(20631)!.Wcid, kit.ItemOf(20631)!.UnitBurden, kit.ItemOf(20631)!.MaxStack!.Value)); // the foci formula's taper (SpellFormula.cs:378): BSD Mage holds a focus
-        Assert.DoesNotContain(188u, kit.CustomisedComponentIds); // not part of any account's customised formula
+        Assert.All(taperWcids, wcid => Assert.Null(kit.ItemOf(wcid))); // M5 3 m1: the twelve coloured tapers are retired with the full formulas
+        Assert.Equal((GearKit.PrismaticTaperWcid, GearKit.PrismaticTaperBurden, 1000), (kit.ItemOf(20631)!.Wcid, kit.ItemOf(20631)!.UnitBurden, kit.ItemOf(20631)!.MaxStack!.Value)); // the foci formula's taper (SpellFormula.cs:378)
+        Assert.Contains(188u, kit.CustomisedComponentIds);
     }
 
     [RequiresDatsFact]
@@ -96,20 +77,15 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
         var kit = KitFor(Account);
         foreach (var c in kit.Components)
         {
-            Assert.InRange(c.Stack, GearKit.TravelMinimumStack, c.MaxStack!.Value); // M4 P5b J3b: the travel-only components (the recall's and the tie's) hold the smaller TravelMinimumStack
-            Assert.Equal(c.Wcid == GearKit.PrismaticTaperWcid ? GearKit.PrismaticTaperBurden : GearKit.ComponentBurden, c.UnitBurden);
+            Assert.All(GearKit.StackSizes(c.Stack, c.MaxStack), stack => Assert.InRange(stack, 1, c.MaxStack!.Value)); // M5 7 F3 (D87): a line past one stack is granted in several
+            Assert.Equal(c.Wcid == GearKit.PrismaticTaperWcid ? GearKit.PrismaticTaperBurden : c.WeenieType == GearKit.WeenieTypeSpellComponent ? GearKit.ComponentBurden : 15, c.UnitBurden);
         }
 
-        // A formula can hold a component twice (ACE needs as many in the pack as the slots, Player_Magic.cs:1234-1245): no stack is below the most any one profile spell holds.
+        // A formula can hold a component twice (ACE needs as many in the pack as the slots, Player_Magic.cs:1234-1245): no stack is below the most any one cast of the ground needs.
         var spells = SpellTableData.Load(fixture.Dats).Spells;
-        foreach (var spell in ArenaProfile.Lines.SelectMany(l => l.Spells))
+        foreach (var burn in GearKit.CastBurns(Lifestone.Client.Session.Grounds.GroundCatalog.Get(FightOptions.DefaultGround), spells, heroRing: false))
         {
-            var info = spells[spell.Id];
-            foreach (var group in SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, Account).Where(id => id != 0).GroupBy(id => id))
-            {
-                ComponentWeenies.TryGetByComponent(group.Key, out var weenie);
-                Assert.True(kit.ItemOf(weenie.Wcid)!.Stack >= group.Count(), $"spell {spell.Id} needs {group.Count()} of {weenie.Name}");
-            }
+            Assert.True(kit.ItemOf(burn.Wcid)!.Stack >= burn.PerCast, $"spell {burn.SpellId} ({burn.Spell}) needs {burn.PerCast} of {burn.Name}");
         }
     }
 
@@ -118,34 +94,14 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
     {
         var kit = KitFor(Account);
         var capacity = GearKit.EncumbranceCapacity(GearKit.CapacityStrength);
-        output.WriteLine($"kit: {kit.Describe()}; capacity at strength {GearKit.CapacityStrength} = {capacity}; wand+armour burden = {kit.Items.Where(i => i.Kind != GearKind.Component).Sum(i => i.Burden)}; components = {kit.Components.Sum(c => c.Stack)} units");
+        output.WriteLine($"kit: {kit.Describe()}; capacity at strength {GearKit.CapacityStrength} = {capacity}");
         Assert.Equal(19_650, capacity);
-        Assert.Equal(5_997, kit.Items.Where(i => i.Kind != GearKind.Component).Sum(i => i.Burden)); // M3 4.2 P7 (D43): the Healer's Heart 50 + helm 600 + coat 1,600 + leggings 2,288 + gauntlets 919 + sollerets 540
-        // M3 2.1 s0a: the two mana lines (D24) put the components at 11,008 (the leather kit's 13,618 less its 2,610); with the classic armour the kit is 17,005, 86.5% of the conservative capacity.
+        // M5 3 m1: wand 50 + robe 200 (M5 7 F13, D87: the hooded robe, same burden) + gloves 270 + the four foci 1,600 + 1,000 tapers x 6 + 30 potions x 15 + 420 scarabs x 4 = 10,250 (M5 7 F3, D87: the Pyreal Scarab line keeps 300, was 100; the loot kit was 17,143 of the same capacity).
+        Assert.Equal(2_150, kit.Items.Where(i => i.Kind != GearKind.Component).Sum(i => i.Burden)); // M5 7 G3: 2,120 + two side packs at 15 each (seven refused live: no room)
+        Assert.Equal(11_264, kit.Burden); // M5 7 G3 (seven side packs of burden 15, 11,234 + 105); M5 7 F25 (D93): 20 Silver and 20 Gold Scarabs at 4 each, 11,074 + 160; M5 7 F16 (D91): 100 Lead Scarabs for the emergency drain at 4 each, 10,674 + 400; M5 7 F10 (the components rule): 100 more Pyreal Scarabs and 6 Diamond Scarabs at 4 each, 10,250 + 424
         Assert.True(kit.Burden * 100 <= capacity * 90, $"the kit's burden {kit.Burden} is over 90% of {capacity}");
-        Assert.Equal(17_143, kit.Burden);
-        Assert.True(kit.Slots <= GearKit.PackCapacity * 7 / 10, $"{kit.Slots} slots of {GearKit.PackCapacity}"); // M4 P5b J3b: was 6/10; the recall's and the tie's four component lines
+        Assert.True(kit.Slots <= GearKit.PackCapacity / 4, $"{kit.Slots} slots of {GearKit.PackCapacity}");
         Assert.Equal(kit.Items.Sum(i => i.Burden), kit.Burden);
-        var tapers = kit.ItemOf(GearKit.PrismaticTaperWcid)!.Stack;
-        Assert.Equal(5_997 + (4 * (kit.Components.Sum(c => c.Stack) - tapers)) + (6 * tapers), kit.Burden); // exact: every component weenie weighs 4 but the Prismatic Taper's 6 (the SELECT; TODO(m3-kit-burdens) closed)
-    }
-
-    [RequiresDatsFact]
-    public void Cassius_Ring_of_Fires_components_are_in_the_hero_mages_kit_only_not_the_gates_FB_R12()
-    {
-        var spells = SpellTableData.Load(fixture.Dats).Spells;
-        var plain = GearKit.Build(spells, Account);
-        var hero = GearKit.Build(spells, Account, heroRing: true);
-        foreach (var wcid in new uint[] { 770, 745, 7299 })
-        {
-            Assert.Null(plain.ItemOf(wcid)); // the gate's mage does not carry the video's burden
-            Assert.NotNull(hero.ItemOf(wcid));
-        }
-
-        Assert.True(hero.Burden > plain.Burden);
-        Assert.Equal(17_215, hero.Burden); // J7's kit, the hero gear station's
-        Assert.Equal(66, hero.Slots);
-        Assert.Equal(63, plain.Slots);
     }
 
     [RequiresDatsFact]
@@ -196,36 +152,24 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
         Assert.Equal(ComponentWeenies.All.Count, ComponentWeenies.All.Select(c => c.Wcid).Distinct().Count());
         Assert.DoesNotContain(GearKit.Wand.Wcid, ComponentWeenies.All.Select(c => c.Wcid));
         // The tuskers (creatures) are the loops' targets, not the kit's.
-        Assert.Empty(ArenaProfile.TargetWcids.Intersect(GearKit.Armour.Select(a => a.Wcid).Append(GearKit.Wand.Wcid).Concat(ComponentWeenies.All.Select(c => c.Wcid))));
+        Assert.Empty(new uint[] { 1628, 1629 }.Intersect(GearKit.Armour.Select(a => a.Wcid).Append(GearKit.Wand.Wcid).Concat(ComponentWeenies.All.Select(c => c.Wcid))));
     }
 
     [RequiresDatsFact]
-    public void With_the_orb_in_hand_the_kit_still_carries_every_component_the_customised_formulas_and_the_foci_formula_need()
+    public void The_wand_is_the_vendors_and_not_a_focus_and_every_foci_formula_count_is_in_the_kit()
     {
-        // The earlier held item sat beside a focus (the live mage holds the Foci of Strife in its pack): a focus switches ACE's casts to the foci formula. The orb is not one, so the casts use the account's customised formulas.
         var kit = KitFor(Account);
         var spells = SpellTableData.Load(fixture.Dats).Spells;
         Assert.Equal(GearKind.Wand, kit.WandItem.Kind);
-        Assert.Equal(GearKit.Wand.Wcid, kit.WandItem.Wcid);
-        foreach (var id in kit.CustomisedComponentIds)
+        Assert.Equal(2472u, kit.WandItem.Wcid); // the vendor wand, from the den's profile (the Healer's Heart 8552 is retired from the mage kit)
+        Assert.DoesNotContain(kit.WandItem.Wcid, GearKit.FociWcids);
+        Assert.All(GearKit.MageFociWcids, focus => Assert.NotNull(kit.ItemOf(focus)));
+        foreach (var spell in ArenaProfile.Lines.Where(l => l.Spells.Count < 7 && !l.ByPlay).SelectMany(l => l.Spells).Concat(ArenaProfile.LineNamed("Flame Bolt")!.Spells.Skip(5).Take(2)).Append(ArenaProfile.Spell(3256)!)) // M5 7 P7j: of Spirit Drinker, the IV the den's learn list teaches
         {
-            ComponentWeenies.TryGetByComponent(id, out var weenie);
-            Assert.NotNull(kit.ItemOf(weenie.Wcid));
-        }
-
-        foreach (var spell in ArenaProfile.Lines.SelectMany(l => l.Spells))
-        {
-            var info = spells[spell.Id];
-            foreach (var group in SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, Account).Where(i => i != 0).GroupBy(i => i))
-            {
-                ComponentWeenies.TryGetByComponent(group.Key, out var weenie);
-                Assert.True(kit.ItemOf(weenie.Wcid)!.Stack >= group.Count(), $"spell {spell.Id}: the customised formula needs {group.Count()} of {weenie.Name}");
-            }
-
-            foreach (var (id, count) in GearKit.FociFormulaCounts(info.Formula))
+            foreach (var (id, count) in GearKit.FociFormulaCounts(spells[spell.Id].Formula))
             {
                 ComponentWeenies.TryGetByComponent(id, out var weenie);
-                Assert.True(kit.ItemOf(weenie.Wcid)!.Stack >= count, $"spell {spell.Id}: the foci formula (a focus held later) needs {count} of {weenie.Name}");
+                Assert.True(kit.ItemOf(weenie.Wcid)!.Stack >= count, $"spell {spell.Id}: the foci formula needs {count} of {weenie.Name}");
             }
         }
     }
@@ -234,10 +178,11 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
     public void Every_line_of_the_built_kit_is_an_item_type_the_select_names()
     {
         var kit = KitFor(Account);
-        Assert.All(kit.Items, i => Assert.Contains(i.WeenieType, new[] { GearKit.WeenieTypeCaster, GearKit.WeenieTypeClothing, GearKit.WeenieTypeSpellComponent }));
+        Assert.All(kit.Items, i => Assert.Contains(i.WeenieType, new[] { GearKit.WeenieTypeCaster, GearKit.WeenieTypeClothing, GearKit.WeenieTypeSpellComponent, 1u, 18u, 21u })); // the foci are Generic (1), the potion Food (18), the side pack Container (21, M5 7 G3)
         Assert.DoesNotContain(kit.Items, i => i.WeenieType == 10); // WeenieType.Creature
         Assert.Equal(1, kit.Items.Count(i => i.Kind == GearKind.Wand));
-        Assert.Equal(5, kit.Items.Count(i => i.Kind == GearKind.Armour));
+        Assert.Equal(2, kit.Items.Count(i => i.Kind == GearKind.Armour)); // the hooded robe covers the body and the head in one piece, the gauntlets the hands (M5 7 F13, D87)
+        Assert.Equal(4, kit.Items.Count(i => i.Kind == GearKind.Focus));
     }
 
     [Fact]
@@ -310,6 +255,50 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
         }
 
         public void Dispose() => Session.Dispose();
+    }
+
+    [Theory]
+    [InlineData(0, 100, new int[] { 0 })]
+    [InlineData(1, 100, new[] { 1 })]
+    [InlineData(100, 100, new[] { 100 })]
+    [InlineData(101, 100, new[] { 100, 1 })]
+    [InlineData(300, 100, new[] { 100, 100, 100 })]
+    [InlineData(250, 100, new[] { 100, 100, 50 })]
+    [InlineData(1000, 1000, new[] { 1000 })]
+    public void A_line_is_granted_in_stacks_of_at_most_the_weenies_maximum_M5_7_F3(int total, int max, int[] expected)
+    {
+        Assert.Equal(expected, GearKit.StackSizes(total, max));
+        Assert.Equal([total], GearKit.StackSizes(total, null)); // an item with no maximum is one stack
+    }
+
+    [Fact]
+    public void SpawnGear_asks_for_a_line_of_more_than_one_stack_in_stacks_of_the_maximum_and_a_rerun_asks_for_nothing_M5_7_F3()
+    {
+        using var rig = new Rig();
+        var kit = GearKit.Of([Wand(), Comp(691, "Lead Scarab", 250)]);
+        Assert.Equal(1 + 3, kit.Slots);
+
+        var spawn = rig.Finish(rig.Session.Tools.SpawnGear(kit, ActionSource.Host));
+        Assert.True(spawn.Succeeded);
+        Assert.True(spawn.Arrived);
+        Assert.Equal([(GearKit.Wand.Wcid, (int?)null), (691u, 100), (691u, 100), (691u, 50)], spawn.Grants.Select(g => (g.Item.Wcid, g.Requested)));
+        Assert.Empty(spawn.Refusals);
+        Assert.Equal(250, rig.Held(691));
+        Assert.Equal(3, rig.Stacks(691)); // full stacks never merge past the maximum
+
+        var again = rig.Finish(rig.Session.Tools.SpawnGear(kit, ActionSource.Host));
+        Assert.Equal(0, again.Requested);
+        Assert.True(again.Succeeded);
+
+        // A top-up past a held stack asks for the stacks of the rest only: 100 held, 300 kept = two more of 100.
+        using var topUp = new Rig();
+        var held = topUp.Session.Tools.SpawnItem(691, 100, ActionSource.Host);
+        topUp.Run(1.5);
+        Assert.Equal(ItemOutcome.Created, ItemOutcomes.Of(held));
+        var more = topUp.Finish(topUp.Session.Tools.SpawnGear(GearKit.Of([Comp(691, "Lead Scarab", 300)]), ActionSource.Host));
+        Assert.True(more.Succeeded);
+        Assert.Equal([100, 100], more.Grants.Select(g => g.Requested!.Value));
+        Assert.Equal(300, topUp.Held(691));
     }
 
     [Fact]
@@ -601,7 +590,8 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
     {
         var kit = KitFor(Account);
         var spells = SpellTableData.Load(fixture.Dats).Spells;
-        foreach (var spell in ArenaProfile.Lines.SelectMany(l => l.Spells))
+        var cast = GearKit.CastBurns(Lifestone.Client.Session.Grounds.GroundCatalog.Get(FightOptions.DefaultGround), spells, heroRing: false).Select(b => b.SpellId).ToHashSet(); // M5 3 m1: the spells the mage casts (the plan's levels), not every level of every line
+        foreach (var spell in ArenaProfile.Lines.SelectMany(l => l.Spells).Where(sp => cast.Contains(sp.Id)))
         {
             var counts = GearKit.FociFormulaCounts(spells[spell.Id].Formula);
             Assert.NotEmpty(counts);
@@ -630,134 +620,148 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
         // Player_Spells.cs 451-457: Enchantment, Artifice, Verdancy, Strife, Shadow.
         Assert.Equal([15268u, 15269u, 15270u, 15271u, 43173u], GearKit.FociWcids);
     }
+}
 
-
-    // ---------------------------------------------------------------- M4 3.1 d0 (D20): the decoys join the death loop's kit only
-
-    private static Dictionary<uint, StandInItemKind> DecoyWeenies() => DecoyKit.All.ToDictionary(d => d.Wcid, d => new StandInItemKind(d.Name, null));
-
-    [RequiresDatsFact]
-    public void A_plain_kit_is_what_it_was_and_the_decoy_kit_is_the_plain_kit_with_eight_decoy_lines_at_the_end()
+/// <summary>The supply weenies' pinned slots and values, offline (review 3-R12 and 3-R17; the SQL-backed re-read is <c>SupplyWeenieSqlTests</c>).</summary>
+public sealed class SupplyWeenieOfflineTests
+{
+    /// <summary>M5 7 F13 (D87, the kit): the hooded robe's wear locations include the head and the gauntlets' the hands (the pinned world SQL: 5851 ClothingPriority 0x17F00 and ValidLocations 0x7F01; 56 ClothingPriority 0x8000 and ValidLocations 0x20; the SQL-backed re-read of the coverage is <c>SupplyWeenieSqlTests</c>); the den's worn lines are exactly the two and nothing else covers the head or the hands.</summary>
+    [Fact]
+    public void The_dens_worn_kit_is_a_hooded_robe_and_gloves_the_robe_covers_the_head_and_the_gauntlets_the_hands()
     {
-        var plain = KitFor(Account);
-
-        // The plain kit (the buff, fight and login legs' kit) has no decoy and describes itself as it always did.
-        Assert.False(plain.HasDecoys);
-        Assert.Empty(plain.DecoyItems);
-        Assert.Equal(63, plain.Items.Count);
-        Assert.Equal(17_143, plain.Burden);
-        Assert.Equal("items=63 components=57 customised_components=56 slots=63/102 burden=17143/19650", plain.Describe());
-        Assert.Equal(PinnedStacks, string.Join(' ', plain.Components.Select(c => c.Wcid + ":" + c.Stack)));
-
-        var decoyed = plain.WithDecoys(DecoyKit.All);
-        output.WriteLine("decoy kit: " + decoyed.Describe());
-
-        Assert.True(decoyed.HasDecoys);
-        Assert.Equal(71, decoyed.Items.Count);
-        Assert.Equal(plain.Items, decoyed.Items.Take(63)); // the plain lines, unchanged and in the same order
-        Assert.Equal(DecoyKit.All.Select(d => d.Wcid), decoyed.Items.Skip(63).Select(i => i.Wcid));
-        Assert.All(decoyed.Items.Skip(63), i => Assert.Equal(GearKind.Decoy, i.Kind));
-        Assert.Equal(DecoyKit.All.Select(d => d.ToGearItem()), decoyed.DecoyItems);
-        Assert.Equal(71, decoyed.Slots);
-        Assert.Equal(17_143 + 452, decoyed.Burden);
-        Assert.Equal(17_595, decoyed.Burden);
-        Assert.Equal(plain.CustomisedComponentIds, decoyed.CustomisedComponentIds);
-        Assert.Equal(57, decoyed.Components.Count());
-        Assert.Equal(5, decoyed.ArmourItems.Count());
-        Assert.Equal(plain.WandItem, decoyed.WandItem);
-        Assert.Equal("items=71 components=57 customised_components=56 slots=71/102 burden=17595/19650 decoys=8", decoyed.Describe());
-
-        // The plain kit was not changed by building the other, and the decoys left it by value.
-        Assert.False(plain.HasDecoys);
-        Assert.Equal(63, plain.Items.Count);
-    }
-
-    [RequiresDatsFact]
-    public void The_decoy_kit_stays_under_the_capacity_and_the_pack_slots_and_a_mage_that_kept_the_leather_set_and_the_old_wand_still_fits_under_its_real_capacity()
-    {
-        var kit = KitFor(Account).WithDecoys(DecoyKit.All);
-        var conservative = GearKit.EncumbranceCapacity(GearKit.CapacityStrength);
-        var real = EncumbranceSystem.EncumbranceCapacity((int)(MageTemplate.LowAttribute + GearKit.CapacityStrength), 0);
-        const int OldWand = 50;
-        var carried = kit.Burden + GearKit.LeatherSetBurden + OldWand;
-        output.WriteLine($"decoy kit {kit.Burden} of {conservative} (conservative); + leather {GearKit.LeatherSetBurden} + old wand {OldWand} = {carried} of {real} at strength 141 ({(double)carried / real:P1})");
-
-        Assert.True(kit.Burden * 100 <= conservative * 90, $"the decoy kit's burden {kit.Burden} is over 90% of {conservative}");
-        Assert.True(kit.Slots <= GearKit.PackCapacity * 3 / 4, $"{kit.Slots} slots of {GearKit.PackCapacity}");
-        Assert.True(carried * 100 <= real * 96, $"carrying {carried} is over 96% of {real}"); // M4 P5b J3b: was 95%; the decoy kit carries 20,205 (95.5%) without the ring too, so it stays 96% (fix FB, P5b-R12); the load penalty starts at 100%
-        Assert.True(EncumbranceSystem.Load(real, carried) < 1.0);
-    }
-
-    [RequiresDatsFact]
-    public void ForDeathLoop_is_the_decoy_kit_with_the_option_on_and_the_plain_kit_with_it_off_and_counts_the_decoys_for_the_level()
-    {
-        var spells = SpellTableData.Load(fixture.Dats).Spells;
-        var plain = GearKit.Build(spells, Account);
-
-        var on = GearKit.ForDeathLoop(spells, Account, new DeathOptions());
-        Assert.Equal(plain.WithDecoys(DecoyKit.All).Items, on.Items); // BSD Mage's level 126: all eight
-
-        var off = GearKit.ForDeathLoop(spells, Account, new DeathOptions { Decoys = false });
-        Assert.False(off.HasDecoys);
-        Assert.Equal(plain.Items, off.Items);
-        Assert.Equal(plain.Describe(), off.Describe());
-
-        Assert.Single(GearKit.ForDeathLoop(spells, Account, new DeathOptions(), level: 15).DecoyItems);
-        Assert.Equal(3, GearKit.ForDeathLoop(spells, Account, new DeathOptions(), level: 21).DecoyItems.Count());
-        Assert.False(GearKit.ForDeathLoop(spells, Account, new DeathOptions(), level: 5).HasDecoys);
-        Assert.Equal(8, GearKit.ForDeathLoop(spells, Account, new DeathOptions(), level: 400).DecoyItems.Count());
-        Assert.Throws<ArgumentNullException>(() => GearKit.ForDeathLoop(spells, Account, null!));
+        var den = Lifestone.Client.Session.Grounds.GroundCatalog.Get("black-spawn-den-aluvian");
+        var worn = den.Supplies.Kit.Where(k => k.Slot == Lifestone.Client.Session.Grounds.KitSlot.Worn).Select(k => GearKit.SupplyWeenieOf(k.Wcid, den, "kit")).ToList();
+        Assert.Equal([5851u, 56u], worn.Select(w => w.Wcid));
+        var robe = worn[0];
+        var gloves = worn[1];
+        Assert.True(robe.ValidLocations.HasFlag(Lifestone.Client.Session.Contracts.EquipMask.HeadWear), "the hooded robe covers the head");
+        Assert.Equal(Lifestone.Client.Session.Contracts.EquipMask.HandWear, gloves.ValidLocations);
+        Assert.Equal(GearKit.ItemTypeClothing, robe.ItemType);
+        Assert.Equal(GearKit.ItemTypeArmor, gloves.ItemType);
+        Assert.Equal(0, robe.ItemDifficulty + gloves.ItemDifficulty); // nothing to wield: no Arcane Lore, no skill
+        Assert.Equal((Lifestone.Client.Session.Contracts.EquipMask)0x7F00, robe.ValidLocations & (Lifestone.Client.Session.Contracts.EquipMask)0x7F00); // and everything the old robe covered
+        Assert.Equal(Lifestone.Client.Session.Contracts.EquipMask.None, robe.ValidLocations & gloves.ValidLocations); // the two do not take one slot: both are worn at once
     }
 
     [Fact]
-    public void WithDecoys_replaces_the_decoys_it_has_is_idempotent_and_leaves_the_kit_it_was_called_on_alone()
+    public void The_robes_and_the_wand_keep_their_pinned_slots_and_each_vendor_prices_them_at_one_sell_rate_over_their_value()
     {
-        var plain = GearKit.Of([Wand(), Comp(691, "Lead Scarab", 40)]);
+        var robe = GearKit.SupplyWeenies.Single(w => w.Wcid == 6071);
+        var wand = GearKit.SupplyWeenies.Single(w => w.Wcid == 2472);
+        Assert.Equal((Lifestone.Client.Session.Contracts.EquipMask)0x7F00, robe.ValidLocations); // chest, abdomen, arms, legs, feet: the pinned world SQL's 32512
+        Assert.Equal(Lifestone.Client.Session.Contracts.EquipMask.Held, wand.ValidLocations); // 16777216
+        Assert.Equal(200, wand.Value); // TODO(m4-caster-value) closed for the vendor wand
 
-        var one = plain.WithDecoys(DecoyKit.All.Take(1).ToList());
-        var eight = one.WithDecoys(DecoyKit.All);
-        var again = eight.WithDecoys(DecoyKit.All);
-        var none = eight.WithDecoys([]);
+        // The profiles' prices are an independent source: a vendor's SellPrice is one rate (ACE Vendor.GetSellCost, Vendor.cs 577-585 @95ef426d: max(1, ceil(rate x Value - 0.1)), in float), 1.35 for the den's
+        // vendors and 1.8 for Fort Tethana's, so every supply weenie they sell must be priced so over the Value read from the SQL.
+        foreach (var (key, rate) in new[] { ("black-spawn-den-aluvian", 1.35), ("tusker-temple-fort-tethana", 1.8) })
+        {
+            var ground = Lifestone.Client.Session.Grounds.GroundCatalog.Get(key);
+            var checkedWares = 0;
+            foreach (var ware in ground.Vendors.SelectMany(v => v.Sells))
+            {
+                if (ground.Supplies.Purse.Notes.Any(n => n.Wcid == ware.Wcid) || GearKit.SupplyWeenies.FirstOrDefault(w => w.Wcid == ware.Wcid) is not { Value: > 1 } weenie) // M5 7 G1: a trade note is sold at 1.15 times its face, not the vendor's rate
+                {
+                    continue;
+                }
 
-        Assert.Equal(2, plain.Items.Count);
-        Assert.False(plain.HasDecoys);
-        Assert.Equal(3, one.Items.Count);
-        Assert.Equal(10, eight.Items.Count);
-        Assert.Equal(eight.Items, again.Items);
-        Assert.Equal(plain.Items, none.Items);
-        Assert.False(none.HasDecoys);
-        Assert.Equal(plain.Burden + DecoyKit.TotalBurden, eight.Burden);
-        Assert.Equal("items=10 components=1 customised_components=0 slots=10/102 burden=" + eight.Burden + "/19650 decoys=8", eight.Describe());
-        Assert.Equal(DecoyKit.For(126).Select(d => d.Wcid), plain.WithDecoys(126).DecoyItems.Select(i => i.Wcid));
-        Assert.Throws<ArgumentNullException>(() => plain.WithDecoys((IReadOnlyList<DecoyItem>)null!));
+                Assert.Equal(Math.Max(1, (int)Math.Ceiling(((float)rate * weenie.Value) - 0.1)), ware.Price);
+                checkedWares++;
+            }
+
+            Assert.True(checkedWares >= 3, $"{key}: the robe, the wand and the Mana Potion are sold");
+        }
+    }
+}
+
+/// <summary>A fact that runs only when the pinned world SQL zip (server/runtime/downloads, ACE-World-16PY-Patches v0.9.296) is on disk in this checkout or one above it; it is reported skipped otherwise.</summary>
+public sealed class RequiresPinnedWorldSqlFactAttribute : FactAttribute
+{
+    public const string ZipRelativePath = "server/runtime/downloads/ace-world-v0.9.296/ACE-World-Database-v0.9.296.sql.zip";
+
+    public RequiresPinnedWorldSqlFactAttribute()
+    {
+        if (Find() is null)
+        {
+            Skip = "The pinned world SQL zip is not on disk (" + ZipRelativePath + "): run server/setup-server.ps1 in the main checkout.";
+        }
     }
 
-    [Fact]
-    public void SpawnGear_asks_for_exactly_the_decoys_not_held_one_each_and_a_rerun_asks_for_none()
+    public static string? Find()
     {
-        using var rig = new Rig(DecoyWeenies());
-        var three = GearKit.Of([Wand()]).WithDecoys(DecoyKit.All.Take(3).ToList());
-        var first = rig.Finish(rig.Session.Tools.SpawnGear(three, ActionSource.Host));
-        Assert.True(first.Succeeded, first.Describe());
-        Assert.Equal(4, first.Requested); // the wand and three decoys
-        Assert.All(DecoyKit.All.Take(3), d => Assert.Equal(1, rig.Held(d.Wcid)));
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, ZipRelativePath);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
 
-        var all = GearKit.Of([Wand()]).WithDecoys(DecoyKit.All);
-        var second = rig.Finish(rig.Session.Tools.SpawnGear(all, ActionSource.Host));
+        return null;
+    }
+}
 
-        Assert.True(second.Succeeded, second.Describe());
-        Assert.True(second.Arrived);
-        Assert.Equal(5, second.Requested); // the five decoys not held, none of the three that are, and not the wand
-        Assert.Equal(4, second.AlreadyHeld);
-        Assert.Equal(DecoyKit.All.Skip(3).Select(d => d.Wcid), second.Grants.Select(g => g.Item.Wcid));
-        Assert.All(second.Grants, g => Assert.Null(g.Requested)); // an item, not a stack
-        Assert.All(second.Grants, g => Assert.Equal(ItemOutcome.Created, g.Outcome));
-        Assert.All(DecoyKit.All, d => Assert.Equal(1, rig.Held(d.Wcid)));
-        Assert.All(DecoyKit.All, d => Assert.Equal(1, rig.Stacks(d.Wcid)));
+/// <summary>
+/// Review 3-R12 / 3-R17 (M5 item 3 fix F3): every hand-typed fact of <see cref="GearKit.SupplyWeenies"/> against the pinned world SQL (a read-only parse of the zip): the WeenieType, the ItemType (PropertyInt 1), the burden (5), the
+/// ValidLocations (9: the robes' 0x7F00 and the wand's Held), the stack size (11), the Arcane Lore (109) and the Value (19: the vendor wand's 200). Exhaustive tier: it reads about 100 MB of text.
+/// </summary>
+[Trait("Tier", "Exhaustive")]
+public sealed class SupplyWeenieSqlTests
+{
+    [RequiresPinnedWorldSqlFact]
+    public void Every_supply_weenie_fact_is_what_the_pinned_world_SQL_holds()
+    {
+        using var zip = System.IO.Compression.ZipFile.OpenRead(RequiresPinnedWorldSqlFactAttribute.Find()!);
+        using var reader = new StreamReader(zip.Entries.First(e => e.Name.EndsWith(".sql", StringComparison.Ordinal)).Open());
+        var sql = reader.ReadToEnd();
+        var ints = Block(sql, "INSERT INTO `weenie_properties_int` VALUES");
+        var weenies = Block(sql, "INSERT INTO `weenie` VALUES");
+        foreach (var w in GearKit.SupplyWeenies)
+        {
+            var props = System.Text.RegularExpressions.Regex.Matches(ints, @"\(\d+," + w.Wcid + @",(\d+),(-?\d+)\)")
+                .ToDictionary(m => int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), m => int.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture));
+            var row = System.Text.RegularExpressions.Regex.Match(weenies, @"\(" + w.Wcid + @",'[^']*',(\d+),");
+            Assert.True(row.Success, $"weenie {w.Wcid} {w.Name} is not in the pinned world SQL");
+            Assert.True(w.WeenieType == uint.Parse(row.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), $"{w.Wcid} {w.Name}: WeenieType {w.WeenieType} vs the SQL's {row.Groups[1].Value}");
+            Assert.True(w.ItemType == (uint)props[1], $"{w.Wcid} {w.Name}: ItemType 0x{w.ItemType:X} vs the SQL's 0x{props[1]:X}");
+            Assert.True(w.UnitBurden == props[5], $"{w.Wcid} {w.Name}: burden {w.UnitBurden} vs the SQL's {props[5]}");
+            Assert.True((uint)w.ValidLocations == (props.TryGetValue(9, out var locations) ? (uint)locations : 0u), $"{w.Wcid} {w.Name}: ValidLocations 0x{(uint)w.ValidLocations:X} vs the SQL's 0x{(props.TryGetValue(9, out var l2) ? l2 : 0):X}");
+            Assert.True(w.MaxStack == (props.TryGetValue(11, out var stack) ? (int?)stack : null), $"{w.Wcid} {w.Name}: stack {w.MaxStack} vs the SQL's {(props.TryGetValue(11, out var s2) ? (int?)s2 : null)}");
+            Assert.True(w.ItemDifficulty == (props.TryGetValue(109, out var lore) ? lore : 0), $"{w.Wcid} {w.Name}: Arcane Lore {w.ItemDifficulty} vs the SQL's {(props.TryGetValue(109, out var l3) ? l3 : 0)}");
+            Assert.True(w.Value == props[19], $"{w.Wcid} {w.Name}: Value {w.Value} vs the SQL's {props[19]}");
+        }
 
-        var third = rig.Finish(rig.Session.Tools.SpawnGear(all, ActionSource.Host));
-        Assert.Equal(0, third.Requested);
-        Assert.Equal(9, third.AlreadyHeld);
-        Assert.Equal(9, rig.Inventory.Pack.Count); // the wand and the eight decoys, never a second copy
+        // M5 7 F13 (D87): the coverage itself, ClothingPriority (PropertyInt 4, ACE's CoverageMask): the hood 0x4000 and the hands 0x8000, read from the SQL and not from our own table.
+        const int Head = 0x4000, Hands = 0x8000, BodyAndLegs = 0x3F00;
+        Assert.True((props_of(ints, 5851)[4] & Head) != 0 && (props_of(ints, 5851)[4] & BodyAndLegs) == BodyAndLegs, "5851 covers the head and everything the old robe did");
+        Assert.True((props_of(ints, 6071)[4] & Head) == 0, "the old War robe 6071 has no hood");
+        Assert.True((props_of(ints, 56)[4] & Hands) != 0 && (props_of(ints, 56)[4] & Head) == 0, "56 covers the hands");
+        Assert.Equal(130, props_of(ints, 56)[28]); // the gauntlets' ArmorLevel
+        Assert.False(props_of(ints, 5851).ContainsKey(158) || props_of(ints, 56).ContainsKey(158), "neither piece has a WieldRequirements row: nothing the mage must meet");
+
+        var robe = GearKit.SupplyWeenies.First(w => w.Wcid == 6071);
+        var wand = GearKit.SupplyWeenies.First(w => w.Wcid == 2472);
+        Assert.Equal((EquipMask)0x7F00, robe.ValidLocations); // the pinned pair, stated: chest, abdomen, arms, legs, feet
+        Assert.Equal(EquipMask.Held, wand.ValidLocations);
+        Assert.Equal(200, wand.Value); // TODO(m4-caster-value) closed for the vendor wand
+    }
+
+    private static Dictionary<int, int> props_of(string ints, uint wcid) =>
+        System.Text.RegularExpressions.Regex.Matches(ints, @"\(\d+," + wcid + @",(\d+),(-?\d+)\)")
+            .ToDictionary(m => int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), m => int.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>Every chunk of the dump's <paramref name="start"/> statement (the dump splits a table's rows over several INSERTs), joined.</summary>
+    private static string Block(string sql, string start)
+    {
+        var all = new System.Text.StringBuilder();
+        for (var at = sql.IndexOf(start, StringComparison.Ordinal); at >= 0; at = sql.IndexOf(start, at + start.Length, StringComparison.Ordinal))
+        {
+            var end = sql.IndexOf("\nINSERT INTO", at + start.Length, StringComparison.Ordinal);
+            all.Append(sql, at, (end < 0 ? sql.Length : end) - at);
+        }
+
+        Assert.True(all.Length > 0, start + " is not in the pinned world SQL");
+        return all.ToString();
     }
 }

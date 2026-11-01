@@ -45,7 +45,7 @@ public sealed class CastAttributionTests
         var cast = r.Api.Cast(StrengthSelf, ActionSource.Ui);
         var use = r.Api.Use(Door, ActionSource.Ui);
         r.Tick();
-        Assert.Single(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        Assert.Single(r.H.Net.SelfCasts(WorldActionRig.Player));
         Assert.Empty(r.H.Net.Of(FakeSendKind.Use)); // not while the cast is out: its UseDone could not be told from the door's
 
         r.Enchant((ushort)StrengthSelf);
@@ -72,12 +72,12 @@ public sealed class CastAttributionTests
         var cast = r.Api.Cast(StrengthSelf, ActionSource.Ui);
         r.Tick();
         Assert.Single(r.H.Net.Of(FakeSendKind.Use));
-        Assert.Empty(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        Assert.Empty(r.H.Net.SelfCasts(WorldActionRig.Player));
 
         r.UseDone(0x001D); // ACE: busy
         r.Tick();
         Assert.Equal((ActionOutcomeKind.ServerError, 0x001Du), (use.Outcome!.Value.Kind, use.Outcome.Value.Code));
-        Assert.Single(r.H.Net.Of(FakeSendKind.CastUntargetedSpell)); // now the cast goes out
+        Assert.Single(r.H.Net.SelfCasts(WorldActionRig.Player)); // now the cast goes out
         Assert.False(cast.IsCompleted);
 
         r.Enchant((ushort)StrengthSelf);
@@ -104,7 +104,7 @@ public sealed class CastAttributionTests
         r.Tick();
         r.Enchant((ushort)StrengthSelf);
         r.Tick(10.1); // the hold is let go at 10 s from the send: the next cast goes out
-        Assert.Equal(2, r.H.Net.Of(FakeSendKind.CastUntargetedSpell).Count);
+        Assert.Equal(2, r.H.Net.SelfCasts(WorldActionRig.Player).Count);
 
         r.UseDone(); // the first cast UseDone, late
         r.Tick();
@@ -124,7 +124,7 @@ public sealed class CastAttributionTests
         r.Tick();
         r.Tick(10.1);
         Assert.Equal(ActionOutcomeKind.TimedOut, lost.Outcome!.Value.Kind);
-        Assert.Equal(2, r.H.Net.Of(FakeSendKind.CastUntargetedSpell).Count);
+        Assert.Equal(2, r.H.Net.SelfCasts(WorldActionRig.Player).Count);
 
         r.UseDone();
         r.Tick();

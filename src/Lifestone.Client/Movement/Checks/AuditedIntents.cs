@@ -45,6 +45,15 @@ public sealed class AuditedIntents : IPlayerMovementIntents, IDisposable
     public bool OnGround => _controller.OnGround;
 
     /// <inheritdoc/>
+    public int ServerMoveToStuckEnds => _controller.ServerMoveToStuckEnds;
+
+    /// <inheritdoc/>
+    public string? LastServerMoveToEnd => _controller.LastServerMoveToEnd;
+
+    /// <inheritdoc/>
+    public bool? IsHeld(uint command) => _controller.IsHeld(command);
+
+    /// <inheritdoc/>
     public void HandleCommand(uint command, bool start, float speed = 1f)
     {
         var before = _trace.Messages.Count;

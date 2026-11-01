@@ -4,8 +4,11 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Scenarios.Journey;
+using Lifestone.Client.Tests.Session.Journey;
 using Lifestone.Client.Session.StandIn;
 using DatReaderWriter.Enums;
 using Lifestone.Data.Magic;
@@ -412,6 +415,9 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
 
     private static int Sends(Rig rig, uint type) => rig.Responder.ActionSends.Count(s => s.Type == type);
 
+    /// <summary>The casts sent, either way: the check's creature buff is SelfTargeted, so it goes out at the player (0x004A), as retail's <c>ClientMagicSystem::CastSpell</c> sends it.</summary>
+    private static int Casts(Rig rig) => Sends(rig, GameActionTypes.CastUntargetedSpell) + Sends(rig, GameActionTypes.CastTargetedSpell);
+
     [Fact]
     public void After_the_gear_the_scenario_enters_the_magic_mode_casts_the_highest_safe_creature_buff_and_returns_to_peace()
     {
@@ -428,7 +434,7 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Contains(rig.Session.State.Self.Qualities.Enchantments, e => e.SpellId == strengthV);
         Assert.Equal(CombatModes.NonCombat, rig.Session.State.Self.Qualities.CombatMode); // back in peace
         Assert.Equal(2, Sends(rig, GameActionTypes.ChangeCombatMode)); // magic, then non-combat
-        Assert.Equal(1, Sends(rig, GameActionTypes.CastUntargetedSpell));
+        Assert.Equal(1, Casts(rig));
         Assert.Matches(Verdict, scenario.VerdictFields());
         Assert.Contains(rig.Log.Entries, e => e.Message.StartsWith("verdict gear=wielded worn=5 kit=7/7 gear_steps=12 topup=1 cast=ok", StringComparison.Ordinal));
     }
@@ -447,6 +453,27 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.DoesNotContain(rig.Session.State.Self.Qualities.Enchantments, e => e.SpellId == 4325);
         Assert.Equal(CombatModes.NonCombat, rig.Session.State.Self.Qualities.CombatMode);
         Assert.Equal(1, rig.World.Fizzles);
+    }
+
+    [Fact]
+    public void The_check_cast_is_sent_once_as_Automation_with_its_mode_changes_whatever_the_fizzle_rule()
+    {
+        // M5 1 K3 (D13, D14): the check is Once ("a check never retries silently"), so D14's retries do not reach it: a fizzle is one send and cast=fizzled. Its cast and mode changes are Automation; the wields stay Host.
+        using var rig = new Rig(Mage(477));
+        rig.Learn(4325);
+        var scenario = new GearScenario(SmallKit(), rig.Log, endSession: false);
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.Equal(1, Casts(rig));
+        Assert.Equal("gear=wielded worn=5 kit=7/7 gear_steps=12 topup=1 cast=fizzled", scenario.VerdictFields());
+        var log = rig.Session.ActionLog;
+        var casts = Enumerable.Range(0, log.Count).Select(i => log[i]).Where(e => e.Kind == ActionKind.CastSpell).ToList();
+        Assert.Equal(ActionSource.Automation, Assert.Single(casts).Source);
+        var modes = Enumerable.Range(0, log.Count).Select(i => log[i]).Where(e => e.Kind == ActionKind.SetCombatMode).ToList();
+        Assert.Equal(2, modes.Count);
+        Assert.All(modes, m => Assert.Equal(ActionSource.Automation, m.Source));
+        Assert.All(Enumerable.Range(0, log.Count).Select(i => log[i]).Where(e => e.Kind == ActionKind.Wield), w => Assert.Equal(ActionSource.Host, w.Source));
     }
 
     [Fact]
@@ -477,7 +504,7 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         var b = new GearScenario(SmallKit(), off.Log, endSession: false, cast: false);
         Assert.Equal(ScenarioStatus.Succeeded, off.Run(b));
         Assert.EndsWith(" cast=n/a", b.VerdictFields(), StringComparison.Ordinal);
-        Assert.Equal(0, Sends(off, GameActionTypes.CastUntargetedSpell));
+        Assert.Equal(0, Casts(off));
         Assert.Equal(0, Sends(off, GameActionTypes.ChangeCombatMode));
     }
 
@@ -546,7 +573,7 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         var second = new GearScenario(SmallKit(), rig.Log, endSession: false);
         Assert.Equal(ScenarioStatus.Succeeded, rig.Run(second));
         Assert.Equal("gear=wielded worn=5 kit=7/7 gear_steps=0 topup=0 cast=ok", second.VerdictFields());
-        Assert.Equal(2, Sends(rig, GameActionTypes.CastUntargetedSpell)); // a cast per run: the gear steps stay 0 either way
+        Assert.Equal(2, Casts(rig)); // a cast per run: the gear steps stay 0 either way
 
         var burned = new GearScenario(GearKit.Of([Wand(), .. GearKit.Armour.Select(Armour), Scarab(30)]), rig.Log, endSession: false, cast: false); // ten scarabs short, as after a burn
         Assert.Equal(ScenarioStatus.Succeeded, rig.Run(burned));
@@ -575,7 +602,7 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Equal("gear=wielded worn=5 kit=7/7 gear_steps=12 topup=1 cast=ok", scenario.VerdictFields());
         Assert.Contains(rig.Log.Entries, e => e.Message.StartsWith("cast: waiting for mana to regenerate: 75 of ", StringComparison.Ordinal) && e.Message.Contains("up to 90 needed", StringComparison.Ordinal));
         Assert.Contains(rig.Log.Entries, e => e.Message.StartsWith("cast: mana 95 reached the 90 needed after ", StringComparison.Ordinal));
-        Assert.Equal(1, Sends(rig, GameActionTypes.CastUntargetedSpell));
+        Assert.Equal(1, Casts(rig));
     }
 
     [Fact]
@@ -588,7 +615,7 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.Equal(ScenarioStatus.Succeeded, never.Run(a, limit: 400));
         Assert.StartsWith("gear=wielded worn=5 ", a.VerdictFields(), StringComparison.Ordinal); // report-only: the gear stays judged
         Assert.EndsWith(" cast=failed", a.VerdictFields(), StringComparison.Ordinal);
-        Assert.Equal(0, Sends(never, GameActionTypes.CastUntargetedSpell));
+        Assert.Equal(0, Casts(never));
         Assert.Equal(0, Sends(never, GameActionTypes.ChangeCombatMode));
         Assert.Contains(never.Log.Entries, e => e.Severity == LogSeverity.Warning && e.Message.StartsWith("cast not sent (cast=failed): the mana did not reach 90 within 120 s: 75 of ", StringComparison.Ordinal));
 
@@ -746,118 +773,10 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
 
         var seconds = rig.Session.Clock.Now - start;
         Assert.True(seconds < first.SpawnLimit, $"{seconds:0.#} s against a spawn limit of {first.SpawnLimit:0.#} s");
-        Assert.Equal("gear=wielded worn=5 kit=63/63 gear_steps=12 topup=57 cast=n/a", first.VerdictFields()); // 6 requests and 6 wields, and 57 component lines
+        Assert.Equal("gear=wielded worn=2 kit=17/17 gear_steps=12 topup=12 cast=n/a", first.VerdictFields()); // M5 7 lead (3c10c079): two side packs, not seven, five requests fewer (gear_steps 17 -> 12); M5 7 G3: the kit line of seven side packs is one more line and seven more requests (gear_steps 10 -> 17); M5 7 F25 (D93): the Silver and Gold Scarab lines are two more requests, topup 10 -> 12 and kit 16; M5 7 F10: the Pyreal Scarab line of 400 is four requests and the Diamond Scarab line one more, so topup 7 -> 9 and kit 13;  M5 7 F3 (D87): the Pyreal Scarab line of 300 is three requests of 100, so topup 5 -> 7 and gear_steps 8 stays (the wand, the robe, the four foci, the wield and the wear); M5 7 F13 (D87): the gauntlets add a request and a wear, worn 2, kit 12, gear_steps 10); // M5 3 m1: 6 requests (the wand, the robe, the four foci) and 2 wields, and the 5 stock lines
         var second = new GearScenario(spells, "gear-test-account", rig.Log, endSession: false);
         Assert.Equal(ScenarioStatus.Succeeded, rig.Run(second));
-        Assert.Equal("gear=wielded worn=5 kit=63/63 gear_steps=0 topup=0 cast=n/a", second.VerdictFields());
-    }
-
-    // ---------------------------------------------------------------- M4 3.1 d0 (D20): the decoys in the gear scenario
-
-    private static Dictionary<uint, StandInItemKind> DecoyWeenies() => DecoyKit.All.ToDictionary(d => d.Wcid, d => new StandInItemKind(d.Name, null));
-
-    private static GearKit SmallDecoyKit(int decoys = 8) => SmallKit().WithDecoys(DecoyKit.All.Take(decoys).ToList());
-
-    [Fact]
-    public void A_decoy_kit_spawns_the_eight_by_the_item_top_up_never_wields_one_and_keeps_the_verdict_fields_of_the_plain_kit()
-    {
-        using var rig = new Rig(items: DecoyWeenies());
-        var scenario = new GearScenario(SmallDecoyKit(), rig.Log, endSession: false);
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        var verdict = scenario.VerdictFields();
-        Assert.Matches(Verdict, verdict);
-        // The seven lines of the small plain kit and the eight decoys: kit counts them all (15/15); gear_steps stays the wand's and the armour's (6 requests and 6 wields); topup the scarabs'.
-        Assert.Equal("gear=wielded worn=5 kit=15/15 gear_steps=12 topup=1 cast=n/a", verdict);
-        Assert.Equal(8, scenario.DecoyGrants);
-        Assert.Equal(1, scenario.TopUp);
-        Assert.Equal(6, scenario.SentWields.Count); // the wand and the five pieces: no decoy was wielded
-        Assert.DoesNotContain(scenario.SentWields, w => DecoyKit.All.Any(d => w.Contains(d.Name, StringComparison.Ordinal)));
-        Assert.Equal(6, rig.Inventory.Equipped.Count);
-        Assert.All(DecoyKit.All, d => Assert.False(WornWcid(rig, d.Wcid), d.Name + " is worn"));
-        Assert.All(DecoyKit.All, d => Assert.True(InPack(rig, d.Wcid), d.Name + " is not in the pack"));
-        Assert.Equal(8, rig.Session.State.Objects.All.Count(o => DecoyKit.IsDecoy(o.Weenie.WeenieClassId)));
-        Assert.Empty(scenario.MissingKit);
-    }
-
-    [Fact]
-    public void A_rerun_of_the_decoy_kit_sends_nothing_and_a_partly_held_set_spawns_exactly_the_decoys_not_held()
-    {
-        using var rig = new Rig(items: DecoyWeenies());
-        var first = new GearScenario(SmallDecoyKit(3), rig.Log, endSession: false, cast: false);
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(first));
-        Assert.Equal("gear=wielded worn=5 kit=10/10 gear_steps=12 topup=1 cast=n/a", first.VerdictFields());
-        Assert.Equal(3, first.DecoyGrants);
-
-        // All eight now: the three held are not asked for again, the five others are, one each.
-        var more = new GearScenario(SmallDecoyKit(), rig.Log, endSession: false, cast: false);
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(more));
-        Assert.Equal("gear=wielded worn=5 kit=15/15 gear_steps=0 topup=0 cast=n/a", more.VerdictFields());
-        Assert.Equal(5, more.DecoyGrants);
-        Assert.Empty(more.SentWields);
-        Assert.All(DecoyKit.All, d => Assert.Equal(1, rig.Session.State.Objects.All.Count(o => o.Weenie.WeenieClassId == d.Wcid)));
-
-        var sends = rig.Responder.ActionSends.Count;
-        var again = new GearScenario(SmallDecoyKit(), rig.Log, endSession: false, cast: false);
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(again));
-        Assert.Equal("gear=wielded worn=5 kit=15/15 gear_steps=0 topup=0 cast=n/a", again.VerdictFields());
-        Assert.Equal(0, again.DecoyGrants);
-        Assert.Equal(sends, rig.Responder.ActionSends.Count);
-    }
-
-    [Fact]
-    public void A_plain_kit_has_no_decoy_grants_and_spawns_no_decoy_so_its_verdict_is_what_it_was()
-    {
-        using var rig = new Rig(items: DecoyWeenies());
-        var scenario = new GearScenario(SmallKit(), rig.Log, endSession: false);
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Equal("gear=wielded worn=5 kit=7/7 gear_steps=12 topup=1 cast=n/a", scenario.VerdictFields());
-        Assert.Equal(0, scenario.DecoyGrants);
-        Assert.All(DecoyKit.All, d => Assert.False(InPack(rig, d.Wcid)));
-    }
-
-    [Fact]
-    public void A_decoy_the_server_cannot_make_fails_the_spawn_and_is_named()
-    {
-        // The stand-in knows no decoy weenie (the visit names none): every decoy request is refused, which fails the spawn with the weenie's own words; nothing is wielded.
-        using var rig = new Rig();
-        var scenario = new GearScenario(SmallDecoyKit(2), rig.Log, endSession: false, cast: false);
-
-        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
-
-        Assert.StartsWith("spawning: ", scenario.Failure, StringComparison.Ordinal);
-        Assert.Contains("Massive Mana Charge", scenario.Failure, StringComparison.Ordinal);
-        Assert.Contains("UnknownWcid", scenario.Failure, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_worn_decoy_is_taken_off_when_it_holds_a_place_the_armour_needs_and_goes_to_the_pack()
-    {
-        // The Skull Cap (a decoy, ValidLocations HeadWear) worn by someone: it is no kit piece, so the helm's place is cleared as for any other worn piece that is not the kit's.
-        const uint SkullCap = 25522;
-        using var rig = new Rig(items: DecoyWeenies());
-        var made = rig.Session.Tools.SpawnItem(SkullCap, null, ActionSource.Host);
-        Pump(rig, 2);
-        Assert.True(made.IsCompleted, made.Summary);
-        var guid = made.Result!.Guid;
-        Pump(rig, 1);
-        var wear = rig.Session.Actions.Wield(guid, EquipMask.HeadWear, ActionSource.Host);
-        Pump(rig, 2);
-        Assert.Equal(ActionOutcomeKind.Confirmed, wear.Outcome!.Value.Kind);
-        Assert.True(WornWcid(rig, SkullCap));
-
-        var scenario = new GearScenario(SmallDecoyKit(), rig.Log, endSession: false, cast: false);
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Equal(1, scenario.SentWields.Count(w => w.StartsWith("take off", StringComparison.Ordinal)));
-        Assert.False(WornWcid(rig, SkullCap));
-        Assert.True(InPack(rig, SkullCap));
-        Assert.Equal(5, WornPieces(rig));
-        Assert.Equal(7, scenario.DecoyGrants); // the Skull Cap was held (worn), so seven were spawned
-        Assert.StartsWith("gear=wielded worn=5 kit=15/15", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Equal("gear=wielded worn=2 kit=17/17 gear_steps=0 topup=0 cast=n/a", second.VerdictFields()); // M5 7 F25: the two buff scarab lines
     }
 
     // ---------------------------------------------------------------- M4 P4 sess2: a session already in the world (one login, several scenarios)
@@ -913,6 +832,99 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         Assert.DoesNotContain(right.Log.Entries, e => e.Message.Contains("entering the existing character", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void The_no_grant_mode_wields_what_the_pack_holds_names_nothing_missing_and_sends_no_item_request_M5_3_c1()
+    {
+        using var rig = new Rig();
+        var kit = GearKit.Of([Wand(), .. GearKit.Armour.Select(Armour), Scarab(20)]);
+        var build = new GearScenario(kit, rig.Log, endSession: false, cast: false); // the build's own gear stage keeps granting
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(build));
+        Assert.Equal(7, rig.Session.Tools.Verbs.Counts.Item);
+
+        var coat = GearKit.Armour.Single(a => a.Name == "Greater Amuli Shadow Coat");
+        foreach (var wcid in new[] { GearKit.Wand.Wcid, coat.Wcid })
+        {
+            var guid = rig.Inventory.Equipped.Select(e => e.Guid).First(g => rig.Session.State.Objects.TryGet(g, out var o) && o.Weenie.WeenieClassId == wcid);
+            rig.Session.Actions.Unwield(guid, ActionSource.Host);
+            Pump(rig, 3);
+        }
+
+        Assert.True(InPack(rig, GearKit.Wand.Wcid) && InPack(rig, coat.Wcid));
+        var mark = rig.Session.Tools.Verbs.Counts;
+
+        var play = new GearScenario(kit, rig.Log, endSession: false, cast: false) { NoGrant = true };
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(play));
+
+        Assert.Equal("gear=wielded worn=5 kit=7/7 gear_steps=2 topup=0 cast=n/a", play.VerdictFields()); // two wields, no grant
+        Assert.Equal(default, rig.Session.Tools.Verbs.Counts.Since(mark)); // nothing of any verb was sent
+        Assert.Contains(rig.Log.Lines, l => l.Contains("kit verified in the pack (no grant", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void M5_7_D139_m_the_no_grant_mode_keeps_a_held_caster_that_is_not_the_kits_wand_and_the_build_mode_still_swaps_it()
+    {
+        // Round 13 (2026-10-30 03:01:33 UTC): the start-up's gear stage took the self-equip's Fire Sceptre off for the kit's Wand and left it unwielded in the main pack.
+        using var rig = new Rig(items: OldKitWeenies());
+        var kit = GearKit.Of([Wand(), .. GearKit.Armour.Select(Armour)]);
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(new GearScenario(kit, rig.Log, endSession: false, cast: false)));
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(new GearScenario(GearKit.Of(OldKitLines()), rig.Log, endSession: false, cast: false)));
+        var picked = rig.Inventory.EquippedAt((uint)EquipMask.Held);
+        Assert.True(WornWcid(rig, OldWandWcid)); // another caster holds the hands, the kit's Wand is in the pack
+        Assert.True(rig.Session.State.Objects.TryGet(picked!.Value, out var old));
+        old.Created = old.Created with { Weenie = old.Created.Weenie with { ItemType = CombatModeGuard.ItemTypeCaster } }; // the stand-in describes an unknown weenie as Misc; ACE's wand 2472 is a Caster
+        Assert.True(InPack(rig, GearKit.Wand.Wcid));
+
+        var play = new GearScenario(kit, rig.Log, endSession: false, cast: false) { NoGrant = true };
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(play));
+        Assert.Equal(picked, rig.Inventory.EquippedAt((uint)EquipMask.Held));
+        Assert.DoesNotContain(play.SentWields, w => w.EndsWith("the " + GearKit.Wand.Name, StringComparison.Ordinal) || w.StartsWith("wield ", StringComparison.Ordinal));
+        Assert.StartsWith("gear=wielded worn=5", play.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(rig.Log.Lines, l => l.Contains("is not the kit's " + GearKit.Wand.Name + " but the self-equip's pick: it keeps the hands", StringComparison.Ordinal));
+
+        var build = new GearScenario(kit, rig.Log, endSession: false, cast: false); // the build's own stage wields exactly the kit
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(build));
+        Assert.True(WornWcid(rig, GearKit.Wand.Wcid));
+    }
+
+    [Fact]
+    public void M5_7_D146_grant_only_grants_exactly_the_one_item_counts_it_before_and_after_and_sends_nothing_else()
+    {
+        // The owner's exception for one test run (Diamond Scarabs, 2026-10-30): the one item, nothing of the kit, no wield.
+        using var rig = new Rig();
+        var kit = GearKit.Of([Wand(), .. GearKit.Armour.Select(Armour), Scarab(20)]);
+        var mark = rig.Session.Tools.Verbs.Counts;
+        var grant = new GearScenario(kit, rig.Log, endSession: false, cast: false) { GrantOnly = (691u, 10) };
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(grant));
+
+        Assert.Equal(new ModVerbCounts(Item: 1), rig.Session.Tools.Verbs.Counts.Since(mark)); // one request: the item, no kit top-up
+        Assert.Empty(grant.SentWields);
+        Assert.Contains(rig.Log.Lines, l => l.Contains("grant-only (D146): weenie 691 granted 10: held 0 before, 10 now (read from the pack)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_no_grant_mode_with_a_kit_item_missing_fails_naming_it_and_sends_no_spawn_while_a_short_component_is_only_a_warning_M5_3_c1()
+    {
+        using var rig = new Rig();
+        var kit = GearKit.Of([Wand(), .. GearKit.Armour.Select(Armour), Scarab(20)]);
+        var play = new GearScenario(kit, rig.Log, endSession: false, cast: false) { NoGrant = true };
+
+        Assert.Equal(ScenarioStatus.Failed, rig.Run(play, 30));
+
+        Assert.Equal($"gear: {GearKit.Wand.Name} is not in the pack and play grants nothing (M5 DoD 6)", play.Failure);
+        Assert.Equal(0, rig.Session.Tools.Verbs.Counts.Total);
+
+        // A kit whose wand and armour are held but whose Lead Scarabs are short: the run goes on (the resupply buys components), the shortage is named, nothing is granted.
+        using var held = new Rig();
+        var bare = GearKit.Of([Wand(), .. GearKit.Armour.Select(Armour)]);
+        Assert.Equal(ScenarioStatus.Succeeded, held.Run(new GearScenario(bare, held.Log, endSession: false, cast: false)));
+        var markHeld = held.Session.Tools.Verbs.Counts;
+        var withScarabs = new GearScenario(kit, held.Log, endSession: false, cast: false) { NoGrant = true };
+        Assert.Equal(ScenarioStatus.Succeeded, held.Run(withScarabs));
+        Assert.Equal(default, held.Session.Tools.Verbs.Counts.Since(markHeld));
+        Assert.Contains(held.Log.Lines, l => l.Contains("Lead Scarab", StringComparison.Ordinal) && l.Contains("is held 0 of 20 and play grants nothing", StringComparison.Ordinal));
+    }
+
     private static ScenarioStatus Steps(Rig rig, IScenario scenario, double seconds)
     {
         var status = ScenarioStatus.Running;
@@ -923,5 +935,178 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
         }
 
         return status;
+    }
+
+    // ---------------------------------------------------------------- M5 3 F6: the casts the kit can pay for (live round 2: Strength Self V needed a Gold Scarab the ground's kit does not carry, ACE refused 0x0400)
+
+    public static TheoryData<string> Dungeons => new() { "black-spawn-den-aluvian", "tusker-temple-fort-tethana" };
+
+    /// <summary>A caster with Creature Enchantment, Item Enchantment and Life Magic trained with <paramref name="ranks"/> ranks each: with the stand-in's Focus 70 and Self 100 each skill is 43 + ranks.</summary>
+    private static StandInPlayerStats Casters(int ranks) =>
+        new() { Skills = [new SkillDesc(31, (ushort)ranks, 1, 2, 0, 0, 0, 0.0), new SkillDesc(32, (ushort)ranks, 1, 2, 0, 0, 0, 0.0), new SkillDesc(33, (ushort)ranks, 1, 2, 0, 0, 0, 0.0)] };
+
+    /// <summary>M5 7 F25 (D93): the ground's kit without the buff's Silver (IV) and Gold (V) Scarabs the den now carries, so the level-floor tests keep proving that a pack short of a level's scarab never picks that level.</summary>
+    private (GearKit Kit, IReadOnlyDictionary<uint, SpellInfo> Real) GroundKitWithoutBuffScarabs(string ground)
+    {
+        var (kit, real) = GroundKit(ground);
+        return (GearKit.Of([.. kit.Items.Where(i => i.Wcid is not (687 or 688))]), real);
+    }
+
+    private (GearKit Kit, IReadOnlyDictionary<uint, SpellInfo> Real) GroundKit(string ground)
+    {
+        var real = SpellTableData.Load(fixture.Dats).Spells;
+        return (GearKit.Build(real, "gear-test-account", ground: GroundCatalog.Get(ground)), real);
+    }
+
+    /// <summary>The Rig's creature spells with the SpellTable's own formulas, so the level floor judges them as ACE's foci formula does.</summary>
+    private static void WithRealFormulas(Rig rig, IReadOnlyDictionary<uint, SpellInfo> real)
+    {
+        foreach (var id in rig.Table.Keys.ToList())
+        {
+            if (real.TryGetValue(id, out var r))
+            {
+                rig.Table[id] = rig.Table[id] with { Formula = r.Formula, FormulaVersion = r.FormulaVersion };
+            }
+        }
+    }
+
+    private static uint[] IdsOf(string line) => [.. ArenaProfile.LineNamed(line)!.Spells.Select(s => s.Id)];
+
+    /// <summary>The mage knows the spells: the stand-in has them (so it answers their casts) and the read model's book is told directly (the stand-in sends no GameEvent 0x02C1).</summary>
+    private static void Know(Rig rig, params uint[] ids)
+    {
+        rig.Learn(ids);
+        foreach (var id in ids)
+        {
+            rig.Session.State.Self.Spellbook.Learn(id);
+        }
+    }
+
+    /// <summary>ACE's rule (<c>HasComponentsForSpell</c>, Player_Magic.cs:1227-1248): the pack holds as many of each component of the foci formula as the formula has slots of it.</summary>
+    private static void AssertPaid(Rig rig, IReadOnlyDictionary<uint, SpellInfo> real, uint spellId)
+    {
+        var held = GearInventory.CountAll(rig.Session.State, out var unsettled);
+        Assert.Equal(0, unsettled);
+        Assert.False(LevelFloor.ShortOf(held, real[spellId], out var need), $"spell {spellId} ({real[spellId].Name}) needs {need}");
+    }
+
+    [RequiresDatsTheory]
+    [MemberData(nameof(Dungeons))]
+    public void A_pack_without_a_Gold_Scarab_never_picks_level_V_and_picks_VI_or_VII_when_the_skill_reaches_them_on_both_dungeons_M5_3_F6(string ground)
+    {
+        var (kit, real) = GroundKitWithoutBuffScarabs(ground); // M5 7 F25: the den carries the Gold Scarab now; the floor is proved on a pack without it
+        Assert.DoesNotContain(kit.Items, i => i.Wcid == 687); // the plan casts VI and VII: no Gold Scarab (level V) in the kit
+
+        // Skill 343, the live mage's: level V is the highest whose chance reaches 0.999. The earlier rule picked it (ACE then refused 0x0400); the floor passes it over, by name, and picks a level the pack can pay for.
+        using var low = new Rig(Casters(300));
+        Assert.Equal(ScenarioStatus.Succeeded, low.Run(new GearScenario(kit, low.Log, endSession: false, cast: false)));
+        var q = low.Session.State.Self.Qualities;
+        Assert.Equal(5, GearCasts.Pick(q, ProfileRole.CreatureBuff, out _)!.Spell.Position);
+        var floor = new PackFloor(low.Session.State, real);
+        var lowPick = GearCasts.Pick(q, ProfileRole.CreatureBuff, out var why, floor)!;
+        Assert.True(lowPick.Spell.Position < 5, lowPick.Describe());
+        Assert.Contains("Strength Self: level V needs Gold Scarab 687, which the pack does not hold; skipped", why, StringComparison.Ordinal);
+        Assert.Contains(floor.Skipped, s => s.StartsWith("Strength Self: level V needs Gold Scarab 687", StringComparison.Ordinal));
+        AssertPaid(low, real, lowPick.Spell.Id);
+
+        // Skill 403: level VII (power 300) is safe, VIII (power 400) is not: every role's pick is VI or VII, and the pack pays for it.
+        using var high = new Rig(Casters(360));
+        Assert.Equal(ScenarioStatus.Succeeded, high.Run(new GearScenario(kit, high.Log, endSession: false, cast: false)));
+        foreach (var role in new[] { ProfileRole.CreatureBuff, ProfileRole.LifeBuff, ProfileRole.ItemBuffWand })
+        {
+            var pick = GearCasts.Pick(high.Session.State.Self.Qualities, role, out var highWhy, new PackFloor(high.Session.State, real));
+            Assert.True(pick is not null, $"{role}: {highWhy}");
+            Assert.True(pick.Spell.Position is 6 or 7, $"{role}: {pick.Describe()}");
+            AssertPaid(high, real, pick.Spell.Id);
+        }
+    }
+
+    [RequiresDatsTheory]
+    [MemberData(nameof(Dungeons))]
+    public void A_pack_with_no_level_it_can_pay_for_gives_a_named_why_and_no_pick_M5_3_F6(string ground)
+    {
+        var (full, real) = GroundKit(ground);
+        var noScarabs = GearKit.Of([.. full.Items.Where(i => i.Kind != GearKind.Component || i.Wcid == GearKit.PrismaticTaperWcid)]); // the foci and the tapers, no scarab of any level
+        using var rig = new Rig(Casters(300));
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(new GearScenario(noScarabs, rig.Log, endSession: false, cast: false)));
+
+        var floor = new PackFloor(rig.Session.State, real);
+        Assert.Null(GearCasts.Pick(rig.Session.State.Self.Qualities, ProfileRole.CreatureBuff, out var why, floor));
+
+        Assert.Contains(": no level the pack can pay for (level ", why, StringComparison.Ordinal); // the last creature line's reason, as the cycle's miss names its line
+        Assert.Contains("which the pack does not hold; skipped)", why, StringComparison.Ordinal);
+        Assert.Contains(floor.Skipped, x => x.StartsWith("Strength Self: level V needs Gold Scarab 687, which the pack does not hold; skipped", StringComparison.Ordinal));
+        Assert.NotNull(GearCasts.Pick(rig.Session.State.Self.Qualities, ProfileRole.CreatureBuff, out _)); // the floor alone refuses it: without the floor the same pack has a pick (V)
+    }
+
+    [RequiresDatsTheory]
+    [MemberData(nameof(Dungeons))]
+    public void The_certain_fizzle_passes_over_a_level_the_pack_cannot_pay_for_because_ACE_checks_the_components_first_M5_3_F6(string ground)
+    {
+        var (kit, real) = GroundKit(ground);
+        using var rig = new Rig(Casters(300));
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(new GearScenario(kit, rig.Log, endSession: false, cast: false)));
+        Know(rig, IdsOf("Strength Self")); // the only known spell more than 50 above skill 343 is the Incantation (power 400), whose scarab no stock line holds
+        var q = rig.Session.State.Self.Qualities;
+        var book = rig.Session.State.Self.Spellbook;
+
+        var plain = GearCasts.PickFizzle(q, book, out _);
+        Assert.Equal(4325u, plain!.Spell.Id); // without the floor it would be chosen, and ACE would refuse it 0x0400 (CreatePlayerSpell: ValidateSpell 404-408 before GetCastingPreCheckStatus 1026)
+
+        var floor = new PackFloor(rig.Session.State, real);
+        Assert.Null(GearCasts.PickFizzle(q, book, out var report, floor));
+        Assert.Contains("that the pack can pay for", report, StringComparison.Ordinal);
+        Assert.Contains("Strength Self: level VIII needs ", report, StringComparison.Ordinal);
+    }
+
+    [RequiresDatsTheory]
+    [MemberData(nameof(Dungeons))]
+    public void The_gear_scenarios_check_cast_lands_cast_ok_with_a_level_the_pack_can_pay_for_on_a_fresh_mage_of_each_dungeon_M5_3_F6(string ground)
+    {
+        var (kit, real) = GroundKitWithoutBuffScarabs(ground); // M5 7 F25: a pack without the Gold Scarab
+        using var rig = new Rig(Casters(300)); // skill 343: level V by chance, which the kit cannot pay for
+        WithRealFormulas(rig, real);
+        Know(rig, IdsOf("Strength Self"));
+        var scenario = new GearScenario(kit, rig.Log, endSession: false, spells: rig.Table);
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.StartsWith(ground == "black-spawn-den-aluvian" ? "gear=wielded worn=2 " : "gear=wielded worn=1 ", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.EndsWith(" cast=ok", scenario.VerdictFields(), StringComparison.Ordinal); // it read cast=failed live
+        Assert.NotEqual(1331u, scenario.CastSpellId); // not Strength Self V
+        Assert.True(IdsOf("Strength Self").ToList().IndexOf(scenario.CastSpellId) is >= 0 and < 4, scenario.CastSpell);
+        AssertPaid(rig, real, scenario.CastSpellId);
+        Assert.Contains(rig.Log.Entries, e => e.Message.StartsWith("cast: Strength Self: level V needs Gold Scarab 687, which the pack does not hold; skipped", StringComparison.Ordinal));
+    }
+
+    [RequiresDatsTheory]
+    [MemberData(nameof(Dungeons))]
+    public void The_cast_facts_station_passes_its_gear_stage_and_plans_payable_casts_on_the_grounds_kit_at_worn_1_with_a_short_taper_line_M5_3_F6(string ground)
+    {
+        var (full, real) = GroundKit(ground);
+        var (kit, _) = GroundKitWithoutBuffScarabs(ground); // M5 7 F25: the pack lacks the Gold Scarab, so the plan still passes level V over by name
+        using var rig = new Rig(Casters(300));
+        rig.Session.State.Self.Name = MageTemplate.CharacterName;
+        var taper = kit.Items.Single(i => i.Wcid == GearKit.PrismaticTaperWcid);
+        var shortKit = GearKit.Of([.. kit.Items.Select(i => i.Wcid == taper.Wcid ? i with { Stack = taper.Stack - 1 } : i)]); // as after the buff station: a taper short, and no-grant play never tops it up
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(new GearScenario(shortKit, rig.Log, endSession: false, cast: false)));
+        Know(rig, IdsOf("Strength Self"));
+
+        var context = new JourneyContext { Character = MageTemplate.CharacterName, Account = "gear-test-account", Log = rig.Log, Travel = new J3aTravel(), Spells = real, Dungeon = GroundCatalog.Get(ground) };
+        var run = (CastFactsRun)new CastFactsStation("gear-test-account").Start(context);
+        var status = ScenarioStatus.Running;
+        for (var i = 0; i < 400 && status == ScenarioStatus.Running && run.Stage is not ("mana" or "magic-mode"); i++)
+        {
+            rig.Tick(0.25);
+            status = run.Step(rig.Session, rig.Session.Clock.Now);
+        }
+
+        Assert.Contains(rig.Log.Entries, e => e.Message.Contains((ground == "black-spawn-den-aluvian" ? "gear: gear=wielded worn=2 kit=" : "gear: gear=wielded worn=1 kit="), StringComparison.Ordinal) && e.Message.Contains($"kit={kit.Items.Count - 1}/{full.Items.Count} ", StringComparison.Ordinal)); // the live case: kit=10/11; M5 7 F25: the station's kit is the ground's whole one, the pack lacks the two buff scarabs
+        Assert.Contains(rig.Log.Entries, e => e.Message.Contains("gear: the kit is short, which is no gear failure here", StringComparison.Ordinal) && e.Message.Contains("Prismatic Taper", StringComparison.Ordinal));
+        Assert.DoesNotContain("gear scenario", run.Failure ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains(rig.Log.Entries, e => e.Message.Contains("plan: creature ", StringComparison.Ordinal)); // the plan was made: every pick is a level the pack can pay for
+        Assert.Contains(rig.Log.Entries, e => e.Message.Contains("plan: Strength Self: level V needs Gold Scarab 687", StringComparison.Ordinal));
+        Assert.Contains(rig.Log.Entries, e => e.Message.Contains("fizzle: n/a: the only known spells more than 50 above the current skill are levels the pack cannot pay for", StringComparison.Ordinal));
+        Assert.StartsWith("mana: the casts need up to", run.Failure, StringComparison.Ordinal); // past the gear and the plan: the stand-in mage's 100 mana cannot pay the casts (the live gate's can), the first thing that stops the run
     }
 }

@@ -82,6 +82,9 @@ public sealed record VitalsOptions
     /// </summary>
     public bool FighterOrder { get; init; }
 
+    /// <summary>The mana order's options (M5 1 K5, D15 and D27: <c>--cast-mana-tries</c>, <c>--cast-mana-try-chance</c>, <c>--cast-mana-try-spacing-s</c>, <c>--cast-mana-dance-presses</c>); <see cref="ManaOrderOptions.Ceiling"/> is today's order.</summary>
+    public ManaOrderOptions Mana { get; init; } = ManaOrderOptions.Default;
+
     /// <summary>These options in the fighters' order (<see cref="FighterOrder"/>).</summary>
     public VitalsOptions ForFighter() => this with { FighterOrder = true };
 
@@ -162,7 +165,14 @@ public sealed record VitalsOptions
                 options = options with { InFightPotion = OptionValues.Switch(argument, errors, options.InFightPotion) };
                 return true;
             default:
-                return false;
+                var mana = options.Mana;
+                if (!ManaOrderOptions.Apply(argument, errors, ref mana))
+                {
+                    return false;
+                }
+
+                options = options with { Mana = mana };
+                return true;
         }
     }
 

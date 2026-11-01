@@ -17,7 +17,7 @@ namespace Lifestone.Client.Tests.RetailUi.Chat;
 
 /// <summary>
 /// The spew box and the chat windows of the in-game shell (docs/retail-ui.md section 21.2): type 26 to the spew box only, identical text replaced and the rows capped,
-/// the other types to the chat windows by their masks, the mod's machine channel filtered, the entry sending Talk, and the talk-focus menu answering NotInM2.
+/// the other types to the chat windows by their masks, the mod's machine channel filtered, the entry sending Talk, the '/' commands (ChatCommandsTests has the parse), and the talk-focus menu answering NotInM2 for the channels.
 /// </summary>
 public sealed class GameChatTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
@@ -218,17 +218,118 @@ public sealed class GameChatTests(DatSetFixture fixture) : IClassFixture<DatSetF
     }
 
     [RequiresLocalDatsFact]
-    public void A_slash_command_is_a_named_todo_and_is_not_sent()
+    public void A_slash_tell_is_sent_as_a_Tell_from_the_Ui_and_the_chat_reports_what_the_action_layer_made_of_it()
     {
         using var rig = new LoginRig(fixture, liveGame: true);
         var chat = EnterGame(rig).Chat!;
-        chat.Main!.TypeIntoEntry("/tell bob hi");
+        chat.Main!.TypeIntoEntry("/t Lifestone Tools, hello");
+        Assert.True(chat.Main.ProcessCommand());
+        Assert.Equal(1, chat.CommandsRun);
+        Assert.Equal(0, chat.TalkSent); // a Tell, not a Talk
+        Assert.Equal(["/t Lifestone Tools, hello"], chat.Main.History);
+
+        // Offline, the action layer refuses the Tell; the chat names the player.
+        rig.Frame();
+        Assert.Contains("your tell to Lifestone Tools was not sent", chat.Main.LogText, StringComparison.Ordinal);
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_slash_recall_asks_for_the_recall_and_the_chat_says_it_did_not_happen_offline()
+    {
+        using var rig = new LoginRig(fixture, liveGame: true);
+        var chat = EnterGame(rig).Chat!;
+        chat.Main!.TypeIntoEntry("/lifestone");
+        chat.Main.ProcessCommand();
+        rig.Frame();
+        Assert.Contains("the lifestone recall did not happen", chat.Main.LogText, StringComparison.Ordinal);
+        Assert.Equal(0, chat.TalkSent);
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_slash_command_answered_by_name_logs_one_named_todo_and_not_what_was_typed()
+    {
+        using var rig = new LoginRig(fixture, liveGame: true);
+        var chat = EnterGame(rig).Chat!;
+        chat.Main!.TypeIntoEntry("/general bob is here");
+        chat.Main.ProcessCommand();
+        chat.Main.TypeIntoEntry("/trade bob is here");
         chat.Main.ProcessCommand();
         Assert.Equal(0, chat.TalkSent);
-        Assert.Equal(1, chat.CommandsDeclined);
-        Assert.Contains("TODO(g4-chat-commands)", chat.Main.LogText, StringComparison.Ordinal);
-        Assert.Contains(rig.Log.Lines, l => l.Contains("TODO(g4-chat-commands)", StringComparison.Ordinal));
+        Assert.Equal(2, chat.CommandsDeclined);
+        Assert.Contains("TODO(g4-chat-channels)", chat.Main.LogText, StringComparison.Ordinal);
+        Assert.Single(rig.Log.Lines, l => l.Contains("TODO(g4-chat-channels)", StringComparison.Ordinal));
         Assert.DoesNotContain(rig.Log.Lines, l => l.Contains("bob", StringComparison.Ordinal)); // what was typed is not written to the log
+    }
+
+    [RequiresLocalDatsFact]
+    public void M5_7_D145_typed_stop_and_auto_reach_the_autopilots_controls_show_their_answer_and_send_nothing()
+    {
+        using var rig = new LoginRig(fixture, liveGame: true);
+        var chat = EnterGame(rig).Chat!;
+        chat.Main!.TypeIntoEntry("/stop");
+        chat.Main.ProcessCommand();
+        Assert.Contains(ChatCommands.NoAutopilotLine, chat.Main.LogText, StringComparison.Ordinal); // no autopilot wired yet: it says so
+
+        var calls = new List<string>();
+        chat.Autopilot = new Controls(calls);
+        chat.Main.TypeIntoEntry("/stop");
+        chat.Main.ProcessCommand();
+        chat.Main.TypeIntoEntry("/auto");
+        chat.Main.ProcessCommand();
+        rig.Frame();
+        Assert.Equal(["stop", "auto"], calls);
+        Assert.Contains("the stop answer", chat.Main.LogText, StringComparison.Ordinal);
+        Assert.Contains("the auto answer", chat.Main.LogText, StringComparison.Ordinal);
+        Assert.Equal((0, 3, 1), (chat.TalkSent, chat.CommandsRun, chat.CommandsDeclined)); // nothing went to the server; only the unwired /stop was a line alone
+        Assert.Null(chat.LastTalk);
+    }
+
+    private sealed class Controls(List<string> calls) : IAutopilotChatControls
+    {
+        public string Stop()
+        {
+            calls.Add("stop");
+            return "the stop answer";
+        }
+
+        public string Auto()
+        {
+            calls.Add("auto");
+            return "the auto answer";
+        }
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_slash_command_the_table_does_not_know_goes_to_the_server_as_Talk_and_an_at_line_stays_Talk()
+    {
+        using var rig = new LoginRig(fixture, liveGame: true);
+        var chat = EnterGame(rig).Chat!;
+        chat.Main!.TypeIntoEntry("/acehelp");
+        chat.Main.ProcessCommand();
+        Assert.Equal(1, chat.TalkSent);
+        Assert.Equal(ActionKind.Talk, chat.LastTalk!.Kind);
+    }
+
+    [RequiresLocalDatsFact]
+    public void The_Selected_focus_is_honoured_and_plain_text_with_no_target_says_so()
+    {
+        using var rig = new LoginRig(fixture, liveGame: true);
+        var chat = EnterGame(rig).Chat!;
+        var menu = Assert.IsType<UiMenu>(chat.FocusMenu);
+        menu.SetSelectedItem(menu.GetItem(2), true); // row 2: "Tell to selected"
+        Assert.Equal(TalkFocus.Selected, chat.Focus);
+        Assert.Equal(0, chat.FocusRefusals);
+
+        chat.Main!.TypeIntoEntry("hello you");
+        chat.Main.ProcessCommand();
+        Assert.Equal(0, chat.TalkSent);
+        Assert.Contains("select a creature", chat.Main.LogText, StringComparison.Ordinal);
+
+        // A channel is refused and the menu goes back to the Selected row.
+        menu.SetSelectedItem(menu.GetItem(1), true);
+        Assert.Equal(1, chat.FocusRefusals);
+        Assert.Equal(TalkFocus.Selected, chat.Focus);
+        Assert.Equal(menu.GetItem(2), menu.GetItem(menu.SelectedIndex));
     }
 
     [RequiresLocalDatsFact]

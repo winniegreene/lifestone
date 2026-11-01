@@ -96,6 +96,59 @@ public sealed class WorldObject
 
     /// <summary>When this instance was created, in session-clock seconds.</summary>
     public double CreatedAt { get; internal set; }
+
+    /// <summary>
+    /// Whether the server says the object is locked (a door's or a chest's ACE <c>PropertyBool.Locked</c>, key 3; M5 6 w2), from the last GameMessage 0x02D2 for this
+    /// instance; null until the server says. The CreateObject does not carry it: its weenie description has no lock field, and the Openable description bit
+    /// is not the lock (ACE sets Openable to "not locked" for a container, corpse, chest, hook or storage, but forces it on for a locked chest under its
+    /// <c>fix_chest_missing_inventory_window</c> property, and never sets it for a door: @95ef426d <c>WorldObject_Networking.cs:845-856</c>), so nothing is read from it.
+    /// </summary>
+    public bool? Locked { get; internal set; }
+
+    /// <summary>Every public property the server changed for this instance since its CreateObject (GameMessages 0x02D0, 0x02D2, 0x02D4, 0x02D6, 0x02D8), by kind and key.</summary>
+    public ObjectProperties Properties { get; } = new();
+}
+
+/// <summary>
+/// The public properties the server updated for one object (<see cref="WorldObject.Properties"/>; M5 6 w2), by kind and ACE's key; the description's own
+/// values are not in it (the CreateObject carries a fixed set of fields, not a property table). Game thread only.
+/// </summary>
+public sealed class ObjectProperties
+{
+    internal ObjectProperties()
+    {
+    }
+
+    /// <summary>How many values are kept, over every kind.</summary>
+    public int Count => Bools.Count + Int64s.Count + Floats.Count + Strings.Count + DataIds.Count;
+
+    internal Dictionary<uint, bool> Bools { get; } = [];
+
+    internal Dictionary<uint, long> Int64s { get; } = [];
+
+    internal Dictionary<uint, double> Floats { get; } = [];
+
+    internal Dictionary<uint, string> Strings { get; } = [];
+
+    internal Dictionary<uint, uint> DataIds { get; } = [];
+
+    /// <summary>The last update sequence accepted per kind and key (the reducer's <c>WTimeStamper</c> rule).</summary>
+    internal Dictionary<(ObjectPropertyKind Kind, uint Key), byte> Stamps { get; } = [];
+
+    /// <summary>The last 0x02D2 value of <paramref name="key"/>.</summary>
+    public bool TryGetBool(uint key, out bool value) => Bools.TryGetValue(key, out value);
+
+    /// <summary>The last 0x02D0 value of <paramref name="key"/>.</summary>
+    public bool TryGetInt64(uint key, out long value) => Int64s.TryGetValue(key, out value);
+
+    /// <summary>The last 0x02D4 value of <paramref name="key"/>.</summary>
+    public bool TryGetFloat(uint key, out double value) => Floats.TryGetValue(key, out value);
+
+    /// <summary>The last 0x02D6 value of <paramref name="key"/>.</summary>
+    public bool TryGetString(uint key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? value) => Strings.TryGetValue(key, out value);
+
+    /// <summary>The last 0x02D8 value of <paramref name="key"/>.</summary>
+    public bool TryGetDataId(uint key, out uint value) => DataIds.TryGetValue(key, out value);
 }
 
 /// <summary>What holds an object (F749 ParentEvent, or a CreateObject's parent).</summary>

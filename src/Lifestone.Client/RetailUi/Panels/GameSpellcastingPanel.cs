@@ -42,11 +42,27 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// spell with no target type with no target; the client keeps no component table of target types, so every spell that is not SelfTargeted needs a selection. <c>TODO(m3-cast-components)</c>: retail refuses a spell whose
 /// components the pack lacks before sending ("You do not have all of this spell's components"); ACE answers the same through the cast's UseDone, which the action reports. <c>TODO(m3-cast-compat)</c>:
 /// <c>ObjectCompatibleWithSpell</c> (the target must suit the spell) is ACE's to judge. <c>TODO(m3-spellcast-selection-notice)</c>: the cast button's tooltip follows the spell selection, not the object selection (the shell
-/// polls that one). <c>TODO(m3-spellcast-endowment)</c>: the endowment icon (a wielded item's own spell) is hidden. <c>TODO(m3-spellcast-hotkeys)</c>: next and previous tab and spell, the quickslots, the drop handler and the
-/// favourite add/remove by drag are not built (D13: no drag; <c>AddSpellFavorite</c> is an action the play-checks send).
+/// polls that one). <c>TODO(m3-spellcast-endowment)</c>: the endowment icon (a wielded item's own spell) is hidden, so the spell keys' selection wraps where retail's would select the endowment.
+/// </para>
+/// <para>
+/// <b>The keys</b> (M5 6 s1, the closed <c>m3-spellcast-hotkeys</c>): the magic input map 0x10000005 (<see cref="SpellBarKeys"/>) is registered in Magic mode only and taken out of the router when the window is deleted. Keys 1 to 9 cast
+/// the open tab's nth spell (<see cref="CastQuickslot"/>, <c>RecvNotice_CastQuickslotSpell</c> 11.6096 0x004C84A0: selected, then <c>Cast</c>, as a double click); End casts the selected spell; Delete and PgDn select the previous and
+/// next spell, Insert and PgUp open the previous and next tab, and with Ctrl the first and last of each.
+/// </para>
+/// <para>
+/// <b>The drag</b> (M5 6 s1). Retail's drop handler is <c>gmSpellcastingUI::HandleDropRelease</c> (11.6096 0x004C8520): a spell dropped on a cell of the open tab's list goes in at that cell (<c>AddSpellShortcut</c> 0x004C7F10 over
+/// <c>SpellCastSubMenu::AddFavorite</c> 0x004C7C50), on the window's background at the end of the open tab, on a tab at the end of that tab; <c>SpellCastSubMenu::OnItemListDragOver</c> (0x004C6580) accepts a drop that carries a
+/// spell id only. <c>AddFavorite</c> first takes a spell the bar holds off it (<c>RemoveSpellFromMenu</c> 0x004C74E0, <c>RemoveSpellFromPlayerModule</c> 0x004C7000: RemoveSpellFavorite) and moves the position one left when the old
+/// place was before it, then <c>AddSpellToPlayerModule</c> (0x004C70B0) sends AddSpellFavorite at that position; ACE does not add a spell its bar already holds (<c>AddSpellToBar</c>, @95ef426d
+/// Source/ACE.Database/Models/Shard/CharacterExtensions.cs:538-539) and clamps the position to the bar (548-549), so a move is a RemoveSpellFavorite then an AddSpellFavorite. A spell dragged off a bar to anywhere else is removed
+/// (<c>RecvNotice_ItemListBeginDrag</c> 0x004C7F50 removes it when the drag begins; here at the release, as the shortcut bar does, so an Escape keeps it: <c>TODO(m5-spellbar-drag-begin)</c>). Every action goes through
+/// <see cref="IActionApi.AddSpellFavorite"/> and <see cref="IActionApi.RemoveSpellFavorite"/> as <see cref="ActionSource.Ui"/>, and the read model's bar changes at once. A drop ACE would ignore (an item, a spell the character does
+/// not know, a bar above 7: @95ef426d Source/ACE.Server/WorldObjects/Player_Character.cs:300) is refused before anything is sent; retail prints no line for it that is known (<c>TODO(m5-spellbar-refusal-line)</c>). Retail's position
+/// is the cell's index in a list that holds every favourite; Lifestone's list leaves out the favourites the character does not know, so the drop names the bar position of the cell's spell. Deviation: any part of the window that is
+/// not a list or a tab counts as its background (retail compares one background element, address unknown).
 /// </para>
 /// </remarks>
-public sealed class GameSpellcastingPanel : UiElement
+public sealed class GameSpellcastingPanel : UiElement, IUiDragSourceOwner
 {
     /// <summary>The retail class id (<c>gmSpellcastingUI</c>, Register 11.6096 0x004C6C20).</summary>
     public const uint RetailClassId = 0x10000015;
@@ -90,6 +106,15 @@ public sealed class GameSpellcastingPanel : UiElement
     /// <summary>The chat line of the cast button with no spell selected (<c>gmSpellcastingUI::Cast</c>).</summary>
     public const string NoSpellText = "You must select a spell to cast";
 
+    /// <summary>Why a drop that carries no spell is refused (<c>OnItemListDragOver</c> accepts a spell id only).</summary>
+    public const string NotASpellRefusal = "only a spell goes on a spell bar (SpellCastSubMenu::OnItemListDragOver 0x004C6580 accepts a drop with a spell id only)";
+
+    /// <summary>Why a spell the character does not know is refused before sending (ACE ignores it).</summary>
+    public const string UnknownSpellRefusal = "the character does not know the spell, so ACE would ignore it (HandleActionAddSpellFavorite, Player_Character.cs:300); retail prints no line that is known (TODO(m5-spellbar-refusal-line))";
+
+    /// <summary>Why a bar outside 0 to 7 is refused before sending (ACE ignores it).</summary>
+    public const string BarRefusal = "ACE ignores a bar above 7 (HandleActionAddSpellFavorite, Player_Character.cs:300); retail prints no line that is known (TODO(m5-spellbar-refusal-line))";
+
     private readonly UiItemList?[] _lists = new UiItemList?[TabCount];
     private readonly ImmutableArray<uint>[] _built = new ImmutableArray<uint>[TabCount];
     private readonly bool[] _dirty = new bool[TabCount];
@@ -105,6 +130,9 @@ public sealed class GameSpellcastingPanel : UiElement
     private HashSet<uint>? _unknownNamed; // the favourites a loaded table lacked, each named once (allocated at a build, an event)
     private bool _awaitingTable;
     private bool _selectionTodoLogged;
+    private SpellBarKeys? _keys;
+    private UiDrag? _drag;
+    private Func<uint, UiSpellIcon?>? _spellIcon;
 
     /// <summary>A spellcasting window of <paramref name="init"/>.</summary>
     public GameSpellcastingPanel(in UiElementInit init)
@@ -186,6 +214,12 @@ public sealed class GameSpellcastingPanel : UiElement
     /// <summary>The last cast the window asked for, or null.</summary>
     public ActionHandle? LastCast { get; private set; }
 
+    /// <summary>The magic map's keys (<see cref="SpellBarKeys"/>), null before <see cref="Attach"/>.</summary>
+    public SpellBarKeys? Keys => _keys;
+
+    /// <summary>The actions the last drag on or off a bar asked for, in the order they were sent (empty for none).</summary>
+    public IReadOnlyList<ActionHandle> BarEdits { get; private set; } = [];
+
     /// <summary>The spell selected on the open tab (0 for none).</summary>
     public uint SelectedSpell => _selected[OpenTab];
 
@@ -265,7 +299,9 @@ public sealed class GameSpellcastingPanel : UiElement
             }
         }
 
-        context.Manager.Services.Log.Warn("retailui", "gmSpellcastingUI: TODO(m3-cast-untargeted) TODO(m3-cast-components) TODO(m3-cast-compat) TODO(m3-spellcast-selection-notice) TODO(m3-spellcast-endowment) TODO(m3-spellcast-hotkeys) TODO(m3-spellcast-unknown-favourite)");
+        context.Manager.Services.Log.Warn("retailui", "gmSpellcastingUI: TODO(m3-cast-untargeted) TODO(m3-cast-components) TODO(m3-cast-compat) TODO(m3-spellcast-selection-notice) TODO(m3-spellcast-endowment) TODO(m3-spellcast-unknown-favourite) TODO(m5-spellbar-drag-begin) TODO(m5-spellbar-refusal-line)");
+        _keys = new SpellBarKeys(context.Manager, this);
+        AttachDrag(context);
         SetCombatMode(context.Session.State.Self.Qualities.CombatMode);
     }
 
@@ -275,6 +311,7 @@ public sealed class GameSpellcastingPanel : UiElement
     public void SetCombatMode(int mode)
     {
         Mode = mode;
+        _keys?.SetMode(mode); // RegisterInputMaps: the magic map in Magic mode only
         if (mode == CombatModes.Magic && !HideForVideo)
         {
             SetVisible(true);
@@ -356,6 +393,88 @@ public sealed class GameSpellcastingPanel : UiElement
         return LastCast;
     }
 
+    /// <summary><c>RecvNotice_CastQuickslotSpell</c> (11.6096 0x004C84A0): the open tab's spell in cell <paramref name="slot"/> is selected and cast (<see cref="CastSelected"/>), as a double click on it; an empty slot does nothing.</summary>
+    public void CastQuickslot(int slot)
+    {
+        var spell = SpellAt(OpenTab, slot);
+        if (spell == 0)
+        {
+            return;
+        }
+
+        SelectSpell(spell);
+        CastSelected();
+    }
+
+    /// <summary><c>RecvNotice_NextSpellSelection</c> (11.6096 0x004C8050): the spell after the selected one on the open tab; none selected, the first; after the last, the first again (retail selects the endowment there when one shows).</summary>
+    public void SelectNextSpell()
+    {
+        var tab = OpenTab;
+        var count = SpellCount(tab);
+        if (count == 0)
+        {
+            return;
+        }
+
+        var at = IndexOfSpell(tab, _selected[tab]);
+        SelectSpell(SpellAt(tab, at < 0 || at + 1 >= count ? 0 : at + 1));
+    }
+
+    /// <summary><c>RecvNotice_PrevSpellSelection</c> (11.6096 0x004C81C0): the spell before the selected one; none selected, the first; before the first, the last.</summary>
+    public void SelectPreviousSpell()
+    {
+        var tab = OpenTab;
+        var count = SpellCount(tab);
+        if (count == 0)
+        {
+            return;
+        }
+
+        var at = IndexOfSpell(tab, _selected[tab]);
+        SelectSpell(SpellAt(tab, at < 0 ? 0 : at == 0 ? count - 1 : at - 1));
+    }
+
+    /// <summary><c>RecvNotice_FirstSpellSelection</c> (11.6096 0x004C8390): the open tab's first spell, when it has one.</summary>
+    public void SelectFirstSpell()
+    {
+        if (SpellCount(OpenTab) > 0)
+        {
+            SelectSpell(SpellAt(OpenTab, 0));
+        }
+    }
+
+    /// <summary><c>RecvNotice_LastSpellSelection</c> (11.6096 0x004C8410): the open tab's last spell, when it has one.</summary>
+    public void SelectLastSpell()
+    {
+        var count = SpellCount(OpenTab);
+        if (count > 0)
+        {
+            SelectSpell(SpellAt(OpenTab, count - 1));
+        }
+    }
+
+    /// <summary><c>RecvNotice_NextSpellTab</c> (11.6096 0x004C7FD0) over <c>GetNextTabID</c> (0x004C6400): the next tab opens, the last wrapping to the first.</summary>
+    public bool OpenNextTab() => OpenTabByClick((OpenTab + 1) % TabCount);
+
+    /// <summary><c>RecvNotice_PrevSpellTab</c> (11.6096 0x004C8010) over <c>GetPrevTabID</c> (0x004C6480): the previous tab opens, the first wrapping to the last.</summary>
+    public bool OpenPreviousTab() => OpenTabByClick((OpenTab + TabCount - 1) % TabCount);
+
+    /// <inheritdoc/>
+    public bool OwnsTarget(IUiDropTarget? target) => target is SpellDrop drop && ReferenceEquals(drop.Panel, this);
+
+    /// <summary>A spell dragged off a bar and released anywhere but the window's own targets is taken off that bar (RemoveSpellFavorite, <see cref="ActionSource.Ui"/>).</summary>
+    public void DragReleasedAway(in UiDragPayload drag, IUiDropTarget? target)
+    {
+        var from = BarOf(drag.SourceList);
+        if (_context is not { } context || from < 0 || drag.SpellId == 0 || !context.Session.State.Self.Spellbook.Bar(from).Contains(drag.SpellId))
+        {
+            BarEdits = [];
+            return;
+        }
+
+        BarEdits = [context.Session.Actions.RemoveSpellFavorite(drag.SpellId, from, ActionSource.Ui)];
+    }
+
     /// <summary>The window's messages (<c>ListenToElementMessage</c>, 11.6096 0x004C86A0): the cast button casts the selected spell; a tab change brings the new tab up to date.</summary>
     protected internal override UiListenResult ListenToElementMessage(in UiElementMessage message)
     {
@@ -400,6 +519,33 @@ public sealed class GameSpellcastingPanel : UiElement
     /// <inheritdoc/>
     protected internal override void OnDeleting()
     {
+        _keys?.Dispose();
+        _keys = null;
+        if (_drag is { } drag)
+        {
+            for (var i = 0; i < TabCount; i++)
+            {
+                if (_lists[i] is { } list)
+                {
+                    drag.UnregisterSourceOwner(list);
+                    drag.UnregisterTarget(list);
+                }
+
+                if (TabElement(i) is { } tab)
+                {
+                    drag.UnregisterTarget(tab);
+                }
+            }
+
+            drag.UnregisterTarget(this);
+            if (ReferenceEquals(drag.SpellIconOf, _spellIcon))
+            {
+                drag.SpellIconOf = null;
+            }
+
+            _drag = null;
+        }
+
         _bookSubscription?.Dispose();
         _modeSubscription?.Dispose();
         _qualitySubscription?.Dispose();
@@ -408,6 +554,151 @@ public sealed class GameSpellcastingPanel : UiElement
     }
 
     private void OnCombatModeChanged(in CombatModeChanged change) => SetCombatMode(change.Mode);
+
+    // The drag (M5 6 s1): every bar's list is a source and a target, each tab and the window's background a target; a spell's icon under the pointer comes from the SpellTable.
+    private void AttachDrag(UiLoginContext context)
+    {
+        var drag = context.Manager.Input.Drag;
+        _drag = drag;
+        var session = context.Session;
+        _spellIcon = id => session.Spell(id) is { } spell ? UiSpellIcon.Of(spell) : null;
+        drag.SpellIconOf ??= _spellIcon;
+        for (var i = 0; i < TabCount; i++)
+        {
+            if (_lists[i] is { } list)
+            {
+                list.DragSource = true;
+                drag.RegisterTarget(list, new SpellDrop(this, i, onList: true));
+                drag.RegisterSourceOwner(list, this);
+            }
+
+            if (TabElement(i) is { } tab)
+            {
+                drag.RegisterTarget(tab, new SpellDrop(this, i, onList: false));
+            }
+        }
+
+        drag.RegisterTarget(this, new SpellDrop(this, -1, onList: false));
+    }
+
+    // Why a drop of the drag on the bar is refused before anything is sent, or null. Called on every pointer move over a target: returns constants, allocates nothing.
+    private string? RefusalOf(in UiDragPayload drag, int bar)
+    {
+        if (drag.SpellId == 0)
+        {
+            return NotASpellRefusal;
+        }
+
+        if (bar is < 0 or >= TabCount)
+        {
+            return BarRefusal;
+        }
+
+        return _context is { } context && context.Session.State.Self.Spellbook.Knows(drag.SpellId) ? null : UnknownSpellRefusal;
+    }
+
+    // HandleDropRelease (0x004C8520) over AddFavorite (0x004C7C50): the spell goes in at the bar position of the cell's spell (no cell or an empty one: the end); a spell the bar holds is taken off first (the position moves one left
+    // when the old place was before it), and a spell from another bar comes off that one (retail's drag-begin removal). Nothing is sent when the spell would land where it is.
+    private void DropSpell(in UiDragPayload drag, int bar, UiItem? cell)
+    {
+        if (_context is not { } context)
+        {
+            return;
+        }
+
+        var spell = drag.SpellId;
+        var from = BarOf(drag.SourceList);
+        var book = context.Session.State.Self.Spellbook;
+        var target = book.Bar(bar);
+        var index = target.Length;
+        if (cell is { SpellId: not 0 } shown && target.IndexOf(shown.SpellId) is var at and >= 0)
+        {
+            index = at;
+        }
+
+        var actions = context.Session.Actions;
+        var edits = new List<ActionHandle>(3);
+        if (from >= 0 && from != bar && book.Bar(from).Contains(spell))
+        {
+            edits.Add(actions.RemoveSpellFavorite(spell, from, ActionSource.Ui));
+        }
+
+        var old = target.IndexOf(spell);
+        if (old >= 0)
+        {
+            if (old < index)
+            {
+                index--;
+            }
+
+            if (old == index)
+            {
+                BarEdits = edits;
+                return; // already there
+            }
+
+            edits.Add(actions.RemoveSpellFavorite(spell, bar, ActionSource.Ui));
+        }
+
+        edits.Add(actions.AddSpellFavorite(spell, index, bar, ActionSource.Ui));
+        BarEdits = edits;
+    }
+
+    private int BarOf(UiItemList? list)
+    {
+        if (list is null)
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < TabCount; i++)
+        {
+            if (ReferenceEquals(_lists[i], list))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    // The spells of a tab's list are its first cells (the empty slot boxes follow them).
+    private int SpellCount(int tab)
+    {
+        if (_lists[tab] is not { } list)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        while (count < list.CellCount && list.CellAt(count) is { SpellId: not 0 })
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    private uint SpellAt(int tab, int index) => index >= 0 && _lists[tab]?.CellAt(index) is { } cell ? cell.SpellId : 0;
+
+    private int IndexOfSpell(int tab, uint spellId)
+    {
+        if (spellId == 0)
+        {
+            return -1;
+        }
+
+        var count = SpellCount(tab);
+        for (var i = 0; i < count; i++)
+        {
+            if (SpellAt(tab, i) == spellId)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
 
     private void OnQualitiesChanged(in QualitiesChanged change)
     {
@@ -511,7 +802,7 @@ public sealed class GameSpellcastingPanel : UiElement
 
             if (cell.SpellId != id)
             {
-                cell.ShowSpell(id, info.IconId, info.Name);
+                cell.ShowSpell(UiSpellIcon.Of(info), info.Name); // the composed picture (GetSpellIcon, D147)
                 cell.SetTooltip(UiStringRef.FromLiteral(info.Name + CastHint)); // the cell's name text stays the name; the tooltip adds the hint
             }
 
@@ -635,5 +926,21 @@ public sealed class GameSpellcastingPanel : UiElement
     {
         _context?.Manager.Services.Log.Info("retailui", line);
         ChatNotice?.Invoke(line);
+    }
+
+    // A drop target of the window: a bar's list (tab, on the cell under the pointer), a tab (tab, at its end) or the background (tab -1: the open tab, at its end).
+    private sealed class SpellDrop(GameSpellcastingPanel panel, int tab, bool onList) : IUiDropTarget
+    {
+        public GameSpellcastingPanel Panel => panel;
+
+        public bool HighlightsCell => onList;
+
+        private int Bar => tab >= 0 ? tab : panel.OpenTab;
+
+        public bool Accepts(in UiDragPayload drag, UiItem? cell) => panel.RefusalOf(drag, Bar) is null;
+
+        public string? Refusal(in UiDragPayload drag, UiItem? cell) => panel.RefusalOf(drag, Bar);
+
+        public void Drop(in UiDragPayload drag, UiItem? cell) => panel.DropSpell(drag, Bar, onList ? cell : null);
     }
 }

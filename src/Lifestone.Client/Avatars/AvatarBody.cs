@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
 using Lifestone.Client.PortalSpace;
 using Lifestone.Data.Animation;
@@ -49,6 +51,99 @@ public static class AvatarStateBits
 /// <param name="GroundProbe">The ground clamp for grounded objects (owner decision D24), or null for none.</param>
 public readonly record struct AvatarStep(CellFrame? PlayerPosition, IGroundProbe? GroundProbe);
 
+/// <summary>What a server object's transition or placement through its physics host came to (<see cref="IAvatarTransitions"/>).</summary>
+public enum AvatarTransitionResult
+{
+    /// <summary>The host keeps no physics object in a cell for it: the body moves without a transition, as before M5 item 5.</summary>
+    NotHosted,
+
+    /// <summary>The host's object moved; the result is where it is now.</summary>
+    Moved,
+
+    /// <summary>No position was valid: retail leaves the object where it was (a step only turns it, a placement fails).</summary>
+    NoValidPosition,
+}
+
+/// <summary>What held a hosted body back in a transition that ended short of the requested position (Lifestone's diagnostic, M5 item 5 F4; <see cref="AvatarObstacle"/>).</summary>
+public enum AvatarObstacleKind : byte
+{
+    /// <summary>Nothing recorded.</summary>
+    None,
+
+    /// <summary>A player's physics object (the client's own or another's).</summary>
+    Player,
+
+    /// <summary>Another creature's object.</summary>
+    Creature,
+
+    /// <summary>Another object that is neither: a door, a lifestone, an NPC that is not a creature.</summary>
+    Object,
+
+    /// <summary>The environment: terrain, a building or a cell's walls.</summary>
+    Environment,
+
+    /// <summary>Only a refused step-up or edge slide is recorded.</summary>
+    Step,
+}
+
+/// <summary>
+/// The last obstacle of a hosted body's transition: what it was, which object (0 for the environment or a step) and the cell the body stood in
+/// (<see cref="IAvatarTransitions.LastObstacle"/>, <see cref="AvatarBody.LastObstacle"/>). A value (no allocation).
+/// </summary>
+/// <param name="Kind">What it was.</param>
+/// <param name="Guid">The object's id, for a player, creature or object.</param>
+/// <param name="CellId">The cell the body stood in after the transition.</param>
+/// <param name="StepRefused">The transition also refused a step-up or an edge slide (a wall is a step too high, so a wall sets it too).</param>
+public readonly record struct AvatarObstacle(AvatarObstacleKind Kind, uint Guid, uint CellId, bool StepRefused)
+{
+    /// <summary>The log token: <c>none</c>, <c>player</c>, <c>creature:0x..</c>, <c>object:0x..</c>, <c>env:0x........</c> (the cell) or <c>step</c>.</summary>
+    public string Describe() => Kind switch
+    {
+        AvatarObstacleKind.Player => "player",
+        AvatarObstacleKind.Creature => string.Create(CultureInfo.InvariantCulture, $"creature:0x{Guid:X8}"),
+        AvatarObstacleKind.Object => string.Create(CultureInfo.InvariantCulture, $"object:0x{Guid:X8}"),
+        AvatarObstacleKind.Environment => string.Create(CultureInfo.InvariantCulture, $"env:0x{CellId:X8}"),
+        AvatarObstacleKind.Step => "step",
+        _ => "none",
+    };
+}
+
+/// <summary>
+/// The transitions of server objects (M5 item 5, owner decision D45): the server-object physics host runs retail's transition
+/// and placement for a body through the physics object it keeps for it, so creatures collide with each other, the player, doors
+/// and lifestones (<c>ServerObjectPhysicsHost</c> implements it).
+/// </summary>
+public interface IAvatarTransitions
+{
+    /// <summary>True when the host keeps a physics object in a cell for <paramref name="guid"/> (a lookup; allocates nothing).</summary>
+    bool Hosts(uint guid);
+
+    /// <summary>
+    /// Retail <c>CPhysicsObj::transition</c> and <c>SetPositionInternal(transit)</c> for one step of <paramref name="guid"/> from
+    /// <paramref name="from"/> to <paramref name="to"/> (its cell with the new frame), carrying <paramref name="contact"/> (the
+    /// server's Grounded flag, D72); <paramref name="result"/> is the position the transition found.
+    /// </summary>
+    AvatarTransitionResult Transition(uint guid, in CellFrame from, in CellFrame to, bool contact, out CellFrame result);
+
+    /// <summary>
+    /// Retail's sliding <c>SetPositionSimple</c> for <paramref name="guid"/> at <paramref name="position"/> (a teleport, a far
+    /// position, a blip): the placement may push the object aside of what stands there; <paramref name="result"/> is where it landed.
+    /// </summary>
+    AvatarTransitionResult Place(uint guid, in CellFrame position, out CellFrame result);
+
+    /// <summary>
+    /// What stopped the last <see cref="Transition"/> call (M5 item 5 F4, a diagnostic): the last object that stopped it, the environment or a refused
+    /// step; none when it was not stopped or not hosted. Read right after the call.
+    /// </summary>
+    AvatarObstacle LastObstacle { get; }
+
+    /// <summary>
+    /// Where the host's object for <paramref name="guid"/> stands while it is in a cell: after a create, the avatar set puts the body
+    /// there when the create's sliding placement (<c>enter_world</c>) moved the object off the server's position (M5 item 5 F1).
+    /// </summary>
+    bool TryGetPosition(uint guid, out CellFrame position);
+}
+
 /// <summary>
 /// One server object as retail's <c>CPhysicsObj</c> holds it, without collision: its part array (appearance and
 /// animation), effects, motion interpreter with MoveTo (<see cref="MovementManager"/>), position, interpolation,
@@ -69,21 +164,34 @@ public readonly record struct AvatarStep(CellFrame? PlayerPosition, IGroundProbe
 /// acceleration, angular velocity; the animation hooks run.</item>
 /// <item>An object whose Setup has no spheres (<c>CPartArray::GetNumSphere</c> 0) keeps its origin: only the new
 /// rotation is taken, so it never moves by root motion, interpolation or velocity; a server position reaches it only
-/// through a placement or the position manager's blip once its interpolation has failed. Any other object takes the new
-/// frame without a collision transition (owner decision D24, a documented deviation): AlignPath turns it along its
-/// motion, outdoors the cell follows the origin (<see cref="LandDefs.AdjustToOutside"/>), indoors it is kept, and it
-/// becomes the server's cell once the object reaches the server's last position; with a ground probe, a grounded
-/// object's height is clamped to the ground under it.</item>
+/// through a placement or the position manager's blip once its interpolation has failed. Any other object whose server-object
+/// physics host keeps a physics object for it (<see cref="Transitions"/>, M5 item 5, D45) runs retail's transition: an origin
+/// that moved less than the epsilon on every axis only turns it (<c>AC1Legacy::Vector3::operator==</c>, 11.6096 0x0050A9E0);
+/// otherwise AlignPath turns it along its motion and the host's object runs <c>CPhysicsObj::transition</c> (11.6096 0x005138C0)
+/// from the old position to the new frame and takes the result (<c>SetPositionInternal(transit)</c>, 0x00515E30), whose cell
+/// and frame the body takes, indoors and out; with no valid position it only turns. The transition's step-down keeps a grounded
+/// object on the floor, so the ground probe is not used. An object the host keeps nothing for (or with
+/// <c>--server-object-transitions=off</c>, or a projectile: <c>TODO(m5-missile-transitions)</c>) takes the new frame without
+/// a collision transition (owner decision D24): outdoors the cell follows the origin (<see cref="LandDefs.AdjustToOutside"/>),
+/// indoors it is kept, and it becomes the server's cell once the object reaches the server's last position; with a ground
+/// probe, a grounded object's height is clamped to the ground under it.</item>
 /// <item>Retail's order: the target manager's reports (<c>HandleTargetting</c>), the MoveTo manager
 /// (<c>MovementManager::UseTime</c>), the part array's completion check (<c>CPartArray::HandleMovement</c>,
 /// <see cref="MotionPlayer.HandleMovement"/>, which completes the queued motions without animations), and the position
 /// manager's blips (<c>PositionManager::UseTime</c>).</item>
 /// <item>Particles and scripts (with the hooks, <see cref="EffectObject.Update"/>), active or not.</item>
 /// </list></para>
-/// <para><b>Contact</b> comes from the last UpdatePosition's Grounded flag (protocol.md §5.3): no transition runs for a
-/// server object, so contact and walkable ground are both that flag. Gravity is not integrated (D24).</para>
-/// <para><b>Not modelled</b>: <c>calc_friction</c>; the collision transition and its cell changes (TODO(physics): full
-/// transitions for server objects are deferred, D24); <c>CPhysicsObj::UpdateObjectInternal</c>'s heading rule for an
+/// <para><b>Contact</b> comes from the last UpdatePosition's Grounded flag (protocol.md §5.3, M5 D72): contact and walkable
+/// ground are both that flag, and a transition carries it (the host's object's own contact plane when it has one). Retail's
+/// remote objects take their transition's contact instead (<c>CPhysicsObj::MoveOrTeleport</c>, 11.4186 0x00516330, 11.6096 0x00516E30,
+/// only refuses a position without contact; <c>SetPositionInternal(transit)</c> sets Contact), with gravity
+/// pulling an object that left the ground back down; gravity is not integrated here (D24), so the server's flag stays the
+/// contact (<c>TODO(m5-remote-contact)</c>).</para>
+/// <para><b>Placements</b> (a teleport, a far position, a blip): with a host, retail's sliding <c>SetPositionSimple</c>
+/// (11.6096 0x00516DB0) through the host's object, so a creature is never placed inside another object or the player; a
+/// placement with no valid position leaves the body where it was (and a blip reports it failed), as retail's does.</para>
+/// <para><b>Not modelled</b>: <c>calc_friction</c>; the collision transition for an object without a host object
+/// (D24); <c>CPhysicsObj::UpdateObjectInternal</c>'s heading rule for an
 /// unnamed state bit (ACE reads it as Sledding, which M2 never sees); the rest deactivation in its sphereless branch of
 /// an object without a movement manager standing on walkable ground (docs/avatars.md §7).</para>
 /// <para>Not thread-safe; the avatar set's frame loop owns it. An update that queues no motion allocates nothing once
@@ -115,6 +223,20 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
     private bool _poseDirty = true;
     private CellFrame? _serverPosition;
     private AvatarPlacement _placement;
+    private long _transitionTicks;
+    private int _transitionCount;
+    private int _placementsRefused;
+    private long _placementTicks;
+    private int _placementCount;
+    private AvatarObstacle _lastObstacle;
+    private int _shortTransits;
+    private int _shortRun;
+    private float _behindMetres;
+    private bool _heldBackPending;
+    private Vector3 _lastShortRequested;
+    private Vector3 _lastShortReached;
+    private bool _blipPending;
+    private AvatarObstacleKind _blipCause;
 
     internal AvatarBody(uint guid, ModelAssembly setup, PartArrayAppearance appearance, AvatarSources sources, ITargetWorld world, IEffectRandom random, bool isCreature, double now)
     {
@@ -250,6 +372,13 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
 
     /// <summary>Drawn: in a cell, neither NoDraw nor Hidden.</summary>
     public bool IsDrawn => InCell && (State & (AvatarStateBits.NoDraw | AvatarStateBits.Hidden)) == 0;
+
+    /// <summary>
+    /// Drawn and the materialise fade over: <see cref="IsDrawn"/> and the object's translucency back at its own base (the UnHide script 0x3300032F's 0.75 s
+    /// Transparent hook has ended). False while the object is hidden, which for the logging-in player is the cloud of pink bubbles of the Hidden script
+    /// 0x33000331 with no body inside (<c>CPhysicsObj::set_hidden</c>, 11.6096 0x00515760), until the server clears Hidden after LoginComplete.
+    /// </summary>
+    public bool Materialised => IsDrawn && Effects.Visual.Translucency <= Effects.Visual.TranslucencyOriginal;
 
     /// <summary>Retail <c>transient_state</c> Contact (here the Grounded flag).</summary>
     public bool HasContact { get; private set; }
@@ -531,8 +660,12 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         if (teleportAdvanced || Position.CellId == 0)
         {
             TeleportHook();
-            Place(target);
-            _placement = AvatarPlacement.Teleport;
+            if (PlaceSliding(target))
+            {
+                _placement = AvatarPlacement.Teleport;
+                _shortTransits = 0;
+                _shortRun = 0;
+            }
         }
         else if (!hasContact)
         {
@@ -541,11 +674,19 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         else if (PlayerDistance >= ActiveDistance)
         {
             Positions.StopInterpolating();
-            Place(target);
-            _placement = AvatarPlacement.Far;
+            if (PlaceSliding(target))
+            {
+                _placement = AvatarPlacement.Far;
+            }
         }
         else
         {
+            if (!Positions.Interpolation.IsInterpolating)
+            {
+                _shortTransits = 0;
+                _lastObstacle = default;
+            }
+
             var result = Positions.InterpolateTo(target, Movement?.IsMovingTo ?? false, Context());
             if (result.SetHeading is { } heading)
             {
@@ -574,6 +715,58 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         {
             ResumeEmitters();
         }
+    }
+
+    /// <summary>
+    /// Retail's sliding <c>SetPositionSimple</c> (11.4186 0x005162B0, 11.6096 0x00516DB0) for a teleport, a far position or a
+    /// blip: through the host's object when <see cref="Transitions"/> keeps one for this body in a cell (the placement may push
+    /// it aside of another object or the player; one with no valid position leaves the body where it was, as retail's
+    /// <c>SetPosition</c> fails), else <see cref="Place"/> as given.
+    /// </summary>
+    /// <returns>True when the body was placed.</returns>
+    private bool PlaceSliding(in CellFrame position)
+    {
+        if (Transitions is { } transitions && Position.CellId != 0)
+        {
+            var start = Stopwatch.GetTimestamp();
+            var outcome = transitions.Place(Guid, position, out var placed);
+            _placementTicks += Stopwatch.GetTimestamp() - start;
+            _placementCount++;
+            switch (outcome)
+            {
+                case AvatarTransitionResult.Moved:
+                    Place(placed);
+                    return true;
+                case AvatarTransitionResult.NoValidPosition:
+                    _placementsRefused++;
+                    return false;
+            }
+        }
+
+        Place(position);
+        return true;
+    }
+
+    /// <summary>
+    /// The server-object transitions this body's steps and placements run through (M5 item 5; set by the avatar set from its
+    /// <see cref="AvatarSet.ServerObjects"/> host while <see cref="AvatarSet.ServerObjectTransitions"/> is on, never for a
+    /// projectile), or null: today's path without collision (D24).
+    /// </summary>
+    internal IAvatarTransitions? Transitions { get; set; }
+
+    /// <summary>
+    /// Stopwatch ticks spent in transitions since the last call and how many ran, the placements refused, and the ticks spent in sliding
+    /// placements (teleports, far positions, blips, refused or not) and how many ran; and resets them.
+    /// </summary>
+    internal (long Ticks, int Count, int PlacementsRefused, long PlacementTicks, int Placements) TakeTransitionCost()
+    {
+        var cost = (_transitionTicks, _transitionCount, _placementsRefused, _placementTicks, _placementCount);
+        _transitionTicks = 0;
+        _transitionCount = 0;
+        _placementsRefused = 0;
+        _placementTicks = 0;
+        _placementCount = 0;
+        return cost;
     }
 
     /// <summary>
@@ -947,6 +1140,47 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
     /// <summary>The last server position <see cref="MoveOrTeleport"/> took, or null.</summary>
     public CellFrame? ServerPosition => _serverPosition;
 
+    /// <summary>Consecutive short transitions that raise the held-back report (<c>TODO(m5-creature-held-back)</c>).</summary>
+    public const int HeldBackFrames = 10;
+
+    /// <summary>
+    /// Transitions that ended short of the requested position (the result more than the epsilon from the request on the ground plane, or no valid position)
+    /// since the body last caught up with its interpolation (a server position taken with nothing queued) or was placed (M5 item 5 F4, a diagnostic).
+    /// </summary>
+    public int ShortTransits => _shortTransits;
+
+    /// <summary>Consecutive transitions that ended short (a transition that reached its request resets it).</summary>
+    public int ShortRun => _shortRun;
+
+    /// <summary>The obstacle of the last transition that ended short since <see cref="ShortTransits"/> began counting, or none.</summary>
+    public AvatarObstacle LastObstacle => _shortTransits > 0 ? _lastObstacle : default;
+
+    /// <summary>The metres the body was from its interpolation target (the newest queued server position) when it was last stepped; at a blip, how far it was blipped.</summary>
+    public float BehindMetres => _behindMetres;
+
+    /// <summary>Where the last short transition asked to go.</summary>
+    internal Vector3 LastShortRequested => _lastShortRequested;
+
+    /// <summary>True once each time <see cref="ShortRun"/> reaches a multiple of <see cref="HeldBackFrames"/>, and forgets it.</summary>
+    internal bool TakeHeldBack()
+    {
+        var pending = _heldBackPending;
+        _heldBackPending = false;
+        return pending;
+    }
+
+    /// <summary>When the avatar set last logged this body as held back (its rate limit; seconds on the set's clock).</summary>
+    internal double HeldBackLoggedAt { get; set; } = double.NegativeInfinity;
+
+    /// <summary>True when a blip was placed since the last call, with its cause (<see cref="AvatarObstacleKind.None"/> when no transition ended short before it); forgets it.</summary>
+    internal bool TakeBlip(out AvatarObstacleKind cause)
+    {
+        cause = _blipCause;
+        var pending = _blipPending;
+        _blipPending = false;
+        return pending;
+    }
+
     /// <summary>The frame-to-frame jump and flip detector the avatar set runs on this object (<see cref="AvatarJumpWatch"/>).</summary>
     internal AvatarJumpWatch JumpWatch { get; } = new();
 
@@ -1013,6 +1247,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
             var old = Position;
             var newOrigin = newFrame.Origin;
             var probe = step.GroundProbe;
+            var taken = false;
             if (Setup.Spheres.Count == 0 && (!IsProjectile || RetailSpherelessMissile))
             {
                 // A projectile moves through the else branch below unless --retail-sphereless-missile (the registered glitch fix; AvatarSet.Create logs a glitch-fix notice once per such Setup).
@@ -1026,6 +1261,10 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
                 Velocity = Vector3.Zero;
                 probe = null;
             }
+            else if (Transitions is { } transitions && transitions.Hosts(Guid))
+            {
+                taken = Transition(transitions, old, ref newFrame, quantum);
+            }
             else if (newOrigin == old.Origin)
             {
                 Velocity = Vector3.Zero;
@@ -1037,24 +1276,118 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
                     newFrame = EffectActor.SetVectorHeading(newFrame, newOrigin - old.Origin);
                 }
 
-                // Retail's transition runs here (TODO(physics), D24): the frame is taken as it is.
+                // Without a host object no transition runs (D24): the frame is taken as it is.
                 Velocity = (newOrigin - old.Origin) / (float)quantum;
             }
 
-            SetFrame(newFrame, probe);
+            if (!taken)
+            {
+                SetFrame(newFrame, probe);
+            }
+
             FollowCell(old);
             Targets.HandleTargetting(time);
             Movement?.UseTime();
             Parts?.HandleMovement();
+            var queue = Positions.Interpolation.Queue;
+            _behindMetres = queue.Count > 0 ? PositionFrames.Distance(Position, queue[queue.Count - 1]) : 0f;
             if (Positions.UseTime(Context()) is { } blip)
             {
-                Place(blip.Position);
-                Positions.Interpolation.CompleteBlip(placed: true);
-                _placement = AvatarPlacement.Blip;
+                _behindMetres = PositionFrames.Distance(Position, blip.Position);
+                var placed = PlaceSliding(blip.Position);
+                Positions.Interpolation.CompleteBlip(placed);
+                if (placed)
+                {
+                    _placement = AvatarPlacement.Blip;
+                    _blipPending = true;
+                    _blipCause = _shortTransits > 0 ? _lastObstacle.Kind : AvatarObstacleKind.None;
+
+                    // The counts stay for the jump watch's line of this frame; the next server position taken with nothing queued starts them again.
+                }
             }
         }
 
         Effects.Update(time, AnchorFrame, _partFrames);
+    }
+
+    /// <summary>
+    /// <c>CPhysicsObj::UpdateObjectInternal</c>'s branch for an object with spheres (11.4186 0x005156B0, 11.6096 0x005161B0)
+    /// through the host's object: an origin within the epsilon on every axis only turns (no transition); otherwise AlignPath
+    /// turns the frame along the path, the transition runs from <paramref name="old"/> to the new frame in the old cell, and the
+    /// body takes its cell and frame, or only turns when no position is valid. The time spent is counted.
+    /// </summary>
+    /// <returns>True when the position was taken; false when the host no longer keeps the object in a cell (the caller then
+    /// takes the frame without a transition).</returns>
+    private bool Transition(IAvatarTransitions transitions, in CellFrame old, ref AcFrame newFrame, double quantum)
+    {
+        var path = newFrame.Origin - old.Origin;
+        if (Math.Abs(path.X) <= PhysicsGlobals.Epsilon && Math.Abs(path.Y) <= PhysicsGlobals.Epsilon && Math.Abs(path.Z) <= PhysicsGlobals.Epsilon)
+        {
+            Velocity = Vector3.Zero;
+            TakePosition(new CellFrame(old.CellId, newFrame with { Origin = old.Origin }));
+            return true;
+        }
+
+        if ((State & AvatarStateBits.AlignPath) != 0)
+        {
+            newFrame = EffectActor.SetVectorHeading(newFrame, path);
+        }
+
+        var start = Stopwatch.GetTimestamp();
+        var outcome = transitions.Transition(Guid, old, new CellFrame(old.CellId, newFrame), HasContact, out var moved);
+        _transitionTicks += Stopwatch.GetTimestamp() - start;
+        _transitionCount++;
+        switch (outcome)
+        {
+            case AvatarTransitionResult.Moved:
+                var reached = moved.Origin + LandDefs.GetBlockOffset(old.CellId, moved.CellId);
+                Velocity = (reached - old.Origin) / (float)quantum;
+                NoteTransit(transitions, newFrame.Origin, reached, refused: false);
+                TakePosition(moved);
+                return true;
+            case AvatarTransitionResult.NoValidPosition:
+                Velocity = Vector3.Zero;
+                NoteTransit(transitions, newFrame.Origin, old.Origin, refused: true);
+                TakePosition(new CellFrame(old.CellId, newFrame with { Origin = old.Origin }));
+                return true;
+            default:
+                Velocity = path / (float)quantum;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Records what a hosted transition met (M5 item 5 F4): a step that ended farther than the epsilon from the request on the ground plane (the ground clamp moves
+    /// only the height), or found no valid position, is short; it counts, keeps the host's obstacle and, ten in a row, raises the held-back report.
+    /// </summary>
+    private void NoteTransit(IAvatarTransitions transitions, Vector3 requested, Vector3 reached, bool refused)
+    {
+        var dx = requested.X - reached.X;
+        var dy = requested.Y - reached.Y;
+        if (!refused && (dx * dx) + (dy * dy) <= (float)(Epsilon * Epsilon))
+        {
+            _shortRun = 0;
+            return;
+        }
+
+        _shortTransits++;
+        _shortRun++;
+
+        // A body already resting against what holds it asks again every frame and the transition then records only a collision normal, not the object it met
+        // the first time: while it has not moved, an object stays the obstacle (a body that moved on is judged afresh).
+        var obstacle = transitions.LastObstacle;
+        var stalled = _shortTransits > 1 && Vector3.DistanceSquared(reached, _lastShortReached) < 1e-4f;
+        if (!(stalled && _lastObstacle.Kind is AvatarObstacleKind.Player or AvatarObstacleKind.Creature or AvatarObstacleKind.Object && obstacle.Kind is AvatarObstacleKind.Environment or AvatarObstacleKind.None or AvatarObstacleKind.Step))
+        {
+            _lastObstacle = obstacle;
+        }
+
+        _lastShortReached = reached;
+        _lastShortRequested = requested;
+        if (_shortRun % HeldBackFrames == 0)
+        {
+            _heldBackPending = true;
+        }
     }
 
     /// <summary>Retail <c>UpdatePositionInternal</c> (0x00512C30 / 0x00513730); see the class remarks.</summary>
@@ -1138,6 +1471,12 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
             position = position with { Frame = position.Frame with { Origin = position.Origin with { Z = z } } };
         }
 
+        TakePosition(position);
+    }
+
+    /// <summary>The body is at <paramref name="position"/> (its cell and frame as given): the anchor follows a far cell, the parts are posed and the children follow.</summary>
+    private void TakePosition(in CellFrame position)
+    {
         Position = position;
         if (AnchorCellId == 0 || IsFar(AnchorCellId, position.CellId))
         {

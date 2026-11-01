@@ -37,6 +37,9 @@ public interface IResourceCacheStats
 /// entry that holds references into another cache (a mesh its materials, a material its texture) drops them there, so
 /// an idle entry never pins anything and every cache's budget holds on its own (<see cref="Lifestone.Client.Rendering.RenderResourceCaches{TTexture, TMaterial, TMesh}"/>).
 /// <c>onEvict</c> runs when an idle entry leaves the cache: free the engine resource there.</para>
+/// <para><b>Marks</b> (M5 7 P7d, D139 row e). Every take and release stamps the entry with the cache's current generation; <see cref="Mark"/>
+/// starts a new one and returns it, and <see cref="TrimUnusedSince"/> evicts the idle entries last used before a mark, whatever the budget: what a
+/// place used stays cached until the next place has been reached, and nothing older. Entries in use are never evicted.</para>
 /// </remarks>
 public sealed class ResourceCache<TKey, TValue> : IResourceCacheStats
     where TKey : notnull
@@ -46,6 +49,7 @@ public sealed class ResourceCache<TKey, TValue> : IResourceCacheStats
     private readonly LinkedList<TKey> _idle = new();
     private readonly Action<TKey, TValue>? _onEvict;
     private readonly Action<TKey, TValue>? _onIdle;
+    private long _generation;
 
     /// <summary>Creates a cache.</summary>
     /// <param name="name">Name for statistics.</param>
@@ -93,6 +97,7 @@ public sealed class ResourceCache<TKey, TValue> : IResourceCacheStats
         if (_entries.TryGetValue(key, out var entry))
         {
             wasIdle = entry.RefCount++ == 0;
+            entry.LastUsed = _generation;
             if (wasIdle && entry.IdleNode is not null)
             {
                 _idle.Remove(entry.IdleNode);
@@ -114,7 +119,7 @@ public sealed class ResourceCache<TKey, TValue> : IResourceCacheStats
     /// <summary>Adds a new entry with one reference taken. The key must not be cached.</summary>
     public TValue Add(TKey key, TValue value, long bytes)
     {
-        _entries.Add(key, new Entry(value, Math.Max(0, bytes)) { RefCount = 1 });
+        _entries.Add(key, new Entry(value, Math.Max(0, bytes)) { RefCount = 1, LastUsed = _generation });
         TotalBytes += Math.Max(0, bytes);
         Trim();
         return value;
@@ -129,6 +134,7 @@ public sealed class ResourceCache<TKey, TValue> : IResourceCacheStats
             return false;
         }
 
+        entry.LastUsed = _generation;
         if (--entry.RefCount == 0)
         {
             _onIdle?.Invoke(key, entry.Value);
@@ -152,6 +158,28 @@ public sealed class ResourceCache<TKey, TValue> : IResourceCacheStats
         {
             Evict(last.Value);
         }
+    }
+
+    /// <summary>Starts a new use generation and returns it: an entry taken or released from now on counts as used since this mark.</summary>
+    public long Mark() => ++_generation;
+
+    /// <summary>
+    /// Evicts every idle entry not taken or released since <paramref name="mark"/> (a value <see cref="Mark"/> returned), least recently released
+    /// first, whatever the budget. Idle entries sit in release order, so the walk stops at the first one used since the mark.
+    /// </summary>
+    /// <returns>The entries evicted and their bytes.</returns>
+    public (int Count, long Bytes) TrimUnusedSince(long mark)
+    {
+        var count = 0;
+        var bytes = 0L;
+        while (_idle.Last is { } last && _entries[last.Value].LastUsed < mark)
+        {
+            bytes += _entries[last.Value].Bytes;
+            count++;
+            Evict(last.Value);
+        }
+
+        return (count, bytes);
     }
 
     /// <summary>Evicts every idle entry.</summary>
@@ -184,5 +212,8 @@ public sealed class ResourceCache<TKey, TValue> : IResourceCacheStats
         public int RefCount { get; set; }
 
         public LinkedListNode<TKey>? IdleNode { get; set; }
+
+        /// <summary>The generation of the last take or release (<see cref="Mark"/>).</summary>
+        public long LastUsed { get; set; }
     }
 }

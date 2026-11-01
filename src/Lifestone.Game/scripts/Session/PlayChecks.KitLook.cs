@@ -11,7 +11,7 @@ using Lifestone.Game.RetailUi;
 namespace Lifestone.Game.Sessions;
 
 /// <summary>
-/// M3 4.2 p6 follow-up, with <c>--play-frames</c> only: BSD Mage's kit (D43) is worn by the stand-in's player and the owner's review frames are taken: the player in the chase camera from behind and from the front, and the
+/// M3 4.2 p6 follow-up, with <c>--play-frames</c> only: the mage's kit (since M5 3 the ground's vendor kit, the wielded and worn lines of <see cref="GearKit.Build"/>) is worn by the stand-in's player and the owner's review frames are taken: the player in the chase camera from behind and from the front, and the
 /// paperdoll. The stand-in sends the player's ObjDescEvent on each wield (<c>StandInWorld.Dress.cs</c>) and the host dresses it from the dats, so the frames show the kit as a live ACE would send it. The pieces stay worn
 /// afterwards (the panel frames that follow show the paperdoll too); nothing is judged here beyond the wields and the frames being taken.
 /// </summary>
@@ -25,10 +25,20 @@ public sealed partial class PlayChecks
         }
 
         const string name = "the-stand-in-wears-the-kit-and-its-review-frames-are-taken";
-        var kit = new List<(uint Wcid, EquipMask Where)> { (GearKit.Wand.Wcid, GearKit.Wand.ValidLocations) };
-        foreach (var piece in GearKit.Armour)
+        if (Visit.SpellTable is not { } table)
         {
-            kit.Add((piece.Wcid, piece.ValidLocations));
+            Check(name, false, "no dats: the kit is built from the SpellTable");
+            return;
+        }
+
+        // M5 3: the kit's wielded and worn lines are the ground's vendor kit (the gear check above grants it), not M3's loot kit (GearKit.Wand and GearKit.Armour, which the stand-in no longer grants).
+        var kit = new List<(uint Wcid, EquipMask Where)>();
+        foreach (var item in GearKit.Build(table.Spells, KitCheckAccount).Items)
+        {
+            if (item.Kind is GearKind.Wand or GearKind.Armour)
+            {
+                kit.Add((item.Wcid, item.ValidLocations));
+            }
         }
 
         // The review frames are taken in Holtburg's open air (the Academy cell the earlier checks leave the player in is too narrow for the front view): a tool Place there, as the owner's tools panel does.

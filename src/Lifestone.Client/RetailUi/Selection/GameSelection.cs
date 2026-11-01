@@ -106,6 +106,9 @@ public sealed class GameSelection : IDisposable
     /// <summary>The selected object's id, 0 for none (<c>ACCWeenieObject::selectedID</c>); the play mode gives its <c>ObjectSelection</c>.</summary>
     public Func<uint>? SelectedProvider { get; set; }
 
+    /// <summary>Makes an object the selected one (<c>ACCWeenieObject::SetSelectedObject</c>) from a UI click, such as the paperdoll figure's; the play mode gives its <c>ObjectSelection.Select</c>. Null: the UI selects nothing.</summary>
+    public Action<uint>? SelectRequester { get; set; }
+
     /// <summary>The projector the indicator asks for the target box (the retail UI layer <c>SelectionProjector</c>); null without a world.</summary>
     public Func<ISelectionProjector?>? ProjectorProvider { get; set; }
 

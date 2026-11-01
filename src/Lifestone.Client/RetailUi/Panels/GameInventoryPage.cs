@@ -84,6 +84,10 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
     private readonly UiItemList _pack;
     private readonly IDisposable[] _subscriptions;
     private uint _openContainer;
+    private uint _packShows; // the container the pack list was last drawn for (0: not drawn yet)
+    private uint _openMarksBad; // the open container whose marks were last found wrong (logged once per container)
+    private readonly HashSet<uint> _capacityLogged = [];
+    private readonly HashSet<uint> _overCapacityLogged = [];
     private bool _dirty = true;
     private string _titleText = string.Empty;
     private string _contentsTitleText = string.Empty;
@@ -231,6 +235,12 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
         var owner = inventory.Owner != 0 ? inventory.Owner : self.Guid;
         if (_openContainer == 0 || (_openContainer != owner && !IsSidePack(inventory, _openContainer)))
         {
+            if (_openContainer != 0 && _openContainer != owner)
+            {
+                // gmInventoryUI::RecvNotice_ServerSaysMoveItem (11.6096 0x004A6BB0): the open pack left the player, so the first container (the player's own pack) opens (ItemList_OpenFirstContainer 0x004E57F0).
+                _context.Manager.Services.Log.Info("retailui", string.Create(CultureInfo.InvariantCulture, $"inventory page: the open pack 0x{_openContainer:X8} is no longer one of the player's side packs; the pack list shows the backpack 0x{owner:X8}"));
+            }
+
             _openContainer = owner;
         }
 
@@ -255,7 +265,11 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
         Fill(_sidePacks, inventory.SidePacks, objects, inventory, _openContainer);
 
         // The pack list: the open container's items. A side pack's are the container model's entries whose objects have arrived (M4 2.1: a 0196 names them before their F745s).
-        Fill(_pack, ContentsOf(session, inventory, owner), objects, inventory, 0);
+        // M5 7 P7r (D148, m5-8-pack-window-contents): the list has one cell per slot of the open container (ItemList_UpdateContainerListSize), so its empty cells are the container's free slots, and it shows its first row
+        // whenever it opens another container (ItemList_OpenContainer's ScrollToShow(0)).
+        var contents = ContentsOf(session, inventory, owner);
+        var resized = _pack.SetFixedSlots(SlotsOf(objects, inventory, owner, contents.Count));
+        Fill(_pack, contents, objects, inventory, 0);
         if (_openContainer == owner || _openContainer == 0)
         {
             _contentsName = null;
@@ -271,6 +285,19 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
             }
         }
 
+        if (_packShows != _openContainer)
+        {
+            var was = _packShows;
+            _packShows = _openContainer;
+            _pack.SetScrollableXY(0, 0); // ScrollToShow(0): row 0 at the top-left. Not ScrollToShow itself: its UpdateLayout ends the list's frame registration, which would stop the cells still being made over the frames
+            LogPackList(was == 0 ? "the page drew it first" : string.Create(CultureInfo.InvariantCulture, $"it showed 0x{was:X8} before; scrolled to its first row"), inventory, owner, contents.Count);
+        }
+        else if (resized)
+        {
+            LogPackList("its capacity changed", inventory, owner, contents.Count);
+        }
+
+        CheckOpenMarks(objects);
         SetBurden(inventory, self.Qualities);
     }
 
@@ -332,6 +359,101 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
         }
 
         return entries;
+    }
+
+    /// <summary>
+    /// The pack list's cell count for the open container (<c>UIElement_ItemList::ItemList_UpdateContainerListSize</c>, 11.6096 0x004E4670: the container's ItemsCapacity; M5 7 P7r): the player's ItemsCapacity for the main pack, a
+    /// side pack's own for a side pack. A container whose capacity was never sent keeps the layout's count (the pack list's 102), logged once for a side pack; a container that lists more items than its capacity gets a cell for
+    /// each (logged once): every listed item is drawn, never cut off.
+    /// </summary>
+    private int SlotsOf(WorldObjectTable objects, PlayerInventory inventory, uint owner, int listed)
+    {
+        var capacity = objects.TryGet(_openContainer, out var container) ? container.ItemFields().ItemsCapacity : 0;
+        if (capacity <= 0)
+        {
+            capacity = _pack.LayoutFixedSlots;
+            if (_openContainer != owner && _capacityLogged.Add(_openContainer))
+            {
+                _context.Manager.Services.Log.Warn("retailui", string.Create(CultureInfo.InvariantCulture, $"inventory page: the side pack 0x{_openContainer:X8} has no ItemsCapacity (its object {(container is null ? "has not landed" : "sent none")}); the pack list keeps the layout's {capacity} cells for it (TODO(m5-8-pack-capacity-unknown))"));
+            }
+        }
+
+        if (listed > capacity)
+        {
+            if (_overCapacityLogged.Add(_openContainer))
+            {
+                _context.Manager.Services.Log.Warn("retailui", string.Create(CultureInfo.InvariantCulture, $"inventory page: 0x{_openContainer:X8} lists {listed} items, more than its capacity {capacity} (held by the model: {inventory.ItemsIn(_openContainer).Count}); the pack list draws a cell for each"));
+            }
+
+            capacity = listed;
+        }
+
+        return capacity;
+    }
+
+    /// <summary>One line for the pack list's container: which, its cells and how many show items, the items the model holds there (the capacity bar's count) and why the line is written.</summary>
+    private void LogPackList(string why, PlayerInventory inventory, uint owner, int listed)
+    {
+        var held = _openContainer == owner ? inventory.Pack.Count : inventory.ItemsIn(_openContainer).Count;
+        _context.Manager.Services.Log.Info(
+            "retailui",
+            string.Create(CultureInfo.InvariantCulture, $"inventory page: the pack list shows 0x{_openContainer:X8} ('{_contentsTitleText}'): {_pack.CellCount} cells of {_pack.FixedSlots}, {_pack.OccupiedCount} drawn, {listed} listed, {held} held, {_pack.EmptyCount} empty; {why}"));
+    }
+
+    /// <summary>
+    /// The open marks after a redraw (M5 7 P7r, <c>m5-8-pack-open-state</c>): exactly one cell of the backpack column (the player's own cell and the side packs) shows the open-container arrow, and it is the open container's
+    /// (<c>UIElement_ItemList::UpdateOpenContainerIndicator</c>, 11.6096 0x004E3D00). A container's green frame is not a mark: it is the container item type's background (enum 0x10000004, entry 10 for ItemType 0x200;
+    /// <c>IconData::RenderIcons</c> 11.6096 0x0058DFB0), the same on every pack, open or not. A wrong count is an error, logged once per open container; an open container whose object has not landed shows no arrow and is not one.
+    /// </summary>
+    private void CheckOpenMarks(WorldObjectTable objects)
+    {
+        var marks = 0;
+        var right = false;
+        foreach (var list in (ReadOnlySpan<UiItemList>)[_top, _sidePacks])
+        {
+            for (var i = 0; i < list.CellCount; i++)
+            {
+                if (list.CellAt(i) is { OpenContainerShown: true } cell)
+                {
+                    marks++;
+                    right |= cell.ItemId == _openContainer;
+                }
+            }
+        }
+
+        var expected = objects.Contains(_openContainer) ? 1 : 0;
+        if (marks == expected && (expected == 0 || right))
+        {
+            _openMarksBad = 0;
+            return;
+        }
+
+        if (_openMarksBad != _openContainer)
+        {
+            _openMarksBad = _openContainer;
+            _context.Manager.Services.Log.Error("retailui", string.Create(CultureInfo.InvariantCulture, $"inventory page: the backpack column shows {marks} open mark(s) (on the open container: {right}) while 0x{_openContainer:X8} is open; TODO(m5-8-pack-open-state)"));
+        }
+    }
+
+    /// <summary>The open-container arrows the backpack column shows now: the ids of the cells (the player's own cell first, then the side packs) whose arrow shows.</summary>
+    public IReadOnlyList<uint> OpenMarks
+    {
+        get
+        {
+            var marks = new List<uint>(1);
+            foreach (var list in new[] { _top, _sidePacks })
+            {
+                for (var i = 0; i < list.CellCount; i++)
+                {
+                    if (list.CellAt(i) is { OpenContainerShown: true } cell)
+                    {
+                        marks.Add(cell.ItemId);
+                    }
+                }
+            }
+
+            return marks;
+        }
     }
 
     /// <summary>How many items container <paramref name="guid"/> holds as the model has it: the player's pack counts the main pack and the side packs, a side pack its items (0 for an object that is no container).</summary>
@@ -492,6 +614,7 @@ public sealed class GameInventoryPage : IGamePanel, IDisposable
             return;
         }
 
+        _context.Manager.Services.Log.Info("retailui", string.Create(CultureInfo.InvariantCulture, $"inventory page: open 0x{container:X8} in the pack list (was 0x{_openContainer:X8}); the arrow moves to its cell on the next redraw"));
         _openContainer = container;
         MarkDirty();
     }

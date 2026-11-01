@@ -10,14 +10,14 @@
     Stages, in order (-Stages picks a subset; the default is build,test,steps, plus exhaustive with -Exhaustive or -Gate and smoke with -Smoke):
 
       build       dotnet build Lifestone.slnx --disable-build-servers; detail = warning and error counts (0 and 0 to pass)
-      test        dotnet test Lifestone.slnx --no-build --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure"; detail = passed/failed/skipped
+      test        dotnet test Lifestone.slnx --no-build --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Tier!=Tool&Status!=KnownFailure"; detail = passed/failed/skipped
                   totals, the passed count of each test assembly and the slowest tests (the VSTest trx logger's per-test timings,
                   top 20 in cache\slice-check\test-times.txt). -MinTests N fails the stage when fewer than N tests passed (the
                   coverage floor, D28: N is the DEFAULT count; the Exhaustive tier is counted by its own stage). Without
                   -MinTests the floor is the baseline file tests\Shared\test-count-baseline.json (M4 1.1 s3: "default" for this stage, "exhaustive" for the
                   exhaustive stage; the lead writes it at each merge and lowers it only for named deletions whose behaviour is proved elsewhere, m4-plan.md D28; a slice never lowers it); an explicit -MinTests wins, and the detail names the
-                  floor's source ("floor 7968 (baseline file)" or "(-MinTests)"). Tier=Timing (the lead runs it alone) and Status=KnownFailure (never in
-                  the green total) are left out of the default filter
+                  floor's source ("floor 7968 (baseline file)" or "(-MinTests)"). Tier=Timing (the lead runs it alone), Tier=Tool (a lead-run command written as a test, the ground draft's GroundDraftRunTests: it writes files under cache\, so no
+                  timing run or default run picks it up) and Status=KnownFailure (never in the green total) are left out of the default filter
       exhaustive  dotnet test Lifestone.slnx --no-build --filter "Tier=Exhaustive": every test that reads the retail dats (the dat
                   sweeps over every GfxObj, landblock and cell, and the decoder and asset pins), left out of the default filter (M4 polish
                   cut d, D30). -Exhaustive and -Gate add the stage; -Smoke implies it; the lead runs it before a merge. A slice that
@@ -36,9 +36,9 @@
 
     -Gate is G-A, the check before every live gate round (m4-plan.md section 5, D46): build, test and exhaustive (about 3 min,
     the part that catches merge breaks), then the offline line; no Godot step and no smoke. It refuses -Smoke, -Steps, -Changed
-    and -Stages. The offline Godot smoke runs once per item, after its last live gate and before the merge: `slice-check -Changed`
-    (the steps the item's diff selects; the build and the tests again), or `slice-check -Smoke` at a wave's last item and the
-    milestone end.
+    and -Stages. The offline Godot smoke runs once per item, after its last live gate and before the merge: `slice-check -Changed -AllSizes`
+    (the steps the item's diff selects; the build and the tests again; the shell frames and the play-checks at the three window sizes from M5 item 6, D34),
+    or `slice-check -Smoke` (which implies -AllSizes) at a wave's last item and the milestone end.
 
     -Changed [-Base master]: adds the backend-free steps the diff touches (merge-base with -Base, the working tree and untracked
     files, read-only git; tools\lib\StepPaths.psd1 maps source folders to steps). A path under src/ or tools/ that no rule matches runs
@@ -56,8 +56,10 @@
 
     -Parallel N (default 2): smoke runs the backend-free, not frame-judged steps (cli-help, ..., retail-ui, spell-showcase, golden-viewpoints) N at a time.
 
-    Every Godot check and frame run is at retail's native 800x600 (owner rule, 2026-10-14). -AllSizes passes smoke's -AllSizes: the larger sizes
-    (1920x1080, 2560x1440) as well; never run by default.
+    Every Godot check and frame run is at retail's native 800x600 (owner rule, 2026-10-14). -AllSizes passes smoke's -AllSizes (M5 D34, DoD 12): the shell frames
+    and the play-checks also at 1280x720 and 1920x1080 (the retail-ui frames also at 1920x1080), each size in its own <W>x<H> folder of the work folder; never run by default,
+    except that -Smoke (the item-end full offline smoke) implies it from M5 item 6 on. -HiDpi passes smoke's -HiDpi: the 2560x1440 scale-2 shell run, opt-in and not in the gate.
+    The Godot steps run one at a time unless -Parallel says otherwise (the default is 2 and applies only to smoke's backend-free, not frame-judged steps: the play-checks and the shell frames never run in parallel).
 
     The backend is never started: -Backend accepts only auto (a step that needs it is skipped by smoke when it is down).
     The dotnet environment (telemetry off, no global tools on PATH, no ASP.NET certificate) is set for this process
@@ -90,6 +92,7 @@ param(
     [int] $Parallel = 2,
     [switch] $Rerun,
     [switch] $AllSizes,
+    [switch] $HiDpi,
     [ValidateSet('auto')]
     [string] $Backend = 'auto',
     [string] $DotnetRoot = ''
@@ -106,7 +109,7 @@ $allStages = @('build', 'test', 'exhaustive', 'steps', 'smoke')
 # retail-ui-checks is the name slices use for the retail UI layer's checks; smoke runs them inside its retail-ui step.
 $stepAliases = @{ 'retail-ui-checks' = 'retail-ui' }
 # The default tests leave out the loopback tests (backend), the soak tier (merge gates) and the Exhaustive tier (its own stage).
-$testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure'
+$testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Tier!=Tool&Status!=KnownFailure'
 $exhaustiveFilter = 'Tier=Exhaustive'
 # M4 1.1 s3, amended by M4 D28 (coverage, not count): the count is a floor that only the lead lowers, for named deletions. The baseline file is the default floor; an explicit -MinTests wins (and is the only floor of the default count when given).
 $baselineFile = Join-Path $repoRoot 'tests\Shared\test-count-baseline.json'
@@ -121,7 +124,7 @@ foreach ($name in $Stages) { if ($allStages -notcontains $name) { throw "Unknown
 if ($Gate) {
     # D46: G-A before a live gate is the build and the tests; the offline Godot smoke is the item-end check, so -Gate runs none of it.
     $refused = @(@(if ($Smoke) { '-Smoke' }) + @(if ($Steps.Count) { '-Steps' }) + @(if ($Changed) { '-Changed' }) + @(if ($Stages.Count) { '-Stages' }))
-    if ($refused.Count) { throw "-Gate is G-A before a live gate (build, test, exhaustive; no Godot step) and takes no $($refused -join ', '): the offline smoke is the item-end check (slice-check -Changed, or -Smoke at a wave's last item and the milestone end)." }
+    if ($refused.Count) { throw "-Gate is G-A before a live gate (build, test, exhaustive; no Godot step) and takes no $($refused -join ', '): the offline smoke is the item-end check (slice-check -Changed -AllSizes, or -Smoke, which implies -AllSizes, at a wave's last item and the milestone end)." }
     $Stages = @('build', 'test', 'exhaustive')
 }
 elseif ($Stages.Count -eq 0) { $Stages = @(@("build", "test") + @(if ($Exhaustive -or $Smoke) { "exhaustive" }) + @(if ($Steps.Count -or $Changed) { "steps" }) + @(if ($Smoke) { "smoke" })) }
@@ -130,6 +133,8 @@ else {
     if (($Smoke -or $Exhaustive) -and $Stages -notcontains 'exhaustive') { $Stages += 'exhaustive' }
     if ($Changed -and $Stages -notcontains 'steps') { $Stages += 'steps' }
 }
+# M5 6 v1 (D9, D34; m5-plan.md section 5 item 5): the full offline smoke is the item-end check and runs the shell frames and the play-checks at all three window sizes.
+if ($Smoke -and -not $AllSizes) { $AllSizes = [switch]::new($true) }
 foreach ($name in @($Steps | ForEach-Object { if ($stepAliases.ContainsKey($_)) { $stepAliases[$_] } else { $_ } })) {
     if ($name -in @('build', 'test')) { throw "'$name' is a stage, not a step: use -Stages." }
     if ($name -in @('login-check', 'login')) { throw "'$name' needs the backend, which slice-check never starts." }
@@ -280,7 +285,7 @@ function Invoke-Smoke([string[]] $smokeArguments, [string] $name) {
     # (smoke deletes and recreates it) is cache\slice-check\<name>.work. Returns @{ Code; Log; Lines; Work }.
     $log = Join-Path $outDir "$name.log"
     $work = Join-Path $outDir "$name.work"
-    $arguments = @('-NoProfile', '-File', $smokeScript, '-NoBuild', '-Backend', $Backend, '-OutDir', $work, '-Parallel', "$Parallel") + @(if ($AllSizes) { '-AllSizes' }) + $smokeArguments
+    $arguments = @('-NoProfile', '-File', $smokeScript, '-NoBuild', '-Backend', $Backend, '-OutDir', $work, '-Parallel', "$Parallel") + @(if ($AllSizes) { '-AllSizes' }) + @(if ($HiDpi) { '-HiDpi' }) + $smokeArguments
     $code = Invoke-ToFile $pwshExe $arguments $log
     return @{ Code = $code; Log = $log; Lines = (Get-LogLines $log); Work = $work }
 }
@@ -389,7 +394,7 @@ function Write-OfflineAdvisory {
     $map = Import-PowerShellDataFile (Join-Path $PSScriptRoot 'lib\StepPaths.psd1')
     $found = Resolve-ChangedSteps @(Get-ChangedFiles) $map
     $why = if ($found.Unmatched.Count -gt 0) { "; no rule for $(($found.Unmatched | Select-Object -First 3) -join ', '), so every step" } elseif ($found.Everything) { '; a cross-cutting path changed, so every step' } else { '' }
-    $detail = if ($found.Steps.Count -eq 0) { "the diff against $Base selects no backend-free step" } else { "$($found.Steps.Count) step(s) the diff against $Base selects: $((@($found.Steps | Sort-Object)) -join ',')$why; G-A runs no Godot step, the item-end check runs them (slice-check -Changed)" }
+    $detail = if ($found.Steps.Count -eq 0) { "the diff against $Base selects no backend-free step" } else { "$($found.Steps.Count) step(s) the diff against $Base selects: $((@($found.Steps | Sort-Object)) -join ',')$why; G-A runs no Godot step, the item-end check runs them (slice-check -Changed -AllSizes, M5 D34)" }
     Write-Stage 'offline' 'SKIP' $detail 0
 }
 

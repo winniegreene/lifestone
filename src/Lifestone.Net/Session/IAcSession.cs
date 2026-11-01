@@ -401,4 +401,55 @@ public interface IAcSession : IDisposable
     /// still connected.
     /// </summary>
     void Quit();
+
+    // M5 6 w2: the first retail tranche's sends (the writers are slice w1's). Each has a throwing default, so a session that cannot send
+    // it (the stand-in, a test fake) says so loudly instead of sending nothing.
+
+    /// <summary>
+    /// Sends GameAction 0x0275 ConfirmationResponse {u32 type, u32 context, u32 accepted} (in world only), retail
+    /// <c>CM_Character::Event_ConfirmationResponse</c> (11.6096 0x006A2030); ACE's <c>ConfirmationManager.HandleResponse</c> (@95ef426d
+    /// <c>WorldObjects/Managers/ConfirmationManager.cs:89-135</c>) acts on it and answers nothing of its own.
+    /// </summary>
+    /// <param name="type">The request's type word, as GameEvent 0x0274 carried it.</param>
+    /// <param name="context">The request's context word, unchanged.</param>
+    /// <param name="accepted">Yes or no.</param>
+    OutboundTicket SendConfirmationResponse(uint type, uint context, bool accepted) =>
+        throw new NotSupportedException("IAcSession.SendConfirmationResponse is not implemented by this session (M5 6)");
+
+    /// <summary>
+    /// Sends GameAction 0x01A1 SetCharacterOptions with the player module block (in world only), retail
+    /// <c>CM_Character::Event_CharacterOptionsEvent</c> (11.6096 0x006A1EE0); ACE stores both option words and the gameplay options and
+    /// answers nothing (<c>GameActionSetCharacterOptions.cs:45-190</c>, @95ef426d).
+    /// </summary>
+    /// <param name="block">The block.</param>
+    /// <exception cref="ArgumentException">A block the writer cannot say (see <c>MagicActionCodecs.WriteSetCharacterOptions</c>); nothing is sent.</exception>
+    OutboundTicket SendSetCharacterOptions(CharacterOptionsBlock block) =>
+        throw new NotSupportedException("IAcSession.SendSetCharacterOptions is not implemented by this session (M5 6)");
+
+    /// <summary>Sends GameAction 0x0063 TeleToLifestone (no payload; in world only), retail <c>CM_Character::Event_TeleToLifestone</c> (11.6096 0x006A29B0).</summary>
+    OutboundTicket SendTeleToLifestone() =>
+        throw new NotSupportedException("IAcSession.SendTeleToLifestone is not implemented by this session (M5 6)");
+
+    /// <summary>Sends GameAction 0x028D TeleToMarketPlace (no payload; in world only), retail <c>CM_Character::Event_TeleToMarketplace</c> (11.6096 0x006A2A40).</summary>
+    OutboundTicket SendTeleToMarketPlace() =>
+        throw new NotSupportedException("IAcSession.SendTeleToMarketPlace is not implemented by this session (M5 6)");
+
+    /// <summary>Sends GameAction 0x01DF Emote {String16L text} (in world only), retail <c>CM_Communication::Event_Emote</c> (11.6096 0x006A4F40).</summary>
+    /// <exception cref="ArgumentException">A character Windows-1252 lacks, or a text that is too long; nothing is sent.</exception>
+    OutboundTicket SendEmote(ReadOnlySpan<char> text) =>
+        throw new NotSupportedException("IAcSession.SendEmote is not implemented by this session (M5 6)");
+
+    /// <summary>Sends GameAction 0x00BF SetInscription {u32 item, String16L inscription} (in world only), retail <c>CM_Writing::Event_SetInscription</c> (11.6096 0x006AA810; M5 7 D137). ACE answers nothing.</summary>
+    /// <exception cref="ArgumentException">A character Windows-1252 lacks, or a text that is too long; nothing is sent.</exception>
+    OutboundTicket SendSetInscription(uint item, ReadOnlySpan<char> inscription) =>
+        throw new NotSupportedException("IAcSession.SendSetInscription is not implemented by this session (M5 7)");
+
+    /// <summary>Sends GameAction 0x000F SetAfkMode {u32 afk} (in world only), retail <c>CM_Communication::Event_SetAFKMode</c> (11.6096 0x006A4D00).</summary>
+    OutboundTicket SendSetAfkMode(bool afk) =>
+        throw new NotSupportedException("IAcSession.SendSetAfkMode is not implemented by this session (M5 6)");
+
+    /// <summary>Sends GameAction 0x0010 SetAfkMessage {String16L message} (in world only), retail <c>CM_Communication::Event_SetAFKMessage</c> (11.6096 0x006A5260).</summary>
+    /// <exception cref="ArgumentException">A character Windows-1252 lacks, or a text that is too long; nothing is sent.</exception>
+    OutboundTicket SendSetAfkMessage(ReadOnlySpan<char> message) =>
+        throw new NotSupportedException("IAcSession.SendSetAfkMessage is not implemented by this session (M5 6)");
 }

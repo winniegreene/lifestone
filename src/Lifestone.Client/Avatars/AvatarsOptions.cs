@@ -28,6 +28,9 @@ public enum PlayerCameraMode
 /// intents. Implies <c>--offline-player</c>.</description></item>
 /// <item><term>--offline-player-frames[=DIR]</term><description>Four review frames of the offline player (chase camera in Holtburg, first person, inside a building,
 /// mid-jump) to DIR, default <see cref="DefaultFramesDirectory"/>. Implies <c>--offline-player</c>.</description></item>
+/// <item><term>--server-object-transitions=on|off</term><description>M5 item 5 (D45): server objects run retail's transitions through
+/// the server-object physics host (default on); off is the path without collision (D24), a diagnostics switch for before-and-after
+/// measures, not a glitch flag.</description></item>
 /// </list>
 /// </remarks>
 public sealed record AvatarsOptions
@@ -55,6 +58,9 @@ public sealed record AvatarsOptions
 
     /// <summary>The folder the review frames go to, or null when <c>--offline-player-frames</c> was not given.</summary>
     public string? FramesDirectory { get; init; }
+
+    /// <summary>Server objects run retail's transitions through their physics host (<c>--server-object-transitions</c>, default on).</summary>
+    public bool ServerObjectTransitions { get; init; } = true;
 
     /// <summary>The problems <see cref="Parse(IEnumerable{string})"/> found, one line each; the option keeps its default.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
@@ -89,6 +95,12 @@ public sealed record AvatarsOptions
                     break;
                 case "--offline-player-checks":
                     options = options with { OfflinePlayer = true, WalkChecks = true };
+                    break;
+                case "--server-object-transitions":
+                    options = options with
+                    {
+                        ServerObjectTransitions = OptionValues.Choice(argument, errors, options.ServerObjectTransitions, ("on", true), ("off", false)),
+                    };
                     break;
                 case "--offline-player-frames":
                     options = options with { OfflinePlayer = true, FramesDirectory = argument.Value.Length == 0 ? DefaultFramesDirectory : argument.Value };

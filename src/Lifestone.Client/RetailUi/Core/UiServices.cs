@@ -134,8 +134,20 @@ public enum UiRetailGlitches
     /// </summary>
     EffectsStaleInfo = 256,
 
+    /// <summary>
+    /// Retail's single confirmation slot (<c>gmGamePlayUI::MakeGameplayConfirmationDialog</c>, called by the request handlers at 11.6096 0x004EC700 to 0x004ECA50): a second server question
+    /// is dropped while one is open. Lifestone queues the dialogs (M5 6 u1; <c>ServerConfirmation</c>).
+    /// </summary>
+    ConfirmationSingleSlot = 512,
+
+    /// <summary>
+    /// Retail's clipped stack count (M5 7 D132; <c>UIElement_UIItem::UpdateQuantityDisplay</c>, 11.6096 0x004E2A30, writes plain "%d"): five or more digits are wider than the
+    /// cell's quantity text, which then starts at the cell's left edge and loses its last digit ("2500(" for 25,000). Lifestone fits the count (<see cref="Widgets.UiItem"/>).
+    /// </summary>
+    StackCountClip = 1024,
+
     /// <summary>Every glitch restored.</summary>
-    All = DialogQueueing | A8PointTest | FocusLossActions | CharGenHeritageTabs | CharGenSummaryHeritage | CharGenAppearanceCamera | CharGenEmptyName | CharGenHeldHeadgear | EffectsStaleInfo,
+    All = DialogQueueing | A8PointTest | FocusLossActions | CharGenHeritageTabs | CharGenSummaryHeritage | CharGenAppearanceCamera | CharGenEmptyName | CharGenHeldHeadgear | EffectsStaleInfo | ConfirmationSingleSlot | StackCountClip,
 }
 
 /// <summary>
@@ -172,6 +184,9 @@ public sealed class UiServices
     /// </summary>
     public bool ExamineIcon { get; init; }
 
+    /// <summary>The examine window's set details under "Set: name" (<c>--examine-set-details on</c>; default off, retail shows the name alone; M5 7 D137).</summary>
+    public bool ExamineSetDetails { get; init; }
+
     /// <summary>The clipboard for copy, cut and paste in text fields (D39); null disables them.</summary>
     public IUiClipboard? Clipboard { get; init; }
 
@@ -187,6 +202,15 @@ public sealed class UiServices
     /// <summary>The dats' enum-to-DID maps (<c>DBObj::GetByEnum</c>), for the shell pieces that name an image by enum (the vivid target indicator's group 0x10000009). Null in a rig without dats.</summary>
     public Lifestone.Data.Dat.EnumIdMaps? EnumMaps { get; init; }
 
+    /// <summary>The dat's EnumMapper names (<c>EnumMapper::GetString</c>: heritages, genders, creature types, titles), for the examination window (M5 7 D137). Null in a rig without dats.</summary>
+    public Lifestone.Data.Dat.EnumMapperNames? EnumNames { get; init; }
+
     /// <summary>Where the viewports' holes go (the host's 3D views); null leaves them empty, loudly.</summary>
     public IUiViewportHost? ViewportHost { get; init; }
+
+    /// <summary>
+    /// Where the in-game shell keeps its window layout between logins (M5 6 u1, D33; retail's <c>UI-&lt;world&gt;-&lt;character&gt;-&lt;w&gt;-&lt;h&gt;.txt</c>); null keeps nothing, and the shell says so once.
+    /// A host sets it after it makes the services (before the first in-game shell).
+    /// </summary>
+    public IScreenLayoutStore? ScreenLayouts { get; set; }
 }

@@ -67,6 +67,12 @@ internal sealed class StandInResponder
     /// <summary>The world's answers (tools, Use, log off), when the host opted in with <see cref="StandInSessions.AnswerWorld"/>; null otherwise.</summary>
     internal StandInWorld? World { get; set; }
 
+    /// <summary>The character option words a SetCharacterOptions stored (M5 6 k1): kept here, not on the world, so the next visit's description carries them as ACE's database does across logins.</summary>
+    internal (uint One, uint Two)? StoredOptions { get; set; }
+
+    /// <summary>The spell bars the stand-in holds since the last AddSpellFavorite or RemoveSpellFavorite (M5 6 k1): kept here for the next visit's description, as ACE keeps them in the database.</summary>
+    internal System.Collections.Immutable.ImmutableArray<System.Collections.Immutable.ImmutableArray<uint>>? KeptBars { get; set; }
+
     /// <summary>True for the character operations the responder always answers.</summary>
     internal static bool Answers(ActionKind kind) => kind is ActionKind.CreateCharacter or ActionKind.DeleteCharacter or ActionKind.RestoreCharacter;
 
@@ -219,10 +225,10 @@ internal sealed class StandInResponder
 
         public OutboundTicket SendJump(float extent, Vector3 velocity, in AcPosition position, in ObjSeqs sequences) => throw new NotSupportedException(NoServer);
 
-        public OutboundTicket SendUse(uint guid) => owner.World?.Use(guid) ?? throw new NotSupportedException(NoServer);
+        public OutboundTicket SendUse(uint guid) => owner.World?.UseLockedChest(guid) ?? owner.World?.Use(guid) ?? throw new NotSupportedException(NoServer); // M5 6 k1: a locked stand-in chest answers first
 
         // M4 3.1 s2: the kit's heal (StandInWorld.Heal.cs; closes TODO(m4-standin-heal)).
-        public OutboundTicket SendUseWithTarget(uint item, uint target) => owner.Record(GameActionTypes.UseWithTarget, item, target, 0).UseWithTarget(item, target);
+        public OutboundTicket SendUseWithTarget(uint item, uint target) => owner.Record(GameActionTypes.UseWithTarget, item, target, 0).UseKeyOnChest(item, target) ?? owner.World!.UseWithTarget(item, target); // M5 6 k1: a stand-in key on a chest first
 
         public OutboundTicket SendQueryHealth(uint guid) => owner.World?.QueryHealth(guid) ?? throw new NotSupportedException(NoServer);
 
@@ -235,7 +241,7 @@ internal sealed class StandInResponder
 
         public OutboundTicket SendTalk(ReadOnlySpan<char> text) => owner.World is { } world ? world.Talk(text) : throw new NotSupportedException(NoServer);
 
-        public OutboundTicket SendTell(ReadOnlySpan<char> target, ReadOnlySpan<char> text) => throw new NotSupportedException(NoServer);
+        public OutboundTicket SendTell(ReadOnlySpan<char> target, ReadOnlySpan<char> text) => owner.Record(GameActionTypes.Tell, 0, 0, 0).Tell(target.ToString(), text.ToString());
 
         public OutboundTicket SendRaiseAttribute(uint attribute, uint xp) => owner.World?.RaiseAttribute(attribute, xp) ?? throw new NotSupportedException(NoServer);
 
@@ -281,15 +287,32 @@ internal sealed class StandInResponder
 
         public OutboundTicket SendSuicide() => owner.Record(GameActionTypes.Suicide, 0, 0, 0).Suicide();
 
-        public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => owner.Record(GameActionTypes.AddSpellFavorite, spellId, index, bar).AddSpellFavorite(spellId, index, bar);
+        public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => owner.Record(GameActionTypes.AddSpellFavorite, spellId, index, bar).AddSpellFavoriteKept(spellId, index, bar); // M5 6 k1: kept for the next visit's description too (ACE stores the bars)
 
-        public OutboundTicket SendRemoveSpellFavorite(uint spellId, uint bar) => owner.Record(GameActionTypes.RemoveSpellFavorite, spellId, bar, 0).RemoveSpellFavorite(spellId, bar);
+        public OutboundTicket SendRemoveSpellFavorite(uint spellId, uint bar) => owner.Record(GameActionTypes.RemoveSpellFavorite, spellId, bar, 0).RemoveSpellFavoriteKept(spellId, bar);
 
         public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => owner.Record(GameActionTypes.GetAndWieldItem, item, equipMask, 0).GetAndWield(item, equipMask);
 
         public OutboundTicket SendPutItemInContainer(uint item, uint container, uint placement) => owner.Record(GameActionTypes.PutItemInContainer, item, container, placement).PutInContainer(item, container, placement);
 
         public OutboundTicket SendStackableMerge(uint mergeFrom, uint mergeTo, int amount) => owner.Record(GameActionTypes.StackableMerge, mergeFrom, mergeTo, unchecked((uint)amount)).MergeStacks(mergeFrom, mergeTo, amount);
+
+        // M5 6 k1: the retail tranche's sends (StandInWorld.Retail6.cs; ACE's answers).
+        public OutboundTicket SendConfirmationResponse(uint type, uint context, bool accepted) => owner.Record(GameActionTypes.ConfirmationResponse, type, context, accepted ? 1u : 0u).AnswerQuestion(type, context, accepted);
+
+        public OutboundTicket SendSetCharacterOptions(CharacterOptionsBlock block) => owner.Record(GameActionTypes.SetCharacterOptions, block.Options1, block.Options2, 0).SetCharacterOptions(block);
+
+        public OutboundTicket SendTeleToLifestone() => owner.Record(GameActionTypes.TeleToLifestone, 0, 0, 0).Recall(false);
+
+        public OutboundTicket SendTeleToMarketPlace() => owner.Record(GameActionTypes.TeleToMarketPlace, 0, 0, 0).Recall(true);
+
+        public OutboundTicket SendEmote(ReadOnlySpan<char> text) => owner.Record(GameActionTypes.Emote, 0, 0, 0).Emote(text.ToString());
+
+        public OutboundTicket SendSetInscription(uint item, ReadOnlySpan<char> inscription) => owner.Record(GameActionTypes.SetInscription, item, 0, 0).SetInscription(item, inscription.ToString()); // M5 7 D137
+
+        public OutboundTicket SendSetAfkMode(bool afk) => owner.Record(GameActionTypes.SetAfkMode, afk ? 1u : 0u, 0, 0).SetAfkMode(afk);
+
+        public OutboundTicket SendSetAfkMessage(ReadOnlySpan<char> message) => owner.Record(GameActionTypes.SetAfkMessage, 0, 0, 0).SetAfkMessage(message.ToString());
 
         public void LogOff()
         {

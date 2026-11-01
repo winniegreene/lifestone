@@ -486,6 +486,11 @@ public sealed partial class UiInputRouter
             return true;
         }
 
+        if (down && dik == DikScanCodes.Escape && _metaMode == 0 && !_textMode && _manager.TargetMode.Escape())
+        {
+            return true; // ClientUISystem::OnAction's escape: a target mode ends and the key is taken; a text field with the keyboard has its own escape first, as retail's focused element does
+        }
+
         var canonical = DikScanCodes.Canonical(dik);
         var control = RetailKeyBindings.Keyboard(canonical);
         var previous = _controls.GetValueOrDefault(control.Key);

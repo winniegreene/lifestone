@@ -10,7 +10,8 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// same as a press of the toolbar's combat button (<c>ToggleCombatMode</c> 0x0056D610). The keymap dat (KEYMAP 0x14000000 as <see cref="RetailKeyBindings"/> merges it) binds that action to the accent-grave key (DirectInput 0x29), as an impulse.
 /// The press goes through <see cref="CombatModeRules.Toggle"/>, so every rule of the button holds: nothing is asked for a mode the wielded weapon forbids, and the chat line says why.
 /// </summary>
-/// <remarks>The attack-height, power and spell-bar keys of maps 0x10000003 to 0x10000005 are not bound (<c>TODO(m4-combat-map-keys)</c>); the mouse and the panel's own buttons do those.</remarks>
+/// <remarks>The mode maps that join this one (M5 6 s1, the closed <c>m4-combat-map-keys</c>): melee 0x10000003 and missile 0x10000004 are <see cref="CombatMapKeys"/> (the attack power and heights), held here as
+/// <see cref="ModeMaps"/> and taken out of the router with this map; magic 0x10000005 is <see cref="SpellBarKeys"/>, held by the spellcasting window.</remarks>
 public sealed class CombatToggleKey : IInputActionSink, IDisposable
 {
     /// <summary>The combat system's input map, registered whatever the combat mode.</summary>
@@ -25,6 +26,7 @@ public sealed class CombatToggleKey : IInputActionSink, IDisposable
     private readonly IGameSessionView _session;
     private readonly UiElementManager _manager;
     private readonly Func<Action<string>?> _notice;
+    private CombatMapKeys? _modeMaps;
     private bool _disposed;
 
     /// <summary>Registers the combat map on <paramref name="manager"/>'s input router; <paramref name="notice"/> gives the chat line sink (null: only logged).</summary>
@@ -37,6 +39,25 @@ public sealed class CombatToggleKey : IInputActionSink, IDisposable
         _manager = manager;
         _notice = notice;
         manager.Input.RegisterInputMap(InputMap, this, InputMapPriority);
+    }
+
+    /// <summary>The melee and missile maps (<see cref="CombatMapKeys"/>), set once by the shell after the combat window is attached; disposed with this map. Null before.</summary>
+    public CombatMapKeys? ModeMaps
+    {
+        get => _modeMaps;
+        set
+        {
+            if (_modeMaps is not null && !ReferenceEquals(_modeMaps, value))
+            {
+                _modeMaps.Dispose();
+            }
+
+            _modeMaps = value;
+            if (_disposed)
+            {
+                _modeMaps?.Dispose();
+            }
+        }
     }
 
     /// <summary>How many presses of the key reached <see cref="CombatModeRules.Toggle"/>.</summary>
@@ -68,6 +89,7 @@ public sealed class CombatToggleKey : IInputActionSink, IDisposable
         }
 
         _disposed = true;
+        _modeMaps?.Dispose();
         _manager.Input.UnregisterCallback(this);
     }
 }

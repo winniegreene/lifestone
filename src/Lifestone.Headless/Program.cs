@@ -79,6 +79,9 @@ internal static class Program
     /// <summary>The default limit of <c>--scenario=fight</c>: the gear, a buff top-up (a full cycle is about 1,300 s), the teleport, the fight (<c>--fight-seconds</c>, 300 s by default) and the log off.</summary>
     internal const double FightQuitAfterSeconds = 3600;
 
+    /// <summary>The limit of <c>--scenario=fight</c> for these options (M5 1 F1): <see cref="FightQuitAfterSeconds"/>, raised by a fight limit (<c>--fight-minutes</c>, <c>--fight-seconds</c>) over the default 300 s.</summary>
+    internal static double FightQuitAfterSecondsFor(FightOptions fight) => FightQuitAfterSeconds + Math.Max(0, fight.FailSeconds - FightOptions.DefaultSeconds);
+
     /// <summary>
     /// What <c>--scenario=death-and-regear</c> needs besides <c>--death-seconds</c>, in seconds: the gear (about 120 s with the spell bars), the bind at Holtburg's lifestone (teleport, settle, the Use: 120 s), the den (60 s),
     /// a suicide (ACE's five lines 3 s apart, the death, the arrival and the vitals: 120 s), the respawn, the vitals and the regear (150 s), and the log off (120 s), with margin. M4 2.2 s1 adds the corpse trip after the respawn
@@ -111,9 +114,24 @@ internal static class Program
     /// <summary>What <c>--scenario=journey</c> needs besides the plan's expected seconds: the login, the known state (a recovery place and its settle) and the log off.</summary>
     internal const double JourneyLoginMarginSeconds = 300;
 
-    /// <summary>The default limit of <c>--scenario=journey</c>: the plan's expected seconds (the sum of its stations') plus <see cref="JourneyLoginMarginSeconds"/>.</summary>
+    /// <summary>The default limit of <c>--scenario=journey</c>: the plan's expected seconds (the sum of its stations') plus <see cref="JourneyLoginMarginSeconds"/>; with <paramref name="fight"/> raised over its default (<c>--fight-minutes</c>, a long <c>--fight-seconds</c>) the raise is added for each den fight (<see cref="JourneyLimits.WholeExtraSeconds"/>, M5 1 fix B).</summary>
     /// <param name="plan">The journey's plan.</param>
-    internal static double JourneyQuitAfterSeconds(JourneyPlan plan) => plan.ExpectedSeconds + JourneyLoginMarginSeconds;
+    /// <param name="fight">The fight options, or null for the defaults.</param>
+    internal static double JourneyQuitAfterSeconds(JourneyPlan plan, FightOptions? fight = null) => plan.ExpectedSeconds + JourneyLoginMarginSeconds + JourneyLimits.WholeExtraSeconds(plan, fight ?? new FightOptions());
+
+    /// <summary>What <c>--scenario=autopilot</c> needs besides <c>--autopilot-minutes</c>, in seconds: the login and the settle (the gear is the journey's stations' own, inside the run), with margin; Lifestone's own.</summary>
+    internal const double AutopilotLoginMarginSeconds = 300;
+
+    /// <summary>How long a stop at <c>--autopilot-minutes</c> may wait for its safe point, in seconds: a logistics trip (600) or a death handler (280) in progress finishes first; Lifestone's own (the game check's <c>AutopilotLegRunner.SafePointSeconds</c>).</summary>
+    internal const double AutopilotSafePointSeconds = 1200;
+
+    /// <summary>
+    /// The limit of <c>--scenario=autopilot</c> (M5 4 h1): the host's seconds limit is lifted for it, the autopilot's stop rules end the run. With <c>--autopilot-minutes</c> a ceiling of the login margin, the minutes and the safe point (a hang the autopilot's own watchdogs missed still ends); with no minutes,
+    /// <see cref="HeadlessRunOptions.Unlimited"/> (a level or a stop request, Ctrl+C, ends it). <c>--quit-after</c> still overrides.
+    /// </summary>
+    /// <param name="autopilot">The autopilot's options.</param>
+    internal static double AutopilotQuitAfterSeconds(Lifestone.Client.Session.Autopilot.AutopilotOptions autopilot) =>
+        autopilot.Minutes > 0 ? AutopilotLoginMarginSeconds + (autopilot.Minutes * 60.0) + AutopilotSafePointSeconds : HeadlessRunOptions.Unlimited;
 
     /// <summary>The account the headless host uses when <c>--account</c> is not given (D10).</summary>
     internal const string DefaultAccount = "test";
@@ -326,11 +344,12 @@ internal static class Program
                 HeadlessScenario.FighterBuild => FighterBuildQuitAfterSeconds,
                 HeadlessScenario.Gear => GearQuitAfterSeconds,
                 HeadlessScenario.Buff => BuffQuitAfterSeconds,
-                HeadlessScenario.Fight => FightQuitAfterSeconds,
+                HeadlessScenario.Fight => FightQuitAfterSecondsFor(options.Fight),
                 HeadlessScenario.DeathAndRegear => DeathQuitAfterSeconds(options.Death.Seconds, options.Death.FightSeconds),
                 HeadlessScenario.Hunt => HuntQuitAfterSeconds(options.Hunt.Seconds),
                 HeadlessScenario.Wayfind => WayfindScenario.QuitAfterSeconds(options.Wayfind),
-                HeadlessScenario.Journey when options.Journey is { } journeyPlan => JourneyQuitAfterSeconds(journeyPlan),
+                HeadlessScenario.Journey when options.Journey is { } journeyPlan => JourneyQuitAfterSeconds(journeyPlan, options.Fight),
+                HeadlessScenario.Autopilot => AutopilotQuitAfterSeconds(options.Autopilot),
                 _ => HeadlessRunOptions.DefaultQuitAfterSeconds,
             },
             LifestoneVersion = typeof(Program).Assembly.GetName().Version?.ToString(),
@@ -374,7 +393,8 @@ internal static class Program
                         log.Warn("headless", "--character and --create-character are ignored by --scenario=mage-build (the mage is always the template's character)");
                     }
 
-                    scenario = new MageBuildScenario(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log, freshCharacter: options.FreshCharacter);
+                    // M5 3 w1 (D46): the build grants the --fight-ground's kit (the vendor robe and wand, the four foci, the stock, the purse), as the journey's build-verify does: one factory for both hosts.
+                    scenario = BuildVerifyStation.MageBuildOf(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log, options.Fight.GroundProfile, SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), freshCharacter: options.FreshCharacter, level: options.MageLevel);
                 }
                 else if (options.Scenario == HeadlessScenario.FighterBuild)
                 {
@@ -395,7 +415,7 @@ internal static class Program
                     }
 
                     // The kit's taper colours are the account's (ACE customises them from the stored account name, the login name; it is read here, hashed by the kit and never logged or printed).
-                    scenario = new GearScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), log);
+                    scenario = new GearScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), log) { GrantOnly = options.GearGrantOnly }; // D146: one item, nothing else
                 }
                 else if (options.Scenario == HeadlessScenario.Buff)
                 {
@@ -417,7 +437,7 @@ internal static class Program
                     }
 
                     log.Info("headless", "building the Black Spawn Den's collision and floor graph for the fight walk");
-                    scenario = new FightScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Buff, options.Fight, DenWalk.Create(dats, log), log);
+                    scenario = new FightScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Buff, options.Fight, GroundWalk.Create(dats, options.Fight.GroundProfile, log), log);
                 }
                 else if (options.Scenario == HeadlessScenario.DeathAndRegear)
                 {
@@ -427,7 +447,7 @@ internal static class Program
                     }
 
                     log.Info("headless", "building the Black Spawn Den's collision and floor graph for the death wait's walk");
-                    scenario = new DeathScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Death, DenWalk.Create(dats, log), log, stages: options.Death.Stages ?? DeathStages.All, approach: HoltburgApproach.Create(dats, log), buff: options.Buff, fight: new FightOptions { Kills = options.Death.FightKills, Seconds = options.Death.FightSeconds }) { LevelXp = DeathScenario.LevelXpOf(XpTableData.Load(dats)) };
+                    scenario = new DeathScenario(SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), options.Death, GroundWalk.Create(dats, options.Fight.GroundProfile, log), log, stages: options.Death.Stages ?? DeathStages.All, approach: HoltburgApproach.Create(dats, log, options.Fight.GroundProfile), buff: options.Buff, fight: options.Fight with { Kills = options.Death.FightKills, Seconds = options.Death.FightSeconds });
                 }
                 else if (options.Scenario == HeadlessScenario.Hunt)
                 {
@@ -475,6 +495,33 @@ internal static class Program
 
                     // The kit's taper colours are the account's (the login name, read here, hashed by the kit and never logged or printed), as for --scenario=gear.
                     scenario = new HeadlessJourneyScenario(plan, options.Arguments, dats, SpellTableData.Load(dats).Spells, log, LoginName(runtime, runOptions.Session.Account), new HeadlessJourneyRunnerHost(dats, log));
+                }
+                else if (options.Scenario == HeadlessScenario.Autopilot && options.Journey is { } autopilotPlan)
+                {
+                    if (options.Session.Character is not null || options.CreateCharacter is not null)
+                    {
+                        log.Warn("headless", "--character and --create-character are ignored by --scenario=autopilot (the character is the autopilot's: " + autopilotPlan.Character + ")");
+                    }
+
+                    // The kit's taper colours are the account's (the login name, read here, hashed by the kit and never logged or printed), as for --scenario=journey.
+                    // M5 4 h3: the checkpoint is a file under --autopilot-checkpoint-dir (default: an "autopilot" folder beside the run's recording), one file a character; the reconnect is the scenario's own (GameSessionAutopilotSession).
+                    var hostOptions = Lifestone.Client.Session.Autopilot.AutopilotHostOptions.FromArguments(CommandLineArgument.ParseAll(options.Arguments));
+                    if (hostOptions.Errors.Count > 0)
+                    {
+                        throw new ArgumentException("bad autopilot option: " + string.Join("; ", hostOptions.Errors));
+                    }
+
+                    var checkpointFolder = Path.Combine(Path.GetDirectoryName(recordingPath) ?? root, "autopilot");
+                    if (hostOptions.CheckpointDirectory is { } requestedFolder && !OutputPaths.TryResolve(requestedFolder, root, out checkpointFolder, out var folderProblem))
+                    {
+                        throw new ArgumentException("--autopilot-checkpoint-dir: " + folderProblem);
+                    }
+
+                    var checkpoint = new AutopilotFileCheckpointStore(Path.Combine(checkpointFolder, Lifestone.Client.Session.Autopilot.AutopilotHostOptions.CheckpointFileName(autopilotPlan.Character)));
+                    // 4-R11: never an absolute path in a log line: the file relative to the output folder (it is resolved under it), else its file name.
+                    var checkpointRelative = Path.GetRelativePath(root, checkpoint.Path);
+                    log.Info("headless", "autopilot checkpoint: " + (Path.IsPathRooted(checkpointRelative) || checkpointRelative.StartsWith("..", StringComparison.Ordinal) ? checkpoint.Describe : checkpointRelative.Replace('\\', '/')));
+                    scenario = new HeadlessAutopilotScenario(autopilotPlan, options.Autopilot, options.Arguments, dats, SpellTableData.Load(dats).Spells, log, LoginName(runtime, runOptions.Session.Account), new HeadlessJourneyRunnerHost(dats, log), checkpoint);
                 }
                 else if (options.CreateCharacter is { } create)
                 {
@@ -565,6 +612,16 @@ internal static class Program
             }
 
             journeyRun.Dispose();
+        }
+
+        if (scenario is HeadlessAutopilotScenario autopilotRun)
+        {
+            foreach (var line in autopilotRun.Lines)
+            {
+                output.WriteLine(line);
+            }
+
+            autopilotRun.Dispose();
         }
 
         if (scenario is GearScenario gear)

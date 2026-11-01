@@ -54,8 +54,32 @@ public sealed class RouteDriver
     /// <summary>A jump of the player's position in one frame longer than this fails the route (a teleport or a blip).</summary>
     public const float TeleportMetres = 10.0f;
 
+    /// <summary>
+    /// M5 8 npc: how long without progress before the driver looks for a solid server object in its way (a stall, well before <see cref="StuckSeconds"/> fails the route).
+    /// </summary>
+    public const double StallProbeSeconds = 1.0;
+
+    /// <summary>M5 8 npc: the most detours (and goal-edge arrivals) the driver makes for one goal; after that the stall fails the route as before.</summary>
+    public const int MaxDetoursPerGoal = 2;
+
+    /// <summary>M5 8 npc: how far ahead of the walker a solid object is looked for on the leg to the goal.</summary>
+    public const float LookAheadMetres = 4.0f;
+
+    /// <summary>M5 8 npc: the room left between the walker's body and an object's cylinder at a detour point.</summary>
+    public const float DetourClearanceMetres = 0.5f;
+
+    /// <summary>M5 8 npc: a leg that comes this close (beyond the two radii) to an object counts as meeting it.</summary>
+    public const float LegMarginMetres = 0.1f;
+
+    /// <summary>M5 8 npc: how close the walker gets to a detour point.</summary>
+    public const float DetourToleranceMetres = 0.4f;
+
+    /// <summary>M5 8 npc: the arrival radius at the edge of an object's cylinder when the goal lies inside it.</summary>
+    public const float EdgeToleranceMetres = 0.5f;
+
     private const float ProgressMetres = 0.05f;
     private const double ProgressDegrees = 2.0;
+    private const double ObstacleLookEverySeconds = 0.2;
 
     private bool _started;
     private bool _dwelling;
@@ -69,6 +93,15 @@ public sealed class RouteDriver
     private float _bestDistance;
     private double _bestHeadingError;
     private CellFrame _lastPosition;
+    private readonly List<RouteObstacle> _near = [];
+    private CellFrame? _detour;
+    private RouteObstacle _detourAround;
+    private CellFrame? _goalEdge;
+    private int _detoursForGoal;
+    private bool _gaveUp;
+    private double _nextObstacleLook;
+    private bool _stallProbed;
+    private string? _lastDetourAround;
 
     /// <summary>Creates a driver that walks <paramref name="route"/> with <paramref name="controller"/>.</summary>
     /// <param name="controller">The player to drive.</param>
@@ -113,6 +146,32 @@ public sealed class RouteDriver
 
     /// <summary>Raised when the dwell at a stop ends (before the driver moves on).</summary>
     public event Action<RouteStop>? Stopped;
+
+    /// <summary>
+    /// M5 7 D153 (D141): raised when a key the driver holds was found let go by something else (a lost window focus drops every held key) and was pressed again; the
+    /// argument names the keys, for the caller's log.
+    /// </summary>
+    public event Action<string>? KeysPressedAgain;
+
+    /// <summary>
+    /// M5 8 npc: raised once for each detour (or goal-edge arrival) the driver decides on, with the line for the caller's log: the object's name, wcid and distance, the side
+    /// and the reason.
+    /// </summary>
+    public event Action<string>? Detoured;
+
+    /// <summary>
+    /// M5 8 npc: where the driver finds the solid server objects around the walker, or null (the default: it walks straight at its goals and fails when stuck, as before).
+    /// </summary>
+    public IRouteObstacles? Obstacles { get; set; }
+
+    /// <summary>M5 8 npc: how many detours and goal-edge arrivals the driver has made in all.</summary>
+    public int DetoursCount { get; private set; }
+
+    /// <summary>M5 8 npc: the detour point the driver is walking to now, or null.</summary>
+    public CellFrame? DetourPoint => _detour;
+
+    /// <summary>M5 7 D153: how many times held keys were found let go and pressed again.</summary>
+    public int KeysPressedAgainCount { get; private set; }
 
     /// <summary>The player being driven.</summary>
     public IPlayerMovementIntents Controller { get; }
@@ -188,9 +247,11 @@ public sealed class RouteDriver
         }
 
         var goal = Route.Goals[GoalIndex];
-        var offset = position.GetOffset(goal.Target);
+        var goalTarget = _goalEdge ?? goal.Target;
+        var goalTolerance = _goalEdge is null ? goal.Tolerance : EdgeToleranceMetres;
+        var offset = position.GetOffset(goalTarget);
         var distance = new Vector2(offset.X, offset.Y).Length();
-        if (distance <= goal.Tolerance)
+        if (distance <= goalTolerance)
         {
             if (goal.Stop)
             {
@@ -203,6 +264,29 @@ public sealed class RouteDriver
             return NextGoal(now);
         }
 
+        if (Obstacles is { } obstacles && _detour is null && LookForObstacle(obstacles, now, position, goal))
+        {
+            goalTarget = _goalEdge ?? goal.Target;
+            offset = position.GetOffset(goalTarget);
+            distance = new Vector2(offset.X, offset.Y).Length();
+        }
+
+        if (_detour is { } detour)
+        {
+            var toDetour = position.GetOffset(detour);
+            var detourDistance = new Vector2(toDetour.X, toDetour.Y).Length();
+            if (detourDistance <= DetourToleranceMetres)
+            {
+                _detour = null; // reached: the walk goes on to the goal, and the next stall (if any) is judged from here
+                ResetProgress(now);
+            }
+            else
+            {
+                offset = toDetour;
+                distance = detourDistance;
+            }
+        }
+
         var bearing = (Math.Atan2(offset.X, offset.Y) * (180.0 / Math.PI) + 360.0) % 360.0;
         var error = Normalize(bearing - RetailFrames.GetHeading(position.Frame));
         var magnitude = Math.Abs(error);
@@ -211,19 +295,246 @@ public sealed class RouteDriver
             _bestDistance = MathF.Min(_bestDistance, distance);
             _bestHeadingError = Math.Min(_bestHeadingError, magnitude);
             _lastProgressTime = now;
+            _stallProbed = false;
         }
         else if (now - _lastProgressTime > StuckSeconds)
         {
+            var toward = _detour is null
+                ? string.Create(CultureInfo.InvariantCulture, $"goal {GoalIndex}")
+                : string.Create(CultureInfo.InvariantCulture, $"the detour point beside {_detourAround.Name} on the way to goal {GoalIndex}");
+            var detours = _detoursForGoal == 0 && !_gaveUp
+                ? string.Empty
+                : _detoursForGoal == 0
+                    ? $", detour given up ({_lastDetourAround})"
+                    : string.Create(CultureInfo.InvariantCulture, $", after {_detoursForGoal} detour{(_detoursForGoal == 1 ? string.Empty : "s")} ({_lastDetourAround})");
             return Fail(
                 RouteStatus.Stuck,
-                string.Create(CultureInfo.InvariantCulture, $"no progress toward goal {GoalIndex} for {StuckSeconds:F0} s ({distance:F2} m and {magnitude:F0} degrees off)"),
+                string.Create(CultureInfo.InvariantCulture, $"no progress toward {toward} for {StuckSeconds:F0} s ({distance:F2} m and {magnitude:F0} degrees off{detours})"),
                 position);
         }
 
+        PressLostKeysAgain();
         SetTurn(magnitude <= HeadingToleranceDegrees ? 0 : error > 0 ? 1 : -1);
         SetRun(!goal.Stop || distance > WalkWithinMetres);
         SetForward(magnitude < TurnInPlaceDegrees);
         return Status;
+    }
+
+    /// <summary>
+    /// M5 8 npc (check, act, check, D141; Lifestone's own walker behaviour, retail has no automated walker): a solid server object (a static NPC, a chest, a stand; since
+    /// M5 item 5 every server object with collision is solid in the player's world, D70 to D72) can stand on a route's leg or on its goal, and the straight-line walker then
+    /// pushes at it until the stall fails the route. The Holtburg ring stalled at its goal 7 about once in ten runs with the Pumpkin Buffer next to the walker. CHECK: every
+    /// 0.2 s, and at once when the walker has made no progress for <see cref="StallProbeSeconds"/>, ask <see cref="Obstacles"/> for the solid objects within
+    /// <see cref="LookAheadMetres"/>; the leg to the goal meets an object whose cylinder (its radius plus the body's plus <see cref="LegMarginMetres"/>) it passes through, or
+    /// the goal lies inside it, or (stalled, nothing on the leg) the walker touches one. ACT: for a leg, a detour point beside the object (its radius plus the body's plus
+    /// <see cref="DetourClearanceMetres"/>, to the side of the leg), on whichever side the collision world says a body fits (both are probed, the shorter way wins, a side the
+    /// probe refuses is never walked); for a goal inside the cylinder, the nearest free point on its edge, accepted as the goal's arrival within
+    /// <see cref="EdgeToleranceMetres"/>. CHECK AFTER: the walk to the detour point and on to the goal is judged by the same progress rule as any other, so a detour that does not
+    /// free the walk fails as stuck, named, with the detours listed; at most <see cref="MaxDetoursPerGoal"/> per goal, and none while one is being walked.
+    /// </summary>
+    /// <returns>True when the walk's target changed this frame (a detour point or a goal edge was set).</returns>
+    private bool LookForObstacle(IRouteObstacles obstacles, double now, in CellFrame position, RouteGoal goal)
+    {
+        if (_gaveUp || _detoursForGoal >= MaxDetoursPerGoal)
+        {
+            return false;
+        }
+
+        var stalled = now - _lastProgressTime > StallProbeSeconds;
+        if (stalled ? _stallProbed : now < _nextObstacleLook)
+        {
+            return false;
+        }
+
+        _nextObstacleLook = now + ObstacleLookEverySeconds;
+        _stallProbed |= stalled;
+        _near.Clear();
+        obstacles.Near(position, LookAheadMetres, _near);
+        if (_near.Count == 0)
+        {
+            return false;
+        }
+
+        var body = obstacles.BodyRadius;
+        var target = _goalEdge ?? goal.Target;
+        var leg = Horizontal(position.GetOffset(target));
+        var length = leg.Length();
+
+        // A goal inside an object's cylinder cannot be reached: the walk ends at the cylinder's edge.
+        if (_goalEdge is null)
+        {
+            foreach (var o in _near)
+            {
+                var centre = Horizontal(position.GetOffset(o.Centre));
+                if (o.Radius + body - (leg - centre).Length() > goal.Tolerance)
+                {
+                    return AcceptGoalEdge(obstacles, now, goal, o, centre, leg);
+                }
+            }
+        }
+
+        if (length < 1e-3f)
+        {
+            return false;
+        }
+
+        var ahead = leg / length;
+        var found = false;
+        var best = default(RouteObstacle);
+        var bestAlong = float.MaxValue;
+        foreach (var o in _near)
+        {
+            var centre = Horizontal(position.GetOffset(o.Centre));
+            var along = Vector2.Dot(centre, ahead);
+            var across = MathF.Abs((ahead.X * centre.Y) - (ahead.Y * centre.X));
+            var reach = o.Radius + body;
+            if (along > -0.2f && along - reach < length && across < reach + LegMarginMetres && along < bestAlong)
+            {
+                (found, best, bestAlong) = (true, o, along);
+            }
+        }
+
+        var reason = "on the leg to the goal";
+        if (!found && stalled)
+        {
+            var nearest = float.MaxValue;
+            foreach (var o in _near)
+            {
+                var gap = Horizontal(position.GetOffset(o.Centre)).Length() - o.Radius - body;
+                if (gap <= 0.5f && gap < nearest)
+                {
+                    (found, best, nearest) = (true, o, gap);
+                }
+            }
+
+            reason = "touching it with no progress";
+        }
+
+        return found && StartDetour(obstacles, now, position, best, ahead, leg, reason);
+    }
+
+    private bool StartDetour(IRouteObstacles obstacles, double now, in CellFrame position, RouteObstacle around, Vector2 ahead, Vector2 leg, string reason)
+    {
+        var centre = Horizontal(position.GetOffset(around.Centre));
+        var away = around.Radius + obstacles.BodyRadius + DetourClearanceMetres;
+        var left = new Vector2(-ahead.Y, ahead.X);
+        CellFrame? chosen = null;
+        var chosenLeft = false;
+        var chosenLength = float.MaxValue;
+        var blocked = 0;
+        foreach (var isLeft in new[] { true, false })
+        {
+            var side = isLeft ? left : -left;
+            if (!obstacles.TryFindStand(around.Centre, side * away, out var standing))
+            {
+                blocked++;
+                continue;
+            }
+
+            var point = centre + (side * away);
+            var length = point.Length() + (leg - point).Length();
+            if (length < chosenLength)
+            {
+                (chosen, chosenLeft, chosenLength) = (standing, isLeft, length);
+            }
+        }
+
+        var distance = centre.Length();
+        if (chosen is not { } stand)
+        {
+            _gaveUp = true; // both sides probed and refused: no more tries for this goal, the stall stands
+            _lastDetourAround = $"no free side beside {around.Name}";
+            Detoured?.Invoke(string.Create(
+                CultureInfo.InvariantCulture,
+                $"route '{Route.Name}' lap {Lap} goal {GoalIndex}: no detour around {RouteObstacleShapes.Describe(around)}, {distance:0.0} m away ({reason}): the collision world has no free place on either side ({blocked} probes refused); the walk goes on and a stall fails it"));
+            return false;
+        }
+
+        _detour = stand;
+        _detourAround = around;
+        _detoursForGoal++;
+        DetoursCount++;
+        _lastDetourAround = $"around {around.Name} on the {(chosenLeft ? "left" : "right")}";
+        ResetProgress(now);
+        Detoured?.Invoke(string.Create(
+            CultureInfo.InvariantCulture,
+            $"route '{Route.Name}' lap {Lap} goal {GoalIndex}: detour {_detoursForGoal} of {MaxDetoursPerGoal} around {RouteObstacleShapes.Describe(around)}, {distance:0.0} m away ({reason}), by its {(chosenLeft ? "left" : "right")} side (free by probe), then on to the goal; reason: the walk to goal {GoalIndex} is blocked by a solid object"));
+        return true;
+    }
+
+    private bool AcceptGoalEdge(IRouteObstacles obstacles, double now, RouteGoal goal, RouteObstacle covering, Vector2 centre, Vector2 leg)
+    {
+        _ = goal;
+        var edge = covering.Radius + obstacles.BodyRadius + 0.1f;
+        var toGoal = leg - centre;
+        var toward = toGoal.Length() > 0.05f ? Vector2.Normalize(toGoal) : centre.Length() > 0.05f ? Vector2.Normalize(-centre) : new Vector2(0f, 1f);
+        foreach (var degrees in new[] { 0f, 45f, -45f, 90f, -90f, 135f, -135f, 180f })
+        {
+            var turn = degrees * (MathF.PI / 180f);
+            var direction = new Vector2(
+                (toward.X * MathF.Cos(turn)) - (toward.Y * MathF.Sin(turn)),
+                (toward.X * MathF.Sin(turn)) + (toward.Y * MathF.Cos(turn)));
+            if (!obstacles.TryFindStand(covering.Centre, direction * edge, out var standing))
+            {
+                continue;
+            }
+
+            _goalEdge = standing;
+            _detoursForGoal++;
+            DetoursCount++;
+            _lastDetourAround = $"goal covered by {covering.Name}";
+            var gap = (centre + (direction * edge) - leg).Length();
+            ResetProgress(now);
+            Detoured?.Invoke(string.Create(
+                CultureInfo.InvariantCulture,
+                $"route '{Route.Name}' lap {Lap} goal {GoalIndex}: the goal lies inside the cylinder of {RouteObstacleShapes.Describe(covering)}, {centre.Length():0.0} m away; arrival accepted at its edge, {gap:0.00} m from the goal, within {EdgeToleranceMetres:0.0} m (free by probe, {degrees:0} degrees round from the goal's side); reason: the goal cannot be reached"));
+            return true;
+        }
+
+        _gaveUp = true;
+        _lastDetourAround = $"no free edge point at {covering.Name}";
+        Detoured?.Invoke(string.Create(
+            CultureInfo.InvariantCulture,
+            $"route '{Route.Name}' lap {Lap} goal {GoalIndex}: the goal lies inside the cylinder of {RouteObstacleShapes.Describe(covering)} and the collision world has no free place on its edge; the walk goes on and a stall fails it"));
+        return false;
+    }
+
+    private static Vector2 Horizontal(Vector3 v) => new(v.X, v.Y);
+
+    /// <summary>
+    /// M5 7 D153 (D141, check, act, check): the driver remembers the keys it pressed, but something else can let them go: the gate's Holtburg walk of 2026-10-31 13:04 UTC
+    /// stood still 2.95 m short of its first goal with no key held (a lost window focus, <c>CommandInterpreter::LoseKeyboardFocus</c>), while the driver still believed it
+    /// held forward. Each frame the controller is asked; a key it no longer holds is pressed again (with the run key), counted and reported once each time.
+    /// </summary>
+    private void PressLostKeysAgain()
+    {
+        var forwardLost = _forward && Controller.IsHeld(MotionCommands.WalkForward) == false;
+        var turnCommand = _turn > 0 ? MotionCommands.TurnRight : MotionCommands.TurnLeft;
+        var turnLost = _turn != 0 && Controller.IsHeld(turnCommand) == false;
+        if (!forwardLost && !turnLost)
+        {
+            return;
+        }
+
+        if (forwardLost)
+        {
+            Controller.HandleCommand(MotionCommands.WalkForward, start: true);
+        }
+
+        if (turnLost)
+        {
+            Controller.HandleCommand(turnCommand, start: true);
+        }
+
+        if (_runKey)
+        {
+            Controller.SetHoldRun(true);
+        }
+
+        KeysPressedAgainCount++;
+        KeysPressedAgain?.Invoke(string.Create(
+            CultureInfo.InvariantCulture,
+            $"route '{Route.Name}' lap {Lap} goal {GoalIndex}: {(forwardLost ? turnLost ? "forward and turn" : "forward" : "turn")} found let go by something else, pressed again (#{KeysPressedAgainCount})"));
     }
 
     /// <summary>The angle in (-180, 180].</summary>
@@ -258,12 +569,19 @@ public sealed class RouteDriver
             }
         }
 
+        _detour = null;
+        _goalEdge = null;
+        _detoursForGoal = 0;
+        _gaveUp = false;
+        _lastDetourAround = null;
+        _nextObstacleLook = 0;
         ResetProgress(now);
         return Status;
     }
 
     private void ResetProgress(double now)
     {
+        _stallProbed = false;
         _lastProgressTime = now;
         _bestDistance = float.MaxValue;
         _bestHeadingError = double.MaxValue;

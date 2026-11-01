@@ -15,9 +15,9 @@ M5's item 1, its companion is deferred (§3.2, D10).
 the workshop (m5-plan.md D1): a single-player Asheron's Call that can literally play itself from a character's start to
 the game's end, with a lot of grinding, where the person interacts as much or as little as they like, from playing
 entirely by hand to never touching it and watching it like a screensaver. M5 is the first step, and it is "the first
-dungeon": one mage plays one dungeon by itself for a day, honestly, on screen.
+dungeon": one mage plays one dungeon by itself overnight, honestly, on screen (planned as a day; the owner's D54).
 
-- **One mage, one dungeon, for a day.** BSD Mage (D5) hunts the Black Spawn Den on its own: it buffs, recalls to the
+- **One mage, one dungeon, overnight.** BSD Mage (D5) hunts the Black Spawn Den on its own: it buffs, recalls to the
   den, fights tuskers on every storey it is worth fighting on (never the drudge and virindi wing, D4), keeps its mana,
   health and buffs up inside the fight, loots its kills, recalls home when its pack or its components say so, sells,
   buys components and potions, portals back, spends the experience it earns, and when it dies it respawns, re-buffs,
@@ -25,8 +25,8 @@ dungeon": one mage plays one dungeon by itself for a day, honestly, on screen.
   the character once; play uses only what a retail player could do.
 - **Days, not minutes.** The run has no end but the person's. The client survives a day: the two bugs that end a long
   run today are fixed (§5.8), a dropped session reconnects and re-enters the world, a crash or a restart resumes from a
-  checkpoint, memory and logs are bounded and measured, the frame rate is capped. A 24-hour run on screen is the
-  milestone's final gate (DoD 13).
+  checkpoint, memory and logs are bounded and measured, the frame rate is capped. An overnight run on screen is the
+  milestone's final gate (DoD 13; planned as 24 hours, the owner's D54).
 - **The dial.** The autopilot has a key and a panel beside the auto-buff key; the person's own movement keys interrupt
   it and a hand-back resumes it from the state it finds; the kill switch stops every automated action, including the
   casts it does not stop today (§5.5). The automation inspector shows the state and the last decision.
@@ -93,7 +93,7 @@ file at 95ef426d. M4's decisions are cited as "M4 D<n>" (m4-plan.md §7); M5's o
    (`black-spawn-den-aluvian`); the Low B belt and the Low North Forest, which the fighters hunt from tables today, are
    the second and third, written as data only, and the fighters' hunt reads them. `BlackSpawnDen`, `DenPlanner` and
    M4 D12's floor rule become the profile's values (D4 supersedes D12). Checks: `HuntingGroundTests` (the den's profile
-   equals today's constants; a profile with a missing field fails loudly at load); `HuntGroundDatTests` over the three;
+   equals today's constants; a profile with a missing field fails loudly at load); `HuntingGroundDatTests` over the three (M4's `HuntGroundDatTests` keeps the old rows);
    live, the melee journey's hunt on the belt's profile with its judged fields unchanged.
 5. **The whole den.** The room graph of landblock 0x0105 over every storey (today's graph is the arrival floor's 158
    cells), the exit portals' rooms as no-go, the storeys' connectivity proved on the dats, the creature layer and the
@@ -138,11 +138,13 @@ file at 95ef426d. M4's decisions are cited as "M4 D<n>" (m4-plan.md §7); M5's o
     lifestones, NPCs, creatures), moved with the avatar and set ethereal with its state; the wayfinder treats a closed
     door as blocked and a leg that crosses one uses it and waits for it to open; a recall lands the player beside the
     lifestone where ACE puts it; the transitions for server objects (creatures colliding with each other and the
-    player, the cause of the hero takes' flicker) land if their per-frame cost is measured within the frame rule, else
-    stay a named TODO (§5.11). Checks: `ServerObjectPhysicsTests` (a closed door stops the walker, an ethereal one
-    does not, a lifestone's cylinder stops it, an NPC's moves with it, zero allocation for a standing crowd); live, the
-    melee journey's vendor station opens Renald's door on screen (`door_opened=yes`) and the mage's recall-home
-    `stepped_off=no` since none is needed; `AvatarJumpWatch` counts read in the den frames.
+    player, the cause of the hero takes' flicker: two tuskers never stand on one spot) land in M5 **whatever their
+    per-frame cost** (the owner, m5-plan.md D45): the cost is measured and reported against the frame rule, and a frame
+    over it is work for the same item, never a reason to leave the transitions out (§5.11). Checks:
+    `ServerObjectPhysicsTests` (a closed door stops the walker, an ethereal one does not, a lifestone's cylinder stops
+    it, an NPC's moves with it, two creatures pressed to one point end apart, zero allocation for a standing crowd);
+    live, the melee journey's vendor station opens Renald's door on screen (`door_opened=yes`) and the mage's
+    recall-home `stepped_off=no` since none is needed; `AvatarJumpWatch` counts read in the den frames.
 11. **Retail for the person at the keys, first tranche.** The Yes/No confirmation dialog (GE 0x0274 and 0x0276, GA
     0x0275; `CM_UI::Event_ConfirmationRequest`, address unknown), character options saved to the server (GA 0x01A1,
     0x01A2) with the window layout and the chat masks saved beside the user data, the spellcasting bars editable (a
@@ -155,12 +157,12 @@ file at 95ef426d. M4's decisions are cited as "M4 D<n>" (m4-plan.md §7); M5's o
 12. **Window sizes.** The shell frames and the play-checks run at 1280x720 and 1920x1080 as well as 800x600 in the
     gate's offline smoke (the frame judge stays at 800x600, M2 D57); the soak runs at 1280x720. Checks:
     `smoke.ps1 -AllSizes` in the gate's offline step; the owner's eye on one 1280x720 frame of the den.
-13. **The 24-hour run.** BSD Mage on `test`, the autopilot, the Godot play host at 1280x720 with `--max-fps=60`,
-    recording off, the backend under the lead for the day (D6), the `[soak]` line every 60 s (working set, private and
+13. **The overnight run** (the owner's D54, 2026-10-28: one night of the owner's machine, not 24 hours). BSD Mage on `test`, the autopilot, the Godot play host at 1280x720 with `--max-fps=60`,
+    recording off, the backend under the lead for the night (D6), the `[soak]` line every 60 s (working set, private and
     managed bytes, the GC counts and pauses, the object and avatar counts, the light rows, the frame maximum and p99,
     the net counters, the phase, the cycles, Godot's errors, the log size) and an outside loop every 5 min (the three
     processes' memory, the log and database sizes, free disk), one 800x600 frame every 30 min for the owner's eye.
-    Verdicts, report-only in this first soak: `autopilot done ok=true` after 24 h with every cycle accounted for, the
+    Verdicts, report-only in this first soak: `autopilot done ok=true` after the night with every cycle accounted for, the
     working-set slope after the first hour, `objects` and `in_cell` bounded by the den's population, `light_rows<256`,
     `godot_errors=0`, the reconnects and their causes, the frame p99 flat. Logs capped and written once.
 14. **Tests, gates and frame time.** Green `slice-check` at every slice; coverage never decreasing (M4 D28; the
@@ -230,9 +232,11 @@ over the read model, acting only through the Action API; the frame at 800x600. T
 The waves as planned (m5-plan.md §3; each later wave is sliced at its boundary, M3 P8): **0** the measuring run and
 the two live bugs; **1** the outcome-aware caster and mana inside the fight; **2** the hunting-ground profile and the
 whole den; **3** the mage's logistics and the death handler; **4** the outer loop and the dial; **5** a solid world;
-**6** the retail tranche and the two sizes; **7** the 24-hour run; **8** the end. Items 4 and 5 touch different seams
-(the session and the physics) and run as parallel lanes under one lead. The autopilot cycle and the 24-hour run are
+**6** the retail tranche and the two sizes; **7** the overnight run (D54); **8** the end. Items 4 and 5 touch different seams
+(the session and the physics) and run at the same time, each under its own lead (D54). The autopilot cycle and the overnight run are
 the acceptance tests of the milestone.
+
+A target's optional `opener` names the spell line the fight casts on it before the bolts (the den: Tusker Slave, Fire Vulnerability Other).
 
 ## 5. Research (2026-10-25, read-only; ACE paths are under `vendor-eval/ACE/Source/ACE.Server/` at 95ef426d)
 
@@ -302,6 +306,10 @@ floor's Tusker Slaves; D4 keeps the mage out of the north wing (not worth the ti
 it fight the Tusker Guards on the storeys between, which needs the room graph of every storey (today's is the arrival
 floor's 158 cells, built on the dat's cell graph; the storeys' connectivity and the walker's step rules over them are
 item 2's first question). The exit portals' rooms (0x0341-0x0343, 0x035C at z 0; one at z -6) are no-go.
+
+**As built (M5 item 2; D39, m5-plan.md section 7).** The den is the profile `black-spawn-den-aluvian` (`src/Lifestone.Client/Session/Grounds/profiles/`), over six storeys by origin z: z 0 (158 cells), z -6 (81 walkable), z -12 (23), z -18 (148), z -24 (88) and z -30 (1: cell 0x010E, the wing's south doorstep, outside the wing and holding no slot), 499 walkable cells in all. The ramps the walk proves are 0x026E to 0x0241 (-6 to -12) and 0x023F to 0x01D3 (-12 to -18). The wing, 52 cells at origin z -23 or lower and y over -125 (0x0100-0x010D, 0x010F-0x0117, 0x0119-0x0121, 0x0138-0x013D, 0x0168-0x0170, 0x0187-0x018B), is no-go by its geometry and joins the rest of the den by two doorways only (0x01DC to 0x0138, 0x010E to 0x010D). The no-go set is 74 cells: the wing; the outliers 0x0244, 0x02D3, 0x02D5 and 0x02D6; both exits, 0x0341-0x0343 and 0x035C at z 0 and the second Surface Portal's 0x0279 at z -6, which the paragraph above does not list; and the 13 cells the set cuts off from the arrival (the corridor 0x026A-0x026C, 0x0273-0x0278 and 0x027B, its ramp cells 0x0240 and 0x01DC, and 0x02D4). The ramp chain 0x026C, 0x0240, 0x01DC is therefore no-go: it leads from the second exit down to the wing, not to the mage's route. Of the 117 slots, 78 are hunted (19 Tusker Slaves and 59 Tusker Guards in walkable cells; the tour's first draft covers their 57 cells), 5 guards stand unhunted in no-go cells, and 34 creatures avoided by role (8 Virindi Servants, 2 Virindi Masters, 8 Drudge Stalkers, 16 Drudge Raveners) are not hunted. The generators are unchanged (900 s delay, 60 s tick). Section 52 of `docs/session.md` has the tour, the walk and the checks.
+
+The Slave opens with Fire Vulnerability Other: ACE multiplies a war bolt's damage by the fire vulnerability (SpellProjectile.cs:526-557, EnchantmentManager.cs:925-939 at 95ef426d), x2.5 at VI (1108) and x2.85 at VII (2170); Imperil does nothing to a bolt. Below level 126 the mage's build is the traditional mage (no Melee Defense; War Magic and Life Magic specialised); the 126 template keeps Melee Defense specialised.
 
 ### 5.4 The fight loop as measured
 
@@ -374,6 +382,16 @@ fizzles= mana_tries= mana_landed= storeys_visited= basement_entries= granted= pl
 reconnects= s=` and `autopilot done ok= cycles= stop= ...` with the totals; the fields are report-only in their first
 gate and judged as §2 says from the second.
 
+**As built (M5 item 4).** The loop is the arrows above as one state machine over the journey's stations (D57):
+`AutopilotScenario` with the fight's external stop, the upkeep (buff margin and health floor), the trip forced or by
+the counters, the death scripted or not (D56's `rebuffed=`), the stop rules, the checkpoint, the watchdogs, the
+reconnect, and the two lines with `why=`. The dial was Num Lock (D59) and the tools panel's Autopilot button, a
+placeholder, with the hand-back by the person's keys and a kill switch; since M5 item 7 (D145) it is `/stop` and `/auto`
+typed in the chat, with the movement keys locked while the bot runs (`docs/session.md` section 54). The hosts are the headless
+`--scenario=autopilot`, the game's `--login-check=autopilot` and the play host; the gate's hand-off is scripted (D58).
+The autopilot lane and its judges come with the item's last slice. Fields, options and TODO names:
+`docs/session.md` section 54.
+
 ### 5.6 The cheats on the path, and the server
 
 Every use of the mod's verbs during play (the cheat ledger, from the code at master): the gear re-grants (`SpawnGear` in
@@ -388,6 +406,8 @@ The bundled server runs ACE's defaults: Lifestone sets no property. Retail-faith
 true, `safe_spell_comps` false, `vitae_penalty` 0.05 (cap 0.40), `xp_modifier` 1.0, `corpse_destroy_pyreals` true
 (`Managers/PropertyManager.cs:457-687`). The one default ACE flags as non-retail, `creatures_drop_createlist_wield`
 false, does not touch tuskers.
+
+**As built (M5 item 3).** Play grants nothing and places nothing but a recovery (section 53). The journeys' and the death's gear stages run `GearScenario.NoGrant` (the hero mage's ring excepted, `TODO(m5-hero-ring-diamond)`); the death's regear, its decoy top-up and the vitae `xp` grant are removed, and the decoys are retired. Every mod verb sent after the build goes through one counter (`ModVerbCounter`: `item`, `xp`, `place`, `corpses rot`, `spell learn`), and the done line's `granted=` and `places=` are its counts, a recovery place counted apart. Build time keeps its layer: the kit, the foci and the purse, `xp` to the start level, `spell learn`, the quest stamp, and now the first tie (one budgeted place to the ground's portal front, then Primary Portal Tie), so the mage's journey after the build makes no place (its budget is 0; the hero mage keeps 1). The stats the experience buys are raised by `XpSpendRule` through ACE's raise actions, never through the mod's `xp` verb. Both counts are report-only until item 4's gate, which judges `granted=0 places=0`.
 
 ### 5.7 The component economy and Holtburg's vendors (the pinned world SQL v0.9.296, parsed read-only)
 
@@ -437,6 +457,10 @@ false, does not touch tuskers.
   Scriveners in 0xA9B3 (152-158 m from the lifestone); the loot value, `ComponentLoss` below VII and the travel spells'
   formulas stay open (m5-plan.md §9).
 
+**As built (M5 item 3).** The mage's logistics are the ground's `supplies` section (section 53, D48). Holtburg's Archmage Cindrue sells the Prismatic Tapers (30 pyreals each; the stock keeps 1,000, trips under 200 and stops under 12), the vendor kit (Wand 2472 at 270 pyreals, wielded; Faran War Apprentice Robe 6071 at 1,512, worn), the Copper Scarabs for the travel spells (135) and the two trade notes the purse is made of (250,000 and 10,000 pyreals). Thelnoth Cort sells the Mana Potions (230 pyreals; keep 30, trip under 5). Holtburg sells neither the Pyreal nor the Platinum Scarab, and no vendor of the home town sells a focus: the two scarabs are carried (keep 100, stop under 3, D8), and the four foci are the build's. Fort Tethana's Zisaha sells the same taper, notes and Copper Scarab (at 180), and the Pyreal and Platinum Scarabs at 1,800 and 18,000 pyreals, so Tusker Temple's scarabs are bought there, not carried; Yoshi Deshi sells its Mana Potion (306). Its kit is the Wand 2472 (360) and the Dho War Master Robe 5910 (14,400; Arcane Lore 158, against 144 for BSD Mage). The purse is coin for one trip and trade notes: 300,000 pyreals for the den (40,000 coin), 1,600,000 for Tusker Temple (50,000 coin). ACE destroys the coin a death drops; the notes are bonded and stay in the pack. Tusker Temple is not played in M5 (`TODO(m6-tethana-supplies)`), so nothing grants or spends its purse yet. The prices are the pinned world SQL's (v0.9.296) at each vendor's sell multiplier (1.35 Cindrue, 1.8 Fort Tethana).
+
+Item 7's additions to the supplies (F3, F8, F10). A stock line may keep more than one stack of its weenie (the Pyreal Scarab: 300 = 3 x 100); the build asks the mod for each stack, because the mod clamps one request to the weenie's maximum stack (GearKit.StackSizes, PlayerTools.SpawnGear). The opener burns the same scarab and tapers a Flame Bolt of its level does (the foci formula): add its casts (about one a Slave, up to three on resists) to the taper burn. The owner's components rule (F10: no move refused for a missing component; the build grants the carried ones): Pyreal Scarab keep 300 -> 400 (four stacks; about 224 more VI casts an hour for the opener and the drains at 0.017 lost a cast: about 348 a day); Diamond Scarab 7299 keep 6, trip_under = stop_under = 2 (carried, Holtburg sells none; Cassius' Ring of Fire burns two a cast in hand, about one lost every 450 casts, F9); tapers stay bought on trips (keep 1,000, the stack's limit; about 680 an hour, a trip about every 1.2 hours); purse 400,000 -> 550,000 (five Trade Note 50,000; 20,700 pyreals an hour for 26 hours); load about 10,678 of 15,750 at level 80 (F3's 9,984 + 400 + 24 + F13's gloves 270), under the 90% line 14,175.
+
 ### 5.8 Days-long runs
 
 The longest live runs to date are about 25 to 65 minutes (a gate's journey lanes, the 1,800 s buff expiry test, the
@@ -456,7 +480,7 @@ Soak tier's 33 minutes). The long-run audit's ranked risks, with the fix size:
 
 Already in place: the no-GC window and the allocation-free ticks, the session recorder, the kill switch, `Reconnect`,
 the frame samplers, the audio mute, the ring caps (the action log 1,024, the chat 500 lines, the avatar notices 1,024).
-The soak's measurement plan is DoD 13; its three prerequisites are risks 1, 2 and 3 with 4.
+The soak's measurement plan is DoD 13; its three prerequisites are risks 1, 2 and 3 with 4. M5 item 7 s2 closed risk 7 (the logs: `--log-max-mb` and the one log file of `docs/session.md` section 44) and the avatar notice list (`PlayMode.DrainAvatarNotices`, `AvatarNoticeTally`). DoD 13 (logs capped and written once) is met by `--log-max-mb` and that one log file.
 
 ### 5.9 Retail coverage
 
@@ -466,6 +490,11 @@ handles 149 of its 163 GameAction types; Lifestone decodes and reduces 31 of the
 vendors, movement, raising and training, the system text. Nearly: magic (7 of 8 events), world objects (the four
 public property updates missing). Three events arrive unknown at every login: SetTurbineChatChannels 0x0295,
 CharacterTitle 0x0029, FriendsListUpdate 0x0021.
+
+*Amended in item 6 (M5 6, D31):* the public property updates ACE sends are five, not four: 0x02D0, 0x02D2, 0x02D4,
+0x02D6 and 0x02D8 (tailoring and core plating; the item's w1 slice found the last in ACE's source). 0x02D5 is the
+private string update, which ACE never sends. Item 6 decodes the five public updates and the private 0x02D1, 0x02D7,
+0x02D9 and 0x02DB, and the three login events are decoded and ignored by name (`docs/protocol.md` section 5.5).
 
 The interface: of 98 retail rows, 33 built, 25 partial, 38 not built (59% with a controller); 8 of the panel host's 16
 pages work; 1 of 9 persistence rows (the shortcut bar); 47 of 49 character options ghosted.
@@ -477,7 +506,7 @@ pages work; 1 of 9 persistence rows (the shortcut bar); 47 of 49 character optio
 | spellcasting bars | SpellbookFilter, RemoveSpell, SetDesiredComponentLevel | not editable, hotkeys unbound | M | DoD 11 (the bars and hotkeys) |
 | chat | TurbineChat F7DE, ChannelBroadcast, Emote, SoulEmote, squelch, AFK (18) | speech and `@` only | M | DoD 11 (tells, `/e`, `/afk`, the recalls); channels M6 |
 | recall commands | TeleToLifestone 0x0063, TeleToMarketPlace 0x028D | | S | DoD 11 |
-| public property updates | 0x02D2, 0x02D4, 0x02D5, 0x02D6 | a lock stays stale | S | DoD 11 |
+| public property updates | 0x02D0, 0x02D2, 0x02D4, 0x02D6, 0x02D8 (0x02D5 is private and never sent) | a lock stays stale | S | DoD 11 (decoded in item 6: the five, and private 0x02D1, 0x02D7, 0x02D9, 0x02DB) |
 | examine everything | QueryItemMana, SetInscription | only from the pack and paperdoll | M | M6 |
 | books, journal, contracts, map | 10 + 3 messages | pages Not in M3 | M each | M6 |
 | crafting, tinkering, salvage | SalvageOperationsResult, CreateTinkeringTool | no use-on-target mode, no salvage window | M-L | M6 and the crafting bots |
@@ -510,7 +539,8 @@ login. The plan is written on the branch `m4/hero-visual-bugs` (docs/milestones/
 (one slice: a `PhysicsObj` per server object with collision, made on create, moved with `ForceIntoCell`, ethereal with
 its state, removed on delete), doors in the journeys (one slice: a closed door blocks the planner, a leg uses it and
 waits for the ethereal state), and the transitions for server objects (a larger item: the avatar body's step runs a
-transition through its host object, measured against the 50 ms frame rule before it lands). The physics side is built
+transition through its host object; mandatory in M5, m5-plan.md D45: its cost per frame is measured against the 50 ms
+frame rule, and an excess is made cheaper, not cut). The physics side is built
 (the shadows, retail's object-collision rules, doors' BSPs posed when they move, `SetEthereal` with its overlap retry).
 
 ## 6. Decisions
@@ -539,24 +569,46 @@ Lifestone Tools), D41 (the fighters' retail magic gear), D44-D46 (fresh journey 
 
 ## 7. Status
 
-Planned 2026-10-25 (m5-plan.md §0). Item 0 done 2026-10-25 (its row below); item 1 next. The audit table below is filled by the end item, one row per DoD item,
-with the verdict (met, met with named gaps, not met) and the evidence (tests, loopback classes, stations and cycles,
-frames, the soak's numbers).
+Planned 2026-10-25 (m5-plan.md §0). Items 0 and 1 done 2026-10-25 and 2026-10-26, item 6 done 2026-10-26 beside item 1, item 2 done 2026-10-27, items 3, 4 and 5 done 2026-10-28 (items 4 and 5 side by side, D54), item 7 done 2026-10-31; checkpoint 2 answered 2026-10-28 (go, D54) and checkpoint 3 answered the same day (go, D85). Item 8, "The end", done 2026-10-31 (M5 complete): this table is its doc pass, written from three read-only reviews of the audit and a pass over M4's rows placed in M5 (m5-plan.md §9, "At M5's end (item 8)"); the hero video and the private push are the lead's (m5-plan.md §8, item 8). The table has one row per DoD item, with the verdict (met, met with named gaps, not met) and the evidence (tests, loopback classes, stations and cycles, frames, the soak's numbers); the figures of items 0 to 7 are as run in m5-plan.md §8.
 
 | DoD | Verdict | Evidence |
 |---|---|---|
-| 1 The measuring run and the two live bugs | met with named gaps | m5-plan.md §8 item 0: the measures ([M], [D], [S]; the loot value, `ComponentLoss` below VII and the travel formulas open); `ObjectCullTests`, `ObjectCullCellsTests` (the den's PVS on the dats), `NavRunnerTests` (one waypoint), `LegFaultGuardTests`, `GodotErrorTallyTests`, `SoakLineTests`; the gate's `godot_errors=0` on all 12 Godot rows (D19); the cull's fields report-only; the archer's hunt flake (D28) |
-| 2 The outcome-aware caster | | |
-| 3 Mana inside the fight | | |
-| 4 The hunting-ground profile | | |
-| 5 The whole den | | |
-| 6 The mage's logistics, cheat-free | | |
-| 7 Death inside the loop | | |
-| 8 The outer loop | | |
-| 9 The dial | | |
-| 10 A solid world | | |
-| 11 Retail for the person at the keys | | |
-| 12 Window sizes | | |
-| 13 The 24-hour run | | |
-| 14 Tests, gates and frame time | | |
-| 15 The end | | |
+| 1 The measuring run and the two live bugs | met with named gaps | m5-plan.md §8 item 0: the measures ([M], [D], [S]); the loot value and `ComponentLoss` below VII were measured in item 3 (`DenLoot` and `ComponentLossVi`, closing `m5-den-loot-value` and `m5-component-loss-vi`); `ObjectCullTests`, `ObjectCullCellsTests` (the den's PVS on the dats), `ObjectOrphanTests` (item 7's P7d: a deleted object's contents leave with it, as retail), `NavRunnerTests` (one waypoint), `LegFaultGuardTests`, `GodotErrorTallyTests`, `SoakLineTests`; the gate's `godot_errors=0` on all 12 Godot rows (D19) and judged 0 at every gate since, and the long run's `godot_errors 0` over 606 minutes (item 7); the cull's fields report-only; the archer's thin forest (D28) closed by item 2 (`m5-hunt-band-empty`; the archer journey passed 10 of 10 at item 2's round 1 and at item 7's last gate); gaps named: `m6-travel-spell-formulas` (new: the trips use the recalls, so the travel spells' formulas stayed unread), `m5-ring-pull` (new: item 0's Ring of Fire pull, which had no name; F9's picker chooses the ring by situation but builds no pull, and `m5-war-pick-radius` is its open sibling), `m5-object-cull-cells` (the replayer's cull has no cells; M6), `m5-soakline-alloc-flake` (M6) |
+| 2 The outcome-aware caster | met | m5-plan.md §8 item 1: `CastAttemptTests` (every rule row and preset, D14, busy waits and resends, the dance, the tries, the kill switch, dry run, the chat-line proof, and item 7's D141 pre-checks), the callers' tests unchanged under the presets (the D14 and busy changes named), `CastAdoptionTests`, `KillSwitchCastTests`; every automated cast `Automation` (D13); live `KillSwitchBuffLiveTests` twice (the spec's `RebuffLiveTests` and `--kill-switch-at` were never built; this class stands in) and the gate's three journeys with `fizzles=` within each bound (round 2; read by eye, no judge reads it) |
+| 3 Mana inside the fight | met (`mana_wait_max_s<=10` judged from item 2's gate) | `ManaConversionModelTests` (item 0's landing table, exact), `ManaOrderTests`, `FightManaTests` (the order, the floor, the spacing); the options `--cast-mana-tries` (0 restores the ceiling), `--cast-mana-try-chance`, `--cast-mana-try-spacing-s`, `--cast-mana-dance-presses`; live `FightDance` (30 min at VII from 9 mana: `mana_wait_max_s=0`, 11 tries, 2 dances; 68 kills an hour whole and 240 burst against item 0's 68 and about 250) and `FightDanceVi`; the gate's den-fight station `mana_wait_max_s=0`. Item 7 amended the order (D88, F5): the mana runs down to the floor, then Stamina to Mana and Revitalize keep the stamina near full (`--fight-stamina-full`, default 90; the F5 rows of `FightManaTests`; `revitalizes=` and `stamina_min=` report-only), and the bolt level is chosen by `FightPicker` since F10 (D90); item 7's last gate ran the mage journey 12 of 12 with the judge. One allocation flake named: `m5-manaorder-alloc-flake` (M6) |
+| 4 The hunting-ground profile | met with named gaps | m5-plan.md §8 item 2: `HuntingGround` and `GroundCatalog` (embedded JSON; a missing, unknown or out-of-range field fails at load naming the file and the path), `HuntingGroundTests` (the den's profile equals the constants it replaced), `HuntingGroundDatTests` over the four profiles (the den, the belt, the forest, Tusker Temple), the draft builder `GroundDraft` (`GroundDraftTownTests`; the lead-run `GroundDraftRunTests`, `Tier=Tool`); D46's proof, Tusker Temple written as data only with no source edit; live, the melee journey's hunt on the belt's profile 9 of 9 (round 2; item 7's last gate 9 of 9 after P7u) and the archer's on the forest's 10 of 10 (round 1; item 7's last gate 10 of 10); `ground-plan-gap` is built as the load refusal (`GroundCatalog`); gaps named (M6): `m6-ground-fields`, `m6-ground-live-facts` (the den's vendors were walked live in item 7, D120, Renald's sales in the long run; Thelnoth's and the second dungeon's stay), the `ground-draft-*` rows, `ground-multi-landblock` with `cross-landblock-rooms`, `ground-plan-family`, `m5-2-fidelity-citations`, `m5-2-walkable-record` |
+| 5 The whole den | met with named gaps (`storeys_visited>=2 basement_entries=0` judged from item 3's gate) | `DenRoomGraphTests` as per-ground theories (every slot reached from the arrival, every no-go cell refused, the storeys joined, the ramp walks), `IndoorSteeringTests` and `IndoorRunThroughDatTests` (a den leg turns 0.127 to 0.136 times a metre against the 0.25 limit; it walks 4% of its metres, was 94%), `IndoorCreatureLayerTests`, `GroundRulesTests`, `RespawnScheduleTests`, `GroundTourTests`, `GroundTourPurposeTests` (D47); live, the 30-minute read 224 kills an hour over five storeys with two timed returns and no pacing (round 3), the journey's den-fight station `storeys_visited=2 basement_entries=0`, the owner's eye on the den frames (rounds 2-4, `cache/m5/2/gate-r4/lower-*.png`); the creatures' overlap (D45) was met by item 5 (DoD 10); item 7 made the mage fight back an attacker it avoids (F4, D88) and step out of a no-go cell for one (P7s, closing `m5-8-no-go-attacker`); gaps named: `ground-slot-dead-at-start` (narrowed) and `ground-respawn-unseen` (M6), `m5-avoid-creature-reach` (the reach margin as a profile value; M6), `m5-splash-kill-respawn` (splash kills are not fed to the respawn schedule) and `room-route-doorway-zigzag` (room routes zigzag in thin doorway cells; both new, M6), `m5-indoorsteering-alloc-flake` (new, M6) |
+| 6 The mage's logistics, cheat-free | met with named gaps (the cycle's `granted=0 places=0` judged from item 4's gate; `sold>=1` met live in item 7's long run with looting on; two owner exceptions named) | m5-plan.md §8 item 3 and item 7: the profiles' `supplies` section (D48, D49; D148's floor: a carried-only scarab the bolts or buffs need stops the run at its floor with the keys unlocked, and the Silver Scarab is bought from Cindrue; `LogisticsCountersTests` with its floor-only cases), `MageKitTests` (the vendor robe and wand, the four foci, the stock and the purse over both dungeon profiles), `MageLootRulesTests` (the den's floors, 4,000 payout, 60 value per burden, 150 burden, F29; D149's heavy finds) and the loot step behind `--fight-loot` (default off, D38), `ResupplyStationTests`, `ResupplyRouteDatTests` and `ResupplyLearnTests`, `XpSpendRuleTests`, `LogisticsStationTests`, `GrantsCountedTests` (every mod verb counted at one seam), `P1PlacesTests` (the tie in the build, D50), `GearScenarioTests`, `KitWiredTests` and `HarmHealScriptTests` (no automated cast the kit cannot pay for); live, the mage journey's forced trip (item 7's last gate: `granted=0 places=0 loot=off sold=0 bought=39 spent_xp=167575650 raises=12`), item 7's long run (606 minutes: 13 trips, `sold=452 bought=5543 spent_xp=57584969 granted=0 places=0`; Spirit Drinker IV's scroll bought and learned by play, D143), the lead's `ComponentLossVi` (0.8 tapers a cast at VI) and `DenLoot` (211 kills and about 318,000 pyreals of sellable loot an hour). *Looting:* the soak has looted since item 7's F28 (61e79e75), which made `tools/soak.ps1` pass `--fight-loot=on`; D95 and D96 (the owner's loot rules of 2026-10-28) assume it; no decision amends D38, so the option's default stays off and the gate's journeys still read `loot=off sold=0`. *Owner exceptions, said plainly:* 10 Diamond Scarabs were granted before the long run by a separate headless `--gear-grant-only=7299:10` (D146; the run's `granted=0` does not count it, and by play alone the ring would have stopped the run at its first burn); BSD Mage's old den corpses were rotted once before round 9 (D98's `@lifestone corpses rot`, a mod verb after the build, the owner's call). Closed since the first draft: `m5-loot-no-walk` (F27), `m5-loot-floor-measure` (F29), `m5-8-unsold-component-floor` (P7s); gaps named: `m5-fighter-grants` (M6, D55; the melee journey still reads `granted=1 places=1`), `m5-level-floor-check-cost`, `m6-carried-scarab-restock` (D148's amendment), `m5-loot-walk-for-los` (new: a corpse out of sight is skipped, not walked to), `m6-ground-live-facts` (all M6) |
+| 7 Death inside the loop | met with named gaps (`deaths=1 corpse_recovered=yes vitae_grants=0 rebuffed=yes` judged from item 4's gate) | `DeathHandlerTests` over the scripted ACE on both dungeon profiles (the order, the rearm D53 from the pack and by a bought wand, another caster in the wand's slot, a rotted corpse, a second death before the trip, a third death (F19), the trip's aborts by name), the grants removed from every host (d2, d3: the vitae grant, the regear, the decoys; 106 tests of the removed paths deleted, each named), `DeathDecoyOptionsTests` (the refusal); live, the journey's scripted death (round 4: the wand and the Training Wand both dropped, `rearm=bought` for 270 pyreals, `corpse_recovered=yes route=recall items_back=8 vitae_grants=0 relines=2`; round 3 `rearm=pack items_back=6`), the frames of the corpse and the vitae panel; the autopilot's scripted death and an unscripted death are handled in the loop (item 4's round 2). *Item 7:* the last gate's mage journey and autopilot lane each read `deaths=1 corpse_recovered=yes route=recall items_back=8 vitae_grants=0 rebuffed=yes relines=2 rearm=pack` (P7o: the vitals guard stands down for the scripted death, and the lie-down is checked); the long run had 0 deaths in 606 minutes, so it exercised none; the den never retreats at level 80 (D91). The vitae's clearing by earned experience is ACE's rule and no run read it clear (only `vitae_grants=0` is evidenced). Gaps named (M6): `m5-death-rearm-standalone` (the standalone leg only), `m5-death-tally-resume` (`DeathTally.cs` is untouched since M4), `m5-fight-death-midrun` (the retreat rule for grounds other than the den) |
+| 8 The outer loop | met with named gaps (`cycles>=2 reconnects=0` report-only in its first gate, `cycles>=2` judged from item 7's gate and passed: `cycles=2`; the reconnect is not met live) | m5-plan.md §8 item 4: `AutopilotScenario`, one state machine over the journey's own stations (D57): the known state, buff, travel, the open-ended fight with its external stop, upkeep (`buff-margin`, `health-floor`), the trip (forced or by the counters), death (scripted and unscripted, entered again when cut), stopped; the checkpoint (`AutopilotCheckpoint`: the counts, the budget, the character's guid and a run tag, written on every state change and every 60 s; the world decides the state), the watchdogs and the recoveries (a recall home and the known state, bounded per cycle; the fight's bound from the ground's respawn schedule), the reconnect (5 tries, 230 s, over ACE's 60 s drop), the stop rules (`--autopilot-minutes`, `--autopilot-level`, and since D145 a typed `/stop`), the cycle and done lines of §5.5; `AutopilotTests`, `AutopilotResumeTests` (a restart that resumes, a drop that reconnects through the reducer's reset, a drop during the death and the trip, a failure recovered), the hosts (`--scenario=autopilot`, `--login-check=autopilot`, the play host); live, the gate's autopilot lane (item 4's round 2: 30 minutes, `ok=yes cycles=2 kills=89 deaths=1 trips=1 bought=58 granted=0 places=0 interrupted=1 resumed=1 reconnects=0 godot_errors=0`; item 7's last gate `ok=yes cycles=2 kills=64 deaths=1 trips=1 interrupted=1 resumed=1 reconnects=0`). *Item 7:* the long run, 606 minutes on its own: `ok=yes stop=minutes cycles=13 kills=1910 deaths=0 trips=13 reconnects=0 godot_errors=0`, working set at most 1.97 GB; a carried scarab at its floor stops the run safely with the keys unlocked (D148). Gaps named: the reconnect not met live (the long run read `reconnects=0`; `m5-autopilot-ui-reconnect`, M6), `m5-death-tally-resume`, `m5-fight-death-midrun`'s retreat rule (M6); `m5-autopilot-vitae-panel` and `m5-autopilot-start` closed by item 7 s1 |
+| 9 The dial | met with named gaps, through the owner's D145: `/stop` and `/auto` typed in the chat replace Num Lock and the movement-key hand-off of the spec | m5-plan.md §8 items 4 and 7: the dial is two chat commands since D145 (the owner retired Num Lock and D98's key hand-off). `/stop` stops him where he stands, cancels every queued automation action, releases every held key and unlocks the movement keys; `/auto` re-reads every state a fight needs from the live state, fixes each gap by its named recovery, says so in chat and resumes; while the bot runs the movement keys do nothing (`HumanKeyLock`, with a rate-limited chat notice); any stop the bot makes itself unlocks them with the reason. The tools panel's Autopilot button (a placeholder retail never had) types the same commands; the kill switch withdraws every queued automated action within a tick, the loop's loot, vendor, corpse and wield sends included (F2); the inspector (Scroll Lock) shows the state, the last decision and the next trigger; the auto-buff driver stands down while the autopilot runs. Tests: `MovementKeyLockTests`, `ChatCommandsTests` (both commands are client commands, never sent), `AutopilotHostTests` (`.Controls`, `.Drill`), `AutopilotFullAuditTests`, `LifestoneHotkeysTests` (Num Lock only shows a hint line), the hunt's `HuntScenarioTests.KillSwitch`; live, item 7's take-over drill (2026-10-30 13:40 to 14:11 UTC: steps a to d3 pass, frames inspected), the owner's own hand-off in the long run (21:10:20 W swallowed with the notice, 21:10:26 /stop mid-fight, 21:17:35 /auto: home, kit ok, buffed 25 of 25, fighting again at 21:18:59; `interrupted=1 resumed=1`), and the last gate's autopilot lane typing /stop and /auto (`interrupted=1 resumed=1`). The spec's key beside Pause and the movement keys' interrupt are not met as written; D145 is the owner's change. Closed: `m5-autopilot-interrupt-queue` (`/stop` cancels the queue), `m5-autopilot-lead-handoff` (the owner's hand-off), `m5-autopilot-start` (item 7 s1); gaps named (M6): `m5-7-chat-controls-robust` (the owner: more robust commands next milestone), `m5-autopilot-ui-reconnect` |
+| 10 A solid world | met with named gaps (`door_opened=` judged from item 7's gate and passed) | m5-plan.md §8 item 5: `ServerObjectPhysicsTests` (a closed door stops the walker, an Ethereal one does not, a lifestone's sphere stops it, an NPC's cylinder moves with it, the world's tables restored on delete, 0 bytes for a standing crowd), `ServerObjectTransitionTests` (two creatures pressed to one point end apart, 2.1-2.6 m; a tusker stops at the lifestone and at the player; 20 tuskers reported at 0.67-0.83 ms a frame, not asserted), `ServerObjectIndoorTests` (the den: a portal crossing ends in the next cell, a ramp ends on the floor), `ObjectTableFeedTests`, `DoorLegTests`, `DoorHostTests`, `ServerObjectRouteTests` (the whole chain: through Renald's closed door, past an NPC and a tusker), `LifestonePlacementTests` (2.22 m out, ACE's spot), `InterpolationRateTests` (D74), `F6RenaldMoveToDatTests`; live round 3: the melee journey's `vendor` and `vendor-facts` `door_opened=yes` (Renald's door opened on screen), both journeys' recall-home `stepped_off=no`, the den fight's `creature_jumps=62 creature_flips=0 transit_ms_max=0.72` in 108 s (28 in 81 s before item 5), every tusker on its own spot in the den frames. *Item 7's last gate:* the melee journey's vendor `door_opened=yes`, the mage journey's recall-home `stepped_off=no` twice, the den fight `creature_jumps=7 creature_flips=0 transit_ms_max=0.25`. Gaps named: `m5-den-creature-blips` (item 8, the owner's call left there by D85), `m5-remote-contact`, `m5-missile-transitions`, `m5-moveto-stuck` (still a loud TODO in the controller; P7p added the reopen after a stuck MoveTo), `door-locked-unknown`, `door-locked-behind`, `door-locked-replan` (M6) |
+| 11 Retail for the person at the keys | met with named gaps | m5-plan.md §8 item 6: the wire codec tests from ACE's writers (`ConfirmationAndLoginNoticeCodecTests`, `PropertyUpdateCodecTests`, `CharacterActionWriterTests`), `RetailTrancheReducerTests` and `RetailTrancheActionTests`, the panels' tests (`ServerConfirmationTests`, `GameOptionsTests`, `ScreenLayoutStoreTests`, `SpellBarEditTests`, `CombatMapKeysTests`, `ChatCommandsTests`), `StandInRetail6Tests` and the `PlayChecks.Retail6` play-checks; live, the keep leg (`options_kept=yes layout_kept=yes`) and `KeyChestLiveTests` (a chest unlocked by its key reads unlocked; a live question answered No); item 7 added `/stop` and `/auto` as client chat commands (D145; `ChatCommandsTests`, `MovementKeyLockTests`); gaps named: most options' client-side effects (`g6-option-effects`), the chat channels (`g4-chat-channels`, M6), `m5-6-abort-no-unverified`, `m5-6-headless-confirm-reply` |
+| 12 Window sizes | met with named gaps | `-AllSizes` (a switch of `smoke.ps1` and `slice-check.ps1`, not a game option) runs the shell frames and the play-checks at 800x600, 1280x720 and 1920x1080: report-only in item 6's gate (200 of 200 at each, 10 frames at each), judged from item 7's, D36: the item-end check passed 220 of 220 at each size, frame time judged at 800x600 only; the camera follows a resize (`RetailLensSizeTests`); the owner's 1280x720 den frame (m5-plan.md §8 item 6); the soak at 1280x720 (round 13 and the long run, item 7); gaps named: `cam-fov-resize-tunnel`, `uicheck-hidpi-split` (M6); `m5-6-allsizes-flake` was not seen in item 7's runs (closed unless it returns) |
+| 13 The overnight run (D54) | met with named gaps (report-only, D54) | m5-plan.md §8 item 7: round 13, the night (2026-10-29 19:13 to 2026-10-30 03:07 UTC, two runs, 1,413 kills, 0 deaths, 7 trips; run 1 stopped by the owner's key after a 64 s stall and run 2 by a failure, `stop=failed`, both fixed in item 7's polish); the long run (2026-10-30 14:37 to 2026-10-31 00:45 UTC, 606 minutes, m5/7 8f7b5e8a, 1280x720, `--max-fps=60`, recorded by D97 where the DoD says recording off): `done ok=yes stop=minutes`, 13 cycles all accounted for, 1,910 kills, 0 deaths, 13 trips, the owner's hand-off by /stop and /auto (`interrupted=1 resumed=1`); working set 19.32 MB an hour after the first hour (at most 1,969.8 MB); `objects_max=257 in_cell_max=109`; `light_rows_max=18` (under 256); `godot_errors=0`; `reconnects=0`; p99 frame 16.67 ms in the first hour and the last (under the 60 fps cap, so it reads the cap); 3 log files, 44.32 MB, 2 rolls; the outside loop 122 rows (Godot 1,961 MB, ACE 1,032 MB, MariaDB 196 MB, free disk 549 GB at the least); 40 frames at 1280x720 every 15 minutes (the DoD says 800x600 every 30). 10 Diamond Scarabs were granted by the owner's exception (D146), so the run was not cheat-free on that item. Gaps named: the reconnect not met live (`m5-autopilot-ui-reconnect`), the working set against the 400 MB target (`m5-memory-soak`, M6), the objects' bound undefined (the docs set no number), and master's later fixes (P7o to P7v, the GC heap setting, D153, D154) were not soaked |
+| 14 Tests, gates and frame time | met with named gaps | green `slice-check` at every slice; the default test floor 9,238 to 11,674 and Exhaustive 736 to 775, lowered only for item 3's 106 named deletions (m5-plan.md §8); the live gate's lanes and the autopilot lane after the mage's journey (item 7's end: item-end-2 and item-end-3-r2, then the login checks alone after D151's GC fix, then the item-end check at three sizes); the frame judge solo for the deciding runs; item 7's new fields (`openers= picks= defended= revitalizes= stamina_min= drains= heals= health_min=`) report-only in their first gate. Gaps named: Exhaustive was not rerun at item 7's end (item 8's gate G-A reruns it), the flakes (§9) are not explained by the soak and are re-placed to M6's Timing tier |
+| 15 The end | met with named gaps | Item 8's doc pass: this table from the cluster reviews, section 9's closures and re-placements and its "At M5's end (item 8)" table (the M4 rows placed in M5, and the code TODOs that never reached it), `docs/session.md` and the README on `/stop` and `/auto` (D145), the `docs/automation-vision.md` "as built" notes, and M6's seed list of hunting grounds (§7.1); the three item-8 rows done (the world wait, the step-around, the four-frame player build) and the gate green in one round (m5-plan.md §8, item 8). The hero video: 26.0 s, no text on screen, sound in sync (0 ms measured), from a fresh 20-minute take (D158). Gaps named: none of DoD 15's |
+
+### 7.1 M6's seed list of hunting grounds (D11; item 8)
+
+Drawn from the knowledge corpus and this server's world data by read-only research (2026-10-27 to 2026-10-30; the
+notes are gitignored under `cache/m6/`); every fact here is a game fact, not corpus text. The ladder's rungs are the
+owner's confirmed list (M6's draft); the level-80 alternatives are ranked by XP a full clear with the respawn read from
+the generators. Each becomes a `HuntingGround` profile through `GroundDraft` and passes `HuntingGroundDatTests` before
+any live run (D46).
+
+| Band | Ground (landblock) | Targets | Element | Respawn | M6's use |
+|---|---|---|---|---|---|
+| 1-5 | the Training Academy and the Pathwarden chest | the Academy's own | | | the start (a quest) |
+| 5-15 | Holtburg's outskirts, the Redoubt, the Low B belt (M4's profile) | rabbits, drudges, mites | | | the first rungs |
+| 15-30 | Tusker Burrow, Lodge and Cave (the Facility Hub) | Female, Male and Goldenback tuskers | fire | | the tusker spine |
+| 30-40 | Tusker Cave, the Low North Forest Mix (M4's profile) | | fire | | |
+| 40-55 | Hills Citadel, alternating with Tusker Abode, Habitat and Quarters | Gotrok; Tusker Minions, Tuskie Throwers | lightning; fire | | the second element |
+| 55-70 | Tusker Barracks; Mountain Keep (0x01D2) as the alternation | Tuskie Launchers (60); 130 Dread Mu-miyah (60, 200 health, no spells) | fire | Mountain Keep 3 min | the long band's two grounds |
+| 70-80+ | Phyntos Menace (0x0143), via Stonehold | 166 White Phyntos Wasps (80, 238 health), 8 Harrower Grievvers (100) | slash; fire with the Atlan wand | 3 min | the level-80 alternation and BSD Mage's next ground (a model: about 6.9 M XP an hour today against the den's 5.5 M) |
+| 80+ | the Black Spawn Den (0x0105), the Tusker Temple (M5's profiles) | tuskers | fire | 15 min | home |
+| 80-100 | Crater Caves Dungeon (0x019A) | Nubilous and Magma Golems (80, 100), Embers, Cursed Wisps | cold (fire-proof) | 3 min | the Atlan wand's hunt (a frost plan) |
+| later | Blighted Disgusting Moarsman Tunnels (0x00C2); Hidden City (0x02D6); Secured Vault Sewers (0x000D); the level-100 golem grounds | Moarsmen (80); Vile Ruschk and Cursed Bones (80); a level-100 mix | fire; mixed | 1-13 min | M7 (no-tie routes, two elements, or level 100) |
+| never a rung | the Olthoi Horde Nest | olthoi | | | completion only (the owner) |
+
+The rates are models from item 7's measured 19.6 s a tusker kill, not measurements; M6 measures each ground live.

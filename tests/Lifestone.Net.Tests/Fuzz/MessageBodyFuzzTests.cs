@@ -42,7 +42,7 @@ public sealed class MessageBodyFuzzTests
         AceWireWriters.PlayerCreate(0x50000001),
         AceWireWriters.CharacterLogOff(),
         AceWireWriters.ServerMessage("#lifestone/1 status", 0),
-        AceWireWriters.GameEvent(0x50000001, 3, 0x0029, [1, 2, 3, 4, 5, 6, 7, 8]),
+        AceWireWriters.GameEvent(0x50000001, 3, 0x0314, [1, 2, 3, 4, 5, 6, 7, 8]),  // ContractTrackerTable: an undecoded event
 
         // World (N7).
         AceWireWriters.ObjectCreate(Messages.World.CreateObjectCodecTests.Player),

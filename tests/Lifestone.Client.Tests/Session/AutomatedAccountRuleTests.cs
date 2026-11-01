@@ -152,6 +152,7 @@ public sealed class AutomatedAccountRuleTests
         Assert.DoesNotContain(TestAccounts.Tools, wrong!, StringComparison.Ordinal);
 
         Assert.True(AutomatedAccountRule.TryLoginCheck(TestAccounts.Tools, LoginCheckKind.Throwaway, out _));
+        Assert.True(AutomatedAccountRule.TryLoginCheck(TestAccounts.Tools, LoginCheckKind.Keep, out _)); // M5 6 k2: the keep check enters Lifestone Throwaway twice
         foreach (var kind in new[] { LoginCheckKind.Enter, LoginCheckKind.AcademyExit, LoginCheckKind.HoltburgLaps, LoginCheckKind.All })
         {
             Assert.False(AutomatedAccountRule.TryLoginCheck(TestAccounts.Tools, kind, out _), kind.ToString()); // they create Lifestone Smoke
@@ -161,6 +162,8 @@ public sealed class AutomatedAccountRuleTests
         {
             Assert.False(AutomatedAccountRule.TryLoginCheck(account, LoginCheckKind.Throwaway, out var refusal), account);
             Assert.False(string.IsNullOrEmpty(refusal));
+            Assert.False(AutomatedAccountRule.TryLoginCheck(account, LoginCheckKind.Keep, out var keepRefusal), account);
+            Assert.False(string.IsNullOrEmpty(keepRefusal));
             Assert.False(AutomatedAccountRule.TryCharacters(account, "Lifestone Throwaway", null, out _));
             Assert.False(AutomatedAccountRule.TryCharacters(account, null, "lifestone throwaway", out _));
         }
@@ -177,7 +180,7 @@ public sealed class AutomatedAccountRuleTests
     {
         foreach (var account in new[] { TestAccounts.Melee, TestAccounts.Archer })
         {
-            foreach (var kind in new[] { LoginCheckKind.Enter, LoginCheckKind.AcademyExit, LoginCheckKind.HoltburgLaps, LoginCheckKind.All, LoginCheckKind.Throwaway })
+            foreach (var kind in new[] { LoginCheckKind.Enter, LoginCheckKind.AcademyExit, LoginCheckKind.HoltburgLaps, LoginCheckKind.All, LoginCheckKind.Throwaway, LoginCheckKind.Keep })
             {
                 Assert.False(AutomatedAccountRule.TryLoginCheck(account, kind, out var refusal), kind.ToString());
                 Assert.False(string.IsNullOrEmpty(refusal));
@@ -189,7 +192,7 @@ public sealed class AutomatedAccountRuleTests
             Assert.True(AutomatedAccountRule.TryLoginCheck(account, LoginCheckKind.None, out _));
         }
 
-        foreach (var kind in Enum.GetValues<LoginCheckKind>().Where(k => k != LoginCheckKind.Throwaway))
+        foreach (var kind in Enum.GetValues<LoginCheckKind>().Where(k => k is not (LoginCheckKind.Throwaway or LoginCheckKind.Keep)))
         {
             Assert.True(AutomatedAccountRule.TryLoginCheck(TestAccounts.Test, kind, out _), kind.ToString());
         }

@@ -51,7 +51,7 @@ internal abstract class ActionTracker
     internal ActionLane Lane { get; }
 
     /// <summary>How long after sending it may wait for its confirmation.</summary>
-    internal double TimeoutSeconds { get; }
+    internal double TimeoutSeconds { get; private protected set; }
 
     /// <summary>Where the tracker is.</summary>
     internal TrackerState State { get; set; }
@@ -85,6 +85,50 @@ internal abstract class ActionTracker
     /// go now, or null.
     /// </summary>
     internal virtual string? Refusal(ActionApi api) => null;
+
+    /// <summary>
+    /// M5 7 D141: the action was accepted (queued, or about to go now): a tracker notes what its before-check compares with at its turn, such as whether the object it names is in the
+    /// object table now (<see cref="TargetGone"/>).
+    /// </summary>
+    internal virtual void Accepted(ActionApi api)
+    {
+    }
+
+    /// <summary>
+    /// M5 7 D141: the before-check of an action that names an object: <paramref name="guid"/> was in the object table when the action was accepted (<paramref name="seen"/>) and is not
+    /// now (a corpse that rotted, a creature that died or left), so the server would answer NoObject or TargetNotAcquired: the refusal text, else null. An object never seen is not
+    /// refused (the client's table is not the server's: the server judges it).
+    /// </summary>
+    protected string? TargetGone(ActionApi api, uint guid, bool seen, string what) =>
+        seen && guid != 0 && guid != api.State.Self.Guid && !api.State.Objects.TryGet(guid, out _)
+            ? Refuse(ActionReason.TargetGone, "the " + what + " " + ActionText.Hex(guid) + " is gone: it was in the object table when the action was asked and is not now")
+            : null;
+
+    /// <summary>M5 7 D141: the typed reason of the last <see cref="Refusal"/> (set by <see cref="Refuse"/>), or <see cref="ActionReason.None"/>.</summary>
+    internal ActionReason RefusalReason { get; private set; }
+
+    /// <summary>
+    /// M5 7 D141 ("check before"): the precondition with its typed reason. Runs <see cref="Refusal"/> and returns its text; <see cref="RefusalReason"/> is the reason the tracker named
+    /// (<see cref="Refuse"/>), else <see cref="ActionReason.NotInWorld"/> for the in-world refusal every tracker shares, else none. The Action API asks this, never <see cref="Refusal"/> directly.
+    /// </summary>
+    internal string? CheckRefusal(ActionApi api)
+    {
+        RefusalReason = ActionReason.None;
+        var refusal = Refusal(api);
+        if (refusal is not null && RefusalReason == ActionReason.None && refusal == Trackers.WorldTrackers.NotInWorld(api))
+        {
+            RefusalReason = ActionReason.NotInWorld;
+        }
+
+        return refusal;
+    }
+
+    /// <summary>M5 7 D141: a <see cref="Refusal"/> that names its reason: records <paramref name="reason"/> for <see cref="CheckRefusal"/> and returns <paramref name="detail"/>.</summary>
+    protected string Refuse(ActionReason reason, string detail)
+    {
+        RefusalReason = reason;
+        return detail;
+    }
 
     /// <summary>
     /// Why the action, which the precondition accepted, must still wait in its lane (its turn has come but what it needs has not): null when it may go. Asked at each dispatch after <see cref="Refusal"/>, so a change

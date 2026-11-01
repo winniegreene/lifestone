@@ -291,4 +291,69 @@ public sealed class WorldSendTests
         Assert.Equal(SessionPhase.InWorld, rig.Session.Phase);
         Assert.Empty(rig.Log.At(NetLogLevel.Error));
     }
+
+    /// <summary>
+    /// M5 6 w2: the seven sends of the first retail tranche go out on the weenie queue with the next action sequences, in ACE's layouts (slice w1's writers):
+    /// 0x0275 {type, context, accepted}, 0x01A1 {flags 0x60, options1, an empty bar, filters, options2}, 0x0063 and 0x028D with no payload, 0x01DF and 0x0010 a padded
+    /// String16L, 0x000F {afk}.
+    /// </summary>
+    [Fact]
+    public void The_retail_tranche_sends_reach_the_server_as_the_ACE_layouts_on_the_weenie_queue()
+    {
+        using var rig = new SessionRig();
+        rig.ToWorld();
+        var block = new CharacterOptionsBlock(0x50C4A54Au, 0x00948700u, 0x3FFFu, [], [[]], []);
+
+        var tickets = new[]
+        {
+            rig.Session.SendConfirmationResponse(7, 0x11, accepted: true),
+            rig.Session.SendSetCharacterOptions(block),
+            rig.Session.SendTeleToLifestone(),
+            rig.Session.SendTeleToMarketPlace(),
+            rig.Session.SendEmote("waves"),
+            rig.Session.SendSetAfkMessage("brb"),
+            rig.Session.SendSetAfkMode(true),
+        };
+        rig.RunFor(TimeSpan.FromMilliseconds(200));
+
+        var actions = rig.Tap.Messages.Where(m => m.Direction == MessageDirection.Outbound && BitConverter.ToUInt32(m.Body) == MessageOpcodes.GameAction).ToList();
+        Assert.Equal(7, actions.Count);
+        Assert.All(actions, a => Assert.Equal(MessageQueue.Weenie, a.Queue));
+        Assert.Equal(Enumerable.Range(1, 7).Select(i => (uint)i), actions.Select(a => BitConverter.ToUInt32(a.Body, 4)));
+        Assert.Equal(new uint[] { 0x0275, 0x01A1, 0x0063, 0x028D, 0x01DF, 0x0010, 0x000F }, actions.Select(a => BitConverter.ToUInt32(a.Body, 8)));
+        Assert.Equal(new[] { 24, 32, 12, 12, 20, 20, 16 }, actions.Select(a => a.Body.Length));
+        Assert.Equal((7u, 0x11u, 1u), (BitConverter.ToUInt32(actions[0].Body, 12), BitConverter.ToUInt32(actions[0].Body, 16), BitConverter.ToUInt32(actions[0].Body, 20)));
+        Assert.Equal(
+            new uint[] { 0x60, 0x50C4A54A, 0, 0x3FFF, 0x00948700 },
+            Enumerable.Range(0, 5).Select(i => BitConverter.ToUInt32(actions[1].Body, 12 + (4 * i))));
+        Assert.Equal((ushort)5, BitConverter.ToUInt16(actions[4].Body, 12));
+        Assert.Equal("waves", System.Text.Encoding.ASCII.GetString(actions[4].Body, 14, 5));
+        Assert.Equal("brb", System.Text.Encoding.ASCII.GetString(actions[5].Body, 14, 3));
+        Assert.Equal(1u, BitConverter.ToUInt32(actions[6].Body, 12));
+        Assert.Equal(tickets.Select(t => t.MessageSequence), actions.Select(a => a.Sequence));
+    }
+
+    /// <summary>M5 6 w2: each of the seven refuses a session outside the world and sends nothing.</summary>
+    [Fact]
+    public void The_retail_tranche_sends_refuse_a_session_outside_the_world()
+    {
+        using var rig = new SessionRig();
+        rig.ToCharacterSelect();
+        var sent = rig.Tap.Outbound.Count();
+        var block = new CharacterOptionsBlock(0, 0, 0, [], [[]], []);
+
+        Action[] sends =
+        [
+            () => rig.Session.SendConfirmationResponse(7, 1, accepted: false),
+            () => rig.Session.SendSetCharacterOptions(block),
+            () => rig.Session.SendTeleToLifestone(),
+            () => rig.Session.SendTeleToMarketPlace(),
+            () => rig.Session.SendEmote("waves"),
+            () => rig.Session.SendSetAfkMode(false),
+            () => rig.Session.SendSetAfkMessage("brb"),
+        ];
+
+        Assert.All(sends, s => Assert.Contains("InWorld", Assert.Throws<InvalidOperationException>(s).Message, StringComparison.Ordinal));
+        Assert.Equal(sent, rig.Tap.Outbound.Count());
+    }
 }

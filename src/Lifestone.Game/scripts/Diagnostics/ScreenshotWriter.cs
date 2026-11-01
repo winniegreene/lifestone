@@ -59,7 +59,18 @@ public static class ScreenshotWriter
     /// <param name="completed">Called on the worker when the file is written or failed.</param>
     /// <param name="fields">Extra fields for the "screenshot saved" line.</param>
     /// <returns>The milliseconds the main thread spent (the read-back), or -1 when the capture failed.</returns>
-    public static double SaveInBackground(Viewport viewport, string path, string category, Action<bool> completed, params (string Key, object? Value)[] fields)
+    public static double SaveInBackground(Viewport viewport, string path, string category, Action<bool> completed, params (string Key, object? Value)[] fields) =>
+        SaveInBackgroundCore(viewport, path, category, completed, logSaved: true, fields);
+
+    /// <summary>
+    /// <see cref="SaveInBackground"/> without its "screenshot saved" line, for a caller that writes its own one line per frame (the soak frames, M5 item 7);
+    /// a failure is still logged as an error. <paramref name="completed"/> runs on the worker with whether the file was written.
+    /// </summary>
+    /// <param name="crop">A rectangle of the viewport, in its pixels, to save instead of the whole image (clipped to it; M5 7 S6, the examination window's own frame); null saves the whole image.</param>
+    public static double SaveInBackgroundQuietly(Viewport viewport, string path, string category, Action<bool> completed, Rect2I? crop = null) =>
+        SaveInBackgroundCore(viewport, path, category, completed, logSaved: false, [], crop);
+
+    private static double SaveInBackgroundCore(Viewport viewport, string path, string category, Action<bool> completed, bool logSaved, (string Key, object? Value)[] fields, Rect2I? crop = null)
     {
         ArgumentNullException.ThrowIfNull(viewport);
         ArgumentNullException.ThrowIfNull(completed);
@@ -86,6 +97,21 @@ public static class ScreenshotWriter
             return -1;
         }
 
+        if (crop is { } wanted)
+        {
+            var clipped = wanted.Intersection(new Rect2I(0, 0, image.GetWidth(), image.GetHeight()));
+            if (clipped.Size.X <= 0 || clipped.Size.Y <= 0)
+            {
+                Log.Error(category, "screenshot failed: the crop is outside the viewport", ("path", full), ("crop", wanted));
+                image.Dispose();
+                return -1;
+            }
+
+            var region = image.GetRegion(clipped);
+            image.Dispose();
+            image = region;
+        }
+
         var readbackMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         var size = $"{image.GetWidth()}x{image.GetHeight()}";
         _ = Lifestone.Game.Core.GameServices.Instance.Workers.RunSync(_ =>
@@ -101,7 +127,11 @@ public static class ScreenshotWriter
                 var error = image.SavePng(full);
                 if (error == Error.Ok)
                 {
-                    Log.Info(category, "screenshot saved", [("path", full), ("size", size), ("main_thread_ms", readbackMs), .. fields]);
+                    if (logSaved)
+                    {
+                        Log.Info(category, "screenshot saved", [("path", full), ("size", size), ("main_thread_ms", readbackMs), .. fields]);
+                    }
+
                     ok = true;
                 }
                 else

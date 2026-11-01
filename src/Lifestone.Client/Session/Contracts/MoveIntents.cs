@@ -41,10 +41,45 @@ public sealed class MoveIntents : IRunByDefaultSource
     internal MoveIntents(ActionApi api)
     {
         _api = api;
+        KeyLock = new HumanKeyLock(api.Log);
+    }
+
+    /// <summary>
+    /// M5 7 D145: the person's movement keys' lock while the autopilot runs. The play host's input path asks it about every movement-map action (<c>MovementBindings.Lock</c>); the autopilot's dial locks and unlocks it.
+    /// </summary>
+    public HumanKeyLock KeyLock { get; }
+
+    /// <summary>
+    /// M5 7 D145: what automation holds on the controller now (the commands it started and has not stopped, the run and sidestep holds, the autorun it turned on). 0 after <see cref="ReleaseAutomation"/>: the check after a /stop reads it.
+    /// </summary>
+    public int AutomationHeld => _heldByAutomation.Count + (_runHeldByAutomation ? 1 : 0) + (_sidestepHeldByAutomation ? 1 : 0) + (_autoRunToggledByAutomation ? 1 : 0);
+
+    /// <summary>M5 7 D145: the automation actions still waiting in their lanes (all kinds, not only movement): the check after a /stop reads it.</summary>
+    public int QueuedAutomation => _api.QueuedAutomation;
+
+    /// <summary>
+    /// M5 7 D145 (/stop, and any stop the autopilot makes): cancels every automation action still waiting in its lane (<paramref name="reason"/>), then releases everything automation holds on the controller (<see cref="ReleaseAutomation"/>),
+    /// in that order so no queued intent presses a key again after the release. Returns (cancelled, released).
+    /// </summary>
+    internal (int Cancelled, int Released) StandDownAutomation(string reason)
+    {
+        _api.CheckThread("MoveIntents.StandDownAutomation");
+        var cancelled = _api.CancelQueuedAutomation(reason);
+        var released = ReleaseAutomation();
+        return (cancelled, released);
     }
 
     /// <summary>True while a movement controller is bound.</summary>
     public bool IsBound => _controller is not null;
+
+    /// <summary>
+    /// M5 7 P7p (D141): the server MoveTos the bound controller's stuck rule has ended (<see cref="IPlayerMovementIntents.ServerMoveToStuckEnds"/>), 0 while nothing is bound. A scenario reads it before and after an
+    /// open: a rise means ACE's walk-to-use ended stuck in between (<c>TODO(m5-moveto-stuck)</c>).
+    /// </summary>
+    public int ServerMoveToStuckEnds => _controller?.ServerMoveToStuckEnds ?? 0;
+
+    /// <summary>M5 7 P7p: how the bound controller's last server MoveTo ended (<see cref="IPlayerMovementIntents.LastServerMoveToEnd"/>), or null.</summary>
+    public string? LastServerMoveToEnd => _controller?.LastServerMoveToEnd;
 
     /// <summary>
     /// The bound player's run-by-default option (<see cref="MovementOptions.RunByDefault"/>): true when an unheld run key

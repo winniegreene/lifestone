@@ -18,6 +18,21 @@ public sealed record RecordingHeader
     /// <summary>The retail client version string ACE expects.</summary>
     public const string RetailClientVersion = "1802";
 
+    /// <summary>
+    /// <see cref="ClientRules"/> of a recording made before the field existed (absent from its header): the client kept orphaned objects (a deleted
+    /// container's contents, items that left the player's holdings) in its object table for good.
+    /// </summary>
+    public const int ClientRulesKeepOrphans = 0;
+
+    /// <summary>
+    /// <see cref="ClientRules"/> from M5 7 P7d (D139 row f) on: a deleted object's contents leave with it, and an object that left the player's holdings
+    /// leaves 25 s later (<see cref="Lifestone.Client.Session.State.ObjectCull.Doom"/>).
+    /// </summary>
+    public const int ClientRulesDropOrphans = 1;
+
+    /// <summary>The rules this build's client applies, written into every new header.</summary>
+    public const int CurrentClientRules = ClientRulesDropOrphans;
+
     /// <summary>Who recorded: a short token such as <c>headless</c>, <c>godot</c> or <c>test</c> (lower-case letters, digits, dashes).</summary>
     public required string Runner { get; init; }
 
@@ -38,6 +53,13 @@ public sealed record RecordingHeader
 
     /// <summary>The scenario that ran (a token, e.g. <c>login</c>), or null.</summary>
     public string? Scenario { get; init; }
+
+    /// <summary>
+    /// The revision of the client's state rules the recording was made under (<c>clientRules</c>; M5 7 P7d): a rule that changes what the live
+    /// client keeps changes its trailer digest, so a replay applies the recording's own revision. New headers carry <see cref="CurrentClientRules"/>;
+    /// a header without the field reads <see cref="ClientRulesKeepOrphans"/>.
+    /// </summary>
+    public int ClientRules { get; init; } = CurrentClientRules;
 
     /// <summary>
     /// Throws <see cref="ArgumentException"/> unless every field is of its restricted shape, so no free text (a name, a
@@ -64,6 +86,11 @@ public sealed record RecordingHeader
         if (AceCommit is not null && (AceCommit.Length < 7 || !IsShaped(AceCommit, 40, char.IsAsciiHexDigitLower)))
         {
             throw new ArgumentException("the ACE commit must be 7 to 40 lower-case hexadecimal digits", nameof(AceCommit));
+        }
+
+        if (ClientRules is < 0 or > 1000)
+        {
+            throw new ArgumentException("the client rules revision must be 0 to 1000", nameof(ClientRules));
         }
     }
 
@@ -105,6 +132,7 @@ public sealed record RecordingHeader
                 json.WriteString("scenario", Scenario);
             }
 
+            json.WriteNumber("clientRules", ClientRules);
             json.WriteEndObject();
         }
 
@@ -135,6 +163,7 @@ public sealed record RecordingHeader
                     ? new DatIterations(it.GetProperty("portal").GetInt32(), it.GetProperty("cell").GetInt32(), OptionalInt(it, "local"), OptionalInt(it, "highRes"))
                     : null,
                 Scenario = OptionalString(root, "scenario"),
+                ClientRules = OptionalInt(root, "clientRules") ?? ClientRulesKeepOrphans, // M5 7 P7d: absent in every recording made before the field
             };
             header.Validate();
             return header;

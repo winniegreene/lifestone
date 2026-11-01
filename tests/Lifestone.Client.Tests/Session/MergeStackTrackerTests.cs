@@ -103,7 +103,7 @@ public sealed class MergeStackTrackerTests
     }
 
     [Fact]
-    public void A_target_size_that_is_not_the_sum_does_not_confirm()
+    public void A_target_size_that_is_not_the_sum_fails_at_once_typed_contrary_not_after_the_timeout()
     {
         var r = Rig();
         var merge = r.Api.MergeStack(SmallStack, BigStack, 10, ActionSource.Ui);
@@ -111,7 +111,45 @@ public sealed class MergeStackTrackerTests
 
         AceWholeMerge(r, SmallStack, BigStack, 24); // someone else's change, not 15 + 10
         r.Tick();
+
+        // M5 7 D141's after-check: the target's 0197 is ACE's last answer, so a size other than the sum is the result, and it is not the one asked.
+        var outcome = merge.Outcome!.Value;
+        Assert.Equal((ActionOutcomeKind.ServerError, ActionReason.ContraryResult), (outcome.Kind, outcome.Reason));
+        Assert.Contains("left the target at 24, not the 25 asked", outcome.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_partial_merge_is_not_failed_by_the_sources_0197_that_comes_first()
+    {
+        var r = Rig();
+        var merge = r.Api.MergeStack(SmallStack, BigStack, 4, ActionSource.Ui);
+        r.Tick();
+
+        r.Raw(AceM3Writers.SetStackSize(++_seq, SmallStack, 6, 0)); // the source first: the target is still 15, which is not a result
+        r.Tick();
         Assert.False(merge.IsCompleted);
+    }
+
+    [Theory]
+    [InlineData(11, ActionReason.StackShort)]
+    [InlineData(95, ActionReason.StackFull)]
+    public void The_before_check_names_the_merge_s_missing_precondition(int amountOrTarget, ActionReason reason)
+    {
+        var r = Rig();
+        if (reason == ActionReason.StackFull)
+        {
+            Stack(r, BigStack, Hyssop, (ushort)amountOrTarget);
+        }
+
+        var merge = r.Api.MergeStack(SmallStack, BigStack, reason == ActionReason.StackFull ? 10 : amountOrTarget, ActionSource.Ui);
+        var notHeld = r.Api.MergeStack(0x80000999, BigStack, 1, ActionSource.Ui);
+        var different = r.Api.MergeStack(SmallStack, Lead, 1, ActionSource.Ui);
+        r.Tick();
+
+        Assert.Equal((ActionOutcomeKind.Refused, reason), (merge.Outcome!.Value.Kind, merge.Outcome.Value.Reason));
+        Assert.Equal(ActionReason.NotHeld, notHeld.Outcome!.Value.Reason);
+        Assert.Equal(ActionReason.NotSameItem, different.Outcome!.Value.Reason);
+        Assert.Empty(r.H.Net.Of(FakeSendKind.StackableMerge));
     }
 
     [Fact]

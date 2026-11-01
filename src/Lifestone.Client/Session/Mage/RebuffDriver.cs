@@ -135,7 +135,7 @@ public sealed class RebuffDriver : IDisposable
         _enabled = options.Auto;
         State = _enabled ? RebuffDriverState.Idle : RebuffDriverState.Off;
         _damageSubscription = session.Events.Subscribe<CombatEvent>(OnCombat);
-        _log.Info(BuffCycle.LogCategory, string.Create(CultureInfo.InvariantCulture, $"re-buff driver: {(_enabled ? "on" : "off")}, check every {options.AutoCheckSeconds:0.#} s, margin {options.RebuffMarginSeconds:0.#} s"));
+        _log.Info(BuffCycle.LogCategory, string.Create(CultureInfo.InvariantCulture, $"re-buff driver: {(_enabled ? "on" : "off")}, check every {options.AutoCheckSeconds:0.#} s, margin {options.RebuffMarginSeconds:0.#} s{(options.DriverUnattended ? " (the autopilot's own: the fight guard does not hold it, M5 7 F23)" : string.Empty)}"));
     }
 
     /// <summary>The fighter's caster swap this driver runs around a pass (null for the mage).</summary>
@@ -360,7 +360,7 @@ public sealed class RebuffDriver : IDisposable
         }
 
         var mode = qualities.CombatMode;
-        if (mode is CombatModes.Melee or CombatModes.Missile || now - _lastDamageAt < FightQuietSeconds)
+        if (!_options.DriverUnattended && (mode is CombatModes.Melee or CombatModes.Missile || now - _lastDamageAt < FightQuietSeconds)) // M5 7 F23: the autopilot's own station is never held by the fight guard
         {
             return GuardFight;
         }
@@ -423,7 +423,7 @@ public sealed class RebuffDriver : IDisposable
 
         _log.Info(BuffCycle.LogCategory, "re-buff driver: a pass starts; the magic combat mode first");
         _changedMode = true;
-        _pending = _actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
+        _pending = _actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation);
         _phase = Phase.ModeIn;
     }
 
@@ -572,7 +572,7 @@ public sealed class RebuffDriver : IDisposable
 
         if (_changedMode)
         {
-            _pending = _actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
+            _pending = _actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation);
             _phase = Phase.ModeOut;
             return;
         }

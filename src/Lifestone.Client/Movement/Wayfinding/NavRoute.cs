@@ -218,6 +218,62 @@ public sealed class NavRoute
     /// <summary>The horizontal distance from <paramref name="point"/> to the route (the runner's 3 m off-route test).</summary>
     public float DistanceFrom(NavPoint point) => Nearest(point.Global).Distance;
 
+    /// <summary>
+    /// The arc length and distance of the route's point nearest <paramref name="point"/> among the segments that overlap the arc lengths from
+    /// <paramref name="fromArc"/> back <paramref name="behindMetres"/> to ahead <paramref name="aheadMetres"/> (M5 D134, the runner's forward-only progress), counted by
+    /// height: a segment whose height at the nearest point differs from the point's by more than <paramref name="storeyMetres"/> is a storey above or below and
+    /// counts only when no segment of the window is on the point's storey. Allocates nothing.
+    /// </summary>
+    public (float Arc, float Distance) NearestInWindow(NavPoint point, float fromArc, float behindMetres, float aheadMetres, float storeyMetres)
+    {
+        var p = point.Global;
+        if (_xy.Length == 1)
+        {
+            return (0f, Vector2.Distance(p, _xy[0]));
+        }
+
+        var lo = fromArc - behindMetres;
+        var hi = fromArc + aheadMetres;
+        float bestArc = MathF.Max(0f, MathF.Min(fromArc, ArcLength));
+        float bestD2 = float.MaxValue;
+        var bestOnStorey = false;
+        for (int i = 0; i + 1 < _xy.Length; i++)
+        {
+            if (_arc[i + 1] < lo)
+            {
+                continue;
+            }
+
+            if (_arc[i] > hi)
+            {
+                break;
+            }
+
+            var a = _xy[i];
+            var ab = _xy[i + 1] - a;
+            float len2 = ab.LengthSquared();
+            float t = len2 <= 0f ? 0f : Math.Clamp(Vector2.Dot(p - a, ab) / len2, 0f, 1f);
+            float arc = _arc[i] + (t * (_arc[i + 1] - _arc[i]));
+            if (arc < lo || arc > hi)
+            {
+                // The window cuts this segment: the nearest point within the window's part of it.
+                arc = Math.Clamp(arc, MathF.Max(lo, _arc[i]), MathF.Min(hi, _arc[i + 1]));
+                t = _arc[i + 1] > _arc[i] ? (arc - _arc[i]) / (_arc[i + 1] - _arc[i]) : 0f;
+            }
+
+            float d2 = Vector2.DistanceSquared(p, a + (ab * t));
+            var onStorey = MathF.Abs(point.Z - (_z[i] + ((_z[i + 1] - _z[i]) * t))) <= storeyMetres;
+            if ((onStorey && !bestOnStorey) || (onStorey == bestOnStorey && d2 < bestD2))
+            {
+                bestD2 = d2;
+                bestArc = arc;
+                bestOnStorey = onStorey;
+            }
+        }
+
+        return (bestArc, bestD2 == float.MaxValue ? float.MaxValue : MathF.Sqrt(bestD2));
+    }
+
     private (float Arc, float Distance) Nearest(Vector2 p)
     {
         if (_xy.Length == 1)

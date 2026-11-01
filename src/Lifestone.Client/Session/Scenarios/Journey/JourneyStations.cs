@@ -1,3 +1,5 @@
+using System.Globalization;
+using Lifestone.Client.Avatars;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session.Contracts;
@@ -18,6 +20,46 @@ public interface IJourneyServerSounds
 {
     /// <summary>The server sounds that sounded so far this run, or null when the counter does not exist.</summary>
     int? ServerSounds { get; }
+}
+
+/// <summary>
+/// The physics fields of a station's span (M5 item 5 c1, report-only; the den-fight station's line): the jump watch's counts as the difference of <see cref="AvatarStats"/>' totals from the span's first sample to its last, and the maxima of the
+/// per-frame figures sampled over the span (the avatars' transition time, the sliding placements' time, the transitions of one advance). Read from <see cref="IJourneyWalks.PhysicsCost"/>; a host with none (the headless one) gives
+/// <c>n/a</c> for all five. Game thread only.
+/// </summary>
+public sealed class PhysicsSpan
+{
+    private AvatarPhysicsCost? _first;
+    private AvatarPhysicsCost _last;
+    private double _transitMsMax;
+    private double _placeMsMax;
+    private int _transitsMax;
+
+    /// <summary>The fields printed for a span that never saw a cost.</summary>
+    public const string NotAvailable = "creature_jumps=n/a creature_flips=n/a transit_ms_max=n/a place_ms_max=n/a transits_max=n/a";
+
+    /// <summary>Takes one sample: the first non-null one starts the span, each one extends it; a null (no avatars yet, or a host without any) changes nothing.</summary>
+    /// <param name="cost">The host's physics cost now.</param>
+    public void Sample(AvatarPhysicsCost? cost)
+    {
+        if (cost is not { } now)
+        {
+            return;
+        }
+
+        _first ??= now;
+        _last = now;
+        _transitMsMax = Math.Max(_transitMsMax, now.TransitionMs);
+        _placeMsMax = Math.Max(_placeMsMax, now.PlacementMs);
+        _transitsMax = Math.Max(_transitsMax, now.Transitions);
+    }
+
+    /// <summary>The five fields: <c>creature_jumps= creature_flips= transit_ms_max= place_ms_max= transits_max=</c> (counts over the span, milliseconds with two decimals), or all <c>n/a</c> when nothing was sampled.</summary>
+    public string Fields() => _first is not { } first
+        ? NotAvailable
+        : string.Create(
+            CultureInfo.InvariantCulture,
+            $"creature_jumps={Math.Max(0, _last.CreatureJumps - first.CreatureJumps)} creature_flips={Math.Max(0, _last.CreatureFlips - first.CreatureFlips)} transit_ms_max={_transitMsMax:0.00} place_ms_max={_placeMsMax:0.00} transits_max={_transitsMax}");
 }
 
 /// <summary>
@@ -70,10 +112,86 @@ public static class JourneyStations
 
     /// <summary>
     /// The archer journey's hunt seconds when <c>--hunt-seconds</c> is not given: the forest's 20-30 band is sparse with real spawns (D23), and a gate an hour after
-    /// another found none within 35 m of five cells in the default 300 s (M4 4.2 live round 2, <c>m4-hunt-band-empty</c>), so the archer searches longer; the
-    /// station's limit (<see cref="JourneyScenario.StationLimitFactor"/> times its 320 s plus the margin) holds it.
+    /// another found none within 35 m of five cells in the default 300 s (M4 4.2 live round 2, <c>m4-hunt-band-empty</c>), so the archer searches longer; M5 item 2 k2 sets 1,200 s for the forest's 33 spots (D42; g3's estimate: the chance of two usable spots is 0.98 within all 33, 0.87 within 20, and one loop of the 33 is about 3,100 m).
+    /// The station's limit (<see cref="JourneyScenario.StationLimitFactor"/> times its <see cref="JourneyPlans.ArcherHuntExpectedSeconds"/> 400 s plus the margin, 1,500 s) holds it, and both hosts' whole-run limits add the difference (<see cref="JourneyLimits.WholeExtraSeconds"/>), so a failure ends by the hunt's own named reason.
     /// </summary>
-    public const double ArcherHuntSeconds = 540;
+    public const double ArcherHuntSeconds = 1200;
+
+    /// <summary>
+    /// M5 4 a1 (D57): the den-fight spec argument that makes the fight open-ended for the autopilot: no kill cap (<see cref="FightOptions.UnlimitedKills"/>, whatever the plan or <c>--fight-kills</c> say), no clean minutes stop and no failure
+    /// limit (<see cref="OpenEndedFailSeconds"/>), so only the fight's external stop (<see cref="IStoppableFight.RequestStop"/>), its death, its kill switch or its walk ends it. The autopilot's watchdogs (slice a2) bound it instead.
+    /// </summary>
+    public const string OpenEndedArgument = "open-ended";
+
+    /// <summary>The open-ended fight's failure limit: none (the autopilot's stop rules and watchdogs end it, never a fight timer).</summary>
+    public const double OpenEndedFailSeconds = double.PositiveInfinity;
+
+    /// <summary>M5 4 a1 (D57): the logistics spec's <see cref="JourneyPlans.TripArgument"/> value for the unforced trip: the station trips only when its counters say so (the other value is <see cref="JourneyPlans.TripForced"/>; no argument is the same as this one).</summary>
+    public const string TripByCounters = "counters";
+
+    /// <summary>
+    /// M5 4 a1 (D57): the death spec argument that leaves out the death handler's own return to the fight (<see cref="DeathOptions.Fight"/> off for this station): the autopilot goes back to its own open-ended fight after the corpse trip and the
+    /// item lines, so the handler's composed fight of <c>--death-fight-kills</c> kills would be a second fight.
+    /// </summary>
+    public const string DeathNoFightArgument = "no-fight";
+
+    /// <summary>M5 7 F30: the den-fight spec argument of a fight that starts with the mage already on the ground: it fights from where it stands (<see cref="FightOptions.ResumeOnGround"/>), with no place stage and no walk to the arrival.</summary>
+    public const string ResumeOnGroundArgument = "resume-on-ground";
+
+    /// <summary>M5 7 F23: the buff spec's argument of the autopilot's own buff and upkeep stations: the re-buff driver of the station is never held by its <c>in a fight</c> guard (<see cref="Mage.BuffOptions.DriverUnattended"/>).</summary>
+    public const string UnattendedArgument = "unattended";
+
+    /// <summary>D126 (a): the buff spec's argument of the autopilot's start (and restart) buff station: its pass recasts every line due within one buff cycle (<see cref="Mage.BuffOptions.OneBuffCycleSeconds"/>) unless the command line names <c>--buff-start-margin-s</c>.</summary>
+    public const string StartPassArgument = "start-pass";
+
+    /// <summary>
+    /// The options of the den-fight station <paramref name="spec"/>: the command line's fight options <paramref name="baseline"/> without a leave on failure or at the end (the death follows in the den, lane J2b), then the spec's own arguments
+    /// (<see cref="JourneyPlans.SpellArgument"/>, <see cref="JourneyPlans.KillsArgument"/>, <see cref="JourneyPlans.StoreysMinArgument"/>) unless the command line gave the option itself (<c>--fight-kills</c>, <c>--fight-storeys-min</c>).
+    /// The mage's den fight asks for 3 kills and a tour of 2 storeys (M5 item 2 k2).
+    /// </summary>
+    /// <param name="spec">The station's spec.</param>
+    /// <param name="baseline">The fight options of the command line.</param>
+    /// <param name="arguments">The command line, to tell which options it gave.</param>
+    public static FightOptions DenFightOptions(StationSpec spec, FightOptions baseline, IReadOnlyList<CommandLineArgument> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        ArgumentNullException.ThrowIfNull(baseline);
+        ArgumentNullException.ThrowIfNull(arguments);
+        var fight = baseline with { LeaveOnFailure = false, LeaveAtEnd = false }; // the death follows in the den (lane J2b)
+        if (spec.Arguments.TryGetValue(JourneyPlans.SpellArgument, out var spellText) && uint.TryParse(spellText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var spellId))
+        {
+            fight = fight with { SpellId = spellId }; // M4 P5b J7: the hero plan casts Cassius' Ring of Fire instead of the Flame Bolt line
+        }
+
+        if (spec.Arguments.TryGetValue(JourneyPlans.KillsArgument, out var killsText) && int.TryParse(killsText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var kills) && kills is >= 1 and <= FightOptions.MaxKills
+            && !arguments.Any(a => a.Name == "--fight-kills"))
+        {
+            fight = fight with { Kills = kills }; // the plan's own kills unless the command line asked for others
+        }
+
+        if (spec.Arguments.TryGetValue(JourneyPlans.StoreysMinArgument, out var storeysText) && int.TryParse(storeysText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var storeys) && storeys is >= 1 and <= FightOptions.MaxStoreysMin
+            && !arguments.Any(a => a.Name == "--fight-storeys-min"))
+        {
+            fight = fight with { StoreysMin = storeys }; // the plan's own tour depth unless the command line asked for another (the mage's den fight tours two storeys)
+        }
+
+        if (spec.Arguments.ContainsKey(OpenEndedArgument))
+        {
+            fight = fight with { Kills = FightOptions.UnlimitedKills, Minutes = 0, Seconds = OpenEndedFailSeconds }; // M5 4 a1: the autopilot's fight, ended only by its stop
+        }
+
+        if (spec.Arguments.ContainsKey(ResumeOnGroundArgument))
+        {
+            fight = fight with { ResumeOnGround = true }; // M5 7 F30: no teleport to the arrival and no walk to it
+        }
+
+        if (spec.Arguments.ContainsKey(UnattendedArgument))
+        {
+            fight = fight with { HoldStance = true }; // M5 7 F25 (D93): the autopilot's own fight keeps the magic mode at its end
+        }
+
+        return fight;
+    }
 
     /// <summary>The keeper's in-fight potion option; absent from the command line, a journey turns the potion on.</summary>
     public const string InFightPotionOption = "--vitals-infight-potion";
@@ -184,13 +302,16 @@ public static class JourneyStations
             + " attack_frame_max_ms=" + HuntLegVerdict.FrameMs(frames?.AttackFrameMaxMs) + " loot_frame_max_ms=" + HuntLegVerdict.FrameMs(frames?.LootFrameMaxMs);
     }
 
-    /// <summary>The vendor station's fields (M4 4.2 J1): the hunt's verdict and vendor fields, then the vendor window's slowest frame from the host (<c>vendor_frame_max_ms=&lt;x.x|n/a&gt;</c>, report-only for the station).</summary>
+    /// <summary>
+    /// The vendor station's fields (M4 4.2 J1): the hunt's verdict and vendor fields, then the vendor window's slowest frame from the host (<c>vendor_frame_max_ms=&lt;x.x|n/a&gt;</c>, report-only for the station), then
+    /// <c>door_opened=yes|no</c> (M5 item 5, d2 and F2: a door the walk to the shop itself Used turned Ethereal, <see cref="HuntScenario.DoorOpenedField"/>; the vendor's own Use and other doors never count; report-only, printed before any <c>why=</c>).
+    /// </summary>
     /// <param name="hunt">The hunt's vendor stage that ran.</param>
     /// <param name="frames">The host's window frame times, or null.</param>
     public static string VendorFields(HuntScenario hunt, IJourneyWindowFrames? frames)
     {
         ArgumentNullException.ThrowIfNull(hunt);
-        return hunt.VerdictFields() + " " + hunt.VendorFields() + " vendor_frame_max_ms=" + HuntLegVerdict.FrameMs(frames?.VendorFrameMaxMs);
+        return hunt.VerdictFields() + " " + hunt.VendorFields() + " vendor_frame_max_ms=" + HuntLegVerdict.FrameMs(frames?.VendorFrameMaxMs) + " door_opened=" + hunt.DoorOpenedField;
     }
 
     /// <summary>The hunt's judges a vendor visit cannot meet (it attacks nothing): left out of the vendor station's ok, logged.</summary>
@@ -259,6 +380,39 @@ public static class JourneyStations
         return "?";
     }
 
+    /// <summary>
+    /// M5 7 F14 (closes <c>TODO(m5-7-journey-mage-level)</c>): the level of the mage's build the journey's build-verify station judges: <c>--mage-level</c> when given, else <see cref="MageTemplate.TargetLevel"/> (the gate's 126, unchanged).
+    /// A value that is no integer or lies outside <see cref="MageTemplate.MinLevel"/> to <see cref="MageTemplate.TargetLevel"/> is refused by name (the headless host refuses it before the run).
+    /// </summary>
+    /// <param name="arguments">The host's parsed command-line arguments.</param>
+    public static int MageLevelOf(IReadOnlyList<CommandLineArgument> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        var level = MageTemplate.TargetLevel;
+        var errors = new List<string>();
+        foreach (var argument in arguments)
+        {
+            if (argument.Name != "--mage-level")
+            {
+                continue;
+            }
+
+            var asked = OptionValues.Int(argument, errors, MageTemplate.TargetLevel);
+            if (errors.Count == 0 && (asked < MageTemplate.MinLevel || asked > MageTemplate.TargetLevel))
+            {
+                errors.Add(string.Create(CultureInfo.InvariantCulture, $"--mage-level: '{argument.Value}' is not a level {MageTemplate.MinLevel} to {MageTemplate.TargetLevel}"));
+            }
+
+            if (errors.Count == 0)
+            {
+                level = asked;
+            }
+        }
+
+        Refuse(errors, "--mage-level");
+        return level;
+    }
+
     /// <summary>The catalog: one station per kind, built fresh for its spec; the scenarios run embedded (no login, no place of their own, no leave).</summary>
     private sealed class Factory : IStationFactory
     {
@@ -271,13 +425,18 @@ public static class JourneyStations
         private readonly DeathOptions _death;
         private readonly HuntOptions _hunt;
         private readonly FighterTemplate? _fighter;
+        private readonly int _mageLevel;
 
         private bool _denWalkLogged;
+        private FightScenario? _denFight;
 
-        /// <summary>The death station's den walk: the host's (<see cref="IJourneyWalks.DenWalk"/>: the headless body's or, since M4 P5b J5b, the Godot player's), else none (a scripted host), logged once.</summary>
-        private IFightWalk? DeathDenWalk(JourneyContext c)
+        /// <summary>The guids the den fight's loot step kept (M5 3 c2a, closes <c>TODO(m5-resupply-kept-list)</c>): the list the factory's logistics and resupply stations hand the resupply. The den-fight station of this journey sets it; null when no fight ran.</summary>
+        private IReadOnlyCollection<uint> KeptLoot() => _denFight?.LootKeptGuids ?? [];
+
+        /// <summary>The death station's den walk: the host's (<see cref="IJourneyWalks.FightWalk"/>: the headless body's or, since M4 P5b J5b, the Godot player's), else none (a scripted host), logged once.</summary>
+        private IFightWalk? DeathGroundWalk(JourneyContext c)
         {
-            if ((c.Runners as IJourneyWalks)?.DenWalk(c) is { } walk)
+            if ((c.Runners as IJourneyWalks)?.FightWalk(c, _fight.GroundProfile) is { } walk)
             {
                 return walk;
             }
@@ -300,6 +459,7 @@ public static class JourneyStations
             Refuse(_fight.Errors, "--fight-*");
             _death = DeathOptions.FromArguments(arguments);
             Refuse(_death.Errors, "--death-*");
+            _mageLevel = MageLevelOf(arguments);
             _fighter = FighterTemplate.ForAccount(plan.Account) is { } t && t.Name == plan.Character ? t : null;
             var hunt = HuntOptions.FromArguments(arguments);
             Refuse(hunt.Errors, "--hunt-*");
@@ -313,12 +473,15 @@ public static class JourneyStations
             _hunt = hunt;
         }
 
+        /// <inheritdoc />
+        public double StationLimitSeconds(StationSpec spec) => JourneyLimits.StationSeconds(spec, _fight);
+
         public IStation Create(StationSpec spec)
         {
             ArgumentNullException.ThrowIfNull(spec);
             return spec.Kind switch
             {
-                StationKinds.BuildVerify => new BuildVerifyStation(),
+                StationKinds.BuildVerify => new BuildVerifyStation(mageLevel: _mageLevel),
                 StationKinds.Gear => Gear(spec),
                 StationKinds.Buff => Buff(spec),
                 StationKinds.CastFacts => new CastFactsStation(KitAccount(null)),
@@ -337,9 +500,24 @@ public static class JourneyStations
                 StationKinds.VendorFacts => new VendorFactsStation(),
                 StationKinds.Shortcuts => new ShortcutsStation(),
                 StationKinds.Hotbar => new HotbarStation(),
-                StationKinds.Corpses => new CorpsesStation(),
+                StationKinds.Corpses => new CorpsesStation(spec.Arguments.ContainsKey(JourneyPlans.NoItemWaitArgument)),
+                StationKinds.Resupply => new ResupplyStation(new ResupplyOptions(Loot: _fight.Loot, Kept: KeptLoot, Memory: SaleMemory.Shared, Gear: _fight.Loot)),
+                StationKinds.Logistics => new LogisticsStation(forced: TripForced(spec), new ResupplyOptions(Loot: _fight.Loot, Kept: KeptLoot, Memory: SaleMemory.Shared, Gear: _fight.Loot)),
                 _ => throw new NotSupportedException($"TODO(j4-station-kind): the journey catalog has no station of kind '{spec.Kind}' (station '{spec.Name}')"),
             };
+        }
+
+        /// <summary>M5 4 a1: the logistics spec's trip: forced by <see cref="JourneyPlans.TripForced"/>, by the counters with no argument or <see cref="TripByCounters"/>; any other value is refused by name.</summary>
+        private static bool TripForced(StationSpec spec)
+        {
+            if (!spec.Arguments.TryGetValue(JourneyPlans.TripArgument, out var trip) || trip == TripByCounters)
+            {
+                return false;
+            }
+
+            return trip == JourneyPlans.TripForced
+                ? true
+                : throw new ArgumentException($"journey: the logistics station '{spec.Name}' has trip={trip}: the trip is {JourneyPlans.TripForced} or {TripByCounters}");
         }
 
         private string KitAccount(ILogSink? log)
@@ -356,7 +534,7 @@ public static class JourneyStations
         private ScenarioStation Gear(StationSpec spec) => new(
             spec.Name,
             spec.NeedsOverride ?? new StationNeeds(StationWhere.Holtburg),
-            c => new GearScenario(c.Spells, KitAccount(c.Log), c.Log, endSession: false, heroRing: spec.Arguments.ContainsKey(JourneyPlans.RingArgument)),
+            c => new GearScenario(GearKit.Build(c.Spells, KitAccount(c.Log), spec.Arguments.ContainsKey(JourneyPlans.RingArgument), _fight.GroundProfile), c.Log, endSession: false, spells: c.Spells) { NoGrant = !spec.Arguments.ContainsKey(JourneyPlans.RingArgument) }, // M5 3 c2a (DoD 6): play grants nothing; the hero ring's plan keeps its grant (TODO(m5-hero-ring-diamond)); M5 3 F2: the kit of the journey's --fight-ground, as the buff and the den fight have it
             s => ((GearScenario)s).VerdictFields(),
             (s, status) => status == ScenarioStatus.Succeeded && Token(((GearScenario)s).VerdictFields(), "gear") == "wielded");
 
@@ -367,6 +545,16 @@ public static class JourneyStations
             if (fighter is null && !_arguments.Any(a => a.Name == "--buff-auto"))
             {
                 options = options with { Auto = true }; // the mage's journey: the buff and the driver's pass (design 3.4: rebuffed=yes buffs=24/24)
+            }
+
+            if (spec.Arguments.ContainsKey(UnattendedArgument))
+            {
+                options = options with { DriverUnattended = true }; // M5 7 F23: the autopilot's own station; the driver's fight guard holds only a person's driver
+            }
+
+            if (spec.Arguments.ContainsKey(StartPassArgument) && options.StartMarginSeconds is null)
+            {
+                options = options with { StartMarginSeconds = Mage.BuffOptions.OneBuffCycleSeconds }; // D126 (a): the start's pass refreshes every line due within one buff cycle
             }
 
             // The fighters' buff has no gear step (gear=n/a, P5a C4): the mage's gear token is not judged for them.
@@ -386,14 +574,14 @@ public static class JourneyStations
                     soundsBefore = sounds?.ServerSounds ?? 0;
                     return fighter is not null
                         ? new BuffScenario(fighter, c.Spells, options, c.Log, endSession: false)
-                        : new BuffScenario(c.Spells, KitAccount(c.Log), options, c.Log, endSession: false, bars: new MageSpellBars(c.Log));
+                        : new BuffScenario(c.Spells, KitAccount(c.Log), options, c.Log, endSession: false, bars: new MageSpellBars(c.Log), noGrant: true, ground: _fight.GroundProfile); // M5 3 F2 (closes 3-R3, DoD 6): the buff's gear stage verifies the journey ground's kit and sends no grant
                 },
                 s => ((BuffScenario)s).VerdictFields() + judgesReported,
                 (s, status) =>
                 {
                     var b = (BuffScenario)s;
                     // The fighters' leg has no gear step: its gear fields are the n/a ones the verdict line prints, not the unused gear scenario's "gear=failed".
-                    var result = new BuffLegScenarioResult(status == ScenarioStatus.Succeeded, b.Failure, fighter is null ? b.Gear.VerdictFields() : FighterGearFields, b.CycleResult, b.ForcedResult, b.DriverOn, b.DriverResult, b.DriverRebuffSeconds);
+                    var result = new BuffLegScenarioResult(status == ScenarioStatus.Succeeded, b.Failure, fighter is null ? b.Gear.VerdictFields() : FighterGearFields, b.CycleResult, b.ForcedResult, b.DriverOn, b.DriverResult, b.DriverRebuffSeconds, b.UnattendedEnd);
                     var counted = sounds?.ServerSounds is { } now ? Math.Max(0, now - soundsBefore) : (int?)null;
                     var judged = BuffJudge(result, unjudged, spec.Name, log, counted, soundsReportOnly: true);
                     judgesReported = judged.Reported.Count == 0 ? string.Empty : " judges_reported=" + string.Join('+', judged.Reported.Select(JudgeName)) + (counted is { } n ? $" sounds_server_counted={n}" : string.Empty);
@@ -405,45 +593,42 @@ public static class JourneyStations
 
         private ScenarioStation DenFight(StationSpec spec)
         {
-            var fight = _fight with { LeaveOnFailure = false, LeaveAtEnd = false }; // the death follows in the den (lane J2b)
-            if (spec.Arguments.TryGetValue(JourneyPlans.SpellArgument, out var spellText) && uint.TryParse(spellText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var spellId))
-            {
-                fight = fight with { SpellId = spellId }; // M4 P5b J7: the hero plan casts Cassius' Ring of Fire instead of the Flame Bolt line
-            }
-
-            if (spec.Arguments.TryGetValue(JourneyPlans.KillsArgument, out var killsText) && int.TryParse(killsText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var kills) && kills is >= 1 and <= FightOptions.MaxKills
-                && !_arguments.Any(a => a.Name == "--fight-kills"))
-            {
-                fight = fight with { Kills = kills }; // the plan's own kills unless the command line asked for others
-            }
+            var fight = DenFightOptions(spec, _fight, _arguments);
 
             var buff = _buff;
             var dats = _dats;
+            var physics = new PhysicsSpan(); // M5 5 c1: the span of this station's fight, read from the host's avatars (report-only)
             return new ScenarioStation(
                 spec.Name,
                 spec.NeedsOverride ?? new StationNeeds(StationWhere.Den, MinHealthPercent: JourneyPlans.FightHealthPercent, MinManaPercent: 50, Buffed: true),
-                c => new FightScenario(
+                c => _denFight = new FightScenario(
                     c.Spells,
                     KitAccount(c.Log),
                     buff,
                     fight with { Travel = c.Travel },
-                    (c.Runners as IJourneyWalks)?.DenWalk(c) ?? (dats is null ? null : DenWalk.Create(dats, c.Log)),
+                    (c.Runners as IJourneyWalks)?.FightWalk(c, fight.GroundProfile) ?? (dats is null ? null : GroundWalk.Create(dats, fight.GroundProfile, c.Log)),
                     c.Log,
                     endSession: false,
                     stages: FightStages.Place | FightStages.Mode),
-                s => ((FightScenario)s).VerdictFields(),
+                s => ((FightScenario)s).VerdictFields() + " " + physics.Fields(),
                 (s, status) =>
                 {
                     var f = (FightScenario)s;
                     var t = f.Tally;
                     var measures = new FightLegMeasures(t.Kills, t.DamageDealt, t.Casts, t.Misses, t.XpGained, t.DamageTaken, t.HitsTaken, t.Evades, null, null, null, null, double.IsNaN(f.FightSeconds) ? null : f.FightSeconds, BlockedPicks: t.BlockedPicks, WallHits: t.WallHits);
                     return status == ScenarioStatus.Succeeded && FightLegVerdict.Compose(f.Failure, measures).Ok;
-                });
+                },
+                sample: c => physics.Sample((c.Runners as IJourneyWalks)?.PhysicsCost));
         }
 
         private ScenarioStation Death(StationSpec spec)
         {
             var death = _death with { StartAt = DeathStages.Death, LeaveOnFailure = false }; // D37: one death, no suicide first (lane J2b)
+            if (spec.Arguments.ContainsKey(DeathNoFightArgument))
+            {
+                death = death with { Fight = false }; // M5 4 a1: the autopilot returns to its own fight
+            }
+
             var buff = _buff;
             var dats = _dats;
             return new ScenarioStation(
@@ -452,16 +637,13 @@ public static class JourneyStations
                 c => new DeathScenario(
                     c.Spells,
                     KitAccount(c.Log),
-                    death with { Travel = c.Travel },
-                    DeathDenWalk(c),
+                    death with { Travel = c.Travel, Facts = c.Facts, Journey = c },
+                    DeathGroundWalk(c),
                     c.Log,
                     endSession: false,
                     stages: death.Stages ?? DeathStages.All,
                     buff: buff,
-                    fight: new FightOptions { Kills = death.FightKills, Seconds = death.FightSeconds })
-                {
-                    LevelXp = dats is null ? null : DeathScenario.LevelXpOf(XpTableData.Load(dats)),
-                },
+                    fight: _fight with { Kills = death.FightKills, Seconds = death.FightSeconds, HoldStance = spec.Arguments.ContainsKey(UnattendedArgument) }), // M5 7 F25: the autopilot's corpse-trip fights keep the magic mode
                 s => ((DeathScenario)s).VerdictFields(),
                 (s, status) => status == ScenarioStatus.Succeeded && ((DeathScenario)s).Outcome().Ok);
         }

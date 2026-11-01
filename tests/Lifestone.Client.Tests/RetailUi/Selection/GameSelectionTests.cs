@@ -397,12 +397,12 @@ public sealed class GameSelectionTests(DatSetFixture fixture) : IClassFixture<Da
         rig.Run(0.3);
         Assert.Equal(VividTargetState.OnScreen, selection.Indicator.State);
 
-        Assert.True(screen.Options!.TrySet(PlayerOptionTable.VividTargetingIndicator, false)); // the options panel's write (g6)
+        rig.Actions.SetSessionOption(1, 0x8000, false); // the words as the server returns them (the options panel's Apply sends them: M5 6 u1)
         rig.Frame();
         Assert.Equal(VividTargetState.Hidden, selection.Indicator.State);
         Assert.True(selection.FieldShown); // the name still shows
 
-        Assert.True(screen.Options.TrySet(PlayerOptionTable.VividTargetingIndicator, true));
+        rig.Actions.SetSessionOption(1, 0x8000, true);
         rig.Frame();
         Assert.Equal(VividTargetState.OnScreen, selection.Indicator.State);
     }

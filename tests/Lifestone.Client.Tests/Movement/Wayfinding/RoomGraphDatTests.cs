@@ -1,4 +1,6 @@
 using System.Numerics;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Tests.Session.Grounds;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
@@ -110,28 +112,28 @@ public sealed class RoomGraphDatTests(DatSetFixture fixture, ITestOutputHelper o
     public void The_dens_tour_over_the_room_graph_with_lean_0_3_reaches_every_spawn_cell_the_old_planner_reached()
     {
         var all = LandblockCellSet.Load(new CellStructureLibrary(Dats), new LandblockCoord(1, 5));
-        var floor = DenRooms.FloorOf(all);
-        var graph = DenRooms.GraphOf(all);
+        var floor = GroundRooms.FloorOf(all, DenGround.Profile);
+        var graph = GroundRooms.GraphOf(all, DenGround.Profile);
         Assert.Equal(0.3f, graph.MaxLean);
-        Assert.Equal(BlackSpawnDen.FloorLowWords.Count, floor.Count);
+        Assert.Equal(DenGround.Profile.Walkable.Count, floor.Count);
 
         // The old planner (a breadth first search through the doorways the upright rule and the 0.3 lean accept) reached all twelve spawn cells from the arrival.
-        var from = BlackSpawnDen.Arrival;
-        foreach (var low in DenWalk.Tour)
+        var from = DenGround.Arrival;
+        foreach (var low in DenGround.SpawnLowWords)
         {
             var cellId = 0x01050000u | low;
             var path = graph.FindPath(from.CellId, cellId);
             Assert.NotNull(path);
-            Assert.All(path, c => Assert.True(BlackSpawnDen.IsFloorCell(c), $"0x{c:X8} on the way to 0x{cellId:X8}"));
+            Assert.All(path, c => Assert.True(DenGround.Profile.IsWalkable(c), $"0x{c:X8} on the way to 0x{cellId:X8}"));
 
-            var route = graph.PlanScripted("tour", in from, cellId, DenWalk.StopWithinMetres, DenWalk.StopDwellSeconds);
+            var route = graph.PlanScripted("tour", in from, cellId, DenGround.Profile.Walk.StopWithinMetres, DenGround.Profile.Walk.StopDwellSeconds);
             Assert.NotNull(route);
             Assert.Equal(cellId, route.Goals[^1].Target.CellId);
             Assert.True(route.Goals[^1].Stop);
             var planned = graph.Plan(from.CellId, from.Origin, cellId, graph.RoomFrame(cellId)!.Value.Origin)!;
             Assert.Equal(from.CellId, planned.Cells[0]);
             Assert.Equal(cellId, planned.Cells[^1]);
-            Assert.All(planned.Cells, c => Assert.True(BlackSpawnDen.IsFloorCell(c), $"0x{c:X8} in the plan to 0x{cellId:X8}"));
+            Assert.All(planned.Cells, c => Assert.True(DenGround.Profile.IsWalkable(c), $"0x{c:X8} in the plan to 0x{cellId:X8}"));
             Assert.InRange(planned.Cells.Count, 2, path.Count + 3); // the shortest walk in metres is near the fewest doorways
             output.WriteLine($"0x{low:X4}: {path.Count - 1} doorways by the fewest-doorways search, {planned.Cells.Count - 1} by the shortest walk, {route.Goals.Count} goals");
 
@@ -143,12 +145,12 @@ public sealed class RoomGraphDatTests(DatSetFixture fixture, ITestOutputHelper o
     [RequiresDatsFact]
     public void Without_the_lean_the_den_is_reached_in_one_spawn_cell_of_twelve_and_the_lean_reaches_twelve()
     {
-        var floor = DenRooms.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(Dats), new LandblockCoord(1, 5)));
+        var floor = GroundRooms.FloorOf(LandblockCellSet.Load(new CellStructureLibrary(Dats), new LandblockCoord(1, 5)), DenGround.Profile);
         var upright = new RoomGraph(floor);
-        var leaning = new RoomGraph(floor, DenRooms.MaxLean);
-        var arrival = BlackSpawnDen.Arrival.CellId;
-        var plain = DenWalk.Tour.Count(low => upright.FindPath(arrival, 0x01050000u | low) is not null);
-        var lean = DenWalk.Tour.Count(low => leaning.FindPath(arrival, 0x01050000u | low) is not null);
+        var leaning = new RoomGraph(floor, DenGround.Profile.Walk.DoorwayLean);
+        var arrival = DenGround.Arrival.CellId;
+        var plain = DenGround.SpawnLowWords.Count(low => upright.FindPath(arrival, 0x01050000u | low) is not null);
+        var lean = DenGround.SpawnLowWords.Count(low => leaning.FindPath(arrival, 0x01050000u | low) is not null);
         output.WriteLine($"lean 0: {plain} of 12 spawn cells; lean 0.3: {lean} of 12");
         Assert.Equal(1, plain); // 0x0383 only
         Assert.Equal(12, lean);

@@ -50,6 +50,27 @@ public sealed class AutomationInspectorTests(DatSetFixture fixture, ITestOutputH
     }
 
     [Fact]
+    public void The_autopilot_lines_show_the_mode_the_state_the_last_decision_and_the_next_trigger_M5_4_h2()
+    {
+        Assert.Equal(
+            "Autopilot: running | fight:den-fight | cycle 2 | interrupted 1, resumed 1\nLast decision: known-state -> fight: in the ground\nNext trigger: trip at 200 Tapers: 412 held",
+            AutomationInspector.FormatAutopilot(new AutopilotStatus(AutopilotMode.Running, "fight:den-fight", "known-state -> fight: in the ground", "trip at 200 Tapers: 412 held", 2, 1, 1)));
+        Assert.Equal(
+            "Autopilot: off (type /auto to start it)\nLast decision: not started\nNext trigger: -",
+            AutomationInspector.FormatAutopilot(new AutopilotStatus(AutopilotMode.Off, string.Empty, "not started", string.Empty, 0, 0, 0)));
+        Assert.StartsWith("Autopilot: stopped (the controls are yours; /auto resumes)", AutomationInspector.FormatAutopilot(new AutopilotStatus(AutopilotMode.Interrupted, "fight:den-fight", "x", string.Empty, 1, 1, 0)), StringComparison.Ordinal);
+        Assert.StartsWith("Autopilot: halted by the kill switch", AutomationInspector.FormatAutopilot(new AutopilotStatus(AutopilotMode.Halted, "fight:den-fight", "x", string.Empty, 1, 0, 0)), StringComparison.Ordinal);
+        Assert.StartsWith("Autopilot: not available in this session", AutomationInspector.FormatAutopilot(null), StringComparison.Ordinal);
+
+        // A long decision is cut to one line of the window.
+        var long1 = AutomationInspector.FormatAutopilot(new AutopilotStatus(AutopilotMode.Running, "fight:den-fight", new string('x', 300), "stop at 30 min: 12 min left", 1, 0, 0)).Split('\n');
+        Assert.Equal(3, long1.Length);
+        Assert.Equal("Last decision: ".Length + AutomationInspector.AutopilotLineLimit, long1[1].Length);
+        Assert.EndsWith("...", long1[1], StringComparison.Ordinal);
+        Assert.Equal("Next trigger: stop at 30 min: 12 min left", long1[2]);
+    }
+
+    [Fact]
     public void The_log_counts_every_outcome_for_its_lifetime_and_announces_each_change()
     {
         var log = new ActionLog();
@@ -125,13 +146,54 @@ public sealed class AutomationInspectorTests(DatSetFixture fixture, ITestOutputH
             Assert.True(inspector.IsOpen);
             var window = Assert.IsAssignableFrom<UiElement>(inspector.Window);
             Assert.Equal((120, 40, 560, 400), (window.Box.X0, window.Box.Y0, window.Box.Width, window.Box.Height));
-            foreach (var id in new[] { AutomationInspector.CountersId, AutomationInspector.StateId, AutomationInspector.ListId, AutomationInspector.ScrollbarId, AutomationInspector.CloseId })
+            foreach (var id in new[] { AutomationInspector.CountersId, AutomationInspector.StateId, AutomationInspector.AutopilotId, AutomationInspector.ListId, AutomationInspector.ScrollbarId, AutomationInspector.CloseId })
             {
                 Assert.NotNull(window.GetChildRecursive(id));
             }
 
             Assert.DoesNotContain(rig.Log.Entries, e => e.Severity >= LogSeverity.Error);
             Assert.Equal(window, Assert.Single(rig.Manager.Roots, r => ReferenceEquals(r, window)));
+        }
+    }
+
+    private sealed class FakeAutopilot : IAutopilotStatusSource
+    {
+        public AutopilotStatus Status { get; set; } = new(AutopilotMode.Off, string.Empty, "not started", string.Empty, 0, 0, 0);
+
+        public event Action? Changed;
+
+        public void Raise() => Changed?.Invoke();
+    }
+
+    [RequiresLocalDatsFact]
+    public void The_open_inspector_shows_the_autopilots_lines_and_follows_its_changes_on_the_next_frame_M5_4_h2()
+    {
+        var (rig, _, inspector) = EnterGame();
+        using (rig)
+        {
+            inspector.Open();
+            Assert.StartsWith("Autopilot: not available", inspector.AutopilotText, StringComparison.Ordinal);
+
+            var autopilot = new FakeAutopilot();
+            inspector.Autopilot = autopilot;
+            rig.Frame();
+            Assert.StartsWith("Autopilot: off (type /auto to start it)", inspector.AutopilotText, StringComparison.Ordinal);
+
+            autopilot.Status = new AutopilotStatus(AutopilotMode.Running, "fight:den-fight", "buff -> fight: buffed in the ground", "stop at 30 min: 12 min left", 1, 0, 0);
+            var refreshes = inspector.Refreshes;
+            autopilot.Raise();
+            Assert.True(inspector.IsStale);
+            rig.Frame();
+            Assert.Equal(refreshes + 1, inspector.Refreshes);
+            Assert.Contains("Next trigger: stop at 30 min: 12 min left", inspector.AutopilotText, StringComparison.Ordinal);
+            Assert.Contains("Last decision: buff -> fight: buffed in the ground", inspector.AutopilotText, StringComparison.Ordinal);
+
+            // Unwired again: the window no longer follows it.
+            inspector.Autopilot = null;
+            autopilot.Raise();
+            rig.Frame();
+            Assert.StartsWith("Autopilot: not available", inspector.AutopilotText, StringComparison.Ordinal);
+            Assert.DoesNotContain(rig.Log.Entries, e => e.Severity >= LogSeverity.Error);
         }
     }
 

@@ -139,8 +139,11 @@ public sealed class F2JourneyFixTests
 
         Assert.NotNull(dir);
         var shop = File.ReadAllText(Path.Combine(dir!, "src", "Lifestone.Client", "Session", "Scenarios", "Journey", "ShopStations.cs"));
-        Assert.Contains("RenaldAt, 2.0f, HuntScenario.RenaldUseMetres)", shop, StringComparison.Ordinal);
+        // M5 7 P7p: no walk to Renald ends at a range any more: the station's walk is the point goal to his stand (GoToRenaldStand); the 6.5 m is the arrival's in-reach check only.
+        Assert.Contains("GoToRenaldStand(\"the first walk\")", shop, StringComparison.Ordinal);
+        Assert.Contains("distance <= HuntScenario.RenaldUseMetres", shop, StringComparison.Ordinal);
         Assert.DoesNotContain("RenaldAt, 2.0f, 5.0)", shop, StringComparison.Ordinal);
+        Assert.DoesNotContain("RenaldAt, 2.0f, HuntScenario.RenaldUseMetres)", shop, StringComparison.Ordinal);
     }
 
     [Fact]

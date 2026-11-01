@@ -301,6 +301,74 @@ public sealed class UiInputRouterTests
         Assert.DoesNotContain(open, scene.Manager.Elements);
     }
 
+    // The owner's sighting (M5 item 7): the tooltip was laid out in its text element's design width, so a long description
+    // wrapped one word per line and the tooltip grew only downwards. UIElementManager::StartTooltip (11.6096 0x0045DF70)
+    // measures the text first (UIElement_Text::InqSizewMargins, 11.6096 0x004698F0: no wider than the text element's
+    // maximum width property, else the display) and sizes the tooltip to it.
+    private const string LongTooltip = "Self: Affects how much magic a character can use, and how quickly they regain mana. Self also aids resistance to some spells.";
+
+    [Fact]
+    public void A_long_tooltip_lays_out_as_wide_as_the_display_allows_not_one_word_per_line()
+    {
+        var (scene, open) = OpenTooltip(LongTooltip, maxWidth: null);
+        var label = Assert.IsType<UiTextElement>(open.GetChild(0x51));
+        label.RecalculateGlyphList();
+
+        // 7 pixels a character: 875 pixels of text wrap at the 800-pixel display into two lines, not twenty.
+        Assert.Equal(2, label.Glyphs.Lines.Count);
+        Assert.True(label.Box.Width > 700, $"text width {label.Box.Width}");
+        Assert.True(label.Box.Width <= scene.Manager.DisplaySize.Width);
+        Assert.Equal(open.Box.Width, label.Box.Width);
+        Assert.True(label.PaperHeight <= label.Box.Height, $"text {label.PaperHeight} high in {label.Box.Height}");
+        Assert.True(open.Box.X0 >= 0 && open.Box.X0 + open.Box.Width <= scene.Manager.DisplaySize.Width);
+    }
+
+    [Fact]
+    public void A_long_tooltip_keeps_to_its_text_element_s_maximum_width()
+    {
+        var (_, open) = OpenTooltip(LongTooltip, maxWidth: 200);
+        var label = Assert.IsType<UiTextElement>(open.GetChild(0x51));
+        label.RecalculateGlyphList();
+
+        // Wider than the longest word ("character," is 70 pixels) and no wider than 200: several words a line.
+        Assert.InRange(label.Box.Width, 71, 200);
+        Assert.InRange(label.Glyphs.Lines.Count, 5, 9);
+        Assert.Equal(label.PaperHeight, label.Box.Height);
+    }
+
+    [Fact]
+    public void A_short_tooltip_shrinks_to_its_text()
+    {
+        var (_, open) = OpenTooltip("Play", maxWidth: 200);
+        var label = Assert.IsType<UiTextElement>(open.GetChild(0x51));
+
+        Assert.Equal(4 * 7, label.Box.Width);
+        Assert.Equal(12, label.Box.Height);
+    }
+
+    private static (UiScene Scene, UiElement Tooltip) OpenTooltip(string text, int? maxWidth)
+    {
+        var stretch = new UiEdges(UiEdge.OwnSide, UiEdge.OwnSide, UiEdge.OwnSide, UiEdge.OwnSide);
+        UiProperty[] labelProperties = maxWidth is { } max ? [new UiIntegerProperty(UiPropertyIds.ElementMaxWidth, max)] : [];
+        var tooltip = UiDescs.Element(0x50, F, 0, 0, 40, 16, properties: [new UiEnumProperty(UiPropertyIds.ElementTooltipTextId, 0x51)], children:
+        [
+            UiDescs.Element(0x51, UiClassIds.Text, 0, 0, 40, 16, edges: stretch, properties: labelProperties, layout: 0x21000002),
+        ], layout: 0x21000002);
+        var scene = new UiScene(
+        [
+            UiDescs.Element(3, Button, 10, 10, 50, 20, properties:
+            [
+                new UiBoolProperty(UiPropertyIds.ElementTooltipsOn, true),
+                new UiEnumProperty(UiPropertyIds.ElementTooltipId, 0x50),
+                new UiDataIdProperty(UiPropertyIds.ElementTooltipLayout, 0x21000002),
+            ]),
+        ], extraLayouts: [UiDescs.Layout(0x21000002, 800, 600, tooltip)]);
+        scene.Get<UiButton>(3).SetTooltip(UiStringRef.FromLiteral(text));
+        scene.Input.MouseMove(20, 20);
+        scene.Frame(0.3);
+        return (scene, Assert.IsAssignableFrom<UiElement>(scene.Input.TooltipElement));
+    }
+
     [Fact]
     public void The_cursor_is_the_capture_s_then_the_entered_element_s_then_the_default()
     {

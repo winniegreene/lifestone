@@ -1,0 +1,709 @@
+{
+  "key": "black-spawn-den-aluvian",
+  "name": "Black Spawn Den (Aluvian)",
+  "kind": "dungeon",
+  "sources": {
+    "landblocks": "the dats: landblock 0x0105, the Aluvian Black Spawn Den (InteriorLocations.BlackSpawnDenAluvian; m5-first-dungeon.md section 5.3)",
+    "arrival": "the pinned world SQL v0.9.296: the den portal 7242's destination, cell 0x01050375 at (100, -210, 0), quaternion w 0.707107 z -0.707107 (InteriorLocations.BlackSpawnDenAluvian, the same destination GroundDraft's arrival half reads; m3-lights-and-sound.md section 5.1)",
+    "walk": "a measure (M3 3.1 lane fa, kept by the walks that read this section): the doorway lean 0.3 the room graph accepts (the den's plaza doorways lean 0.196; floors and ceilings are 1, read from the dats through RoomGraph.IsPassable) and the leg's stop rules: stop within 1.0 m, dwell 0.25 s, a leg at most 90 s",
+    "storeys": "the dats through GroundDraft.Cells (M5 item 2 g2): every cell the arrival 0x01050375 reaches over the doorways RoomGraph.IsPassable accepts at lean 0.3, grouped by origin z into six bands (z 0 161, z -6 96, z -12 25, z -18 149, z -24 117, z -30 19 cells: 567 of the landblock's 653; 572 reached, less the wing's five floorless ramp cells 0x0139-0x013D; 35 floorless and 51 unreached pocket cells left out); today's 158-cell floor lies inside z 0; the z -30 band is the wing's bottom but for 0x010E, the wing's south doorstep, which holds no slot",
+    "no_go": "m5-plan.md D39 (item 2's lead, from cache/m5/2/research.md section 1): the north wing by its geometry, the 52 cells with origin z at or under -23 and y over -125 (the dats); the Virindi outliers' cells 0x0244, 0x02D3, 0x02D5 and 0x02D6 (the pinned world SQL v0.9.296); the exits: the draft's exit portals' cells 0x0341 and 0x0279 (two Surface Portals, wcid 7243, to 0x1B90002D; GroundDraft.World over the pinned world SQL v0.9.296) with the first exit's room 0x0342-0x0343 and doorway 0x035C (the exclusion M3's fight loop measured by hand); and the 13 walkable cells these cut off from the arrival (GroundDraft.CutOff): the second exit's corridor 0x026A-0x026C, 0x0273-0x0278 and 0x027B with its ramp 0x0240 and 0x01DC down to the wing, reached only through the wing or 0x0279, and 0x02D4 between the outliers 0x02D3 and 0x02D5. D39 retired M3's hand-made ranges 0x0100-0x0121 and 0x016A-0x018B, which also held the south z -24 guard cells 0x0118, 0x0171-0x0176 and 0x0182",
+    "targets": "the pinned world SQL v0.9.296: the den's generator links with each weenie's name and level (m5-first-dungeon.md section 5.3); the targets are the Tusker Slave and the Tusker Guard (the two classes M3's fight loop hunted), the avoided are the other four (session.md section 31's floor rule); GroundDraft.World finds exactly these six weenies in the generators' slots. A slot's role is its weenie's; a target's slot in a no-go cell is not hunted (the no-go set wins): the guards of 0x02D3, 0x02D5 (2), 0x02D6 and the wing's 0x010D. M5 7 F7 (the drain picker's measures of the two targets, the pinned world SQL v0.9.296 parsed read-only): max_health is the weenie's weenie_properties_attribute_2nd type 1 (MaxHealth) current_Level, Tusker Slave 400 and Tusker Guard 260; magic_defence is its weenie_properties_skill type 15 (Magic Defense) init_Level, 200 and 225, without the formula share ACE adds to a creature's skill (TODO(m5-drain-magic-defence-formula)) M5 7 F8 (D89, the owner): the Slave names an opener, Fire Vulnerability Other, cast once before the bolts (ACE multiplies a war bolt's damage by the fire vulnerability, SpellProjectile.cs:526-557 and EnchantmentManager.cs:925-939 at 95ef426d; the lead's arithmetic, cache/m5/7/vuln-math.md: a Slave at level 80 dies in 10.1 s with it against 11.4 s without); the Guard names none, a tie",
+    "level_band": "the pinned world SQL v0.9.296: both tuskers are level 80 (m5-first-dungeon.md section 5.3)",
+    "portal": "a measure (session.md section 41, the W0 facts, live): the den's portal guid 0x71B90000, weenie 7242, in cell 0x1B90002C at origin (122.404, 87.43, 29.937) as the client saw it; the pinned world SQL v0.9.296 row of that guid agrees to the centimetre but for z (122.404, 87.4296, 30.005, quaternion w 0.008428 z 0.999964: the portal faces south); the tie point is the W0 stand 3 m in front of it, cell 0x1B90002C at (122.40, 84.43, 30.01), where Primary Portal Tie 47 links; Primary Portal Recall 48 arrives in 0x01050375",
+    "home": "a measure (session.md section 41, M4 4.2 FS): Holtburg's lifestone in cell 0xA9B40019 and the known point (84, 7.7) off it, z 94 (TravelStations.HoltburgLifestone)",
+    "vendors": "the pinned world SQL v0.9.296, parsed read-only (M5 2 g1): each vendor's landblock_instance row (guid, cell, origin) and its int property 74 (MerchandiseItemTypes); the wares and prices at 1.35 from cache/m5/0/world-sql-facts.md section 3 (m5-plan.md section 8 item 0, the vendors row, [S]); Renald's stop is his front room 0xA9B4013F (docs/wayfinding.md), Thelnoth's his cellar (HeadlessJourneyRunnerHost); M5 3 fix F4 (the dats, ResupplyRouteDatTests): Cindrue's stop is the building's entry hall 0xA9B40117 at (152.3, 132.5, 66), the clear floor nearest her that the journeys' leg planner reaches (the hall is 3.0 m under her floor; her own cell 0xA9B4011B and the rooms of her upper floor join the hall only by steps the room graph refuses, TODO(room-steps); the entry rooms 0xA9B40118 and 0xA9B40119 route too, 4.3 m and 7.4 m from her), and Renald's stop point is a clear floor of his front room in front of his counter, because his own point lies in his back room 0xA9B40141, outside the stop cell; the walk ends at the stop point and the open lets ACE's move-to walk the rest. M5 7 (m5-renald-shop-floor, D120): the stop point moved from (135.6, 15.8, 94), the floor polygon nearest him, to (133.5, 15.5, 94), because the corner nearest him is full: three barrels (Setup 0x020000A5, cylinders of 0.27 m, two on the floor at (134.83, 16.05) and (135.75, 16.05) and one stacked on them) stand against the north wall beside the counter 0x02000272 (its west face at x 135.14), the old point lay 0.29 m from a barrel's axis, and the walker's physics pre-check (RouteConfirmer, the fixed-world ground probe) refused every plan to it at the sample 1 m before it (the soak of 2026-10-29 03:13 UTC, the mage never moved). The new point is the clear floor by the door where the walks of M4 P5b and M5 item 0 ended and sold (F1's floor arrival (133.35, 15.65) is 0.2 m from it): the human's foot sphere stands on the floor at it and at every point of the 0.5 m stop tolerance round it, 6.4 m from Renald (5.0 m cylinder to cylinder, his use radius), and ACE's move-to from any point of that ring arrives within his use radius in under a second on the floor, not up the box and the counter (VendorStopConfirmDatTests, on the dats); M5 3 m0 added Cindrue's Faran War Apprentice Robe 6071 (1,512) and Wand 2472 (270), the kit of the supplies section, which lists every ware a vendor sells here (a vendor lists only supply lines); M5 7 F13 (D87): the robe 6071 left the kit (it does not cover the head), so Cindrue lists the Wand alone, Renald lists the Leather Gauntlets 56 (1,485) and Ecutha the Tailor (guid, cell and point from her landblock_instance row; int property 74 = 0x40004; sell rate 1.35, float property 38) lists the Faran Robe with Hood 5851 (68); she is a vendor of the kit only, no trip stocks anything from her, and her stop is her own cell as Thelnoth's is (TODO(m6-ecutha-stop-point): the stop point is her point until a live round walks it) M5 7 F28 (D95): Monyra the Jeweler (wcid 716; guid 0x7A9B4020, cell 0xA9B40117 at (157.19, 135.298, 66.12) from her landblock_instance row, the entry hall that is also Archmage Cindrue's stop cell, 4.9 m from Cindrue's stop point; int property 74 = 264200 = 0x40808, Jewelry 0x8 + Gem 0x800 + PromissoryNote 0x40000; read-only SELECTs of the live world database, the pinned dump's rows) lists no supply line: she is a loot buyer only, so the jewellery and gems the loot step keeps are sold (no profile vendor bought either before); the Blacksmith (712, 0.95 for armour and weapons, against Renald's 0.9) is not in the profile; her stop is her own cell as Thelnoth's and Ecutha's are (TODO(m6-monyra-stop-point): the walk to her point has not been run live) M5 7 G1: Archmage Cindrue also lists the Trade Note (250,000) wcid 20630, the largest note she sells, which the sell trip BUYS to turn the coin above the purse's coin into notes (ACE sells a promissory note at 1.15 times its face, Vendor.cs 577-585 @95ef426d: 287,500), because ACE never merges coin stacks and a sale needs one free slot per 25,000 paid (Player_Commerce.cs 176-191 @95ef426d) M5 7 P7j (D143, the owner): the Scrivener of Item Magic (wcid 20214, 'scriveneritemouter'; guid 0x7A9B301B in the outdoor cell 0xA9B3003C at (187.288, 86.7918, 116.005), the landblock south of Holtburg's, her landblock_instance row as the town draft reads it) lists Aura of Spirit Drinker Self IV's scroll (wcid 28005, Value 100, ItemType Writable 0x2000, SpellDID 3256; her CreateList row 77950 in the pinned world SQL v0.9.296) at her SellPrice 50 (float property 38): ACE's GetSellCost is ceil(50 x 100 - 0.1) = 5,000 pyreals (Vendor.cs 577-585 @95ef426d); she is a vendor of the learn list only, so her mask is 0 here (her int property 74 is 270464 = 0x42080, Misc, Writable and PromissoryNote, but no trip sells to her: the loot buyers stay in town), and her stop is her own outdoor cell as Thelnoth's is (the walk's range stops short of her); M5 7 (D148, a read-only check of her CreateList, destination 4): Archmage Cindrue also sells the Silver Scarab 688 (Value 250 at 1.35: 338 pyreals), so it is a supply line bought on the trips, not a carried one (the Iron Scarab 689 she sells too is not a line of this profile)",
+    "spell_plan": "m5-plan.md D41 (after D26): Flame Bolt VI below character level 100, VII from 100; 275 is ACE's highest character level",
+    "components": "the kit code: GearKit.FociFormulaCounts over SpellFormulaRules.ScarabOnlyFormula (the foci formula: the level's scarab, then 4 Prismatic Tapers for a power 6 or power 8 scarab) and ComponentWeenies for the wcids: Pyreal Scarab 690 for VI, Platinum Scarab 8897 for VII (D26; m5-first-dungeon.md section 5.7)",
+    "supplies": "m5-plan.md D48 and D49, sized from the burn (m5-first-dungeon.md section 5.7; D38). The burn: 0.43 Prismatic Tapers a Flame Bolt cast on the foci formula, 3 to 3.5 casts a kill = about 1.4 a kill, about 11 a buff cycle (a cycle at most every half hour, GearKit's 30-minute enchantments: an upper bound, 22 an hour), 224 kills an hour (item 2, the whole den): 224 x 1.4 + 22 = about 336 an hour, 8,054 in 24 h. Prismatic Taper 20631 (Cindrue, 30): keep 1,000 (3 hours of the burn; 6,000 burden at 6 each, of the mage's capacity near 21,000; a stack is at most 1,000), trip_under 200 (36 minutes of the burn left against a trip of 70 to 110 s, section 5.7), stop_under 12 (a buff cycle's 11 and one more; a cast needs at most 4, per_cast). Mana Potion 379 (Thelnoth, 230): the mage's kit holds none today (GearKit) and its mana comes from the stamina-to-mana casts, so the potion is a reserve for the keeper: keep 30 (25 mana each, 750 mana, burden 15 each), trip_under 5, stop_under 0 (no potion is a shortage, not a stop). Pyreal Scarab 690 and Platinum Scarab 8897 are CARRIED (Holtburg sells neither: section 5.7, D8) and a trip cannot restock them, so trip_under = stop_under = 3 (D8: a stack under three stops the loop by name); keep 100, the stack's limit (MaxStackSize 100, burden 4 each): Platinum burns 0.012 a kill and 0.09 a buff cycle = 5,376 x 0.012 + 48 x 0.09 = about 69 in 24 h (100 is 1.45 days); the Pyreal Scarab's burn at VI is unmeasured (m5-component-loss-vi; about twice Platinum's if the live cast facts hold, 138 a day) and VI is cast only below character level 100 (D41), so 100 is the stack, not a day. Kit, from Archmage Cindrue's CreateList in the pinned world SQL v0.9.296 (parsed read-only; prices at her SellPrice 1.35, max(1, ceil(1.35 x Value - 0.1))): the Faran War Apprentice Robe 6071 (Value 1,120, 1,512 pyreals; the War school's of her four apprentice robes, the school of Flame Bolt; Arcane Lore difficulty 20, which BSD Mage meets) and the Wand 2472 (Value 200, 270 pyreals, burden 50; against her Wand 5539, Value 100, burden 125: both are the same plain wand with no spell and no elemental bonus in the row, so the lighter and dearer one); M5 7 F13 (D87, the owner: the level-80 traditional mage, no Melee Defense, wears a hooded robe and gloves, so a bare head and hands take the big hits): the Faran War Apprentice Robe 6071 (ClothingPriority 81664 = 0x13F00, no head) is replaced by the Faran Robe with Hood 5851 (Ecutha the Tailor, Value 50, 68 pyreals, burden 200 as the old robe, ClothingPriority 98048 = 0x17F00 with the head 0x4000, ValidLocations 0x7F01 = the old robe's 0x7F00 and HeadWear, armour level 0, no wield requirement; no robe named for the War school covers the head in the pinned world SQL, so the hood wins over the school, and the War robe's two item spells are not carried) and the Leather Gauntlets 56 (Renald the Elder, Value 1,100, 1,485 pyreals, burden 270, ClothingPriority 32768 = 0x8000 the hands, ValidLocations HandWear, armour level 130, no wield requirement: the lightest gloves of the three Holtburg sells, the Studded Leather and Chainmail gauntlets weigh 450, the Chainmail's armour level 140 being the only better); the vendor wand is a placeholder until the owner picks a caster (The Healer's Heart 8552, the M3 wand, is not in her list). burden_trip_percent 90: a trip before the load nears the capacity (m5-plan.md section 4.5, row m4). Purse: about 300,000 pyreals for the soak's day (D38): 45 pyreals a kill (1.4 tapers x 30 = 42, plus 3 for the buffs) x 224 x 24 = 241,920, plus a margin of about a quarter; coin 40,000 is one refill of tapers and potions (1,000 x 30 + 30 x 230 = 36,900, rounded up); the other 260,000 is in the largest trade notes Cindrue sells (Trade Note 250,000 wcid 20630 and Trade Note 10,000 wcid 2625; Values from her CreateList), which are bonded and never drop at a death, so they stay in the pack (D49 as corrected by m1: ACE Player_Death.cs:501-502 @95ef426d) M5 7 F3 (D87, the soak's mage at level 80 casting VI, the day's burn measured by the lead: about 0.017 Pyreal Scarab lost a cast, 3 to 4 casts a kill, about 180 kills an hour = about 12 an hour): Pyreal Scarab keep 300 (25 hours; three stacks of 100, MaxStackSize 100, which the build asks for in three requests; 1,200 burden at 4 each; the load of the kit and the purse stays under burden_trip_percent for a level-80 mage of Strength 113, GearKit.KitPlan); Prismatic Taper keep stays 1,000 (a stack's limit; about 0.8 a cast at VI = about 500 an hour, so a trip every 1.6 hours, trip_under 200); the purse is 400,000 (coin 40,000, Trade Note 250,000, Trade Note 10,000 and two Trade Note 50,000 wcid 2626; about 85 pyreals a kill x 180 kills an hour = about 15,300 an hour, 26 hours; the 50,000 note is Cindrue's, Value from her CreateList). M5 3 m1 (the mage kit's foci check): the four travel spells (Lifestone Recall and Tie, Primary Portal Tie and Recall) burn one Copper Scarab 686 on the foci formula (Copper, level III; Cindrue and Zisaha sell it, Value 100 at the vendor's sell price), a travel cast is a few a trip: keep 20 (80 burden), trip_under 5, stop_under 2 (a cast needs 1). M5 7 F10 (D90, the owner's components rule: no move the fight's picker can choose is refused for a missing component; the build grants the carried ones, nothing after it): the picker's moves at level 80 are Flame Bolt VI, Fire Vulnerability Other VI (about one a Tusker Slave: 19 of the 78 targets, so about 44 casts an hour at 180 kills), Drain Health Other VI (at the floor and as an attack while the mage is hurt: up to one a kill, 180 an hour, an upper bound), Drain Stamina Other VI (in place of a Revitalize Self, no extra cast) and Cassius' Ring of Fire (F9: three or more tuskers within about 3 m). Every VI move burns the Pyreal Scarab and 4 Prismatic Tapers on the foci formula: about 224 more VI casts an hour x 0.017 = 3.8 more Pyreal Scarabs an hour, (10.7 + 3.8) x 24 = about 348 a day, so keep 400 (four stacks; trip_under and stop_under stay 3: carried, Holtburg sells none). The ring burns 2 Diamond Scarabs 7299 and 3 Prismatic Tapers a cast on the foci formula (ComponentWeenies: loss 0.01, about one scarab every 450 casts, F9): CARRIED like the Pyreal (Holtburg sells none): keep 6 (a day of rings with a margin), trip_under = stop_under = 2 (one cast's two; a carried line stops by name and trips never, D8, as the Pyreal's 3 and 3). Tapers stay bought on trips: about 180 more an hour (224 casts x 0.8), so about 680 an hour against a keep of 1,000 (the stack's limit; a trip about every 1.2 hours, trip_under 200 is about 18 minutes; the ring's 3 a cast are under the bolt's 4). The purse is raised to match: 180 more tapers an hour x 30 = 5,400 more an hour, 15,300 + 5,400 = 20,700 an hour x 26 hours = about 538,000, so 550,000 (coin 40,000, Trade Note 250,000, Trade Note 10,000 and five Trade Note 50,000). Burden at level 80 (F3's capacity 15,750 at Strength 113, the 90% line 14,175): F3's 9,984, plus 100 Pyreal Scarabs x 4 = 400, plus 6 Diamond Scarabs x 4 = 24, plus F13's gloves (270; the hooded robe weighs the old robe's 200) = about 10,678 (68%), under the line; the three extra trade notes weigh next to nothing. M5 7 F16 (D91, the owner's components rule): the emergency drain is always Drain Health Other I (one gesture, no wind-up), which burns one Lead Scarab 691 and the foci formula's tapers a cast (Archmage Cindrue sells the scarab, Value 10, 14 pyreals at her 1.35 in the pinned world SQL v0.9.296, so it is bought on trips, not carried): keep 100 (the stack's limit, MaxStackSize 100), trip_under 20 (a trip while the stack lasts), stop_under 2 (a cast needs 1); an emergency cast is a few a fight at most. M5 7 F25 (D93): the Silver Scarab 688 (level IV) and the Gold Scarab 687 (level V) are CARRIED (Holtburg sells neither; the build grants them, burden 4 each, 160 for both stacks), keep 20, trip_under = stop_under = 2 (the carried lines' rule), so the first buff pass after a login or a death climbs through levels IV and V instead of bootstrapping from level III and counting the lower lines missed. M5 7 D136 follow-up (the lead, 2026-10-29): purse min_note 25000, the smallest note the trips buy with the coin above the floor: a note under one coin stack (the pyreal stacks to 25,000) saves no pack slot and costs 15% (1.15 x the face, Vendor.cs 577-585), so the 10,000 and smaller stay coin; ACE has no 25,000 note, so the trips buy the 50,000 to the 250,000.",
+    "hold_spots": "none: today's loop walks the tour and holds no spot",
+    "respawn": "the pinned world SQL v0.9.296 through GroundDraft.World (M5 item 2 g2): the three generators (wcid 3955, Linkable Monster Gen (15 min.)) 0x70105022 in cell 0x0154 and 0x7010507A and 0x7010507B in cell 0x0382 (session.md section 31), each its first profile row's delay 900 s and its RegenerationInterval 60 s; a measure of m5-plan.md section 8 item 0 agrees (903-955 s from a death to the slot's next creature); the slots are their 117 link children (cell, wcid): the 78 targets in walkable cells (19 Tusker Slaves, 59 Tusker Guards), 5 guards in no-go cells and 34 avoided creatures (8 Virindi Servants, 2 Virindi Masters, 8 Drudge Stalkers, 16 Drudge Raveners); the two chests' generators (wcid 3969 and 3985) make no creature and are left out",
+    "tour": "a first draft (GroundDraft.FirstTour, M5 item 2 g2): the 57 cells of the 78 target slots in walkable cells, storey by storey from z 0 down, nearest first by cell origin from the arrival (cache/m5/2/research.md section 1's greedy order was the research's first draft; the tour's own logic is item 2 g6's)",
+    "outdoor": "none: the den is a dungeon"
+  },
+  "landblocks": [
+    "0x0105"
+  ],
+  "arrival": {
+    "cell": "0x01050375",
+    "origin": { "x": 100, "y": -210, "z": 0 },
+    "heading": {
+      "w": 0.707107,
+      "z": -0.707107
+    }
+  },
+  "walk": {
+    "doorway_lean": 0.3,
+    "stop_within_m": 1.0,
+    "stop_dwell_s": 0.25,
+    "leg_s": 90
+  },
+  "storeys": [
+    {
+      "name": "z 0",
+      "z_min": 0,
+      "z_max": 0,
+      "cells": [
+        "0x010502D7", "0x010502D8", "0x010502D9", "0x010502DA", "0x010502DB", "0x010502E0", "0x010502E1", "0x010502E2",
+        "0x010502E3", "0x010502E4", "0x010502E5", "0x010502E6", "0x010502E7", "0x010502E8", "0x010502E9", "0x010502EA",
+        "0x010502EB", "0x010502EC", "0x010502ED", "0x010502EE", "0x010502EF", "0x010502F0", "0x010502F1", "0x010502F2",
+        "0x010502F7", "0x010502F8", "0x010502F9", "0x010502FA", "0x010502FB", "0x010502FC", "0x010502FD", "0x010502FE",
+        "0x010502FF", "0x01050300", "0x01050301", "0x01050302", "0x01050303", "0x01050304", "0x01050305", "0x01050306",
+        "0x01050307", "0x01050308", "0x0105030D", "0x0105030E", "0x0105030F", "0x01050310", "0x01050311", "0x01050312",
+        "0x01050313", "0x01050314", "0x01050315", "0x01050316", "0x01050317", "0x01050318", "0x01050319", "0x0105031A",
+        "0x0105031B", "0x0105031C", "0x0105031D", "0x0105031E", "0x0105031F", "0x01050320", "0x01050321", "0x01050322",
+        "0x01050323", "0x01050324", "0x01050325", "0x01050326", "0x01050327", "0x01050328", "0x01050329", "0x0105032A",
+        "0x0105032B", "0x0105032C", "0x0105032D", "0x0105032E", "0x0105032F", "0x01050330", "0x01050331", "0x01050332",
+        "0x01050333", "0x01050334", "0x01050335", "0x01050336", "0x01050337", "0x01050338", "0x01050339", "0x0105033A",
+        "0x0105033B", "0x0105033C", "0x0105033D", "0x0105033E", "0x0105033F", "0x01050340", "0x01050341", "0x01050343",
+        "0x01050344", "0x01050345", "0x01050346", "0x01050347", "0x01050348", "0x01050349", "0x0105034A", "0x0105034B",
+        "0x0105034C", "0x0105034D", "0x0105034E", "0x0105034F", "0x01050350", "0x01050351", "0x01050352", "0x01050353",
+        "0x01050354", "0x01050355", "0x01050356", "0x01050357", "0x01050358", "0x01050359", "0x0105035A", "0x0105035B",
+        "0x0105035C", "0x0105035D", "0x0105035E", "0x0105035F", "0x01050360", "0x01050361", "0x01050362", "0x01050363",
+        "0x01050364", "0x01050365", "0x01050366", "0x01050367", "0x01050368", "0x01050369", "0x0105036A", "0x0105036B",
+        "0x0105036C", "0x0105036D", "0x0105036E", "0x0105036F", "0x01050370", "0x01050371", "0x01050372", "0x01050373",
+        "0x01050374", "0x01050375", "0x01050376", "0x01050377", "0x01050378", "0x01050379", "0x0105037A", "0x0105037B",
+        "0x0105037C", "0x0105037D", "0x0105037E", "0x0105037F", "0x01050380", "0x01050381", "0x01050382", "0x01050383",
+        "0x01050384"
+      ]
+    },
+    {
+      "name": "z -6",
+      "z_min": -6,
+      "z_max": -6,
+      "cells": [
+        "0x01050262", "0x01050263", "0x01050264", "0x01050265", "0x0105026A", "0x0105026B", "0x0105026C", "0x0105026D",
+        "0x0105026E", "0x01050273", "0x01050274", "0x01050275", "0x01050276", "0x01050277", "0x01050278", "0x01050279",
+        "0x0105027B", "0x01050280", "0x01050281", "0x01050284", "0x01050285", "0x01050286", "0x01050287", "0x01050288",
+        "0x01050289", "0x0105028A", "0x0105028B", "0x0105028C", "0x0105028D", "0x0105028E", "0x0105028F", "0x01050290",
+        "0x01050291", "0x01050292", "0x01050293", "0x01050294", "0x01050295", "0x01050296", "0x01050297", "0x0105029B",
+        "0x0105029C", "0x0105029D", "0x0105029E", "0x0105029F", "0x010502A0", "0x010502A1", "0x010502A2", "0x010502A3",
+        "0x010502A4", "0x010502A5", "0x010502A6", "0x010502A7", "0x010502A8", "0x010502A9", "0x010502AA", "0x010502AB",
+        "0x010502AC", "0x010502AD", "0x010502AE", "0x010502AF", "0x010502B0", "0x010502B1", "0x010502B2", "0x010502B3",
+        "0x010502B4", "0x010502B5", "0x010502B6", "0x010502B7", "0x010502BB", "0x010502BC", "0x010502BD", "0x010502BE",
+        "0x010502BF", "0x010502C0", "0x010502C1", "0x010502C2", "0x010502C3", "0x010502C4", "0x010502C5", "0x010502C6",
+        "0x010502C7", "0x010502C8", "0x010502C9", "0x010502CA", "0x010502CB", "0x010502CC", "0x010502CD", "0x010502CE",
+        "0x010502CF", "0x010502D0", "0x010502D1", "0x010502D2", "0x010502D3", "0x010502D4", "0x010502D5", "0x010502D6"
+      ]
+    },
+    {
+      "name": "z -12",
+      "z_min": -12,
+      "z_max": -12,
+      "cells": [
+        "0x01050237", "0x0105023A", "0x0105023B", "0x0105023C", "0x0105023D", "0x0105023E", "0x0105023F", "0x01050240",
+        "0x01050241", "0x01050242", "0x01050243", "0x01050244", "0x01050245", "0x01050246", "0x01050247", "0x01050248",
+        "0x01050249", "0x0105024A", "0x0105024B", "0x0105024C", "0x0105024D", "0x0105024E", "0x0105024F", "0x01050250",
+        "0x01050251"
+      ]
+    },
+    {
+      "name": "z -18",
+      "z_min": -18,
+      "z_max": -18,
+      "cells": [
+        "0x0105018D", "0x0105018E", "0x0105018F", "0x01050190", "0x01050191", "0x01050192", "0x01050193", "0x01050194",
+        "0x01050195", "0x01050196", "0x01050197", "0x01050198", "0x01050199", "0x0105019A", "0x0105019B", "0x0105019C",
+        "0x0105019D", "0x0105019E", "0x0105019F", "0x010501A0", "0x010501A1", "0x010501A2", "0x010501A3", "0x010501A4",
+        "0x010501A5", "0x010501A6", "0x010501A7", "0x010501A8", "0x010501A9", "0x010501AA", "0x010501AB", "0x010501AC",
+        "0x010501AD", "0x010501AE", "0x010501AF", "0x010501B0", "0x010501B1", "0x010501B2", "0x010501B3", "0x010501B4",
+        "0x010501B5", "0x010501B6", "0x010501B7", "0x010501B8", "0x010501B9", "0x010501BA", "0x010501BB", "0x010501BC",
+        "0x010501BD", "0x010501BE", "0x010501BF", "0x010501C0", "0x010501C1", "0x010501C2", "0x010501C3", "0x010501C4",
+        "0x010501C5", "0x010501C6", "0x010501C7", "0x010501C8", "0x010501C9", "0x010501CA", "0x010501CB", "0x010501CC",
+        "0x010501CD", "0x010501CE", "0x010501CF", "0x010501D0", "0x010501D1", "0x010501D2", "0x010501D3", "0x010501D4",
+        "0x010501D5", "0x010501D6", "0x010501DC", "0x010501E7", "0x010501E8", "0x010501E9", "0x010501EA", "0x010501EB",
+        "0x010501EC", "0x010501ED", "0x010501EE", "0x010501EF", "0x010501F0", "0x010501F1", "0x010501F2", "0x010501F3",
+        "0x010501F4", "0x010501F5", "0x010501F6", "0x010501F7", "0x010501F8", "0x010501F9", "0x010501FA", "0x010501FB",
+        "0x010501FC", "0x010501FD", "0x010501FE", "0x010501FF", "0x01050200", "0x01050201", "0x01050202", "0x01050203",
+        "0x01050204", "0x01050205", "0x01050206", "0x01050207", "0x01050208", "0x01050209", "0x0105020A", "0x0105020B",
+        "0x0105020C", "0x0105020D", "0x0105020E", "0x0105020F", "0x01050210", "0x01050211", "0x01050212", "0x01050213",
+        "0x01050214", "0x01050215", "0x01050216", "0x01050217", "0x01050218", "0x01050219", "0x0105021A", "0x0105021B",
+        "0x0105021C", "0x0105021D", "0x0105021E", "0x0105021F", "0x01050220", "0x01050221", "0x01050222", "0x01050223",
+        "0x01050224", "0x01050225", "0x01050226", "0x01050227", "0x01050228", "0x01050229", "0x0105022A", "0x0105022B",
+        "0x0105022C", "0x0105022D", "0x0105022E", "0x0105022F", "0x01050230"
+      ]
+    },
+    {
+      "name": "z -24",
+      "z_min": -24,
+      "z_max": -24,
+      "cells": [
+        "0x01050113", "0x01050114", "0x01050115", "0x01050116", "0x01050117", "0x01050118", "0x01050119", "0x0105011A",
+        "0x0105011B", "0x0105011C", "0x0105011D", "0x0105011E", "0x0105011F", "0x01050120", "0x01050121", "0x01050122",
+        "0x01050123", "0x01050124", "0x01050125", "0x01050126", "0x01050127", "0x01050128", "0x01050129", "0x0105012A",
+        "0x0105012B", "0x0105012C", "0x0105012D", "0x0105012E", "0x0105012F", "0x01050130", "0x01050131", "0x01050132",
+        "0x01050133", "0x01050134", "0x01050135", "0x01050136", "0x01050137", "0x01050138", "0x0105013E", "0x0105013F",
+        "0x01050140", "0x01050141", "0x01050142", "0x01050143", "0x01050144", "0x01050145", "0x01050146", "0x01050147",
+        "0x01050148", "0x01050149", "0x0105014A", "0x0105014B", "0x0105014C", "0x0105014D", "0x0105014E", "0x0105014F",
+        "0x01050150", "0x01050151", "0x01050152", "0x01050153", "0x01050154", "0x01050155", "0x01050156", "0x01050157",
+        "0x01050158", "0x01050159", "0x0105015A", "0x0105015B", "0x0105015C", "0x0105015D", "0x0105015E", "0x0105015F",
+        "0x01050160", "0x01050161", "0x01050162", "0x01050163", "0x01050164", "0x01050165", "0x01050166", "0x01050167",
+        "0x01050168", "0x01050169", "0x0105016A", "0x0105016B", "0x0105016C", "0x0105016D", "0x0105016E", "0x0105016F",
+        "0x01050170", "0x01050171", "0x01050172", "0x01050173", "0x01050174", "0x01050175", "0x01050176", "0x01050177",
+        "0x01050178", "0x01050179", "0x0105017A", "0x0105017B", "0x0105017C", "0x0105017D", "0x0105017E", "0x0105017F",
+        "0x01050180", "0x01050181", "0x01050182", "0x01050183", "0x01050184", "0x01050185", "0x01050186", "0x01050187",
+        "0x01050188", "0x01050189", "0x0105018A", "0x0105018B", "0x0105018C"
+      ]
+    },
+    {
+      "name": "z -30",
+      "z_min": -30,
+      "z_max": -30,
+      "cells": [
+        "0x01050100", "0x01050101", "0x01050102", "0x01050103", "0x01050104", "0x01050105", "0x01050106", "0x01050107",
+        "0x01050108", "0x01050109", "0x0105010A", "0x0105010B", "0x0105010C", "0x0105010D", "0x0105010E", "0x0105010F",
+        "0x01050110", "0x01050111", "0x01050112"
+      ]
+    }
+  ],
+  "no_go": [
+    "0x01050100-0x0105010D", "0x0105010F-0x01050117", "0x01050119-0x01050121", "0x01050138-0x0105013D", "0x01050168-0x01050170", "0x01050187-0x0105018B", "0x01050244", "0x010502D3",
+    "0x010502D5", "0x010502D6", "0x01050279", "0x01050341-0x01050343", "0x0105035C", "0x010501DC", "0x01050240", "0x0105026A-0x0105026C",
+    "0x01050273-0x01050278", "0x0105027B", "0x010502D4"
+  ],
+  "targets": [
+    {
+      "wcid": 1628,
+      "name": "Tusker Slave",
+      "level": 80,
+      "role": "target",
+      "max_health": 400,
+      "magic_defence": 200,
+      "opener": "Fire Vulnerability Other"
+    },
+    {
+      "wcid": 1629,
+      "name": "Tusker Guard",
+      "level": 80,
+      "role": "target",
+      "max_health": 260,
+      "magic_defence": 225
+    },
+    {
+      "wcid": 23,
+      "name": "Virindi Servant",
+      "level": 40,
+      "role": "avoid"
+    },
+    {
+      "wcid": 237,
+      "name": "Virindi Master",
+      "level": 50,
+      "role": "avoid"
+    },
+    {
+      "wcid": 1609,
+      "name": "Drudge Stalker",
+      "level": 50,
+      "role": "avoid"
+    },
+    {
+      "wcid": 1610,
+      "name": "Drudge Ravener",
+      "level": 80,
+      "role": "avoid"
+    }
+  ],
+  "level_band": {
+    "min": 80,
+    "max": 80
+  },
+  "portal": {
+    "guid": "0x71B90000",
+    "cell": "0x1B90002C",
+    "tie_spell": 47,
+    "recall_spell": 48,
+    "wcid": 7242,
+    "origin": { "x": 122.404, "y": 87.43, "z": 29.937 },
+    "front_cell": "0x1B90002C",
+    "front_point": { "x": 122.4, "y": 84.43, "z": 30.01 }
+  },
+  "home": {
+    "town": "Holtburg",
+    "lifestone_cell": "0xA9B40019",
+    "lifestone_point": { "x": 84, "y": 7.7, "z": 94 }
+  },
+  "vendors": [
+    {
+      "name": "Shopkeeper Renald the Elder",
+      "wcid": 718,
+      "guid": "0x7A9B4021",
+      "cell": "0xA9B40141",
+      "point": { "x": 139.234, "y": 18.3293, "z": 94.005 },
+      "stop_cell": "0xA9B4013F",
+      "stop_point": { "x": 133.9, "y": 15.7, "z": 94 },
+      "buys_item_types": "0x480467A7",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 56,
+          "name": "Leather Gauntlets",
+          "price": 1485
+        }
+      ]
+    },
+    {
+      "name": "Archmage Cindrue",
+      "wcid": 2304,
+      "guid": "0x7A9B4033",
+      "cell": "0xA9B4011B",
+      "point": { "x": 152.347, "y": 132.546, "z": 69.005 },
+      "stop_cell": "0xA9B40117",
+      "stop_point": { "x": 152.3, "y": 132.5, "z": 66 },
+      "buys_item_types": "0x000CB000",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 20631,
+          "name": "Prismatic Taper",
+          "price": 30
+        },
+        {
+          "wcid": 686,
+          "name": "Copper Scarab",
+          "price": 135
+        },
+        {
+          "wcid": 688,
+          "name": "Silver Scarab",
+          "price": 338
+        },
+        {
+          "wcid": 691,
+          "name": "Lead Scarab",
+          "price": 14
+        },
+        {
+          "wcid": 2472,
+          "name": "Wand",
+          "price": 270
+        },
+        {
+          "wcid": 20630,
+          "name": "Trade Note (250,000)",
+          "price": 287500
+        }
+      ]
+    },
+    {
+      "name": "Thelnoth Cort the Healer",
+      "wcid": 715,
+      "guid": "0x7A9B4027",
+      "cell": "0xA9B40111",
+      "point": { "x": 30.0196, "y": 159.683, "z": 66.005 },
+      "stop_cell": "0xA9B40111",
+      "buys_item_types": "0x00044080",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 379,
+          "name": "Mana Potion",
+          "price": 230
+        }
+      ]
+    },
+    {
+      "name": "Ecutha the Tailor",
+      "wcid": 719,
+      "guid": "0x7A9B4025",
+      "cell": "0xA9B4012A",
+      "point": { "x": 56.52, "y": 132, "z": 66.12 },
+      "stop_cell": "0xA9B4012A",
+      "buys_item_types": "0x00040004",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 5851,
+          "name": "Faran Robe with Hood",
+          "price": 68
+        }
+      ]
+    },
+    {
+      "name": "Monyra the Jeweler",
+      "wcid": 716,
+      "guid": "0x7A9B4020",
+      "cell": "0xA9B40117",
+      "point": { "x": 157.19, "y": 135.298, "z": 66.12 },
+      "stop_cell": "0xA9B40117",
+      "buys_item_types": "0x00040808",
+      "buy_price": 0.9,
+      "sells": []
+    },
+    {
+      "name": "Scrivener of Item Magic",
+      "wcid": 20214,
+      "guid": "0x7A9B301B",
+      "cell": "0xA9B3003C",
+      "point": { "x": 187.288, "y": 86.7918, "z": 116.005 },
+      "stop_cell": "0xA9B3003C",
+      "buys_item_types": "0x00000000",
+      "buy_price": 0.5,
+      "sells": [
+        {
+          "wcid": 28005,
+          "name": "Aura of Spirit Drinker Self IV",
+          "price": 5000
+        }
+      ]
+    }
+  ],
+  "spell_plan": [
+    {
+      "min_level": 1,
+      "max_level": 99,
+      "family": "Flame Bolt",
+      "spell_level": 6
+    },
+    {
+      "min_level": 100,
+      "max_level": 275,
+      "family": "Flame Bolt",
+      "spell_level": 7
+    }
+  ],
+  "components": [
+    {
+      "wcid": 690,
+      "name": "Pyreal Scarab",
+      "spell_level": 6,
+      "per_cast": 1
+    },
+    {
+      "wcid": 20631,
+      "name": "Prismatic Taper",
+      "spell_level": 6,
+      "per_cast": 4
+    },
+    {
+      "wcid": 8897,
+      "name": "Platinum Scarab",
+      "spell_level": 7,
+      "per_cast": 1
+    },
+    {
+      "wcid": 20631,
+      "name": "Prismatic Taper",
+      "spell_level": 7,
+      "per_cast": 4
+    }
+  ],
+  "supplies": {
+    "stock": [
+      {
+        "wcid": 20631,
+        "name": "Prismatic Taper",
+        "keep": 1000,
+        "trip_under": 200,
+        "stop_under": 12
+      },
+      {
+        "wcid": 379,
+        "name": "Mana Potion",
+        "keep": 30,
+        "trip_under": 5,
+        "stop_under": 0
+      },
+      {
+        "wcid": 690,
+        "name": "Pyreal Scarab",
+        "keep": 400,
+        "trip_under": 3,
+        "stop_under": 3
+      },
+      {
+        "wcid": 8897,
+        "name": "Platinum Scarab",
+        "keep": 100,
+        "trip_under": 3,
+        "stop_under": 3
+      },
+      {
+        "wcid": 686,
+        "name": "Copper Scarab",
+        "keep": 20,
+        "trip_under": 5,
+        "stop_under": 2
+      },
+      {
+        "wcid": 7299,
+        "name": "Diamond Scarab",
+        "keep": 6,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 691,
+        "name": "Lead Scarab",
+        "keep": 100,
+        "trip_under": 20,
+        "stop_under": 2
+      },
+      {
+        "wcid": 688,
+        "name": "Silver Scarab",
+        "keep": 20,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 687,
+        "name": "Gold Scarab",
+        "keep": 20,
+        "trip_under": 2,
+        "stop_under": 2
+      }
+    ],
+    "kit": [
+      {
+        "wcid": 5851,
+        "name": "Faran Robe with Hood",
+        "slot": "worn"
+      },
+      {
+        "wcid": 56,
+        "name": "Leather Gauntlets",
+        "slot": "worn"
+      },
+      {
+        "wcid": 2472,
+        "name": "Wand",
+        "slot": "wielded"
+      },
+      {
+        "wcid": 136,
+        "name": "Pack",
+        "slot": "pack",
+        "count": 2
+      }
+    ],
+    "burden_trip_percent": 90,
+    "purse": {
+      "coin": 40000,
+      "min_note": 25000,
+      "notes": [
+        {
+          "wcid": 20630,
+          "name": "Trade Note (250,000)",
+          "value": 250000,
+          "count": 1
+        },
+        {
+          "wcid": 2625,
+          "name": "Trade Note (10,000)",
+          "value": 10000,
+          "count": 1
+        },
+        {
+          "wcid": 2626,
+          "name": "Trade Note (50,000)",
+          "value": 50000,
+          "count": 5
+        }
+      ]
+    }
+  },
+  "avoid_regions": [
+    {
+      "name": "the 0x02F9-0x0318 pocket",
+      "landblock": "0x0105",
+      "min": { "x": 61, "y": -100, "z": -1 },
+      "max": { "x": 73, "y": -77, "z": 1 },
+      "source": "M5 7 P7i (D144, the owner, 2026-10-30): the rehearsal's stuck pocket, the den floor round (62..72, -78..-99) in cells 0x010502F9 to 0x01050318 (a metre of margin each side): three legs in a row stood there at 04:08-04:09 UTC and a jump rung carried the mage 15 m into it from 0x010502FE (58.4, -90.8). Seeded into the room graph as a costly box (RoomPatches.SeededCostMetres), so plans go round it while another way exists; the stuck ladder never moves the mage into it"
+    }
+  ],
+  "fight": {
+    "retreat_health_percent": 0,
+    "ring_min_targets": 4,
+    "source": "M5 7 F16 (D91, the owner): the fight never retreats on the den at the soak's level; the autopilot's upkeep health stop is off (0 = never) and the emergency drain (Drain Health Other I at the fullest tusker in reach, FightEmergency) holds the health. The first soak round (55 minutes, the level-80 mage without Melee Defense) showed the upkeep pulling the mage out of 13 fights at 30 percent while the tuskers hit about 3.9 a hit (1,433 hits, 5,614 damage over 15 fight legs)"
+  },
+  "loot": {
+    "min_value_per_burden": 60,
+    "min_payout": 4000,
+    "max_item_burden": 150,
+    "trip_every_buff_cycles": 2,
+    "min_free_slots": 5,
+    "load_line_percent": 85,
+    "keep_aside": {
+      "min_war_bonus_percent": 3,
+      "cantrip_tiers": ["Major", "Epic", "Legendary"],
+      "cantrips": [
+        "War Magic Aptitude",
+        "Life Magic Aptitude",
+        "Creature Enchantment Aptitude",
+        "Item Enchantment Aptitude",
+        "Focus",
+        "Willpower",
+        "Mana Conversion Prowess",
+        "Arcane Prowess",
+        "Magic Resistance",
+        "Invulnerability",
+        "Impregnability"
+      ],
+      "source": "M5 7 F30 (the owner): the level-80 mage keeps aside and never sells a caster with a War Magic damage bonus of at least +3 percent (ACE PropertyFloat ElementalDamageMod 152, 1.03 is +3 percent) and any wearable, jewellery or caster with a cantrip useful to it: the War, Life, Creature and Item Enchantment aptitudes, Focus, Willpower, Mana Conversion Prowess, Arcane Prowess and the three defences (ACE names the defence cantrips Magic Resistance for Magic Defense, Invulnerability for Melee Defense and Impregnability for Missile Defense); the spell is the tier and the family (Major Focus). Tier 4 drops Major at most, so Epic and Legendary are for a ground that drops them (cache/m5/7/loot-sim.md section 2.3: about 6 such wands and 8 cantrip pieces in 2,000 corpses)"
+    },
+    "source": "M5 7 F28 (D95, the owner: loot only the most valuable stuff to sell): ACE's own loot generator run offline over 20,000 tusker corpses (cache/m5/7/loot-sim.md, DeathTreasureType 448, tier 4): a corpse averages 3.5 items and 17,800 Value; a floor of 10 Value per burden unit keeps armour, clothing, jewellery, essences, scrolls, wands, gems, concentrated components and mana stones and leaves weapons, shields and cloaks (median 6 to 8 a burden unit), about 13,800 pyreals a corpse against 16,600 at a floor of 1, with a sell trip every 30 corpses instead of every 13 (the trip is burden-bound) M5 7 F29 (D96, the owner: a sell trip about once every two buff cycles, never burdened, weight is bad): the keep rule is both a payout (the Value times the best buyer's buy_price, ACE's max(1, floor(rate x Value + 0.1))) of at least min_payout 4000 and a Value per burden unit of at least min_value_per_burden 60 (cache/loot-sim/tuskers-448-summary.md: about 47 slots and 2,982 burden an hour of corpses at 140 corpses an hour, about 380,000 pyreals an hour), and no single item over max_item_burden 150 (that leaves every tier-4 armour piece at about 760 and the heavy weapons, logged too heavy); the trip is due every trip_every_buff_cycles 2 buff cycles, early when the free slots fall under min_free_slots 5 or the burden passes load_line_percent 85 of the capacity (the load line is also the loot rule's bound; the supplies' burden_trip_percent 90 stays the kit's check); each vendor's buy_price is the world SQL's float property 37 (0.9 for all five) M5 7 D121 (the owner: packs, one job each): what the loot step keeps goes to the pack of its job (PackLayout): the coin, the notes and the loot to sell to the main pack, a spell component to the components pack, a mana stone, a stock potion or a kit spare to the kit pack, a find worth a look to the review pack; the three side packs (two Packs and a Sack, ItemsCapacity 24 each, ACE weenies 136 and 166) take those jobs by their contents, else by their slot order; min_free_slots reads the main pack alone, and the sale offers the main pack alone"
+  },
+  "hold_spots": [],
+  "respawn": {
+    "generators": [
+      {
+        "guid": "0x70105022",
+        "cell": "0x01050154",
+        "delay_s": 900,
+        "tick_s": 60
+      },
+      {
+        "guid": "0x7010507A",
+        "cell": "0x01050382",
+        "delay_s": 900,
+        "tick_s": 60
+      },
+      {
+        "guid": "0x7010507B",
+        "cell": "0x01050382",
+        "delay_s": 900,
+        "tick_s": 60
+      }
+    ],
+    "slots": [
+      { "generator": "0x70105022", "cell": "0x01050100", "wcid": 1609 },
+      { "generator": "0x70105022", "cell": "0x01050101", "wcid": 1609 },
+      { "generator": "0x70105022", "cell": "0x01050102", "wcid": 1609 },
+      { "generator": "0x70105022", "cell": "0x01050103", "wcid": 1609 },
+      { "generator": "0x70105022", "cell": "0x0105010D", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x0105010F", "wcid": 1609 },
+      { "generator": "0x70105022", "cell": "0x01050110", "wcid": 1609 },
+      { "generator": "0x70105022", "cell": "0x01050111", "wcid": 1609 },
+      { "generator": "0x70105022", "cell": "0x01050112", "wcid": 1609 },
+      { "generator": "0x70105022", "cell": "0x01050113", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x01050114", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x01050115", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x01050116", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x01050117", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x0105011D", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x0105011F", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x01050121", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x01050122", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x01050123", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x01050124", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x01050125", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x01050146", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x01050150", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x0105016D", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x0105016E", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x0105016F", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x01050171", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x01050172", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x01050173", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x01050174", "wcid": 1629 },
+      { "generator": "0x70105022", "cell": "0x01050187", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x01050188", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x01050189", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x0105018A", "wcid": 1610 },
+      { "generator": "0x70105022", "cell": "0x0105018B", "wcid": 1610 },
+      { "generator": "0x7010507A", "cell": "0x010502D6", "wcid": 237 },
+      { "generator": "0x7010507B", "cell": "0x01050104", "wcid": 237 },
+      { "generator": "0x7010507B", "cell": "0x01050108", "wcid": 23 },
+      { "generator": "0x7010507B", "cell": "0x0105010B", "wcid": 23 },
+      { "generator": "0x7010507B", "cell": "0x01050118", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050118", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x0105011A", "wcid": 23 },
+      { "generator": "0x7010507B", "cell": "0x0105011D", "wcid": 23 },
+      { "generator": "0x7010507B", "cell": "0x01050127", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050157", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050159", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x0105016A", "wcid": 23 },
+      { "generator": "0x7010507B", "cell": "0x0105016C", "wcid": 23 },
+      { "generator": "0x7010507B", "cell": "0x01050176", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050182", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050182", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050191", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050191", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050192", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050193", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050196", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010501AB", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010501BA", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010501BA", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010501C0", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010501C0", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010501C3", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010501C3", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010501EE", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010501EE", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010501F0", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050202", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x0105020B", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050218", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050219", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050221", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050221", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x0105022C", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x0105022C", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x0105023A", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050243", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050243", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050244", "wcid": 23 },
+      { "generator": "0x7010507B", "cell": "0x01050245", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x0105024C", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050263", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050263", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050280", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050280", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050281", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x01050281", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502A0", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502A0", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502A1", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502B6", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502B6", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502BE", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502D1", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502D2", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502D2", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502D3", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502D5", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502D5", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502D6", "wcid": 1629 },
+      { "generator": "0x7010507B", "cell": "0x010502D6", "wcid": 23 },
+      { "generator": "0x7010507B", "cell": "0x010502E1", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x010502E1", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x010502E2", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050303", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050303", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x0105030D", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050310", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050320", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050320", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050325", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050325", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050338", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x0105033F", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x0105036F", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050377", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050383", "wcid": 1628 },
+      { "generator": "0x7010507B", "cell": "0x01050383", "wcid": 1628 }
+    ]
+  },
+  "learn": [
+    {
+      "spell": 3256,
+      "name": "Aura of Spirit Drinker Self IV",
+      "scroll_wcid": 28005,
+      "vendor_wcid": 20214,
+      "source": "M5 7 P7j (D143, the owner, 2026-10-30): learned by play on a town trip, never granted: the scroll 28005 (SpellDID 3256) from the Scrivener of Item Magic; ACE's Scroll.ActOnUse (Scroll.cs 45-127 @95ef426d) teaches it when Player.CanReadScroll passes (Player_Skills.cs 458-471: power under 50 or from 300 always, else the school trained and its current skill at least the power less 50, so Item Enchantment 100 for IV's power 150). V and VI come from the Master and Grand Master Scriveners (item 8)"
+    }
+  ],
+  "tour": [
+    "0x01050383", "0x01050377", "0x0105036F", "0x01050338", "0x01050320", "0x01050303", "0x0105030D", "0x01050310",
+    "0x01050325", "0x010502E1", "0x010502E2", "0x0105033F", "0x01050281", "0x01050280", "0x010502A0", "0x010502A1",
+    "0x010502BE", "0x010502D1", "0x010502D2", "0x010502B6", "0x01050263", "0x01050243", "0x0105024C", "0x01050245",
+    "0x0105023A", "0x01050191", "0x01050192", "0x01050193", "0x010501C0", "0x010501C3", "0x010501AB", "0x01050196",
+    "0x010501BA", "0x010501F0", "0x01050202", "0x010501EE", "0x01050221", "0x0105020B", "0x0105022C", "0x01050218",
+    "0x01050219", "0x01050182", "0x01050176", "0x01050157", "0x01050159", "0x01050127", "0x01050125", "0x01050150",
+    "0x01050124", "0x01050123", "0x01050146", "0x01050172", "0x01050171", "0x01050122", "0x01050173", "0x01050174",
+    "0x01050118"
+  ],
+  "outdoor": null
+}

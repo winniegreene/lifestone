@@ -12,8 +12,8 @@ namespace Lifestone.Client.Session.Contracts;
 /// is ACE's enum comments (the wording was tested against 11.6096, ACE's note); the types are retail's.
 /// </summary>
 /// <remarks>
-/// A code the table does not hold prints <c>WeenieError 0x%04X</c>; the reducer logs it once per code (<c>TODO(m3-weenie-error-text)</c>). A code whose
-/// type the extraction could not read (<see cref="TypeUnknown"/>) is shown in type 0 and logged once (<c>TODO(m3-weenie-error-type)</c>).
+/// M5 7 D124 (S1b): a code the client prints no line for (<see cref="RetailShows"/> false) is shown nothing and logged; a code it prints and the table lacks shows <c>WeenieError 0x%04X</c> and is logged once per code
+/// (<c>TODO(m3-weenie-error-text)</c>). A shown code whose type the extraction could not read (<see cref="TypeUnknown"/>) is shown in type 0 and logged once (<c>TODO(m3-weenie-error-type)</c>).
 /// </remarks>
 public static class WeenieErrorText
 {
@@ -46,7 +46,9 @@ public static class WeenieErrorText
         if (!Table.TryGetValue(code, out var entry))
         {
             chatType = DefaultType;
-            text = string.Create(CultureInfo.InvariantCulture, $"WeenieError 0x{code:X4}");
+            text = NameOf(code) is { } name
+                ? string.Create(CultureInfo.InvariantCulture, $"WeenieError 0x{code:X4} ({name})")
+                : string.Create(CultureInfo.InvariantCulture, $"WeenieError 0x{code:X4}");
             return false;
         }
 
@@ -59,9 +61,63 @@ public static class WeenieErrorText
     /// <param name="code">The WeenieError code.</param>
     public static bool HasKnownType(uint code) => Table.TryGetValue(code, out var entry) && entry.Type != TypeUnknown;
 
+    /// <summary>
+    /// M5 7 F30: the ACE name (@95ef426d <c>WeenieError.cs</c>) of a code that has no message text in ACE's enum comments, so none the table can hold (the physics codes the client's MoveTo ends with): a line for such a code reads
+    /// <c>WeenieError 0x003C (ITeleported)</c>, and the reducer's <c>TODO(m3-weenie-error-text)</c> carries the name. 0x003C is what ACE sent when the owner walked out of the den (a teleport cancelled the MoveTo in flight, soak round 7).
+    /// </summary>
+    /// <param name="code">The WeenieError code.</param>
+    /// <returns>The ACE name, or null when the code has no name here.</returns>
+    public static string? NameOf(uint code) => Names.TryGetValue(code, out var name) ? name : null;
+
     /// <summary>True when the table holds <paramref name="code"/>.</summary>
     /// <param name="code">The WeenieError code.</param>
     public static bool Knows(uint code) => Table.ContainsKey(code);
+
+    /// <summary>
+    /// M5 7 D124 (S1b, the owner: a line retail never prints is not retail): true when the 11.6096 client prints a chat line for <paramref name="code"/>. <c>ClientCommunicationSystem::HandleFailureEvent</c> (11.6096 0x00572760)
+    /// is a switch on the code; a code with no case of its own goes to the shared exit (0x0057621A), which only releases the function's locals and returns, so nothing reaches the chat. The cases were read off the switch for
+    /// every code 0x0000 to 0x06FF: every code of the table has a case except 0x0426, 0x04DC and 0x051D (<see cref="NoRetailCase"/>); four codes have a case and no text here (<see cref="RetailTextUnknown"/>); every other code
+    /// (0x003B, 0x003C and 0x042C among them) has none. A code the client does not print is shown nothing; the log keeps it (<c>ChatLogTap</c>).
+    /// </summary>
+    /// <param name="code">The WeenieError code.</param>
+    public static bool RetailShows(uint code) => (Table.ContainsKey(code) && !NoRetailCase.Contains(code)) || RetailTextUnknown.Contains(code);
+
+    /// <summary>M5 7 D124 (S1b): true for a code the 11.6096 client prints but whose text the table does not hold (it shows <c>WeenieError 0x%04X</c>, <c>TODO(m3-weenie-error-text)</c>).</summary>
+    /// <param name="code">The WeenieError code.</param>
+    public static bool IsRetailTextUnknown(uint code) => RetailTextUnknown.Contains(code);
+
+    /// <summary>The codes of the table that <c>HandleFailureEvent</c> (11.6096 0x00572760) has no case for: their summaries in ACE are no client text (0x04DC is a note on its use).</summary>
+    private static readonly HashSet<uint> NoRetailCase = [0x0426, 0x04DC, TurbineChatIsEnabled];
+
+    /// <summary>The codes <c>HandleFailureEvent</c> has a case for and the table no text: 0x0049 (ACE CantJumpLoadedDown, a string the client builds at run time) and 0x04B8 to 0x04BA (no summary in ACE).</summary>
+    private static readonly HashSet<uint> RetailTextUnknown = [0x0049, 0x04B8, 0x04B9, 0x04BA];
+
+    /// <summary>"You have entered the {0} channel." (ACE <c>WeenieErrorWithString.YouHaveEnteredThe_Channel</c>, WeenieErrorWithString.cs:319 @95ef426d).</summary>
+    public const uint ChannelEntered = 0x051B;
+
+    /// <summary>"You have left the {0} channel." (ACE <c>WeenieErrorWithString.YouHaveLeftThe_Channel</c>, WeenieErrorWithString.cs:324).</summary>
+    public const uint ChannelLeft = 0x051C;
+
+    /// <summary>"Turbine Chat is enabled." (ACE <c>WeenieError.TurbineChatIsEnabled</c>, WeenieError.cs:1035).</summary>
+    public const uint TurbineChatIsEnabled = 0x051D;
+
+    /// <summary>
+    /// M5 7 D124: true for the chat channels' notices, which ride the failure events but are no failure. At login ACE sends 0x051D (<c>Player_Networking.cs</c>:85-88 @95ef426d, with <c>use_turbine_chat</c> on), then 0x051B with
+    /// each channel's name (General, Trade, LFG; 182); 0x051C when a channel is left (209, at the logoff). The reducer files them as <see cref="ChatKind.ChannelNotice"/> lines: retail's join and leave lines
+    /// ("You have entered the General channel."; the 11.6096 client holds these two texts among its failure strings, the same words as ACE's summaries), never as error lines.
+    /// </summary>
+    /// <param name="code">The WeenieError code.</param>
+    public static bool IsChannelNotice(uint code) => code is ChannelEntered or ChannelLeft or TurbineChatIsEnabled;
+
+    private static readonly Dictionary<uint, string> Names = new()
+    {
+        [0x003B] = "ILeftTheWorld",
+        [0x003C] = "ITeleported",
+
+        // M5 7 D124: TargetNotAcquired (WeenieError.cs:389 @95ef426d, no summary). Neither ACE nor the 11.6096 client holds a text for it, and HandleFailureEvent (0x00572760) has no case for it (RetailShows): the chat shows
+        // nothing, the log keeps the name. ACE sends it when a cast's target is gone (Player_Magic.cs:137-140, 173-179, 197-203, 751-757): the cast path reads it as the target dying mid-cast.
+        [0x042C] = "TargetNotAcquired",
+    };
 
     private static readonly Dictionary<uint, (int Type, string Text)> Table = new()
     {

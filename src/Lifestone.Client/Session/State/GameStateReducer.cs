@@ -199,6 +199,12 @@ internal sealed partial class GameStateReducer : IAcSessionSink
             case SessionNotices.ExpiryLine:
                 ApplyExpiryLine(notice);
                 break;
+            case SessionNotices.ConfirmationAnswered:
+                ApplyConfirmationAnswered(notice);
+                break;
+            case SessionNotices.CharacterOptionsSet:
+                ApplyCharacterOptions(notice);
+                break;
             case SessionNotices.DigestParts:
                 // A record of the final state for the replay to compare (SessionReplayer); it changes nothing.
                 break;
@@ -301,6 +307,26 @@ internal sealed partial class GameStateReducer : IAcSessionSink
         _state.Self.Qualities.SetSessionOption(text[0] - '0', notice.Value, text[2] == '1');
         Changed();
         Publish(new QualitiesChanged(QualityChange.Options, notice.Value));
+    }
+
+    /// <summary>
+    /// Both character option words (<see cref="SessionNotices.CharacterOptionsSet"/>; M5 6 w2, D32): applied at once as the character's own, as retail's
+    /// <c>PlayerModule</c> takes the options panel's words before <c>CM_Character::Event_CharacterOptionsEvent</c> (11.6096 0x006A1EE0) sends them; the session-local
+    /// overrides are dropped, since the words now say every bit.
+    /// </summary>
+    private void ApplyCharacterOptions(in RecordingNotice notice)
+    {
+        var text = notice.Text ?? string.Empty;
+        if (text.Length != 8 || !uint.TryParse(text, System.Globalization.NumberStyles.AllowHexSpecifier, System.Globalization.CultureInfo.InvariantCulture, out var options2))
+        {
+            throw new InvalidDataException($"local notice {SessionNotices.CharacterOptionsSet} (character options) has a bad payload: '{text}' (want the second word as eight hexadecimal digits)");
+        }
+
+        var q = _state.Self.Qualities;
+        q.ClearSessionOptions();
+        q.SetServerOptions(notice.Value, options2);
+        Changed();
+        Publish(new QualitiesChanged(QualityChange.Options, 0));
     }
 
     private void ChangePhase(SessionPhase phase)

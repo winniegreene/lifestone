@@ -27,6 +27,12 @@ public interface INavBody
     bool ServerDriving { get; }
 
     /// <summary>
+    /// How the last server MoveTo or TurnTo ended (<c>PlayerMovementController.LastServerMoveToEnd</c>: <c>arrived</c>, <c>cancelled (0xNNNN Name)</c> or <c>stuck</c>, the
+    /// controller's <c>TODO(m5-moveto-stuck)</c> rule); null while one is under way, before the first, or for a body that does not say (M5 item 5 F6).
+    /// </summary>
+    string? ServerMoveToEnd => null;
+
+    /// <summary>
     /// The controller's clock in seconds (the latest time it was stepped to): the time base of the player's physics, the one
     /// the runner's stuck timers use so a headless run at any tick rate and a 30 Hz play run agree.
     /// </summary>

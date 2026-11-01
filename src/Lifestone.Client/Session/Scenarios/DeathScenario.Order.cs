@@ -24,6 +24,9 @@ public interface IFightLeg : IScenario, IDisposable
 
     /// <summary>The inner scenario's verdict fields (<see cref="FightScenario.VerdictFields"/>).</summary>
     string VerdictFields();
+
+    /// <summary>M5 3 d1: the lines the buff stage missed, as the buff cycle names them (empty before the stage or when none missed): the death handler names the item lines it re-casts from them.</summary>
+    IReadOnlyList<string> BuffMisses => [];
 }
 
 /// <summary>Makes the inner scenario of the rebuff and fight stages (<see cref="DeathScenario.DefaultFightLeg"/> is the real one).</summary>
@@ -73,6 +76,9 @@ public sealed class FightLeg(FightScenario inner) : IFightLeg
         };
 
     /// <inheritdoc/>
+    public IReadOnlyList<string> BuffMisses => inner.Cycle?.Result?.Misses ?? [];
+
+    /// <inheritdoc/>
     public ScenarioStatus Step(IGameSessionView session, double now) => inner.Step(session, now);
 
     /// <inheritdoc/>
@@ -97,42 +103,24 @@ public sealed class FightLeg(FightScenario inner) : IFightLeg
 }
 
 /// <summary>
-/// The death loop's order after the respawn (M4 3.1 d1, D20 and D22), the decoys and the measures' freeze. The order, by what is on (<see cref="DeathStages"/> and <see cref="DeathOptions"/>):
-/// <list type="bullet">
-/// <item><b>Fight on (the default):</b> <c>respawn-vitals</c> (the measures freeze here), <c>regear</c> (what the death destroyed, with the PLAIN kit: the decoys on the corpse are not spawned a second time), <c>rebuff</c> (the buff cycle at Holtburg: the death purged
-/// every enchantment), <c>fight</c> (the den, the magic mode and the kill loop until <see cref="DeathOptions.FightKills"/> kills or <see cref="DeathOptions.FightSeconds"/>), <c>pretrip-heal</c> (only when the health share is the one precondition failing: Heal Self VII and regeneration, <c>DeathScenario.Heal.cs</c>), <c>corpse-*</c> (the 2.2 trip, unchanged inside, with the tuskers dead), the return to Holtburg, <c>done</c>.</item>
-/// <item><b>Fight off:</b> M4 2.2's order, <c>respawn-vitals</c>, <c>corpse-*</c>, <c>regear</c>, then <c>rebuff</c> (alone, when it is on), <c>done</c>; with the rebuff off too it is exactly the loop that merged in 2.2.</item>
-/// </list>
-/// Rebuff and fight are ONE inner scenario (<see cref="IFightLeg"/>, by default <see cref="FightLeg"/> over <see cref="FightScenario"/>, from <see cref="FightLegFactory"/>) stepped like the regear's <see cref="GearScenario"/>: the rebuff is its
-/// <see cref="FightStages.Buffs"/> stage (the scenario's own stage <c>place</c> marks its end), the fight its <see cref="FightStages.Place"/> and <see cref="FightStages.Mode"/> stages and its kill loop; with only the rebuff on the inner scenario is dropped at <c>place</c> and the player goes back to
-/// non-combat (<c>rebuff-peace</c>). <b>The judged measures freeze at the end of <c>respawn-vitals</c></b> (<c>_atRespawn</c>): the regear, the rebuff, the fight and the trip never move <c>died</c>, <c>vitae</c>, <c>vitals_pct</c>, <c>hits_taken</c>, <c>health_min_pct</c> and the rest; a death
-/// DURING the rebuff or the fight fails the leg, naming the stage (a new death is never <c>died=1</c>'s second count).
+/// The death loop's order after the respawn (M5 3 d2, D51: one order for every option set) and the measures' freeze. After <c>respawn-vitals</c> the order is the death handler's (<see cref="DeathHandler"/>): the respawn, the rebuff of what is held,
+/// the pre-trip heal, the corpse trip by its route (Primary Portal Recall or the runner, never a place), the items back (worn and wielded again), the item lines re-cast, the fight. <c>--death-fight off</c> keeps the handler and skips its return
+/// to the fight; <c>--death-rebuff off</c> and <c>--death-recover-corpse off</c> skip their steps. No mod verb is sent from the respawn on: no item, experience or place verb (the regear by the item verb, the vitae grant and the decoy top-up are removed).
+/// The handler's steps are shown as the stages <c>handler-&lt;step&gt;</c> (<see cref="DeathScenario.HandlerStagePrefix"/>), logged once on entry. <b>The judged measures freeze at the end of <c>respawn-vitals</c></b> (<c>_atRespawn</c>): the handler never moves
+/// <c>died</c>, <c>vitae</c>, <c>vitals_pct</c>, <c>hits_taken</c>, <c>health_min_pct</c> and the rest; a death during the handler restarts it for the newer corpse (<c>deaths=</c> of the handler's fields counts it).
 /// </summary>
 public sealed partial class DeathScenario
 {
-    private static readonly DeathStages[] OldOrder = [DeathStages.Corpse, DeathStages.Regear, DeathStages.Rebuff];
-    private static readonly DeathStages[] NewOrder = [DeathStages.Regear, DeathStages.Rebuff, DeathStages.Fight, DeathStages.Corpse];
-
-    private readonly GearKit _regearKit;
     private readonly BuffOptions _buffOptions;
     private readonly FightOptions _fightOptions;
     private readonly FightLegFactory _fightFactory;
     private IFightLeg? _inner;
-    private int _postIndex = -1;
     private string _rebuffed = DeathLegVerdict.RebuffedSkipped;
     private int _denKills;
-    private int _afterNotices;
-    private int _afterDeadMotions;
-    private int _afterDeaths;
-    private DecoyCheck? _decoyCheck;
-    private int? _decoysAtDeath;
     private ListedEntry[]? _listing;
-    private int? _decoysDropped;
-    private int? _gearDropped;
     private int? _gearLeft;
     private int? _listingEntries;
     private int? _listingCoins;
-    private int? _decoysRecovered;
 
     private struct ListedEntry(uint guid)
     {
@@ -153,279 +141,127 @@ public sealed partial class DeathScenario
     public static IFightLeg DefaultFightLeg(GearKit kit, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions buff, FightOptions fight, IFightWalk? walk, ILogSink log, double arrivalSeconds, bool endSession, FightStages stages) =>
         new FightLeg(new FightScenario(kit, spells, buff, fight, walk, log, arrivalSeconds, endSession, stages));
 
-    private bool RegearOn => (_stages & DeathStages.Regear) != 0 && !_stopped && !_diedEarly;
+    // ------------------------------------------------------------------------------------------------ the death handler (M5 3 d1, D51)
 
-    private bool RebuffOn => (_stages & DeathStages.Rebuff) != 0 && _options.Rebuff;
+    private DeathHandler? _handler;
+    private string? _handlerStep;
 
-    private bool FightOn => (_stages & DeathStages.Fight) != 0 && _options.Fight;
+    /// <summary>The death handler that runs after the respawn with the fight on (the default), or null (before the respawn, or a stage list with none of the rebuff, corpse and fight stages).</summary>
+    public DeathHandler? Handler => _handler;
 
-    /// <summary>The kit the regear spawns from: the kit without its decoys (they are on the corpse; M4 3.1 d1).</summary>
-    public GearKit RegearKit => _regearKit;
+    /// <summary>
+    /// The handler's verdict fields (additive at the end of the death's line, before the optional <c>frame_over_50=yes</c>: <c>deaths= corpse_recovered= route= items_back= vitae_grants= rebuffed= relines=</c>), or
+    /// <see cref="DeathHandler.UnmeasuredFields"/> when no handler ran. <see cref="VerdictFields"/> appends them (closes <c>m5-death-handler-fields</c>).
+    /// </summary>
+    public string HandlerFields => _handler?.Fields ?? DeathHandler.UnmeasuredFields;
 
-    /// <summary><c>rebuffed=</c>: <c>yes</c>, <c>no</c> or <c>skipped</c> (<see cref="DeathLegVerdict.RebuffedYes"/>).</summary>
+    /// <summary>The prefix of the stages that are the handler's steps (<c>handler-respawn</c>, <c>handler-corpse-loot</c>, ...).</summary>
+    public const string HandlerStagePrefix = "handler-";
+
+    /// <summary>
+    /// M5 3 d2 (D51, DoD 7): the order after <c>respawn-vitals</c> for every option set. The stage list picks what the handler may do (a stage out of <see cref="DeathStages"/> turns its option off for this run); the options pick the rest.
+    /// </summary>
+    private ScenarioStatus BeginHandler(IGameSessionView session, double clock)
+    {
+        _log.Info(LogCategory, "the stages after the respawn: the death handler (D51: rebuff, the corpse trip, the items back, the item lines, the fight; no regear, no vitae grant, no place) (the judged measures are frozen here)");
+        var effective = _options with
+        {
+            Rebuff = _options.Rebuff && (_stages & DeathStages.Rebuff) != 0,
+            RecoverCorpse = _options.RecoverCorpse && (_stages & DeathStages.Corpse) != 0,
+            Fight = _options.Fight && (_stages & DeathStages.Fight) != 0,
+        };
+        _handler = new DeathHandler(_ground, _tally, _seam.Travel, _fightFactory, _walk, _kit, _spells, _buffOptions, _fightOptions, effective, _log, _arrivalSeconds)
+        {
+            HoldBeforeFight = FightManaWaiting,
+        };
+        _handler.Begin(session, clock, DeathFacts.From(_tally), BoundLifestone, respawned: true);
+        return HandlerStep(session, clock);
+    }
+
+    /// <summary>One frame of the handler, with the scenario's stage following the handler's step and the measures it owns (<c>rebuffed=</c>, <c>den_kills=</c>, <c>gear_restored=</c>, <c>worn=</c>) read from it.</summary>
+    private ScenarioStatus HandlerStep(IGameSessionView session, double now)
+    {
+        var handler = _handler!;
+        var status = handler.Step(session, session.Clock.Now);
+        _inner = handler.Inner; // the scenario's Dispose disposes the inner fight the handler runs
+        (_rebuffed, _denKills) = (handler.RebuffedPretrip, handler.Kills); // stage_rebuffed= stays the rebuff's own verdict before the trip (3-R2); rebuffed= is the handler's, after the item lines (D56)
+        if (handler.CurrentStep is "relines" or "fight" or "done")
+        {
+            (_gearRestored, _regearFields) = (handler.GearBack, handler.WornFields);
+        }
+
+        // The corpse's own listing (M4 3.1 d1) is read from the handler's open view, so gear_left= keeps DeathDropModel's prediction against what the corpse held (D51; the decoys that once filled the listing are retired, D51).
+        if (handler.CurrentStep is "corpse-loot" && _listing is null && session.State.Containers.Viewed is { } view && view.Guid == handler.Facts.CorpseGuid)
+        {
+            CaptureListing(view);
+        }
+
+        if (handler.CurrentStep is "corpse-loot" or "corpse-close")
+        {
+            ResolveListing(session);
+        }
+        else if (handler.CurrentStep is "wear" && _listing is not null && _listingEntries is null)
+        {
+            ClassifyListing(session);
+        }
+
+        var clock = session.Clock.Now;
+        switch (status)
+        {
+            case ScenarioStatus.Failed:
+                _inner = null;
+                return Fail(session, handler.Failure ?? "handler: failed without saying why");
+            case ScenarioStatus.Succeeded:
+                _inner = null;
+                return Conclude(session, clock);
+        }
+
+        if (!ReferenceEquals(_handlerStep, handler.CurrentStep))
+        {
+            _handlerStep = handler.CurrentStep;
+            Enter(HandlerStagePrefix + _handlerStep, clock); // one allocation per step change
+        }
+
+        return ScenarioStatus.Running;
+    }
+
+    /// <summary><c>stage_rebuffed=</c> on the verdict line (3-R2): <c>yes</c>, <c>no</c> or <c>skipped</c> (<see cref="DeathLegVerdict.RebuffedYes"/>).</summary>
     public string Rebuffed => _rebuffed;
 
     /// <summary><c>den_kills=</c>: the kills the fight stage's inner scenario counted.</summary>
     public int DenKills => _denKills;
 
-    /// <summary><c>decoys=</c>: the decoys the pack held when the wait among the tuskers began, or null (<c>--death-decoys off</c>, or the wait never began).</summary>
-    public int? DecoysCarried => _options.Decoys ? _decoysAtDeath : null;
-
-    /// <summary>The gear stage's decoy check (<c>decoy_safe=</c> is its <see cref="DecoyCheck.Field"/>), or null when it did not run.</summary>
-    public DecoyCheck? DecoyCheckResult => _decoyCheck;
-
-    /// <summary><c>decoy_safe=</c>: the gear stage's check, or <c>n/a</c> (<c>--death-decoys off</c>, or no gear stage ran).</summary>
-    public string DecoySafeField => _options.Decoys && _decoyCheck is { } check ? check.Field : DeathLegVerdict.NotApplicable;
-
-    /// <summary><c>decoys_dropped=</c>: the decoys in the corpse's own listing, or null (decoys off, or no listing was read).</summary>
-    public int? DecoysDropped => _decoysDropped;
-
-    /// <summary><c>gear_dropped=</c>: the listed items <see cref="DeathDropModel.IsNeeded"/> says the loops need, or null.</summary>
-    public int? GearDropped => _gearDropped;
-
     /// <summary>The entries of the corpse's own listing (every kind, pyreals included), or null when no listing was read (M4 3.1 fix, review R20).</summary>
     public int? ListingEntries => _listingEntries;
 
-    /// <summary>The listed entries that are pyreal stacks (<see cref="DeathDropModel.CoinWcid"/>): ACE puts half the pyreals on the corpse, so a mage that carries coins lists them beside its decoys; they are neither decoys nor gear. Null when no listing was read.</summary>
+    /// <summary>The listed entries that are pyreal stacks (<see cref="DeathDropModel.CoinWcid"/>): ACE destroys the coin a death drops (D49), so a stack here is a legacy listing; it is not gear. Null when no listing was read.</summary>
     public int? ListingCoins => _listingCoins;
 
-    /// <summary><c>gear_left=</c> (report-only; M4 3.1 fix, review R2): the listed items the loops need that were not taken from the corpse, or null (no listing was read). In the order whose regear runs before the trip each is a duplicate on the corpse.</summary>
+    /// <summary><c>gear_left=</c> (report-only; M4 3.1 fix, review R2): the listed items the loops need that were not taken from the corpse, or null (no listing was read). Under D51 the corpse trip is the only way the item comes back, so each is a loss until it is bought or found.</summary>
     public int? GearLeft => _gearLeft;
-
-    /// <summary><c>decoys_recovered=</c>: the listed decoys that are in the pack after the trip, or null.</summary>
-    public int? DecoysRecovered => _decoysRecovered;
 
     // ------------------------------------------------------------------------------------------------ the order
 
     /// <summary>
-    /// The end of the respawn's vitals wait (the respawn judged lifestone): the judged measures freeze here, once (<c>_atRespawn</c>), and the stages after the respawn begin in their order. The marks are the tally's counts of victim notices, Dead motions and deaths: a
-    /// rise in any of them during the rebuff or the fight is a new death.
+    /// The end of the respawn's vitals wait (the respawn judged lifestone): the judged measures freeze here, once (<c>_atRespawn</c>), and the death handler begins. A stage list with none of the rebuff, corpse and fight stages concludes at once.
     /// </summary>
     private ScenarioStatus BeginPost(IGameSessionView session, double clock)
     {
         _atRespawn = TallyMeasures(session);
-        (_afterNotices, _afterDeadMotions, _afterDeaths) = (_tally.VictimNotices, _tally.DeadMotions, _tally.Deaths);
-        _postIndex = -1;
-        _log.Info(LogCategory, "the stages after the respawn: " + string.Join(", ", EnabledPost()) + " (the judged measures are frozen here)");
-        return NextPost(session, clock);
-    }
-
-    private IEnumerable<string> EnabledPost()
-    {
-        foreach (var stage in FightOn ? NewOrder : OldOrder)
+        if ((_stages & (DeathStages.Rebuff | DeathStages.Corpse | DeathStages.Fight)) == 0)
         {
-            var on = stage switch
-            {
-                DeathStages.Corpse => (_stages & DeathStages.Corpse) != 0 && _options.RecoverCorpse,
-                DeathStages.Regear => RegearOn,
-                DeathStages.Rebuff => RebuffOn,
-                _ => FightOn,
-            };
-            if (on)
-            {
-                yield return stage.ToString().ToLowerInvariant();
-            }
-        }
-    }
-
-    /// <summary>Starts the next enabled stage after the one that just ended (or the first, after <see cref="BeginPost"/>); past the last one the run concludes.</summary>
-    private ScenarioStatus NextPost(IGameSessionView session, double clock)
-    {
-        var order = FightOn ? NewOrder : OldOrder;
-        while (++_postIndex < order.Length)
-        {
-            switch (order[_postIndex])
-            {
-                case DeathStages.Corpse:
-                    if (TryBeginCorpse(session, clock))
-                    {
-                        return ScenarioStatus.Running;
-                    }
-
-                    break;
-                case DeathStages.Regear:
-                    if (RegearOn)
-                    {
-                        StartRegear(clock);
-                        return ScenarioStatus.Running;
-                    }
-
-                    break;
-                case DeathStages.Rebuff:
-                    if (RebuffOn)
-                    {
-                        EnsureInner();
-                        Enter("rebuff", clock);
-                        return ScenarioStatus.Running;
-                    }
-
-                    break;
-                case DeathStages.Fight:
-                    if (FightOn)
-                    {
-                        EnsureInner();
-                        Enter("fight", clock);
-                        return ScenarioStatus.Running;
-                    }
-
-                    break;
-            }
+            _log.Info(LogCategory, "the stages after the respawn: none in this run's stages (the judged measures are frozen here)");
+            return Conclude(session, clock);
         }
 
-        return Conclude(session, clock);
-    }
-
-    private void StartRegear(double clock)
-    {
-        _postIndex = Array.IndexOf(FightOn ? NewOrder : OldOrder, DeathStages.Regear); // entered by Begin (a run of the regear alone) or by NextPost: the order goes on from here
-        _regear = new GearScenario(_regearKit, _log, _arrivalSeconds, endSession: false, cast: false, _spells);
-        Enter("regear-settle", clock);
-    }
-
-    // ------------------------------------------------------------------------------------------------ the rebuff and the fight
-
-    private void EnsureInner()
-    {
-        if (_inner is not null)
-        {
-            return;
-        }
-
-        var stages = (RebuffOn ? FightStages.Buffs : FightStages.None) | (FightOn ? FightStages.Place | FightStages.Mode : FightStages.None);
-        _inner = _fightFactory(_regearKit, _spells, _buffOptions, _fightOptions, _walk, _log, _arrivalSeconds, false, stages);
-        _log.Info(LogCategory, $"the composed fight scenario: stages {stages.ToString().ToLowerInvariant()}; {_fightOptions}");
-    }
-
-    /// <summary>A death after the respawn's vitals wait, during the rebuff or the fight, fails the leg naming the stage. Null when none came.</summary>
-    private ScenarioStatus? OrderGuard(IGameSessionView session, string stage)
-    {
-        if (_tally.VictimNotices <= _afterNotices && _tally.DeadMotions <= _afterDeadMotions && _tally.Deaths <= _afterDeaths)
-        {
-            return null;
-        }
-
-        if (stage == "rebuff")
-        {
-            _rebuffed = DeathLegVerdict.RebuffedNo; // the stage ran and the leg failed in it
-        }
-
-        return Fail(
-            session,
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"{stage}: the mage died during the {stage} (since the respawn's vitals wait: victim notices {_tally.VictimNotices - _afterNotices}, Dead motions {_tally.DeadMotions - _afterDeadMotions}, deaths {_tally.Deaths - _afterDeaths}); died= keeps the tuskers' death, a second death is never counted in it"));
-    }
-
-    private static bool IsBuffing(string stage) => stage is "start" or "gear" or "buffs" or "buffs-mode" or "buffs-cycle";
-
-    private ScenarioStatus RebuffStep(IGameSessionView session, double now)
-    {
-        if (OrderGuard(session, "rebuff") is { } died)
-        {
-            return died;
-        }
-
-        var inner = _inner!;
-        switch (inner.Step(session, now))
-        {
-            case ScenarioStatus.Failed:
-                _rebuffed = DeathLegVerdict.RebuffedNo;
-                return Fail(session, "rebuff: " + inner.Failure);
-            case ScenarioStatus.Succeeded:
-                return RebuffDone(session);
-            default:
-                return IsBuffing(inner.Stage) ? ScenarioStatus.Running : RebuffDone(session);
-        }
-    }
-
-    private ScenarioStatus RebuffDone(IGameSessionView session)
-    {
-        var clock = session.Clock.Now;
-        var inner = _inner!;
-        var up = inner.BuffsAllUp;
-        _rebuffed = up ? DeathLegVerdict.RebuffedYes : DeathLegVerdict.RebuffedNo;
-        if (up)
-        {
-            _log.Info(LogCategory, $"rebuff: done (buffs={inner.BuffsNote}, every profile line up); rebuffed=yes");
-        }
-        else
-        {
-            _log.Warn(LogCategory, $"rebuff: the buff stage ended with a profile line down (buffs={inner.BuffsNote}); rebuffed=no (report-only)");
-        }
-
-        if (FightOn)
-        {
-            return NextPost(session, clock); // the same inner scenario goes on to the den: it is already past its buff stage
-        }
-
-        // The rebuff alone: the inner scenario would go on to its fight, so it is dropped here and the mage leaves the magic mode the cycle entered.
-        inner.Dispose();
-        _inner = null;
-        if (session.State.Self.Qualities.CombatMode != CombatModes.NonCombat)
-        {
-            _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
-            Enter("rebuff-peace", clock);
-            return ScenarioStatus.Running;
-        }
-
-        return NextPost(session, clock);
-    }
-
-    private ScenarioStatus RebuffPeaceStep(IGameSessionView session, double clock)
-    {
-        if (OrderGuard(session, "rebuff") is { } died)
-        {
-            return died;
-        }
-
-        if (_pending is not { Outcome: { } peace })
-        {
-            return ScenarioStatus.Running;
-        }
-
-        _pending = null;
-        if (!peace.Succeeded)
-        {
-            _log.Warn(LogCategory, "rebuff: the mage was left in the magic combat mode: " + Describe(peace)); // report-only, as the fight scenario's mode-peace
-        }
-
-        return NextPost(session, clock);
-    }
-
-    private ScenarioStatus FightStep(IGameSessionView session, double now)
-    {
-        if (OrderGuard(session, "fight") is { } died)
-        {
-            return died;
-        }
-
-        if (FightManaWaiting(session))
-        {
-            return ScenarioStatus.Running;
-        }
-
-        var inner = _inner!;
-        var status = inner.Step(session, now);
-        _denKills = inner.Kills;
-        switch (status)
-        {
-            case ScenarioStatus.Failed:
-                return Fail(session, "fight: " + inner.Failure);
-            case ScenarioStatus.Succeeded:
-                _log.Info(LogCategory, $"fight: done; den_kills={_denKills}");
-                inner.Dispose();
-                _inner = null;
-                return NextPost(session, session.Clock.Now);
-            default:
-                return ScenarioStatus.Running;
-        }
+        return BeginHandler(session, clock);
     }
 
     /// <summary>
     /// M4 P4 g3fix: the bounded precondition wait before the den (see <see cref="DeathOptions.FightManaWaitSeconds"/>): true while the mana is under the floor and the wait has time left. Logged once at its start and once at its end with the numbers;
     /// when the bound passes with the mana short the fight goes on (it waits for mana itself, as before) and a WARN names the numbers, so the cause stays on the log.
     /// </summary>
-    private bool FightManaWaiting(IGameSessionView session)
+    internal bool FightManaWaiting(IGameSessionView session)
     {
         if (_options.FightManaWaitSeconds <= 0 || _fightManaDone)
         {
@@ -475,90 +311,11 @@ public sealed partial class DeathScenario
     private double _fightManaStart = double.NaN;
     private bool _fightManaDone;
 
-    // ------------------------------------------------------------------------------------------------ the decoys
+    // ------------------------------------------------------------------------------------------------ the corpse's listing
 
-    /// <summary>The gear stage's check, once, after the gear steps: the text is logged, <c>decoy_safe=</c> is its field. With <c>--death-decoys off</c> there is none.</summary>
-    private void RunDecoyCheck(IGameSessionView session)
-    {
-        if (!_options.Decoys)
-        {
-            _log.Info(LogCategory, "decoys: --death-decoys is off: no decoy check, every decoy field reads n/a");
-            return;
-        }
-
-        var check = DecoyKit.Check(session.State, session.State.Self.Qualities.Level);
-        _decoyCheck = check;
-        if (check.Made && check.Verdict.Survives)
-        {
-            _log.Info(LogCategory, check.Text);
-        }
-        else
-        {
-            _log.Warn(LogCategory, check.Text + " (decoy_safe=no)");
-        }
-
-        // M4 3.1 fix, review R7: the live load share once after the gear steps, a warning over 95% (no behaviour change: the decoy kit and the regear's duplicates are the mage's burden, and nothing here trims them).
-        var load = DecoyKit.LoadOf(session.State);
-        if (load.Over)
-        {
-            _log.Warn(LogCategory, DecoyKit.LoadText(in load));
-        }
-        else
-        {
-            _log.Info(LogCategory, DecoyKit.LoadText(in load));
-        }
-    }
-
-    /// <summary>
-    /// When the wait among the tuskers begins: the decoys the pack holds (<c>decoys=</c>), by weenie class, and the check again over the live inventory, because the unbuff suicide is a death too and drops items by the same rule (D33): a run whose suicide
-    /// dropped decoys reads fewer here than the kit has, and the line says it is not safe when that leaves the wand under the drops. Report-only.
-    /// </summary>
-    private void CountDecoysAtDeath(IGameSessionView session)
-    {
-        if (!_options.Decoys)
-        {
-            return;
-        }
-
-        _scratch.Clear();
-        GearInventory.Collect(session.State, _scratch);
-        var held = 0;
-        foreach (var guid in _scratch)
-        {
-            if (session.State.Objects.TryGet(guid, out var item) && DecoyKit.IsDecoy(item.Weenie.WeenieClassId))
-            {
-                held++;
-            }
-        }
-
-        _decoysAtDeath = held;
-        if (held == 0 && _suicides == 0)
-        {
-            // M4 4.2 F1: no decoy is carried (D37: the undressed, lying mage dies once and carries no kit) and no unbuff suicide ran that could have dropped one, so the
-            // check has nothing to judge: its NOT SAFE line was noise in every journey gate (decoys=0 decoy_safe=n/a).
-            _log.Info(LogCategory, "decoys: none in the pack as the wait among the tuskers begins (no decoy kit carried, D37; no unbuff suicide ran): no decoy check");
-            return;
-        }
-
-        var check = DecoyKit.Check(session.State, session.State.Self.Qualities.Level);
-        if (check.Made && check.Verdict.Survives)
-        {
-            _log.Info(LogCategory, $"decoys: {held} in the pack as the wait among the tuskers begins; {check.Text}");
-        }
-        else
-        {
-            _log.Warn(LogCategory, $"decoys: {held} in the pack as the wait among the tuskers begins; {check.Text} (not safe: the unbuff suicide, a death too, drops items by the same rule)");
-        }
-    }
-
-    /// <summary>The corpse's own listing at its open: the entries' guids (the weenie classes are read as the F745s arrive, <see cref="ResolveListing"/>). Nothing with <c>--death-decoys off</c>.</summary>
+    /// <summary>The corpse's own listing at its open: the entries' guids (the weenie classes are read as the F745s arrive, <see cref="ResolveListing"/>).</summary>
     private void CaptureListing(ContainerView view)
     {
-        if (!_options.Decoys)
-        {
-            return;
-        }
-
         var entries = new ListedEntry[view.Entries.Count];
         for (var i = 0; i < entries.Length; i++)
         {
@@ -586,9 +343,8 @@ public sealed partial class DeathScenario
     }
 
     /// <summary>
-    /// At the end of the trip: the listing classified by weenie class (<c>decoys_dropped=</c> the <see cref="DecoyKit.IsDecoy"/> entries, <c>gear_dropped=</c> the <see cref="DeathDropModel.IsNeeded"/> ones), and the entries now in the pack counted
-    /// (<c>decoys_recovered=</c>: a taken entry keeps its guid). A needed item that was listed and is not in the pack is counted (<c>gear_left=</c>, report-only in its first gate; M4 3.1 fix, review R2) and warned about, never a failure: in the order whose regear ran
-    /// BEFORE the trip (the fight is on) the regear already replaced it, so what is left behind is a duplicate on the corpse, not a missing item; in M4 2.2's order the regear after the trip spawns it.
+    /// At the end of the trip: the listing classified by weenie class (the <see cref="DeathDropModel.IsNeeded(GearKit, uint)"/> entries are the lines of the mage's own kit, M5 3 d4). A needed item that was listed and is not in the pack is counted (<c>gear_left=</c>,
+    /// report-only in its first gate; M4 3.1 fix, review R2) and warned about, never a failure: under D51 the handler takes what the corpse gives and spawns nothing in its place, so what is left behind is missing until it is bought or found.
     /// </summary>
     private void ClassifyListing(IGameSessionView session)
     {
@@ -598,7 +354,7 @@ public sealed partial class DeathScenario
             return;
         }
 
-        int decoys = 0, gear = 0, recovered = 0, unresolved = 0, coins = 0;
+        int gear = 0, unresolved = 0, coins = 0;
         List<uint>? missed = null;
         foreach (var entry in entries)
         {
@@ -607,15 +363,7 @@ public sealed partial class DeathScenario
             {
                 unresolved++;
             }
-            else if (DecoyKit.IsDecoy(entry.Wcid))
-            {
-                decoys++;
-                if (taken)
-                {
-                    recovered++;
-                }
-            }
-            else if (DeathDropModel.IsNeeded(entry.Wcid))
+            else if (DeathDropModel.IsNeeded(_kit, entry.Wcid))
             {
                 gear++;
                 if (!taken)
@@ -625,13 +373,13 @@ public sealed partial class DeathScenario
             }
             else if (entry.Wcid == DeathDropModel.CoinWcid)
             {
-                coins++; // review R20: ACE puts half the pyreals on the corpse (Player_Death.cs), a stack that is neither a decoy nor gear
+                coins++; // review R20: a pyreal stack on the corpse is not gear
             }
         }
 
-        (_decoysDropped, _gearDropped, _decoysRecovered, _gearLeft) = (decoys, gear, recovered, missed?.Count ?? 0);
+        _gearLeft = missed?.Count ?? 0;
         (_listingEntries, _listingCoins) = (entries.Length, coins);
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"corpse: the listing held {entries.Length} entries: decoys_dropped={decoys} gear_dropped={gear} decoys_recovered={recovered}{(unresolved == 0 ? string.Empty : $"; {unresolved} never resolved to a weenie class, not classified")}{(coins == 0 ? string.Empty : $"; {coins} of them pyreal stack(s) (wcid {DeathDropModel.CoinWcid}: ACE puts half the pyreals on the corpse), neither a decoy nor gear")}"));
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"corpse: the listing held {entries.Length} entries: gear_listed={gear}{(unresolved == 0 ? string.Empty : $"; {unresolved} never resolved to a weenie class, not classified")}{(coins == 0 ? string.Empty : $"; {coins} of them pyreal stack(s) (wcid {DeathDropModel.CoinWcid}: not gear")}"));
         if (missed is null)
         {
             return;
@@ -640,8 +388,6 @@ public sealed partial class DeathScenario
         var left = string.Create(CultureInfo.InvariantCulture, $"corpse: gear_left={missed.Count}: {missed.Count} item(s) the loops need were on the corpse and were not taken (weenie classes {string.Join(", ", missed)})");
         _log.Warn(
             LogCategory,
-            FightOn
-                ? left + "; the regear before the trip already replaced them, so what is left behind is a duplicate on the corpse, not a missing item (report-only in its first gate, review R2)"
-                : left + "; the regear after the trip spawns them (not a failure in M4 2.2's order)");
+            left + "; the death handler took what the corpse gave and spawns nothing in its place (D51), so the item is missing until it is bought or found (report-only in its first gate, review R2)");
     }
 }

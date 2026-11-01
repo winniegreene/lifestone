@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.Magic;
@@ -95,11 +96,41 @@ public sealed record BuffResult
     /// <summary>The reason the pass failed, or null when it did not.</summary>
     public string? Failure { get; init; }
 
+    /// <summary>The cast policy's counts over this pass's attempts (M5 1 lane K3; <see cref="CastTally"/>, reset at the pass's start): the Mana Conversion tries (K5 fills them). Report-only.</summary>
+    public int ManaTries { get; init; }
+
+    /// <summary>The 0x0401 refusals of the pass's casts (<c>mana_refusals</c>; report-only).</summary>
+    public int ManaRefusals { get; init; }
+
+    /// <summary>The Mana Conversion tries of the pass that landed (<c>mana_landed</c>; report-only).</summary>
+    public int ManaLanded { get; init; }
+
+    /// <summary>The busy answers (0x001D) of the pass's casts (<c>busy</c>; report-only).</summary>
+    public int Busy { get; init; }
+
+    /// <summary>The resists the pass's casts met (<c>resists</c>; report-only).</summary>
+    public int Resists { get; init; }
+
+    /// <summary>The Sent casts the proof proved (<c>proved</c>; report-only).</summary>
+    public int Proved { get; init; }
+
     /// <summary>The fighter's caster swap around the pass (M4 P5a C1b): <c>swapped=yes|no swap_s=n</c>, set by <see cref="RebuffDriver"/> once the swap is back; null for the mage, who never swaps (its <see cref="Fields"/> are unchanged).</summary>
     public string? SwapFields { get; init; }
 
-    /// <summary>The verdict fields: <c>buffs=a/w levels=... rebuffed=yes|no min_remaining_s=n fizzles=n transfers=f/t revitalizes=n mana_min=n cycle_s=n mode_changes=n misses=...</c> (and <c>forced=yes</c> for a forced pass).</summary>
+    /// <summary>The verdict fields: <c>buffs=a/w levels=... rebuffed=yes|no min_remaining_s=n fizzles=n transfers=f/t revitalizes=n mana_min=n cycle_s=n mode_changes=n misses=... surpassed=n</c> (and <c>forced=yes</c> for a forced pass).</summary>
     public string Fields { get; init; } = string.Empty;
+
+    /// <summary>The cast policy's fields, appended to the end of the cycle's report line (<c>pass done: ...</c>, <c>FAILED: ...</c>): <c>mana_tries=n mana_refusals=n mana_landed=n busy=n resists=n proved=n</c> (<see cref="CastTally.Fields"/>; M5 1 K3, report-only). <see cref="Fields"/> itself is unchanged.</summary>
+    public string CastFields => string.Create(CultureInfo.InvariantCulture, $"mana_tries={ManaTries} mana_refusals={ManaRefusals} mana_landed={ManaLanded} busy={Busy} resists={Resists} proved={Proved}{(Dances > 0 ? $" mana_presses={DancePresses} dances={Dances} dances_landed={DancesLanded}" : string.Empty)}");
+
+    /// <summary>The stamina-to-mana dances of the pass (M5 1 K5, D27; report-only, written in <see cref="CastFields"/> as <c>dances=</c> where one ran).</summary>
+    public int Dances { get; init; }
+
+    /// <summary>The dances that landed (<c>dances_landed=</c>).</summary>
+    public int DancesLanded { get; init; }
+
+    /// <summary>The presses of every dance, each one cast (<c>mana_presses=</c>).</summary>
+    public int DancePresses { get; init; }
 
     internal static string FormatFields(BuffResult r)
     {
@@ -136,6 +167,8 @@ public sealed record BuffResult
 /// <see cref="ArmourBuffLedger"/> (M4 4.1 lane b; closes <c>TODO(m3-buff-armour-memory)</c>): the ledger is the session's, so a new cycle object knows an earlier object's armour casts, a piece taken off loses its lines, and after a login
 /// that left the ledger empty the worn pieces are appraised once (<see cref="ArmourLedgerSeeder"/>; the server sends no registry for an item, only an appraisal's enchantment ids, which carry no clock). A line found that way has an unknown time
 /// left and is due at once (no saved time: the conservative rule; with the host's store the previous session's seconds left are restored, ACE's clock stopping while the owner is offline). A piece whose line says "surpassed" holds a stronger version of the line and is counted active (retail keeps the stronger enchantment; <see cref="BuffResult.Surpassed"/>, <c>surpassed=</c>; closes <c>TODO(m3-buff-armour-surpassed)</c>).</para>
+/// <para><b>The level floor</b> (M5 item 3 w1): a pack that holds a school's focus casts that school on the foci formula, so a level whose components the pack does not hold (a school short of level VI would need a Gold Scarab no stock line carries) is never chosen
+/// and never stepped down onto: it is skipped, logged once by name, and the line is reported down with the reason (miss <c>down</c> when the level below it that the pack can pay for is cast, <c>no-level</c> when there is none).</para>
 /// <para><b>The mana loop</b> (D24, retail's way): before a cast whose cost (<see cref="GearCasts.ManaCeiling"/>: the base mana and ACE's armour surcharge, <c>Creature_Magic.cs</c> 14-60) is above the current mana,
 /// the cycle casts Stamina to Mana Self at the highest level whose chance reaches the threshold and whose own cost is affordable, tried again until one fires (a try is a separate cast; <see cref="BuffOptions.TransferTries"/>
 /// fizzles in a row fail the cycle); when the stamina is too low for a transfer to cover the shortfall (<see cref="BuffStatMods.Transfer"/> gives the yield) it casts Revitalize Self first by the same rule; when neither can
@@ -185,6 +218,16 @@ public sealed class BuffCycle
     public const int ManaCastLimitPerLine = 64;
 
     /// <summary>
+    /// The attempts a buff line is sent at its ceiling after its Mana Conversion tries were spent, all refused (0x0401); the refusal of the last one fails the cycle (M5 3 m4, <c>m5-buffcycle-ceiling-refusal</c>, review 1-R14). A cast sent with mana at or over the
+    /// line's ceiling cannot be short of mana; a refusal then means the read model's mana is higher than the server's, and a resend would repeat for as long as it stays so. One whole attempt at the ceiling (its tries counted) is sent; its
+    /// refusal is a named failure. Lifestone's own bound.
+    /// </summary>
+    public const int CeilingAttemptsPerLine = 1;
+
+    /// <summary>The Revitalize Self casts one pass makes after its pre-pass dance (M5 7, D88; Lifestone's own bound).</summary>
+    public const int PassRevitalizeLimit = 6;
+
+    /// <summary>
     /// The mana casts (transfers and Revitalizes) in a row that do not lift the line's highest mana (M4 P5a fix r4): after them the line casts no more of them and waits for regeneration (<c>mana-futile:</c>, logged by
     /// name). A Revitalize spends mana for the stamina the next transfer draws on, so a few in a row are an investment; eight that lift nothing are the round 4 trade. A fighter's profile only (<see cref="IBuffProfile.TransfersAhead"/>): the mage's pool and Mana Conversion make its loop another economy, which round 4 passed. Not retail: Lifestone's own.
     /// </summary>
@@ -208,7 +251,7 @@ public sealed class BuffCycle
     private const int MaxPieces = 32;
     private const int MaxWorn = 64;
 
-    private static readonly string[] Roman = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
+    private static readonly string[] Roman = LevelFloor.Roman;
 
     private static readonly Dictionary<string, string> ShortNames = new(StringComparer.Ordinal)
     {
@@ -238,6 +281,7 @@ public sealed class BuffCycle
         ["Bludgeon Bane"] = "BludB",
         ["Hermetic Link"] = "Herm",
         ["Defender"] = "Def",
+        ["Spirit Drinker"] = "Spirit",
     };
 
     private enum Phase : byte
@@ -272,6 +316,12 @@ public sealed class BuffCycle
     {
         public int Index { get; } = index;
 
+        /// <summary>The line's spell ids, lowest level first: the <see cref="CastRequest.Levels"/> of its casts (built once).</summary>
+        public uint[] Ids { get; } = IdsOf(line);
+
+        /// <summary>The purpose of the line's casts in the cast log (built once).</summary>
+        public string Purpose { get; } = "buff " + shortName;
+
         public ProfileLine Line { get; } = line;
 
         public string Short { get; } = shortName;
@@ -287,6 +337,9 @@ public sealed class BuffCycle
     private readonly BuffOptions _options;
     private readonly ILogSink _log;
     private readonly WantedLine[] _order;
+    private readonly sbyte[] _byPlayNoted; // M5 7 P7j: per line learned by play, what was last logged of it (0 nothing, -1 not in the spellbook, 1 in it)
+    private int _onlyNext = -1;
+    private int _only = -1;
     private readonly Dictionary<uint, (int Line, int Index)> _spellOf = [];
     private readonly ProfileLine _transferLine;
     private readonly ProfileLine _boostLine;
@@ -300,13 +353,51 @@ public sealed class BuffCycle
     private readonly uint[] _wornGuid = new uint[MaxWorn];
     private readonly ArmourBuffLedger _ledger;
     private readonly ArmourLedgerSeeder? _seeder;
+    private readonly CastAttempt _cast;
+    private readonly CastTally _tally = new();
+    private readonly uint[] _transferIds;
+    private readonly uint[] _boostIds;
+    private readonly CastRules _manaRules;
+    private readonly CastRules _lineTriesRules;
+    private readonly CastRules _upgradeTriesRules;
+    private readonly CastRules _danceRules;
+    private readonly CastChatProof _danceProof;
+    private readonly Vitals.DanceLevel[] _danceLevels;
+    private readonly int[] _danceIndex;
+    private uint _manaConversion;
+    private readonly Func<uint, bool> _payable;
+    private readonly HashSet<uint> _floorLogged = [];
+    private bool _floorOn;
+    private readonly bool[] _transferPayable;
+    private readonly bool[] _boostPayable;
+    private bool _payableKnown;
+    private bool _noPayableDanceNoted;
+    private bool _lineTriesSpent;
+    private int _ceilingAttempts;
+    private bool _dancing;
+    private bool _danceOff;
+    private bool _passDanceDue; // M5 7: the pass's first buff has not been funded yet; a mana under its cost dances before it (and Revitalizes after). A start's pass re-arms it at every line (P7c, the reserve)
+    private bool _passDancing; // the dance in flight is the pre-pass one
+    private bool _reserveDancing; // P7c: the dance in flight is a start pass's reserve dance (a later line's), not the pre-pass one
+    private uint _passReserve; // P7c: the mana a start pass keeps for the next Stamina to Mana press (the dearest payable level's base; 0 when none or not a start's pass)
+    private int _reserveDances;
+    private bool _passLooked; // P7c: the pass's first look (the pre-pass dance's) is done
+    private uint _passDanceMana;
+    private string _passDanceFor = string.Empty;
+    private bool _reviveDue;
+    private bool _passRevive;
+    private int _passRevives;
+    private int _dances;
+    private int _dancesLanded;
+    private int _dancePresses;
     private Phase _phase = Phase.Idle;
     private bool _rebuff;
     private bool _forced;
     private double _margin;
     private int _line;
     private int _castIndex;
-    private int _lineFizzles;
+    private int _spentFizzles;
+    private int _spentDown;
     private int _manaCasts;
     private int _castsSincePeak;
     private uint _linePeak;
@@ -385,6 +476,7 @@ public sealed class BuffCycle
 
         var lines = Profile.BuffOrder;
         _order = new WantedLine[lines.Count];
+        _byPlayNoted = new sbyte[lines.Count];
         for (var i = 0; i < lines.Count; i++)
         {
             var line = lines[i];
@@ -415,6 +507,11 @@ public sealed class BuffCycle
             }
         }
 
+        _transferIds = IdsOf(_transferLine);
+        _boostIds = IdsOf(_boostLine);
+        _manaRules = CastRules.Utility(Math.Max(1, options.TransferTries)); // the mana loop's rule: the 8th Stamina to Mana (or Revitalize) fizzle in a row fails the pass; made once
+        _cast = new CastAttempt(actions, state, log, spells);
+        _danceProof = new CastChatProof(state, spells); // M5 1 fix B (G5): a landed press of the dance is proved by ACE's transfer line ("You cast ... on yourself and lose ...")
         _transferInfos = InfosOf(_transferLine, spells);
         _boostInfos = InfosOf(_boostLine, spells);
         _transferRows = new TransferRow?[_transferInfos.Length];
@@ -422,6 +519,17 @@ public sealed class BuffCycle
         {
             _transferRows[i] = _transferInfos[i] is { } info ? BuffStatMods.TransferOf(info.Id) : null; // looked up once: the lookup allocates
         }
+
+        // M5 1 K5 (D15, D27): the buff lines' Mana Conversion tries and the dance, made once (the forms build a name string).
+        var mana = options.Mana;
+        _lineTriesRules = mana.On ? CastRules.BuffLineD14.WithManaTries(mana.Tries, mana.TrySpacingSeconds) : CastRules.BuffLineD14;
+        _upgradeTriesRules = mana.On ? CastRules.Once.WithManaTries(mana.Tries, mana.TrySpacingSeconds) : CastRules.Once;
+        _danceRules = CastRules.ManaDance(mana.DancePresses, mana.TrySpacingSeconds);
+        _danceLevels = new Vitals.DanceLevel[_transferInfos.Length];
+        _danceIndex = new int[_transferInfos.Length];
+        _transferPayable = new bool[_transferInfos.Length];
+        _boostPayable = new bool[_boostInfos.Length];
+        _payable = PayableBelow; // made once: a lambda per request allocates
     }
 
     /// <summary>The armour lines' memory this cycle reads and writes (a private one when none was passed in).</summary>
@@ -442,18 +550,33 @@ public sealed class BuffCycle
     /// <summary>What the last pass left; null until a pass ended (or failed) and while the next runs.</summary>
     public BuffResult? Result { get; private set; }
 
-    /// <summary>The number of lines the cycle wants (the profile's buff lines).</summary>
-    public int Wanted => _order.Length;
+    /// <summary>The number of lines the cycle wants (the profile's buff lines; a line learned by play only once the spellbook holds a level of it, M5 7 P7j).</summary>
+    public int Wanted
+    {
+        get
+        {
+            var n = 0;
+            foreach (var w in _order)
+            {
+                n += Wants(w) ? 1 : 0;
+            }
+
+            return n;
+        }
+    }
 
     /// <summary>The wanted lines' names in the order the cycle casts them.</summary>
     public IReadOnlyList<string> LineOrder
     {
         get
         {
-            var names = new string[_order.Length];
-            for (var i = 0; i < names.Length; i++)
+            var names = new List<string>(_order.Length);
+            foreach (var w in _order)
             {
-                names[i] = _order[i].Line.Name;
+                if (Wants(w))
+                {
+                    names.Add(w.Line.Name);
+                }
             }
 
             return names;
@@ -480,6 +603,57 @@ public sealed class BuffCycle
     /// <returns>False when a pass is already running.</returns>
     public bool StartRebuff(double now, bool forced) => Begin(now, rebuff: true, forced);
 
+    /// <summary>
+    /// M5 7 F24: a re-buff pass over ONE line (<paramref name="lineName"/>) when it has less than the cycle's margin left (a line with no active buff is due). The fight's refresh casts the due lines one at a time, in the priority order it chooses,
+    /// so a pass stays short and the fight decides again after each cast. False when a pass is running or the line is not one of the wanted lines.
+    /// </summary>
+    /// <param name="now">The session clock's time.</param>
+    /// <param name="lineName">The profile line's name.</param>
+    public bool StartRebuffLine(double now, string lineName)
+    {
+        var at = -1;
+        for (var i = 0; i < _order.Length && at < 0; i++)
+        {
+            at = string.Equals(_order[i].Line.Name, lineName, StringComparison.Ordinal) ? i : -1;
+        }
+
+        if (at < 0 || Status == BuffStatus.Running || !Wants(_order[at]))
+        {
+            return false;
+        }
+
+        _onlyNext = at;
+        var started = Begin(now, rebuff: true, forced: false);
+        _onlyNext = -1;
+        return started;
+    }
+
+    /// <summary>One wanted line as <see cref="ReadLines"/> reads it: the profile line, whether a buff of it is active, and the seconds left on it (0 when none is).</summary>
+    /// <param name="Line">The profile line.</param>
+    /// <param name="Active">True when a buff of the line is active.</param>
+    /// <param name="Remaining">The seconds left; the least over the worn pieces for an armour line.</param>
+    public readonly record struct LineState(ProfileLine Line, bool Active, double Remaining);
+
+    /// <summary>M5 7 F24: fills <paramref name="into"/> (cleared first) with every wanted line's state at <paramref name="now"/>; an armour line is left out while nothing is worn (as <see cref="RebuffDue"/>). Allocates nothing once the list has grown.</summary>
+    /// <param name="now">The session clock's time.</param>
+    /// <param name="into">The list to fill.</param>
+    public void ReadLines(double now, List<LineState> into)
+    {
+        ArgumentNullException.ThrowIfNull(into);
+        into.Clear();
+        var worn = CollectExpected();
+        foreach (var w in _order)
+        {
+            if ((w.Armour && worn == 0) || !Wants(w))
+            {
+                continue; // M5 7 P7j: a line learned by play is left out until the spellbook holds it
+            }
+
+            var active = ActiveState(w, now, out _, out var remaining);
+            into.Add(new LineState(w.Line, active, active ? remaining : 0));
+        }
+    }
+
     /// <summary>The names of the wanted lines whose remaining time at <paramref name="now"/> is under <paramref name="margin"/> (a line with no active buff has none left: it is due). <see cref="RebuffDriver"/> calls this at each of its checks (closes <c>TODO(m3-buff-rebuff-driver)</c>).</summary>
     /// <param name="now">The session clock's time.</param>
     /// <param name="margin">The margin in seconds (<see cref="double.PositiveInfinity"/> lists every line).</param>
@@ -493,6 +667,11 @@ public sealed class BuffCycle
             {
                 NoteNoArmour();
                 continue; // nothing is worn to enchant: an armour line is not wanted (review R4)
+            }
+
+            if (!Wants(w))
+            {
+                continue; // M5 7 P7j: a line learned by play is not due while the spellbook lacks it (logged once by Wants)
             }
 
             ActiveState(w, now, out _, out var remaining);
@@ -548,7 +727,7 @@ public sealed class BuffCycle
         var min = double.PositiveInfinity;
         foreach (var w in _order)
         {
-            if (ActiveState(w, now, out _, out var remaining) && remaining < min)
+            if (Wants(w) && ActiveState(w, now, out _, out var remaining) && remaining < min)
             {
                 min = remaining;
             }
@@ -611,9 +790,10 @@ public sealed class BuffCycle
             return false;
         }
 
+        _only = _onlyNext; // M5 7 F24: a one-line pass (StartRebuffLine), else -1
         _rebuff = rebuff;
         _forced = forced;
-        _margin = _options.RebuffMarginSeconds;
+        _margin = rebuff ? _options.RebuffMarginSeconds : _options.StartMarginSeconds ?? _options.RebuffMarginSeconds; // D126 (a): a start's pass has its own margin
         _forcedLine = -1;
         _passRecast = 0;
         _upgrading = false;
@@ -634,6 +814,21 @@ public sealed class BuffCycle
         _waitStart = double.NaN;
         _transferStreak = 0;
         _boostStreak = 0;
+        _spentFizzles = 0;
+        _spentDown = 0;
+        _tally.Clear();
+        _dances = _dancesLanded = _dancePresses = 0;
+        _dancing = false;
+        _danceOff = false;
+        _passDanceDue = true;
+        _passDancing = false;
+        _reserveDancing = false;
+        _passReserve = 0;
+        _reserveDances = 0;
+        _passLooked = false;
+        _reviveDue = false;
+        _passRevive = false;
+        _passRevives = 0;
         Result = null;
         Status = BuffStatus.Running;
         if (_state.Self.Qualities.CombatMode != CombatModes.Magic)
@@ -670,7 +865,7 @@ public sealed class BuffCycle
             var least = double.PositiveInfinity;
             foreach (var w in _order)
             {
-                if (ActiveState(w, now, out _, out var left) && left < least)
+                if (Wants(w) && ActiveState(w, now, out _, out var left) && left < least)
                 {
                     least = left;
                     _forcedLine = w.Index;
@@ -689,7 +884,7 @@ public sealed class BuffCycle
             }
         }
 
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{(rebuff ? (forced ? "forced re-buff pass" : "re-buff pass") : "cycle")} starts: {_order.Length} lines, margin {_margin:0.#} s{forcedNote}, {_options}"));
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{(rebuff ? (forced ? "forced re-buff pass" : "re-buff pass") : "cycle")} starts: {Wanted} lines, margin {_margin:0.#} s{forcedNote}, {_options}"));
         _phase = Phase.NextLine;
         Stage = StageMana;
         return true;
@@ -702,6 +897,12 @@ public sealed class BuffCycle
         while (_line < _order.Length)
         {
             var w = _order[_line];
+            if (!Wants(w))
+            {
+                _line++;
+                continue; // M5 7 P7j: a line learned by play the spellbook does not hold yet is not wanted: no cast, no miss (logged once by Wants)
+            }
+
             if (_rebuff && w.Armour && _expectedCount == 0)
             {
                 NoteNoArmour();
@@ -713,6 +914,12 @@ public sealed class BuffCycle
             if (index == int.MinValue)
             {
                 return Fail(now, why);
+            }
+
+            if (index >= 0 && why.Length > 0 && !_upgrading)
+            {
+                // M5 3 w1: the level the rule gave is one the pack cannot pay for; the level below it that the pack can pay for is cast, and the line is reported down with the reason (never a silent substitute).
+                Miss(w, "down", w.Line.Name + ": " + why + "; cast " + w.Line.Spells[index].Name + " instead");
             }
 
             if (index < 0)
@@ -735,6 +942,10 @@ public sealed class BuffCycle
             else if (_forced && _forcedLine >= 0)
             {
                 skip = w.Index != _forcedLine || remaining >= _margin;
+            }
+            else if (_only >= 0)
+            {
+                skip = w.Index != _only || remaining >= _margin; // M5 7 F24: the one line, when it is under the margin
             }
             else
             {
@@ -768,11 +979,23 @@ public sealed class BuffCycle
 
             _castIndex = index;
             _wasActive = active;
-            _lineFizzles = 0;
+            _spentFizzles = 0;
+            _spentDown = 0;
             _manaCasts = 0;
             _castsSincePeak = 0;
             _linePeak = 0;
             _manaFutile = false;
+            _lineTriesSpent = false;
+            _ceilingAttempts = 0;
+            if (!_rebuff)
+            {
+                _passDanceDue = true; // M5 7 P7c: a start's pass looks again before every line (PassDance's reserve), one look a line
+            }
+            if (_options.Mana.On)
+            {
+                Vitals.ManaOrder.TryManaConversion(_state.Self.Qualities, out _manaConversion); // read once a line (it reads enchantments): the try floor and the dance's levels use it
+            }
+
             _phase = Phase.Mana;
             Stage = StageMana;
             return true;
@@ -791,6 +1014,42 @@ public sealed class BuffCycle
     }
 
     /// <summary>
+    /// M5 7 P7j (D143, D141): whether the cycle wants <paramref name="w"/>: every line the build teaches, and a line learned by play (<see cref="ProfileLine.ByPlay"/>) only while the spellbook (the state, never an assumption) holds a level of
+    /// it. The first answer and every change are logged once ("no level is in the spellbook ... not wanted", then "... is in the spellbook now ... wanted"), never each frame. Allocates nothing once logged.
+    /// </summary>
+    private bool Wants(WantedLine w)
+    {
+        if (!w.Line.ByPlay)
+        {
+            return true;
+        }
+
+        var book = _state.Self.Spellbook;
+        ProfileSpell? known = null;
+        if (book.IsKnown)
+        {
+            foreach (var spell in w.Line.Spells)
+            {
+                if (book.Knows(spell.Id))
+                {
+                    known = spell; // the highest held, as the list runs up
+                }
+            }
+        }
+
+        var seen = (sbyte)(known is null ? -1 : 1);
+        if (_byPlayNoted[w.Index] != seen)
+        {
+            _byPlayNoted[w.Index] = seen;
+            _log.Info(LogCategory, known is null
+                ? $"{w.Line.Name}: no level is in the spellbook{(book.IsKnown ? string.Empty : " (the spellbook is not read yet)")}; a line learned by play (D143), so it is not wanted until a level is learned"
+                : $"{w.Line.Name}: {known.Name} ({known.Id}) is in the spellbook now: the line is wanted and kept up as the other auras (D143)");
+        }
+
+        return known is not null;
+    }
+
+    /// <summary>
     /// The highest level of <paramref name="w"/> whose chance from the current skill is at least the threshold: its index, -1 with the reason when none reaches it, or <see cref="int.MinValue"/> when the skill cannot be
     /// read (the cycle fails).
     /// </summary>
@@ -802,17 +1061,55 @@ public sealed class BuffCycle
             return int.MinValue;
         }
 
+        // M5 3 w1: a pack that holds the school's focus casts on the foci formula, whose components it must hold: a level whose components the pack lacks is skipped (logged once, by name), the level below it that the pack can
+        // pay for is the next candidate, and the caller reports the line down with the reason (`why` is then the first skip's text and the index is >= 0). No level the pack can pay for: -1 with that reason.
+        var held = LevelFloor.HeldFor(_state, w.Line.School);
+        _floorOn = held is not null;
+        string? skipped = null;
         for (var i = w.Line.Spells.Count - 1; i >= 0; i--)
         {
-            if (GearCasts.Chance(skill, w.Line.Spells[i].Power) >= _options.CastChance)
+            if (GearCasts.Chance(skill, w.Line.Spells[i].Power) < _options.CastChance || (w.Line.ByPlay && !_state.Self.Spellbook.Knows(w.Line.Spells[i].Id)))
             {
-                why = string.Empty;
-                return i;
+                continue; // M5 7 P7j: of a line learned by play only the levels the spellbook holds are cast
             }
+
+            if (held is not null && w.Infos[i] is { } info && LevelFloor.ShortOf(held, info, out var need))
+            {
+                var text = LevelFloor.SkipText(w.Line.Spells[i], need);
+                skipped ??= text;
+                if (_floorLogged.Add(info.Id))
+                {
+                    _log.Warn(LogCategory, w.Line.Name + ": " + text);
+                }
+
+                continue;
+            }
+
+            why = skipped ?? string.Empty;
+            return i;
         }
 
-        why = string.Create(CultureInfo.InvariantCulture, $"no level reaches a chance of {_options.CastChance} at {w.Line.School} skill {skill}");
+        why = skipped is not null
+            ? "no level the pack can pay for (" + skipped + ")"
+            : string.Create(CultureInfo.InvariantCulture, $"no level reaches a chance of {_options.CastChance} at {w.Line.School} skill {skill}");
         return -1;
+    }
+
+    /// <summary>The cast policy's <see cref="CastRequest.Usable"/> for a level down while the floor applies (D14 steps one level down after two fizzles): a level the SpellTable lacks or whose foci components the pack does not hold is not stepped onto.</summary>
+    private bool PayableBelow(uint spellId)
+    {
+        if (!_spellOf.TryGetValue(spellId, out var at))
+        {
+            return false;
+        }
+
+        var w = _order[at.Line];
+        if (w.Infos[at.Index] is not { } info || (w.Line.ByPlay && !_state.Self.Spellbook.Knows(spellId)))
+        {
+            return false; // M5 7 P7j: a level of a line learned by play that the spellbook lacks is never stepped onto
+        }
+
+        return LevelFloor.HeldFor(_state, w.Line.School) is not { } held || !LevelFloor.ShortOf(held, info, out _);
     }
 
     // ------------------------------------------------------------------------------------------------ the mana loop
@@ -849,6 +1146,11 @@ public sealed class BuffCycle
         }
 
         var need = GearCasts.ManaCeiling(info, _state.Self.Inventory.Equipped.Count);
+        if (_options.Mana.On)
+        {
+            return ManaOrderStep(now, w, info, mana, max, need); // M5 1 K5: the mana order (D15, D27); --cast-mana-tries 0 keeps the loop below, exactly as before
+        }
+
         if (mana >= need)
         {
             if (_phase == Phase.ManaWait)
@@ -864,11 +1166,11 @@ public sealed class BuffCycle
 
             if (PreemptTransfer(mana, max, need, out var aheadIndex, out var aheadNeed))
             {
-                SendMana(ManaKind.Transfer, aheadIndex, mana, max, aheadNeed);
+                SendMana(ManaKind.Transfer, aheadIndex, mana, max, aheadNeed, now);
                 return false;
             }
 
-            SendBuff(w, info, need);
+            SendBuff(w, info, need, now);
             return false;
         }
 
@@ -888,7 +1190,7 @@ public sealed class BuffCycle
             _potionBefore = mana;
             _manaKind = ManaKind.Potion;
             _need = need;
-            _pending = _actions.Drink(potion, ActionSource.Host);
+            _pending = _actions.Drink(potion, ActionSource.Automation);
             _phase = Phase.ManaCasting;
             Stage = StageManaCasting;
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: Mana Potion 0x{potion:X8} ({potionCount} held), mana {mana} of {max}, {need} needed for {_order[_line].Line.Name}"));
@@ -964,9 +1266,367 @@ public sealed class BuffCycle
                     return BeginMode(CombatMode.Magic, Phase.ModeBack); // the next step decides again, in the magic mode
                 }
 
-                SendMana(action == ManaAction.Transfer ? ManaKind.Transfer : ManaKind.Boost, index, mana, max, need);
+                SendMana(action == ManaAction.Transfer ? ManaKind.Transfer : ManaKind.Boost, index, mana, max, need, now);
                 return false;
         }
+    }
+
+    /// <summary>
+    /// The mana step through <see cref="Vitals.ManaOrder"/> (M5 1 K5, D15 and D27): at or over the line's try floor the buff is cast with the Mana Conversion tries (the pass no longer waits for the ceiling); under it the
+    /// mage dances (Stamina to Mana Self pressed until it lands), drinks a Mana Potion only when the stamina is too low for a transfer, else rests in peace for stamina; the fighters drink, then dance at their stamina gate
+    /// within <see cref="FighterTransferCap"/>, then wait. The wait and the stamina rest are the bounded mana wait (<see cref="BuffOptions.ManaWaitSeconds"/>); the stamina rest goes to NonCombat at once (ACE halves
+    /// stamina regeneration in a combat mode), the mana wait after <see cref="NonCombatAfterSeconds"/> as before. Revitalize is not cast for mana in this order. Allocation-free while it waits.
+    /// </summary>
+    private bool ManaOrderStep(double now, WantedLine w, SpellInfo info, uint mana, uint max, uint need)
+    {
+        if (_passDanceDue && PassDance(now, info, mana, max, need, out var danced))
+        {
+            return danced;
+        }
+
+        if (_reviveDue && PassRevitalize(now, info, mana, max, need))
+        {
+            return false;
+        }
+
+        var floor = _lineTriesSpent ? need : Vitals.ManaOrder.FloorOf(need, info.Power, need, _manaConversion, _options.Mana, (info.Flags & SpellFlags.IgnoresManaConversion) != 0);
+        if (mana >= floor)
+        {
+            if (_phase == Phase.ManaWait)
+            {
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana wait over after {now - _waitStart:0.#} s: {mana} of {max}, {floor} needed for {info.Name}{(floor < need ? $" (its try floor; up to {need})" : string.Empty)}"));
+            }
+
+            _waitStart = double.NaN;
+            if (_awayFromMagic)
+            {
+                return BeginMode(CombatMode.Magic, Phase.ModeBack);
+            }
+
+            SendBuff(w, info, need, now, floor);
+            return false;
+        }
+
+        if (max < need)
+        {
+            return Fail(now, string.Create(CultureInfo.InvariantCulture, $"{info.Name} costs up to {need} mana and the maximum is {max} (current {mana})"));
+        }
+
+        if (_phase == Phase.ManaWait)
+        {
+            if (now - _waitStart > _options.ManaWaitSeconds)
+            {
+                return Fail(now, string.Create(CultureInfo.InvariantCulture, $"the mana wait ran out: {mana} of {max} after {_options.ManaWaitSeconds:0.#} s, {floor} needed for {info.Name} and the mana order had nothing to press or drink"));
+            }
+
+            if (now < _nextEvaluate)
+            {
+                return false;
+            }
+        }
+
+        if (_manaCasts >= ManaCastLimitPerLine)
+        {
+            return Fail(now, string.Create(CultureInfo.InvariantCulture, $"{ManaCastLimitPerLine} mana casts did not bring the mana to the {floor} {info.Name} needs ({mana} of {max})"));
+        }
+
+        uint skill;
+        if (_phase == Phase.ManaWait)
+        {
+            skill = _lifeSkill; // the wait allocates nothing: GearCasts.TryCurrentSkill builds lists while the registry holds enchantments (as Decide)
+        }
+        else if (GearCasts.TryCurrentSkill(_state.Self.Qualities, MageTemplate.LifeMagic, out skill, out var why))
+        {
+            _lifeSkill = skill;
+        }
+        else
+        {
+            return Fail(now, "the mana lines need Life Magic: " + why);
+        }
+
+        var q = _state.Self.Qualities;
+        q.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out var staminaMax);
+        var count = _danceOff ? 0 : FillDanceLevels(skill);
+        uint potion = 0;
+        var potionCount = 0;
+        var potions = !_potionsOff && VitalsMeansFind(out potion, out potionCount) ? potionCount : 0;
+        var input = new Vitals.ManaOrderInput
+        {
+            Mana = mana,
+            ManaMax = max,
+            Stamina = stamina,
+            StaminaMax = staminaMax,
+            ManaConversion = _manaConversion,
+            Need = new Vitals.ManaNeed(need, floor),
+            TriesSpent = _lineTriesSpent,
+            ManaPotions = potions,
+            Profile = Profile.TransfersAhead ? Vitals.ManaProfile.Fighter : Vitals.ManaProfile.Mage,
+            FighterGatePercent = Vitals.VitalsOptions.DefaultStaminaUntilPercent,
+            FighterTransfersLeft = FighterTransferCap - _fighterTransfers,
+        };
+        var decision = Vitals.ManaOrder.Decide(input, _danceLevels.AsSpan(0, count), _options.Mana);
+        if (Profile.TransfersAhead && potions == 0 && !_capNoted)
+        {
+            _capNoted = true;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fighter mana order: no Mana Potion to drink; Stamina to Mana (the dance) only at stamina {Vitals.VitalsOptions.DefaultStaminaUntilPercent}% or more and at most {FighterTransferCap} casts a pass (now stamina {stamina} of {staminaMax}, {_fighterTransfers} cast(s)); else the mana wait regenerates"));
+        }
+
+        switch (decision.Step)
+        {
+            case Vitals.ManaStep.Potion:
+                if (_phase == Phase.ManaWait)
+                {
+                    _waitStart = double.NaN;
+                }
+
+                _potionBefore = mana;
+                _manaKind = ManaKind.Potion;
+                _need = need;
+                _pending = _actions.Drink(potion, ActionSource.Automation);
+                _phase = Phase.ManaCasting;
+                Stage = StageManaCasting;
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: Mana Potion 0x{potion:X8} ({potionCount} held), mana {mana} of {max}, {floor} needed for {w.Line.Name} ({decision.Reason})"));
+                return false;
+            case Vitals.ManaStep.Dance:
+                if (_phase == Phase.ManaWait)
+                {
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana wait over after {now - _waitStart:0.#} s: {mana} of {max}, stamina {stamina}"));
+                    _waitStart = double.NaN;
+                }
+
+                if (_awayFromMagic)
+                {
+                    return BeginMode(CombatMode.Magic, Phase.ModeBack); // the next step decides again, in the magic mode
+                }
+
+                SendDance(_danceIndex[decision.DanceIndex], mana, max, floor, now);
+                return false;
+            default:
+                // A rest in peace for stamina, or the wait for mana regeneration: the bounded mana wait.
+                var forStamina = decision.Step == Vitals.ManaStep.RestStamina;
+                if (_phase != Phase.ManaWait)
+                {
+                    _phase = Phase.ManaWait;
+                    Stage = StageManaWait;
+                    _waitStart = now;
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana wait: {mana} of {max}, stamina {stamina} of {staminaMax}, {floor} needed for {info.Name}; {decision.Reason}{(forStamina ? $" (to stamina {decision.StaminaTarget}), NonCombat now" : $"; NonCombat after {NonCombatAfterSeconds:0.#} s of it")}; at most {_options.ManaWaitSeconds:0.#} s (ACE halves stamina and health regeneration in a combat mode, Creature_Vitals.cs GetStanceMod)"));
+                }
+
+                _nextEvaluate = now + ReevaluateSeconds;
+                if (!_awayFromMagic && (forStamina || now - _waitStart >= NonCombatAfterSeconds))
+                {
+                    return BeginMode(CombatMode.NonCombat, Phase.ModeAway);
+                }
+
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// M5 7 (the owner's D88 order, applied to the buff pass): before the pass's first buff, a mana under that buff's cost dances first (the existing dance, <see cref="SendDance"/>: Stamina to Mana Self pressed until it lands), and
+    /// <see cref="PassRevitalize"/> refills the stamina after. Live, a fresh login's first pass started with 15 mana and its first cast was refused for mana. One look a pass: at or over the cost, or when no dance can be pressed
+    /// (the order has no Dance for it, the pass dance is off, the maximum is under the cost), the pass goes on as before. Returns true when it handled the step (<paramref name="result"/> is the step's answer).
+    /// <para>
+    /// M5 7 P7c (D139 row a, <c>m5-start-pass-dance</c>): a start's pass (not a re-buff pass; a mage's profile with the mana order on) looks before every line, and its cost is the line's plus the reserve: the base mana of the
+    /// dearest Stamina to Mana Self level the pack pays for at the cast chance, the most one press can cost (ACE refuses a dearer roll, <c>Player_Magic.cs:566-585</c> @95ef426d). Round 13's start pass spent the mana to 42 and
+    /// the vitals keeper's first press after it, Meditative Trance at 42 of up to 70, was refused "not enough mana" (0x0401). With the reserve, the pass dances while a press is sure (the mana at or over the reserve), and a line is
+    /// cast only with the reserve still in hand after it, so the pass ends with the next press paid. Each look that finds the mana short logs one line (the dance, or why not).
+    /// </para>
+    /// </summary>
+    private bool PassDance(double now, SpellInfo info, uint mana, uint max, uint need, out bool result)
+    {
+        result = false;
+        var first = !_passLooked;
+        _passLooked = true;
+        var reserving = !_rebuff && !Profile.TransfersAhead && _options.Mana.On && _options.StartReserve;
+        if (_phase == Phase.ManaWait || (!reserving && mana >= need) || max < need || _danceOff || !GearCasts.TryCurrentSkill(_state.Self.Qualities, MageTemplate.LifeMagic, out var skill, out _))
+        {
+            _passDanceDue = false;
+            return false;
+        }
+
+        _lifeSkill = skill;
+        _state.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out var staminaMax);
+        var count = FillDanceLevels(skill);
+        if (count == 0)
+        {
+            _passDanceDue = false;
+            return false;
+        }
+
+        _passReserve = reserving ? _danceLevels[count - 1].BaseMana : 0; // lowest first: the last is the dearest press
+        var want = need + _passReserve;
+        if (mana >= want || max < want)
+        {
+            _passDanceDue = false;
+            return false;
+        }
+
+        var potions = !_potionsOff && VitalsMeansFind(out _, out var potionCount) ? potionCount : 0;
+        var input = new Vitals.ManaOrderInput
+        {
+            Mana = mana,
+            ManaMax = max,
+            Stamina = stamina,
+            StaminaMax = staminaMax,
+            ManaConversion = _manaConversion,
+            Need = new Vitals.ManaNeed(want, want),
+            TriesSpent = true,
+            ManaPotions = potions,
+            Profile = Profile.TransfersAhead ? Vitals.ManaProfile.Fighter : Vitals.ManaProfile.Mage,
+            FighterGatePercent = Vitals.VitalsOptions.DefaultStaminaUntilPercent,
+            FighterTransfersLeft = FighterTransferCap - _fighterTransfers,
+        };
+        var decision = Vitals.ManaOrder.Decide(input, _danceLevels.AsSpan(0, count), _options.Mana);
+        if (decision.Step != Vitals.ManaStep.Dance)
+        {
+            _passDanceDue = false;
+            if (_passReserve > 0)
+            {
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"reserve: mana {mana} of {max} is under {want} ({need} for {info.Name} and {_passReserve} kept for the next Stamina to Mana press), stamina {stamina} of {staminaMax}; no dance ({decision.Step}: {decision.Reason}): the line goes on with the mana it has"));
+            }
+
+            return false;
+        }
+
+        if (_awayFromMagic)
+        {
+            result = BeginMode(CombatMode.Magic, Phase.ModeBack); // the next step decides again, in the magic mode
+            return true;
+        }
+
+        if (first)
+        {
+            _passDancing = true;
+        }
+        else
+        {
+            _reserveDancing = true;
+            _reserveDances++;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"reserve: mana {mana} of {max} is under {want} ({need} for {info.Name} and {_passReserve} kept for the next Stamina to Mana press): the dance first, while a press is {(mana >= _passReserve ? "sure" : "a try")}"));
+        }
+
+        _passDanceMana = mana;
+        _passDanceFor = info.Name;
+        SendDance(_danceIndex[decision.DanceIndex], mana, max, need, now);
+        result = false;
+        return true;
+    }
+
+    /// <summary>
+    /// M5 7 (D88): after the pass's first dance landed, the mage's stamina under <see cref="Scenarios.FightOptions.DefaultStaminaFullPercent"/> is refilled with Revitalize Self, the highest payable level whose cost leaves the first buff's mana in hand, one cast
+    /// a look until the stamina is back or the mana cannot pay another. A fighter's profile never does (it spends the stamina). True when a cast was sent.
+    /// </summary>
+    private bool PassRevitalize(double now, SpellInfo info, uint mana, uint max, uint need)
+    {
+        _reviveDue = false;
+        var q = _state.Self.Qualities;
+        var keep = need + _passReserve; // P7c: a start's pass keeps the next press's mana too
+        if (Profile.TransfersAhead || _passRevives >= PassRevitalizeLimit || mana <= keep || !q.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out var staminaMax)
+            || !Vitals.ManaOrder.StaminaUnder(stamina, staminaMax, Scenarios.FightOptions.DefaultStaminaFullPercent) || !GearCasts.TryCurrentSkill(q, MageTemplate.LifeMagic, out var skill, out _))
+        {
+            return false;
+        }
+
+        _lifeSkill = skill;
+        EnsurePayable();
+        var index = PickMana(_boostLine, _boostInfos, _boostPayable, skill, mana - keep);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        _passRevive = true;
+        _passRevives++;
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: Revitalize after the {(_reserveDances > 0 ? "reserve" : "pre-pass")} dance: stamina {stamina} of {staminaMax} is under {Scenarios.FightOptions.DefaultStaminaFullPercent}%, mana {mana} of {max} keeps the {need} {info.Name} needs{(_passReserve > 0 ? $" and the {_passReserve} reserve" : string.Empty)}"));
+        SendMana(ManaKind.Boost, index, mana, max, need, now);
+        return true;
+    }
+
+    /// <summary>The Stamina to Mana Self levels of the profile's transfer line at the cast chance (from <paramref name="skill"/>), lowest first, into <c>_danceLevels</c> (their line index in <c>_danceIndex</c>); their count. No allocation.</summary>
+    private int FillDanceLevels(uint skill)
+    {
+        EnsurePayable();
+        var count = 0;
+        var floored = 0;
+        for (var i = 0; i < _transferInfos.Length; i++)
+        {
+            if (_transferInfos[i] is { } info && _transferRows[i] is { } row && GearCasts.Chance(skill, _transferLine.Spells[i].Power) >= _options.CastChance)
+            {
+                if (!_transferPayable[i])
+                {
+                    floored++; // M5 4 G1: a level whose foci-formula scarab the pack lacks is not pressed (ACE refuses it 0x0400)
+                    continue;
+                }
+
+                _danceIndex[count] = i;
+                _danceLevels[count++] = new Vitals.DanceLevel(info.Id, GearCasts.ManaCeiling(info, 0), info.Power, row);
+            }
+        }
+
+        if (count == 0 && floored > 0 && !_noPayableDanceNoted)
+        {
+            _noPayableDanceNoted = true;
+            _log.Info(LogCategory, _transferLine.Name + ": no level the pack can pay for (" + floored.ToString(CultureInfo.InvariantCulture) + " skipped by the level floor): no dance; the mana wait regenerates instead");
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// M5 4 G1: the level floor for the mana lines (the Stamina to Mana Self and Revitalize Self levels): which levels the pack pays for on the foci formula (<see cref="LevelFloor"/>), read afresh at every look but those of the mana wait
+    /// (the wait allocates nothing and nothing is cast during it); each level skipped is named once. Live, the dance at mana 1 of 415 fell to level V, whose Gold Scarab no stock line carries, and ACE refused it 0x0400.
+    /// </summary>
+    private void EnsurePayable()
+    {
+        if (_phase == Phase.ManaWait && _payableKnown)
+        {
+            return;
+        }
+
+        _payableKnown = true;
+        var held = LevelFloor.HeldFor(_state, _transferLine.School);
+        FillPayable(_transferLine, _transferInfos, _transferPayable, held);
+        FillPayable(_boostLine, _boostInfos, _boostPayable, _boostLine.School == _transferLine.School ? held : LevelFloor.HeldFor(_state, _boostLine.School));
+    }
+
+    private void FillPayable(ProfileLine line, SpellInfo?[] infos, bool[] payable, Dictionary<uint, int>? held)
+    {
+        for (var i = 0; i < infos.Length; i++)
+        {
+            payable[i] = true;
+            if (held is not null && infos[i] is { } info && LevelFloor.ShortOf(held, info, out var need))
+            {
+                payable[i] = false;
+                if (_floorLogged.Add(info.Id))
+                {
+                    _log.Warn(LogCategory, line.Name + ": " + LevelFloor.SkipText(line.Spells[i], need));
+                }
+            }
+        }
+    }
+
+    /// <summary>Sends the dance (D27): the transfer line's level <paramref name="index"/> pressed until it lands, at most <see cref="Vitals.ManaOrderOptions.DancePresses"/> presses, every press counted.</summary>
+    private void SendDance(int index, uint mana, uint max, uint need, double now)
+    {
+        var info = _transferInfos[index]!;
+        _manaKind = ManaKind.Transfer;
+        _dancing = true;
+        _dances++;
+        _need = need;
+        _castsSincePeak++;
+        _chatMark = _state.Chat.Total;
+        _manaCasts++;
+        _tried++;
+        if (Profile.TransfersAhead)
+        {
+            _fighterTransfers++;
+        }
+
+        _phase = Phase.ManaCasting;
+        Stage = StageManaCasting;
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the dance: {info.Name} ({info.Id}) pressed until it lands ({_danceRules.Name}), mana {mana} of {max}, {need} needed for {_order[_line].Line.Name}"));
+        _cast.Start(new CastRequest { Levels = _transferIds, Index = index, Rules = _danceRules, Purpose = "mana dance Stamina to Mana", Proof = _danceProof }, now);
     }
 
     /// <summary>
@@ -995,10 +1655,11 @@ public sealed class BuffCycle
 
         _lifeSkill = skill;
 
+        EnsurePayable();
         var reserve = 0u;
         for (var i = _transferInfos.Length - 1; i >= 0; i--)
         {
-            if (_transferInfos[i] is { } info && GearCasts.Chance(skill, _transferLine.Spells[i].Power) >= _options.CastChance)
+            if (_transferInfos[i] is { } info && GearCasts.Chance(skill, _transferLine.Spells[i].Power) >= _options.CastChance && _transferPayable[i])
             {
                 reserve = GearCasts.ManaCeiling(info, 0);
                 break;
@@ -1041,8 +1702,9 @@ public sealed class BuffCycle
         }
 
         q.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out var staminaMax);
-        var transfer = PickMana(_transferLine, _transferInfos, skill, mana);
-        var boost = PickMana(_boostLine, _boostInfos, skill, mana);
+        EnsurePayable();
+        var transfer = PickMana(_transferLine, _transferInfos, _transferPayable, skill, mana);
+        var boost = PickMana(_boostLine, _boostInfos, _boostPayable, skill, mana);
         if (Profile.TransfersAhead)
         {
             // M4 P5a C7: the fighter's order. Revitalize is never cast for the sake of mana (it costs mana itself); Stamina to Mana only at a high stamina and within the cap, else the mana wait regenerates.
@@ -1089,12 +1751,12 @@ public sealed class BuffCycle
         return ManaAction.Wait;
     }
 
-    /// <summary>The highest level of a mana line whose chance reaches the threshold and whose cost is at most <paramref name="mana"/>, or -1.</summary>
-    private int PickMana(ProfileLine line, SpellInfo?[] infos, uint skill, uint mana)
+    /// <summary>The highest level of a mana line whose chance reaches the threshold, that the pack can pay for (the level floor) and whose cost is at most <paramref name="mana"/>, or -1.</summary>
+    private int PickMana(ProfileLine line, SpellInfo?[] infos, bool[] payable, uint skill, uint mana)
     {
         for (var i = line.Spells.Count - 1; i >= 0; i--)
         {
-            if (infos[i] is { } info && GearCasts.Chance(skill, line.Spells[i].Power) >= _options.CastChance && GearCasts.ManaCeiling(info, 0) <= mana)
+            if (infos[i] is { } info && payable[i] && GearCasts.Chance(skill, line.Spells[i].Power) >= _options.CastChance && GearCasts.ManaCeiling(info, 0) <= mana)
             {
                 return i;
             }
@@ -1117,7 +1779,7 @@ public sealed class BuffCycle
         return _fighterTransfers < FighterTransferCap && _state.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out var staminaMax) && staminaMax != 0 && 100.0 * stamina / staminaMax >= Vitals.VitalsOptions.DefaultStaminaUntilPercent;
     }
 
-    private void SendMana(ManaKind kind, int index, uint mana, uint max, uint need)
+    private void SendMana(ManaKind kind, int index, uint mana, uint max, uint need, double now)
     {
         var line = kind == ManaKind.Transfer ? _transferLine : _boostLine;
         var info = (kind == ManaKind.Transfer ? _transferInfos : _boostInfos)[index]!;
@@ -1135,39 +1797,116 @@ public sealed class BuffCycle
             }
         }
 
-        _pending = _actions.Cast(info.Id);
         _phase = Phase.ManaCasting;
         Stage = StageManaCasting;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: {info.Name} ({line.Spells[index].Id}), mana {mana} of {max}, {need} needed for {_order[_line].Line.Name}"));
+        // M5 1 K3: through the cast policy as Automation (D13). Utility(TransferTries) is today's rule: the n-th fizzle in a row fails the pass; the streak the loop kept across looks goes in FizzlesSpent.
+        _cast.Start(
+            new CastRequest { Levels = kind == ManaKind.Transfer ? _transferIds : _boostIds, Index = index, Rules = _manaRules, Purpose = kind == ManaKind.Transfer ? "mana Stamina to Mana" : "mana Revitalize", FizzlesSpent = kind == ManaKind.Transfer ? _transferStreak : _boostStreak },
+            now);
     }
 
     /// <summary>The outcome of a mana cast: a fire (UseDone without a fizzle) or a fizzle counts; anything else fails the cycle.</summary>
     private bool ManaOutcome(double now)
     {
+        var kind = _manaKind;
+        if (kind != ManaKind.Potion)
+        {
+            return ManaCastOutcome(now, kind);
+        }
+
         if (_pending?.Outcome is not { } outcome)
         {
             return false;
         }
 
         _pending = null;
-        var kind = _manaKind;
         if (_state.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var mana, out _))
         {
             NoteMana(mana);
         }
 
-        if (kind == ManaKind.Potion)
+        if (outcome.Succeeded)
         {
-            if (outcome.Succeeded)
+            _manaPotions++;
+            _potionWaiting = true;
+            _potionWaitUntil = now + PotionVitalWaitSeconds;
+        }
+        else
+        {
+            _potionsOff = true;
+            _log.Warn(LogCategory, $"mana potion: the Mana Potion was not carried out ({outcome.Kind} 0x{outcome.Code:X4}: {outcome.Detail}); no more Mana Potions this pass");
+        }
+
+        _phase = Phase.Mana;
+        Stage = StageMana;
+        return true;
+    }
+
+    /// <summary>
+    /// The end of a Stamina to Mana or Revitalize attempt (M5 1 K3): a landed or sent cast counts (a fire), the fizzles add to the streak the loop keeps across looks (the n-th in a row fails the pass, <see cref="BuffOptions.TransferTries"/>),
+    /// a retry the mana cannot pay goes back to the mana step with the streak, and any other end fails the cycle.
+    /// </summary>
+    private bool ManaCastOutcome(double now, ManaKind kind)
+    {
+        if (_cast.Step(now) == CastEnd.Running)
+        {
+            return false;
+        }
+
+        var report = _cast.Report;
+        _tally.Add(report);
+        _fizzles += report.Fizzles;
+        var extra = report.Tries - 1; // SendMana counted the first try; the attempt's retries (and a try never sent) correct it
+        _manaCasts += _dancing ? 0 : extra; // a dance is one mana cast against ManaCastLimitPerLine; its presses are counted in mana_presses=
+        _castsSincePeak += extra;
+        if (kind == ManaKind.Transfer && !_dancing) // a dance is one transfer tried (transfers=f/t) and one against the fighters' cap, whatever its presses (mana_presses=)
+        {
+            _tried += extra;
+            if (Profile.TransfersAhead) // a dance is one transfer against the fighters' cap, whatever its presses
             {
-                _manaPotions++;
-                _potionWaiting = true;
-                _potionWaitUntil = now + PotionVitalWaitSeconds;
+                _fighterTransfers += extra;
+            }
+        }
+
+        _chatMark = _cast.ChatMark;
+        if (_state.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var mana, out _))
+        {
+            NoteMana(mana);
+        }
+
+        var name = kind == ManaKind.Transfer ? "Stamina to Mana" : "Revitalize";
+        if (_dancing)
+        {
+            // M5 1 K5 (D27): the dance's end; every press counted. Presses spent with none landed go back to the mana step (ManaCastLimitPerLine bounds it, each press counted there too).
+            _dancing = false;
+            _dancePresses += report.Tries;
+            if (_passDancing || _reserveDancing)
+            {
+                // M5 7 (c): one line for the dance before a buff pass: the mana before and after, the presses, the spell it was for. P7c: a start pass's later line names it the reserve dance.
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{(_passDancing ? "pre-pass" : "reserve")} dance: mana {_passDanceMana} -> {mana}, {report.Tries} press(es) ({report.ManaRefusals} refused, {report.Fizzles} fizzled), {(report.End.Succeeded() ? "landed" : report.End.Name())}, for {_passDanceFor}"));
+                _passDancing = false;
+                _reserveDancing = false;
+                _passDanceDue = false;
+                _reviveDue = report.End.Succeeded();
+            }
+
+            if (report.End.Succeeded())
+            {
+                _fired++;
+                _dancesLanded++;
+                _transferStreak = 0;
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the dance landed on press {report.Tries} ({report.ManaRefusals} refused, {report.Fizzles} fizzled); mana {mana} now"));
+            }
+            else if (report.End is CastEnd.ManaShort or CastEnd.TimeCap)
+            {
+                // Every press refused or fizzled: the server's costs are not the model's (the try chance promised a landing). Named, and no more dances this pass: the mana wait instead.
+                _danceOff = true;
+                _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the dance did not land in {report.Tries} presses ({report.ManaRefusals} refused, {report.Fizzles} fizzled); no more dances this pass, the mana wait instead"));
             }
             else
             {
-                _potionsOff = true;
-                _log.Warn(LogCategory, $"mana potion: the Mana Potion was not carried out ({outcome.Kind} 0x{outcome.Code:X4}: {outcome.Detail}); no more Mana Potions this pass");
+                return Fail(now, "the mana loop: the dance ended: " + ExplainEnd(report));
             }
 
             _phase = Phase.Mana;
@@ -1175,7 +1914,7 @@ public sealed class BuffCycle
             return true;
         }
 
-        if (outcome.Succeeded)
+        if (report.End.Succeeded())
         {
             if (kind == ManaKind.Transfer)
             {
@@ -1186,33 +1925,40 @@ public sealed class BuffCycle
             {
                 _revitalizes++;
                 _boostStreak = 0;
+                _reviveDue = _passRevive; // M5 7: the pass's refill goes on until the stamina is back or the mana cannot pay another
             }
-        }
-        else if (outcome.Kind == ActionOutcomeKind.ServerError && outcome.Code == GearCasts.FizzleCode)
-        {
-            _fizzles++;
-            var streak = kind == ManaKind.Transfer ? ++_transferStreak : ++_boostStreak;
-            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: {(kind == ManaKind.Transfer ? "Stamina to Mana" : "Revitalize")} fizzled (try {streak} of {_options.TransferTries}; it costs 5 mana, Player_Magic.cs 566-572)"));
-            if (streak >= _options.TransferTries)
-            {
-                return Fail(now, string.Create(CultureInfo.InvariantCulture, $"the mana loop: {streak} {(kind == ManaKind.Transfer ? "Stamina to Mana" : "Revitalize")} casts in a row fizzled (--buff-transfer-tries {_options.TransferTries})"));
-            }
-        }
-        else
-        {
-            return Fail(now, "the mana loop: a " + (kind == ManaKind.Transfer ? "Stamina to Mana" : "Revitalize") + " cast ended: " + GearCasts.Explain(outcome, _state, _chatMark, _need));
+
+            _phase = Phase.Mana;
+            Stage = StageMana;
+            return true;
         }
 
-        _phase = Phase.Mana;
-        Stage = StageMana;
-        return true;
+        if (report.Fizzles > 0 && (report.End == CastEnd.Fizzled || (report.End == CastEnd.ManaShort && report.Code == CastAttempt.FizzleCode)))
+        {
+            var streak = kind == ManaKind.Transfer ? _transferStreak += report.Fizzles : _boostStreak += report.Fizzles;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: {name} fizzled (try {streak} of {_options.TransferTries}; it costs 5 mana, Player_Magic.cs 566-572)"));
+            if (streak >= _options.TransferTries)
+            {
+                return Fail(now, string.Create(CultureInfo.InvariantCulture, $"the mana loop: {streak} {name} casts in a row fizzled (--buff-transfer-tries {_options.TransferTries})"));
+            }
+
+            _phase = Phase.Mana;
+            Stage = StageMana;
+            return true;
+        }
+
+        return Fail(now, "the mana loop: a " + name + " cast ended: " + ExplainEnd(report));
     }
+
+    /// <summary>The words for an attempt that did not carry the cast out: the Action API's own outcome when a try was sent, else the attempt's reason (the kill switch).</summary>
+    private string ExplainEnd(in CastReport report) =>
+        _cast.LastOutcome is { } outcome ? GearCasts.Explain(outcome, _state, _chatMark, _need) : report.End + ": " + report.Why;
 
     // ------------------------------------------------------------------------------------------------ the combat mode
 
     private bool BeginMode(CombatMode mode, Phase phase)
     {
-        _pending = _actions.SetCombatMode(mode, ActionSource.Host);
+        _pending = _actions.SetCombatMode(mode, ActionSource.Automation);
         _phase = phase;
         Stage = StageMode;
         _log.Info(LogCategory, $"combat mode to {mode} (awaited)");
@@ -1255,12 +2001,11 @@ public sealed class BuffCycle
 
     // ------------------------------------------------------------------------------------------------ the buff casts
 
-    private void SendBuff(WantedLine w, SpellInfo info, uint need)
+    private void SendBuff(WantedLine w, SpellInfo info, uint need, double now, uint tryFloor = 0)
     {
         _need = need;
         _chatMark = _state.Chat.Total;
         var atCaster = w.Armour && GearCasts.FormOf(info) == CastForm.AtItem;
-        _pending = atCaster ? _actions.Cast(info.Id, _state.Self.Guid) : _actions.Cast(info.Id);
         _phase = Phase.Casting;
         Stage = StageCasting;
         var q = _state.Self.Qualities;
@@ -1269,69 +2014,119 @@ public sealed class BuffCycle
             LogCategory,
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"cast {info.Name} ({info.Id}) {(atCaster ? "at the caster (every worn piece, D23)" : "on the caster")}: {w.Line.School} skill {skill}, chance {GearCasts.Chance(skill, info.Power):0.0000}, up to {need} mana"));
+                $"cast {info.Name} ({info.Id}) {(atCaster ? "at the caster (every worn piece, D23)" : "on the caster")}: {w.Line.School} skill {skill}, chance {GearCasts.Chance(skill, info.Power):0.0000}, up to {need} mana{(tryFloor > 0 ? $" (from the try floor {tryFloor}: the Mana Conversion tries, D15)" : string.Empty)}"));
+        // M5 1 K3: through the cast policy as Automation (D13). A buff line is BuffLineD14 (the owner's fizzle rule, D14: the same level twice more, then one level down once, then a named miss; the mana checked again before each retry); the upgrade pass is Once (cast once, never retried).
+        _cast.Start(
+            new CastRequest
+            {
+                Levels = w.Ids,
+                Index = _castIndex,
+                Target = atCaster ? _state.Self.Guid : 0,
+                Rules = _upgrading ? _upgradeTriesRules : _lineTriesRules, // M5 1 K5: with the tries (D15) unless --cast-mana-tries 0, where these are Once and BuffLineD14 exactly
+                Purpose = w.Purpose,
+                WornItems = _state.Self.Inventory.Equipped.Count,
+                FizzlesSpent = _spentFizzles,
+                LevelsDownSpent = _spentDown,
+                ManaTryFloor = tryFloor,
+                ManaConversion = _options.Mana.On ? _manaConversion : null, // M5 7: a Mana Conversion try only where the model says it can raise the mana to the cost
+                ManaTryChance = _options.Mana.TryChance,
+                Usable = _floorOn ? _payable : null, // M5 3 w1: D14's level down never steps onto a level the pack cannot pay for
+            },
+            now);
     }
 
     private bool CastOutcome(double now)
     {
-        if (_pending?.Outcome is not { } outcome)
+        if (_cast.Step(now) == CastEnd.Running)
         {
             return false;
         }
 
-        var handle = _pending;
-        _pending = null;
+        var report = _cast.Report;
+        _tally.Add(report);
+        _fizzles += report.Fizzles;
+        _chatMark = _cast.ChatMark;
         var w = _order[_line];
-        var info = w.Infos[_castIndex]!;
         if (_state.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var mana, out _))
         {
             NoteMana(mana);
         }
 
-        if (outcome.Kind == ActionOutcomeKind.ServerError && outcome.Code == GearCasts.FizzleCode)
+        if (report.End == CastEnd.ManaShort && report.Code == CastAttempt.FizzleCode)
         {
-            _fizzles++;
-            if (_lineFizzles == 0 && _castIndex > 0 && !_upgrading)
-            {
-                _lineFizzles = 1;
-                var lower = w.Infos[_castIndex - 1];
-                _log.Info(LogCategory, $"{info.Name} fizzled; one retry, one level down ({lower?.Name ?? "(no spell)"})");
-                _castIndex--;
-                if (lower is null)
-                {
-                    Miss(w, "fizzled", w.Line.Name + ": " + info.Name + " fizzled and the level below is not in the SpellTable");
-                    return NextLine();
-                }
+            // The retry after a fizzle needs more mana than is held: nothing was sent; back to the mana step for the level the attempt would have retried, its spent bounds kept.
+            _castIndex = report.NextLevelIndex;
+            _spentFizzles = report.FizzleRetriesSpent;
+            _spentDown = report.LevelsDownSpent;
+            _log.Info(LogCategory, $"{w.Infos[report.LevelIndex]!.Name} fizzled; the retry ({w.Infos[_castIndex]?.Name ?? "(no spell)"}) needs more mana: the mana step first");
+            _phase = Phase.Mana;
+            Stage = StageMana;
+            return true;
+        }
 
-                _phase = Phase.Mana;
-                Stage = StageMana;
-                return true;
+        if (report.End == CastEnd.ManaShort && report.Tries == 0 && report.Code == 0 && _options.Mana.On)
+        {
+            // M5 7: the model gate sent nothing (it cannot raise the mana to the cost): no blind tries; the mana step funds the ceiling (dance, potion or rest), the spent bounds kept.
+            _castIndex = report.LevelIndex;
+            _spentFizzles = report.FizzleRetriesSpent;
+            _spentDown = report.LevelsDownSpent;
+            _lineTriesSpent = true;
+            _log.Info(LogCategory, $"{w.Infos[_castIndex]?.Name ?? w.Line.Name}: {report.Why}; the mana step funds its ceiling");
+            _phase = Phase.Mana;
+            Stage = StageMana;
+            return true;
+        }
+
+        if (report.End == CastEnd.ManaShort && report.ManaRefusals > 0 && _options.Mana.On)
+        {
+            // M5 1 K5 (D15): a 0x0401 inside the tries is expected, never a failure; the tries spent, the mana step funds the ceiling (the order's step 3), the spent bounds kept.
+            _castIndex = report.LevelIndex;
+            _spentFizzles = report.FizzleRetriesSpent;
+            _spentDown = report.LevelsDownSpent;
+            if (_lineTriesSpent && ++_ceilingAttempts >= CeilingAttemptsPerLine)
+            {
+                // M5 3 m4 (m5-buffcycle-ceiling-refusal, 1-R14): the tries were spent before and this attempt was sent at the ceiling (the floor is the need once they are spent); the server still refused it, so the mana the read model shows is not the server's.
+                return Fail(now, string.Create(CultureInfo.InvariantCulture, $"{w.Infos[_castIndex]?.Name ?? w.Line.Name}: refused for mana (0x0401) again at its ceiling of {_need} with {mana} shown: the read model's mana is not the server's, so the line is not sent again (the {CeilingAttemptsPerLine} attempt at the ceiling after the tries was refused)"));
             }
 
+            _lineTriesSpent = true;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{w.Infos[_castIndex]?.Name ?? w.Line.Name}: {report.ManaRefusals} Mana Conversion tries refused (0x0401, nothing charged); the mana step funds its ceiling"));
+            _phase = Phase.Mana;
+            Stage = StageMana;
+            return true;
+        }
+
+        _castIndex = report.LevelIndex;
+        var info = w.Infos[_castIndex]!;
+        if (report.End == CastEnd.Fizzled)
+        {
             if (_upgrading)
             {
                 Miss(w, "upgrade-fizzled", w.Line.Name + ": the upgrade to " + info.Name + " fizzled; the line stays at the level it held (an upgrade is cast once, no retry)");
                 return NextLine();
             }
 
-            Miss(w, "fizzled", w.Line.Name + ": " + (_lineFizzles == 0 ? info.Name + " fizzled and there is no level below" : "fizzled twice, the second time at " + info.Name) + " (no third try)");
+            Miss(w, "fizzled", w.Line.Name + ": " + FizzledText(report, info));
             return NextLine();
         }
 
-        if (outcome.Kind is ActionOutcomeKind.TimedOut or ActionOutcomeKind.Refused or ActionOutcomeKind.Cancelled or ActionOutcomeKind.DryRun or ActionOutcomeKind.NotImplemented)
+        if (report.End is CastEnd.Refused or CastEnd.Cancelled or CastEnd.DryRun or CastEnd.NotImplemented or CastEnd.Timeout or CastEnd.TimeCap)
         {
-            return Fail(now, w.Line.Name + ": the cast was not carried out: " + GearCasts.Explain(outcome, _state, _chatMark, _need));
+            return Fail(now, w.Line.Name + ": the cast was not carried out: " + ExplainEnd(report));
         }
 
-        if (outcome.Kind == ActionOutcomeKind.ServerError)
+        if (!report.End.Succeeded())
         {
-            Miss(w, "error-0x" + outcome.Code.ToString("X4", CultureInfo.InvariantCulture), w.Line.Name + ": " + GearCasts.Explain(outcome, _state, _chatMark, _need));
+            // Any other answer (a refusal for mana the read model did not know of, busy, a missing component, out of range): a named miss, never retried.
+            var code = _cast.LastOutcome?.Code ?? 0;
+            Miss(w, "error-0x" + code.ToString("X4", CultureInfo.InvariantCulture), w.Line.Name + ": " + ExplainEnd(report));
             return NextLine();
         }
 
+        var outcome = _cast.LastOutcome!.Value;
         if (w.Armour)
         {
-            ArmourLanded(w, info, handle?.CompletedAt ?? now, now);
+            ArmourLanded(w, info, _cast.Handle?.CompletedAt ?? now, now);
             return NextLine();
         }
 
@@ -1343,6 +2138,24 @@ public sealed class BuffCycle
 
         Landed(w, info);
         return NextLine();
+    }
+
+    /// <summary>The miss text of a buff line that fizzled out of its retries (D14: the same level twice more, one level down once, no further try).</summary>
+    private static string FizzledText(in CastReport report, SpellInfo info)
+    {
+        if (report.LevelsDownSpent > 0)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"fizzled {report.Fizzles} times ({report.FizzleRetriesSpent} more tries at the same level, then one level down), the last at {info.Name} (no further try)");
+        }
+
+        if (report.Why is { } usable && usable.Contains("no usable level below", StringComparison.Ordinal))
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"{info.Name} fizzled {report.Fizzles} times and no level below is one the pack can pay for (its foci components, M5 3 w1; no further try)");
+        }
+
+        return report.Why is { } why && why.Contains("not in the SpellTable", StringComparison.Ordinal)
+            ? string.Create(CultureInfo.InvariantCulture, $"{info.Name} fizzled {report.Fizzles} times and the level below is not in the SpellTable")
+            : string.Create(CultureInfo.InvariantCulture, $"{info.Name} fizzled {report.Fizzles} times and there is no level below (no further try)");
     }
 
     private void Landed(WantedLine w, SpellInfo info)
@@ -1546,7 +2359,7 @@ public sealed class BuffCycle
         _phase = Phase.Idle;
         Status = BuffStatus.Done;
         Result = Build(now, null);
-        _log.Info(LogCategory, "pass done: " + Result.Fields);
+        _log.Info(LogCategory, "pass done: " + Result.Fields + " " + Result.CastFields);
         return false;
     }
 
@@ -1557,7 +2370,7 @@ public sealed class BuffCycle
         Status = BuffStatus.Failed;
         _pending = null;
         Result = Build(now, why);
-        _log.Warn(LogCategory, "FAILED: " + why + "; " + Result.Fields);
+        _log.Warn(LogCategory, "FAILED: " + why + "; " + Result.Fields + " " + Result.CastFields);
         return false;
     }
 
@@ -1567,8 +2380,15 @@ public sealed class BuffCycle
         var levels = new StringBuilder();
         var active = 0;
         var min = double.PositiveInfinity;
+        var wanted = 0;
         foreach (var w in _order)
         {
+            if (!Wants(w))
+            {
+                continue; // M5 7 P7j: a line learned by play is in the result once the spellbook holds it
+            }
+
+            wanted++;
             var on = ActiveState(w, now, out var index, out var remaining);
             if (levels.Length > 0)
             {
@@ -1585,7 +2405,7 @@ public sealed class BuffCycle
 
         var result = new BuffResult
         {
-            Wanted = _order.Length,
+            Wanted = wanted,
             Active = active,
             Levels = levels.ToString(),
             RecastWhileActive = _passRecast,
@@ -1607,6 +2427,15 @@ public sealed class BuffCycle
             CycleSeconds = now - _passStart,
             ModeChanges = _modeChanges,
             Failure = failure,
+            ManaTries = _tally.ManaTries,
+            ManaRefusals = _tally.ManaRefusals,
+            ManaLanded = _tally.ManaLanded,
+            Busy = _tally.Busy,
+            Resists = _tally.Resists,
+            Proved = _tally.Proved,
+            Dances = _dances,
+            DancesLanded = _dancesLanded,
+            DancePresses = _dancePresses,
         };
         return result with { Fields = BuffResult.FormatFields(result) };
     }
@@ -1624,6 +2453,17 @@ public sealed class BuffCycle
         {
             _manaMin = mana;
         }
+    }
+
+    private static uint[] IdsOf(ProfileLine line)
+    {
+        var ids = new uint[line.Spells.Count];
+        for (var i = 0; i < ids.Length; i++)
+        {
+            ids[i] = line.Spells[i].Id;
+        }
+
+        return ids;
     }
 
     private static SpellInfo?[] InfosOf(ProfileLine line, IReadOnlyDictionary<uint, SpellInfo> spells)

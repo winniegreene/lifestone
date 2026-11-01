@@ -2,10 +2,12 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Client.Session.Vitals;
+using Lifestone.Client.Tests.Session.Journey;
 using Lifestone.Data.Magic;
 using Lifestone.Net.Messages;
 using Lifestone.Tests.Shared;
@@ -212,7 +214,7 @@ public sealed class J2aHuntSeamTests
     }
 
     [Fact]
-    public void The_vendor_stage_alone_walks_from_the_lifestone_to_Renald_in_his_front_room_as_an_object_goal_and_attacks_nothing_J2a()
+    public void The_vendor_stage_alone_walks_from_the_lifestone_to_Renalds_stand_in_his_front_room_as_a_point_goal_and_attacks_nothing_J2a()
     {
         var travel = new J2aRecordingTravel();
         using var rig = J2aRig(Base with { Stages = HuntStages.Vendor, Sell = true }, travel);
@@ -224,13 +226,57 @@ public sealed class J2aHuntSeamTests
         var shop = Assert.Single(travel.Requests);
         Assert.Equal(TravelPurpose.Vendor, shop.Purpose);
         Assert.Equal(HuntScenario.RenaldFrontRoomCell, shop.Destination.Location.Position.CellId); // never 0xA9B40141 behind the counter
-        Assert.Equal(HuntScriptRig.RenaldGuid, shop.ObjectGuid);
-        Assert.Equal(6.5, shop.Range);
+        // M5 7 P7p: the same stand point as the vendor-facts station's and the resupply station's walk, from the one source (the den profile's stop_point): a point goal, no object, no range.
+        Assert.Equal(ShopLeg.RenaldStand.Cell, shop.Destination.Location.Position.CellId);
+        Assert.Equal(ShopLeg.RenaldStand.Point, shop.Destination.Location.Position.Local);
+        Assert.Equal(GroundCatalog.Get(FightOptions.DefaultGround).VendorOf(HuntScenario.RenaldWcid)!.StopPoint, shop.Destination.Location.Position.Local);
+        Assert.Equal(0u, shop.ObjectGuid);
+        Assert.Equal(0.0, shop.Range);
         Assert.Equal(0, rig.J2aPlaces());
         Assert.Equal(0, rig.Scenario.Tally.Kills);
         Assert.DoesNotContain(rig.Sends, s => s.Type == GameActionTypes.TargetedMeleeAttack);
         Assert.True(rig.Scenario.Sold >= 1, rig.Scenario.SellOutcome + rig.Tail());
         Assert.EndsWith(" returned=n/a", rig.Scenario.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_refused_open_of_Renald_after_ACEs_MoveTo_ended_stuck_walks_to_his_stand_again_opens_once_more_and_sells_M5_7_P7p()
+    {
+        var travel = new J2aRecordingTravel();
+        using var rig = J2aRig(Base with { Stages = HuntStages.Vendor, Sell = true }, travel);
+        rig.Shops = true;
+        var body = new StuckMoveBody();
+        rig.Session.Actions.Move.Bind(body, runByDefault: false);
+        rig.StuckOpens = 1;
+        rig.OnStuckOpen = () => body.Stuck++;
+
+        var status = rig.Run(900);
+
+        // D141: the first open is refused after the stuck MoveTo; the named recovery walks to the stand once more and the second open sells.
+        Assert.True(status == ScenarioStatus.Succeeded, rig.Scenario.Failure + rig.Tail());
+        Assert.Equal(2, travel.Requests.Count);
+        Assert.All(travel.Requests, r => Assert.Equal(ShopLeg.RenaldStand.Point, r.Destination.Location.Position.Local));
+        Assert.True(rig.Scenario.Sold >= 1, rig.Scenario.SellOutcome + rig.Tail());
+        Assert.Contains(rig.Log.Lines, l => l.Contains("recovery: walking to his stand and opening once more", StringComparison.Ordinal));
+        Assert.Contains(rig.Log.Lines, l => l.Contains("vendors: on foot to Renald the Elder (the recovery after a refused open)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_second_refused_open_after_the_recovery_fails_the_vendor_stage_named_M5_7_P7p()
+    {
+        var travel = new J2aRecordingTravel();
+        using var rig = J2aRig(Base with { Stages = HuntStages.Vendor, Sell = true }, travel);
+        rig.Shops = true;
+        var body = new StuckMoveBody();
+        rig.Session.Actions.Move.Bind(body, runByDefault: false);
+        rig.StuckOpens = 2;
+        rig.OnStuckOpen = () => body.Stuck++;
+
+        rig.Run(900);
+
+        Assert.Equal(2, travel.Requests.Count); // the recovery runs once, never a third walk
+        Assert.StartsWith("failed:", rig.Scenario.SellOutcome, StringComparison.Ordinal);
+        Assert.Contains("vendor did not open", rig.Scenario.SellOutcome, StringComparison.Ordinal);
     }
 
     [Fact]

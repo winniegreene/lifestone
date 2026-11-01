@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Contracts;
@@ -6,7 +8,10 @@ using Lifestone.Client.Session.Credentials;
 using Lifestone.Client.Session.Hosting;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.Dat;
+using Lifestone.Data.Terrain;
 using Lifestone.Data.Tests;
+using Lifestone.Data.World;
+using Lifestone.Data.World.Cells;
 using Lifestone.Net.Messages;
 using Lifestone.Tests.Shared;
 using Xunit.Abstractions;
@@ -68,19 +73,57 @@ public sealed class WayfindScenarioTests(DatSetFixture fixture, ITestOutputHelpe
     }
 
     [RequiresDatsFact]
-    public void An_indoor_end_is_refused_before_anything_moves()
+    public void An_indoor_end_is_planned_through_the_room_graph_and_arrived_in_its_room_and_the_back_leg_leaves_by_the_door_M5_2_k1()
     {
-        // The scripted player begins in the Academy: an indoor --to is refused at the first step, with no place sent.
-        var indoor = WayfindOptions.FromArguments(CommandLineArgument.ParseAll(["--to=0xA9B4013F@10,10,94"]));
-        Assert.Empty(indoor.Errors);
-        using var run = new Run(Dats, indoor, configure: s => s.AcceptsMovement = true);
+        // M5 item 2 k1 (closes TODO(wayfind-indoor)): Holtburg's lifestone (0xA9B40019) to Renald's front room 0xA9B4013F, the shop goal (docs/wayfinding.md: 57 m, 0 rungs), and back out to the lifestone.
+        // The goal's position is the room graph's own room frame (the dat tests' rule: the scenario does not guess a room's floor, TODO(wayfind-indoor-default)).
+        const uint FrontRoom = 0xA9B4013F;
+        var floor = new RoomGraph(LandblockCellSet.Load(new CellStructureLibrary(Dats), LandblockCoord.Holtburg)).RoomFrame(FrontRoom)!.Value.Origin;
+        var to = string.Create(CultureInfo.InvariantCulture, $"--to=0x{FrontRoom:X8}@{floor.X:0.###},{floor.Y:0.###},{floor.Z:0.###}");
+        var options = WayfindOptions.FromArguments(CommandLineArgument.ParseAll(["--from=0xA9B40019@84,7.7,94", to, "--wayfind-back"]));
+        Assert.Empty(options.Errors);
+        Assert.False(LandDefs.IsOutdoorCell(options.To!.Value.CellId));
+        using var run = new Run(Dats, options, configure: s => s.AcceptsMovement = true);
         var result = run.Finish();
-        output.WriteLine($"{result.SummaryLine("memory")}: {result.Failure}");
+        var scenario = (WayfindScenario)run.Runner.Scenario;
+        output.WriteLine($"{result.SummaryLine("memory")} ({run.Frames} frames, {run.WallSeconds:F1} s wall)");
+        foreach (var line in scenario.Lines)
+        {
+            output.WriteLine(line);
+        }
 
-        Assert.False(result.Ok);
-        Assert.Contains("TODO(wayfind-indoor)", result.Failure, StringComparison.Ordinal);
-        Assert.DoesNotContain(run.Server.Talked, t => t.StartsWith("@lifestone place", StringComparison.Ordinal));
-        Assert.Empty(((WayfindScenario)run.Runner.Scenario).Lines);
+        Assert.True(result.Ok, result.Failure);
+        Assert.Equal(2, scenario.Lines.Count);
+        Assert.Matches(Leg, scenario.Lines[0]); // arrived, no rung of the stuck ladder, no correction from the server
+        Assert.Matches(Leg, scenario.Lines[1]);
+        Assert.Equal("wayfind done ok=true legs=2", scenario.DoneLine(result.Ok));
+        Assert.Equal(1, run.Server.Talked.Count(t => t.StartsWith("@lifestone place loc ", StringComparison.Ordinal))); // the one place at --from, none for the indoor end
+        Assert.InRange(result.WhereMaxMetres!.Value, 0.0, 0.5);
+        Assert.Equal(0, run.Server.IgnoredWhileTeleporting);
+        Assert.True(LandDefs.IsOutdoorCell(run.Server.PlayerAt.Cell), $"the back leg ended in 0x{run.Server.PlayerAt.Cell:X8}, outdoors at the lifestone"); // out of the shop by its door
+    }
+
+    [RequiresDatsFact]
+    public void An_indoor_end_in_the_front_room_ends_the_out_leg_in_that_room()
+    {
+        const uint FrontRoom = 0xA9B4013F;
+        var floor = new RoomGraph(LandblockCellSet.Load(new CellStructureLibrary(Dats), LandblockCoord.Holtburg)).RoomFrame(FrontRoom)!.Value.Origin;
+        var to = string.Create(CultureInfo.InvariantCulture, $"--to=0x{FrontRoom:X8}@{floor.X:0.###},{floor.Y:0.###},{floor.Z:0.###}");
+        var options = WayfindOptions.FromArguments(CommandLineArgument.ParseAll(["--from=0xA9B40019@84,7.7,94", to]));
+        Assert.Empty(options.Errors);
+        using var run = new Run(Dats, options, configure: s => s.AcceptsMovement = true);
+        var result = run.Finish();
+        var scenario = (WayfindScenario)run.Runner.Scenario;
+        output.WriteLine($"{result.SummaryLine("memory")}: {string.Join(" | ", scenario.Lines)}");
+
+        Assert.True(result.Ok, result.Failure);
+        var line = Assert.Single(scenario.Lines);
+        Assert.Matches(Leg, line);
+        Assert.StartsWith("wayfind leg=out ", line, StringComparison.Ordinal);
+        Assert.IsType<SessionDoorFeed>(scenario.Runner!.Doors); // M5 5 d2: the leg's runner meets a door as the journey's does
+        Assert.Equal(FrontRoom, run.Server.PlayerAt.Cell); // the server has the body in the goal's room, not in the street outside its wall
+        Assert.InRange(MathF.Abs(run.Server.PlayerAt.Z - 94f), 0f, 0.5f); // on the shop's floor
+        Assert.Equal(0, run.Server.IgnoredWhileTeleporting);
     }
 
     /// <summary>A headless run of the wayfind scenario over the scripted server, stepped at 60 Hz on a manual clock; real time passes while the streamer's workers build.</summary>

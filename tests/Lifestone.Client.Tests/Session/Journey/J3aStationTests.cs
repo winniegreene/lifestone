@@ -22,14 +22,14 @@ public sealed partial class J3aStationTests
     [GeneratedRegex(@"^thelnoth=n/a appraised=0 failed=0 cooldowns=0 not_found=0 problems=1 granted=0$")]
     private static partial Regex VendorVerdictNobody();
 
-    [GeneratedRegex(@"^buy=no sellback=no refused=no sold=no problems=0 granted=0 vendor_frame_max_ms=n/a$")]
+    [GeneratedRegex(@"^buy=no sellback=no refused=no sold=no problems=0 granted=0 vendor_frame_max_ms=n/a door_opened=no$")]
     private static partial Regex VendorFactsVerdictStart();
 
     [GeneratedRegex(@"^added=0 listed=-1 used=none removed=-1 bar_empty=no problems=0 granted=0$")]
     private static partial Regex ShortcutsVerdictStart();
 
-    [GeneratedRegex(@"^outcome='none' code=0x0000 pack_before=\d+ pack_after=-1 held_before=\d+ held_after=-1 kit_uses=n/a problems=0$")]
-    private static partial Regex KitRefusedVerdictStart();
+    [GeneratedRegex(@"^outcome='none' code=0x0000 pack_before=\d+ pack_after=-1 held_before=\d+ held_after=-1 kit_uses=n/a problems=0 skipped=precondition:handy-healing-kit$")]
+    private static partial Regex KitRefusedVerdictSkipped();
 
     [GeneratedRegex(@"^chest_opened=(true|false) closed=(true|false) locked=(none|refused|unreached|not_refused) problems=\d+$")]
     private static partial Regex ChestsVerdictShape();
@@ -93,18 +93,19 @@ public sealed partial class J3aStationTests
     }
 
     [Fact]
-    public void The_kit_refused_station_asks_for_its_kit_with_the_item_verb_first_and_waits_for_the_server()
+    public void The_kit_refused_station_asks_for_no_kit_with_the_item_verb_and_with_none_held_ends_skipped_by_name_M5_3_c1()
     {
         var rig = new J3aStationRig();
         var run = (KitRefusedRun)rig.Start(new KitRefusedStation(), "BSD Mage");
 
         var status = rig.Run(run, 8);
 
-        Assert.True(status == ScenarioStatus.Running, string.Join(" ; ", run.Problems));
-        Assert.Equal(1, rig.ToolRequests("item"));
+        Assert.Equal(ScenarioStatus.Succeeded, status);
+        Assert.True(run.Ok, string.Join(" ; ", run.Problems));
+        Assert.Equal(0, rig.ToolRequests("item")); // play grants nothing (M5 DoD 6): the station uses a kit the pack holds
         Assert.Equal(0, rig.Places);
-        Assert.Matches(KitRefusedVerdictStart(), run.VerdictFields());
-        Assert.Equal(0, run.Granted); // the kit is the station's own test item, dropped again: not a grant the journey judges
+        Assert.Matches(KitRefusedVerdictSkipped(), run.VerdictFields());
+        Assert.Equal(0, run.Granted);
     }
 
     [Fact]
@@ -220,7 +221,7 @@ public sealed partial class J3aStationTests
         var rig = new J3aStationRig(vitals.R, vitals.Table);
         var run = (HarmHealRun)rig.Start(new HarmHealStation(), "Holtburg Brawler");
 
-        var status = rig.Run(run, 6, pump: vitals.Pump);
+        var status = rig.Run(run, 18, pump: vitals.Pump); // M5 7 P7p: the pre-check listens 3 s for attacks first
 
         Assert.True(status == ScenarioStatus.Running, string.Join(" ; ", run.Problems) + " | " + run.Failure + " | " + run.VerdictFields());
         Assert.NotNull(run.Harm);

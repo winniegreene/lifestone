@@ -177,11 +177,19 @@ try {
     }
 
     Write-Host '[play] starting the game'
+    $gameStartedAt = Get-Date # D126 (c): the run's own log files are the ones written from here on
     $exitCode = Invoke-PlayChild $godotScript $godotParameters -Capture:$Offscreen
     Write-Host "[play] the game exited with code $exitCode"
     if ($Offscreen) {
         # M2 D8 / P4-R15: an automated run is muted, the capture runs (--play-look-shots, --play-panel-shots, --play-screenshot) included; none or muted=false fails the run (exit 3) and says why.
         $audioVerdict = Get-PlayAudioVerdict $script:capturedOutput.ToString()
+        if (-not $audioVerdict.Ok -and $IsolateUserData -and $GameArgs -match '--log-copies=file') {
+            # M5 item 7: --log-copies=file keeps Info lines off the console, so the audio line is read from the run's own log (the isolated user data's). D126 (c): from the run's start, the oldest of its
+            # rolled files (a long run's lifestone.log has rolled into lifestone.1.log and further; soak round 12 ended with exit code 3 on a clean run).
+            $isolatedLogs = Join-Path $repoRoot 'cache\godot\roaming\Godot\app_userdata\Lifestone\logs'
+            $runHead = Get-PlayRunLogHead -LogsFolder $isolatedLogs -Since $gameStartedAt
+            if ($runHead) { $audioVerdict = Get-PlayAudioVerdict $runHead }
+        }
         if (-not $audioVerdict.Ok) { Write-Host "[play] AUDIO CHECK FAILED: $($audioVerdict.Reason)" -ForegroundColor Red; if ($exitCode -eq 0) { $exitCode = 3 } }
         else { Write-Host '[play] audio check: muted' }
     }

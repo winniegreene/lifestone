@@ -20,7 +20,7 @@ public sealed class FighterBuffScenarioTests
     private const string Heart = "The Healer's Heart";
 
     private static readonly System.Text.RegularExpressions.Regex Verdict = new(
-        @"^gear=n/a worn=n/a buffs=12/12 levels=(\w+:(I|II|III|IV|V|VI|VII|VIII|-),){11}\w+:(I|II|III|IV|V|VI|VII|VIII|-) rebuffed=yes forced=yes min_remaining_s=\d+ transfers=\d+/\d+ revitalizes=\d+ fizzles=\d+ mana_min=(\d+|n/a) cycle_s=\d+ misses=none surpassed=\d+ swapped=yes swap_s=\d+\.\d$",
+        @"^gear=n/a worn=n/a buffs=12/12 levels=(\w+:(I|II|III|IV|V|VI|VII|VIII|-),){11}\w+:(I|II|III|IV|V|VI|VII|VIII|-) rebuffed=yes forced=yes min_remaining_s=\d+ transfers=\d+/\d+ revitalizes=\d+ fizzles=\d+ mana_min=(\d+|n/a) cycle_s=\d+ mana_tries=\d+ mana_refusals=\d+ mana_landed=\d+ busy=\d+ resists=\d+ proved=\d+( mana_presses=\d+ dances=\d+ dances_landed=\d+)? misses=none surpassed=\d+ swapped=yes swap_s=\d+\.\d$",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private sealed class View(WorldActionRig rig) : IGameSessionView

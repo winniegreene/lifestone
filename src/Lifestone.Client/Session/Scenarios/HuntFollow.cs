@@ -37,9 +37,9 @@ public interface IHuntFollow : IDisposable
 }
 
 /// <summary>
-/// <see cref="IHuntFollow"/> for the headless host: an <see cref="OfflineWalker"/> (the one <see cref="RoutePlay"/> and <see cref="DenWalk"/> make) in a physics world that gets the collision of each landblock
+/// <see cref="IHuntFollow"/> for the headless host: an <see cref="OfflineWalker"/> (the one <see cref="RoutePlay"/> and <see cref="GroundWalk"/> make) in a physics world that gets the collision of each landblock
 /// the server puts the player in and the eight around it, built from the dats on first need. It is placed by the server's teleports and given the player's positions and the server's MoveTo and TurnTo as
-/// <see cref="DenWalk"/> gives them, so ACE's approach to a target (its MoveToObject F74C, with no F748 of its own for the player) moves the client's own position and the client's autonomous positions tell ACE where
+/// <see cref="GroundWalk"/> gives them, so ACE's approach to a target (its MoveToObject F74C, with no F748 of its own for the player) moves the client's own position and the client's autonomous positions tell ACE where
 /// it is. Retail does this in the client's physics: <c>CPhysics::SetObjectMovement</c> (11.4186 0x00509690, 11.6096 0x0050A160) runs the server's MoveTo in the physics object's update (see
 /// <see cref="PhysicsPlayerBody.ApplyServerMovement"/>); the cadence of the position reports is the controller's. The game does not use this class: its player controller already owns the walker
 /// (<see cref="RoutePlayHost"/>).

@@ -57,6 +57,9 @@ public enum AvatarPlacement
 /// <param name="Quantum">The longest object-clock step of the frame, in seconds (0 when it was not stepped).</param>
 /// <param name="ServerMetres">How far the object is from the last server position.</param>
 /// <param name="PlayerMetres">How far the object is from the player.</param>
+/// <param name="ShortTransits">Hosted transitions that ended short of the requested position since the body last caught up with its interpolation (M5 item 5 F4).</param>
+/// <param name="Obstacle">What stopped the last of them (none when there was none).</param>
+/// <param name="BehindMetres">How far the body was from its interpolation target when last stepped (at a blip, the distance it was blipped).</param>
 public readonly record struct AvatarJump(
     AvatarJumpKind Kind,
     float Metres,
@@ -72,7 +75,10 @@ public readonly record struct AvatarJump(
     int PendingMotions,
     double Quantum,
     float ServerMetres,
-    float PlayerMetres);
+    float PlayerMetres,
+    int ShortTransits,
+    AvatarObstacle Obstacle,
+    float BehindMetres);
 
 /// <summary>
 /// Watches one server object's drawn position and pose from frame to frame and reports a jump (more than a metre in one
@@ -205,6 +211,9 @@ public sealed class AvatarJumpWatch
             motion?.PendingMotionCount ?? 0,
             quantum,
             body.ServerPosition is { } server ? PositionFrames.Distance(body.Position, server) : -1f,
-            body.PlayerDistance);
+            body.PlayerDistance,
+            body.ShortTransits,
+            body.LastObstacle,
+            body.BehindMetres);
     }
 }

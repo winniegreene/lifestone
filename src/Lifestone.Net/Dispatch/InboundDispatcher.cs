@@ -20,6 +20,9 @@ namespace Lifestone.Net.Dispatch;
 /// <para>M3 1.2 s0 adds the inventory, combat, magic and admin messages: GM 0x0024, 0x0197, 0x019E, 0x02CE, 0x02DA and 0xEA60, and
 /// the game events 0x0022, 0x0023, 0x00A0, 0x019A, 0x01AC, 0x01AD, 0x01B1-0x01B4, 0x02C1-0x02C8 and 0x0312, each to its own
 /// callback (<c>OnInventoryRemoveObject</c> ... <c>OnMagicPurgeBadEnchantments</c>).</para>
+/// <para>M5 6 w1 adds the game events 0x0274 and 0x0276 (the confirmation dialog) and 0x0021, 0x0029 and 0x0295 (the login notices), and the
+/// property updates GM 0x02D0, 0x02D1, 0x02D2, 0x02D4, 0x02D6, 0x02D7, 0x02D8, 0x02D9 and 0x02DB (<c>OnConfirmationRequest</c> ...
+/// <c>OnPrivatePosition</c>). GM 0x02D3 and 0x02D5 are named in <see cref="MessageOpcodes"/> and still arrive unknown: ACE never sends them.</para>
 /// <para>A message is decoded only when its parser read every byte (<see cref="MessageCodec"/>): a truncated message,
 /// one with trailing bytes, or an opcode-only signal that carries a body is malformed, with a reason naming the message
 /// (for a game event, the envelope's opcode and the event type).</para>
@@ -370,6 +373,89 @@ public static class InboundDispatcher
 
                 return Malformed(context, opcode, body, handler, "02DA PublicUpdateInstanceId: not exactly a u8 sequence, a GUID, a property and a u32 value");
 
+            // M5 6 w1: the property updates (D31).
+
+            case MessageOpcodes.PublicUpdatePropertyInt64:
+                if (PropertyUpdateCodecs.TryParsePublicInt64(body, out var publicInt64))
+                {
+                    handler.OnPublicPropertyInt64(context, publicInt64);
+                    return Decoded(opcode);
+                }
+
+                return Malformed(context, opcode, body, handler, PropertyUpdateCodecs.MalformedReason(opcode));
+
+            case MessageOpcodes.PublicUpdatePropertyBool:
+                if (PropertyUpdateCodecs.TryParsePublicBool(body, out var publicBool))
+                {
+                    handler.OnPublicPropertyBool(context, publicBool);
+                    return Decoded(opcode);
+                }
+
+                return Malformed(context, opcode, body, handler, PropertyUpdateCodecs.MalformedReason(opcode));
+
+            case MessageOpcodes.PublicUpdatePropertyFloat:
+                if (PropertyUpdateCodecs.TryParsePublicFloat(body, out var publicFloat))
+                {
+                    handler.OnPublicPropertyFloat(context, publicFloat);
+                    return Decoded(opcode);
+                }
+
+                return Malformed(context, opcode, body, handler, PropertyUpdateCodecs.MalformedReason(opcode));
+
+            case MessageOpcodes.PublicUpdatePropertyString:
+                if (PropertyUpdateCodecs.TryParsePublicString(body, out var publicString))
+                {
+                    handler.OnPublicPropertyString(context, publicString);
+                    return Decoded(opcode);
+                }
+
+                return Malformed(context, opcode, body, handler, PropertyUpdateCodecs.MalformedReason(opcode));
+
+            case MessageOpcodes.PublicUpdatePropertyDataId:
+                if (PropertyUpdateCodecs.TryParsePublicDataId(body, out var publicDataId))
+                {
+                    handler.OnPublicPropertyDataId(context, publicDataId);
+                    return Decoded(opcode);
+                }
+
+                return Malformed(context, opcode, body, handler, PropertyUpdateCodecs.MalformedReason(opcode));
+
+            case MessageOpcodes.PrivateUpdatePropertyBool:
+                if (PropertyUpdateCodecs.TryParsePrivateBool(body, out var privateBool))
+                {
+                    handler.OnPrivatePropertyBool(context, privateBool);
+                    return Decoded(opcode);
+                }
+
+                return Malformed(context, opcode, body, handler, PropertyUpdateCodecs.MalformedReason(opcode));
+
+            case MessageOpcodes.PrivateUpdatePropertyInstanceId:
+                if (PropertyUpdateCodecs.TryParsePrivateInstanceId(body, out var privateInstanceId))
+                {
+                    handler.OnPrivatePropertyInstanceId(context, privateInstanceId);
+                    return Decoded(opcode);
+                }
+
+                return Malformed(context, opcode, body, handler, PropertyUpdateCodecs.MalformedReason(opcode));
+
+            case MessageOpcodes.PrivateUpdatePropertyDataId:
+                if (PropertyUpdateCodecs.TryParsePrivateDataId(body, out var privateDataId))
+                {
+                    handler.OnPrivatePropertyDataId(context, privateDataId);
+                    return Decoded(opcode);
+                }
+
+                return Malformed(context, opcode, body, handler, PropertyUpdateCodecs.MalformedReason(opcode));
+
+            case MessageOpcodes.PrivateUpdatePosition:
+                if (PropertyUpdateCodecs.TryParsePrivatePosition(body, out var privatePosition))
+                {
+                    handler.OnPrivatePosition(context, privatePosition);
+                    return Decoded(opcode);
+                }
+
+                return Malformed(context, opcode, body, handler, PropertyUpdateCodecs.MalformedReason(opcode));
+
             case MessageOpcodes.AdminEnvirons:
                 if (AdminEnvironsCodec.TryParse(body, out var adminEnvirons))
                 {
@@ -682,6 +768,53 @@ public static class InboundDispatcher
                 }
 
                 return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0312 MagicPurgeBadEnchantments: carries a payload (it is the envelope alone)");
+
+            // M5 6 w1: the confirmation dialog and the login notices.
+
+            case GameEventTypes.CharacterConfirmationRequest:
+                if (GameEventCodecs.TryParseConfirmationRequest(body, out var confirmationRequest))
+                {
+                    handler.OnConfirmationRequest(context, header, confirmationRequest);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0274 CharacterConfirmationRequest: not exactly a u32 type, a u32 context and a String16L");
+
+            case GameEventTypes.CharacterConfirmationDone:
+                if (GameEventCodecs.TryParseConfirmationDone(body, out var confirmationDone))
+                {
+                    handler.OnConfirmationDone(context, header, confirmationDone);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0276 CharacterConfirmationDone: not exactly a u32 type and a u32 context");
+
+            case GameEventTypes.SetTurbineChatChannels:
+                if (GameEventCodecs.TryParseTurbineChatChannels(body, out var turbineChannels))
+                {
+                    handler.OnTurbineChatChannels(context, header, turbineChannels);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0295 SetTurbineChatChannels: not exactly ten u32");
+
+            case GameEventTypes.CharacterTitle:
+                if (GameEventCodecs.TryParseCharacterTitle(body, out var characterTitle))
+                {
+                    handler.OnCharacterTitle(context, header, characterTitle);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0029 CharacterTitle: not exactly a u32 marker, a u32 title, a count and that many u32");
+
+            case GameEventTypes.FriendsListUpdate:
+                if (GameEventCodecs.TryParseFriendsListUpdate(body, out var friendsList))
+                {
+                    handler.OnFriendsListUpdate(context, header, friendsList);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0021 FriendsListUpdate: not a count of friends and an update type");
 
             default:
                 handler.OnGameEvent(context, header, body[GameEventEnvelope.HeaderSize..]);

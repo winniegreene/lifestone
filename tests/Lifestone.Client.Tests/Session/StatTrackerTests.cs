@@ -93,7 +93,7 @@ public sealed class StatTrackerTests
     public void RaiseAttribute_times_out_when_the_server_stays_silent()
     {
         var h = Present();
-        var raise = h.Api.RaiseAttribute(Focus, 999_999, ActionSource.Ui); // more experience than the character has: ACE drops it without a word
+        var raise = h.Api.RaiseAttribute(Focus, 110, ActionSource.Ui); // the server never answers
         h.Tick();
         h.Tick(4.9);
         Assert.False(raise.IsCompleted);
@@ -129,7 +129,7 @@ public sealed class StatTrackerTests
         h.Tick();
         Assert.Equal(ActionOutcomeKind.Confirmed, raise.Outcome!.Value.Kind);
 
-        var refused = h.Api.RaiseVital(MaxHealth, 5_000_000, ActionSource.Ui);
+        var refused = h.Api.RaiseVital(MaxHealth, 4_000, ActionSource.Ui); // within the unspent experience: the server's own refusal (the rank cap)
         h.Tick();
         h.ServerMessage("Your attempt to raise Max Health has failed.");
         h.Tick();
@@ -154,7 +154,7 @@ public sealed class StatTrackerTests
         h.Tick();
         Assert.Equal(ActionOutcomeKind.Confirmed, raise.Outcome!.Value.Kind);
 
-        var silent = h.Api.RaiseSkill(WarMagic, 99_999_999, ActionSource.Ui);
+        var silent = h.Api.RaiseSkill(WarMagic, 4_000, ActionSource.Ui); // within the unspent experience; ACE's rank cap is silent
         h.Tick();
         h.Tick(5.1);
         Assert.Equal(ActionOutcomeKind.TimedOut, silent.Outcome!.Value.Kind);
@@ -178,11 +178,63 @@ public sealed class StatTrackerTests
         Assert.Contains("skill credits 3 -> 1", train.Outcome.Value.Detail, StringComparison.Ordinal);
         Assert.Equal(1, h.State.Self.Qualities.AvailableSkillCredits);
 
-        var again = h.Api.TrainSkill(CreatureEnchantment, 2, ActionSource.Ui);
+        var again = h.Api.TrainSkill(CreatureEnchantment, 2, ActionSource.Ui); // M5 7 D141: the state says it is trained, so it is refused before the send
         h.Tick();
-        h.ServerMessage("Failed to train Creature Enchantment! You now have 1 credits available.");
+        Assert.Equal((ActionOutcomeKind.Refused, ActionReason.AlreadyDone), (again.Outcome!.Value.Kind, again.Outcome.Value.Reason));
+        Assert.Single(h.Net.Of(FakeSendKind.TrainSkill));
+    }
+
+    [Fact]
+    public void TrainSkill_of_a_trained_skill_is_refused_before_the_send_and_ACE_s_failure_line_is_typed_already_done()
+    {
+        var h = Present();
+        var train = h.Api.TrainSkill(WarMagic, 2, ActionSource.Ui); // the description has War Magic specialised (class 3): refused before the send
         h.Tick();
-        Assert.Equal(ActionOutcomeKind.ServerError, again.Outcome!.Value.Kind);
+        Assert.Equal((ActionOutcomeKind.Refused, ActionReason.AlreadyDone), (train.Outcome!.Value.Kind, train.Outcome.Value.Reason));
+
+        var undescribed = h.Api.TrainSkill(44, 2, ActionSource.Ui); // a skill the description does not carry: the server judges
+        h.Tick();
+        h.ServerMessage("Failed to train Heavy Weapons! You now have 3 credits available.");
+        h.Tick();
+        Assert.Equal((ActionOutcomeKind.ServerError, ActionReason.AlreadyDone), (undescribed.Outcome!.Value.Kind, undescribed.Outcome.Value.Reason));
+    }
+
+    // --- M5 7 D141: check before, act, check after -------------------------------------------------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_raise_beyond_the_unspent_experience_is_refused_before_the_send_typed_not_a_silent_timeout()
+    {
+        var h = Present(); // 5,000 unspent
+        var attribute = h.Api.RaiseAttribute(Focus, 999_999, ActionSource.Ui);
+        var vital = h.Api.RaiseVital(MaxHealth, 5_000_000, ActionSource.Ui);
+        var skill = h.Api.RaiseSkill(WarMagic, 5_001, ActionSource.Ui);
+        h.Tick();
+        h.Tick();
+        h.Tick();
+
+        Assert.All([attribute, vital, skill], raise =>
+        {
+            Assert.Equal((ActionOutcomeKind.Refused, ActionReason.NotEnoughXp), (raise.Outcome!.Value.Kind, raise.Outcome.Value.Reason));
+            Assert.Contains("5000 unspent", raise.Outcome.Value.Detail, StringComparison.Ordinal);
+        });
+        Assert.Empty(h.Net.Of(FakeSendKind.RaiseAttribute));
+        Assert.Empty(h.Net.Of(FakeSendKind.RaiseVital));
+        Assert.Empty(h.Net.Of(FakeSendKind.RaiseSkill));
+    }
+
+    [Fact]
+    public void A_raise_of_an_untrained_skill_and_a_train_beyond_the_credits_are_refused_before_the_send()
+    {
+        var h = Present(); // Creature Enchantment untrained (class 1), 3 credits
+        var raise = h.Api.RaiseSkill(CreatureEnchantment, 10, ActionSource.Ui);
+        var train = h.Api.TrainSkill(CreatureEnchantment, 4, ActionSource.Ui);
+        h.Tick();
+        h.Tick();
+
+        Assert.Equal((ActionOutcomeKind.Refused, ActionReason.NotTrained), (raise.Outcome!.Value.Kind, raise.Outcome.Value.Reason));
+        Assert.Equal((ActionOutcomeKind.Refused, ActionReason.NotEnoughCredits), (train.Outcome!.Value.Kind, train.Outcome.Value.Reason));
+        Assert.Empty(h.Net.Of(FakeSendKind.RaiseSkill));
+        Assert.Empty(h.Net.Of(FakeSendKind.TrainSkill));
     }
 
     [Fact]

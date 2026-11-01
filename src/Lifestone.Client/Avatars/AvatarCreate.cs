@@ -17,11 +17,20 @@ public sealed record AvatarCreate
     /// <summary>The object id.</summary>
     public required uint Guid { get; init; }
 
+    /// <summary>The object's name (the weenie description's), or null when the source has none (the stress source, tests); the host's object lines (M5 7 F17) print it.</summary>
+    public string? Name { get; init; }
+
     /// <summary>The player's own object.</summary>
     public bool IsSelf { get; init; }
 
     /// <summary>The weenie is a creature (item type 0x10): its motions are adjusted and need contact.</summary>
     public bool IsCreature { get; init; }
+
+    /// <summary>
+    /// The weenie description's <c>ObjectDescriptionFlags</c> (BF_PLAYER 0x8, BF_ATTACKABLE 0x10, ...), or null when the source has none (the stress source, tests). The server-object physics
+    /// host reads the player bit (players pass players, docs/physics.md section 10); the avatar set passes this on to the host (<c>TODO(m5-object-description-flags)</c> is closed); null for a source that has none.
+    /// </summary>
+    public uint? DescriptionFlags { get; init; }
 
     /// <summary>The Setup (PhysicsDesc CSetup, flag 0x1).</summary>
     public required uint SetupId { get; init; }

@@ -344,9 +344,9 @@ public sealed class PlayerToolsTests
         h.Tick(0.5);
         var hasId = "a" + has.Id.ToString(CultureInfo.InvariantCulture);
         Assert.Equal("@lifestone quest has AcademyTokenGiven #" + hasId, h.Net.ToolRequests()[^1]);
-        h.ServerMessage(ToolsWire.Reply(ToolReply.Failure(hasId, ToolVerbs.Quest, new ToolError(ToolErrors.NotInWorld, "your character is not in the world yet")), "your character is not in the world yet"));
+        h.ServerMessage(ToolsWire.Reply(ToolReply.Failure(hasId, ToolVerbs.Quest, new ToolError(ToolErrors.Busy, "you are teleporting")), "you are teleporting"));
         h.Tick();
-        Assert.Equal(new ActionOutcome(ActionOutcomeKind.ServerError, 0, "not-in-world: your character is not in the world yet"), has.Outcome);
+        Assert.Equal(new ActionOutcome(ActionOutcomeKind.ServerError, 0, "busy: you are teleporting"), has.Outcome);
         Assert.Null(has.Result);
     }
 
@@ -382,7 +382,7 @@ public sealed class PlayerToolsTests
     [InlineData(ToolErrors.UnknownCharacter, "no character named \"Nobody\" is on your account")]
     [InlineData(ToolErrors.CharacterOnline, "Nobody is online; only a character that is offline can be purged")]
     [InlineData(ToolErrors.NotPendingDeletion, "Nobody is not marked for deletion; delete it on the character screen first")]
-    [InlineData(ToolErrors.NotInWorld, "your character is not in the world yet")]
+    [InlineData(ToolErrors.Busy, "you are teleporting")]
     public void A_character_purge_the_mod_refuses_is_a_server_error_with_its_code_and_sentence_and_no_result(string code, string sentence)
     {
         var h = new ActionHarness();

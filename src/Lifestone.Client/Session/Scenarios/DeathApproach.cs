@@ -4,6 +4,8 @@ using Lifestone.Client.Movement;
 using Lifestone.Client.Movement.Routes;
 using Lifestone.Client.Play;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Data.Animation;
 using Lifestone.Data.CharacterCreation;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Motion;
@@ -49,7 +51,8 @@ public interface IApproachWalk : IDisposable
 }
 
 /// <summary>
-/// <see cref="IApproachWalk"/> for the headless host: an <see cref="OfflineWalker"/> in the collision of Holtburg's landblock and the eight around it (the Holtburg laps' world), placed by the server's teleport, with the
+/// <see cref="IApproachWalk"/> for the headless host: an <see cref="OfflineWalker"/> in the collision of the ground's home landblock and the eight around it (M5 3 d1, 2-R10: <see cref="HuntingGround.Home"/>, the lifestone's cell and the point beside it;
+/// Holtburg for the den), placed by the server's teleport, with the
 /// <see cref="RouteDriver"/> of a one-goal route. The game's equivalent (its own player as the walker, as <c>GameFightWalk</c> is for the den) is dd's; it implements the same interface.
 /// </summary>
 public sealed class HoltburgApproach : IApproachWalk
@@ -69,10 +72,18 @@ public sealed class HoltburgApproach : IApproachWalk
     private bool _placed;
     private bool _disposed;
 
-    private HoltburgApproach(DatSet dats, PhysicsGeometryLibrary geometry, PhysicsWorld world, ILogSink log)
+    private readonly GroundHome _home;
+
+    private HoltburgApproach(DatSet dats, PhysicsGeometryLibrary geometry, PhysicsWorld world, ILogSink log, GroundHome home)
     {
-        (_dats, _geometry, _world, _log) = (dats, geometry, world, log);
+        (_dats, _geometry, _world, _log, _home) = (dats, geometry, world, log, home);
     }
+
+    /// <summary>The home the walk is built around (the ground's: its town, its lifestone's cell, the point beside it).</summary>
+    public GroundHome Home => _home;
+
+    /// <summary>The point beside the home lifestone (<see cref="GroundHome.LifestonePoint"/> in <see cref="GroundHome.LifestoneCell"/>): the walk's goal when the lifestone object is not in the table.</summary>
+    public CellFrame HomePoint => new(_home.LifestoneCell, new AcFrame(_home.LifestonePoint, System.Numerics.Quaternion.Identity));
 
     /// <inheritdoc/>
     public string? Failure { get; private set; }
@@ -80,15 +91,22 @@ public sealed class HoltburgApproach : IApproachWalk
     /// <summary>The walker, or null before <see cref="Prepare"/>.</summary>
     public OfflineWalker? Walker => _walker;
 
-    /// <summary>Builds the collision of Holtburg's landblock and its neighbours from the dats (a few seconds).</summary>
+    /// <summary>Builds the collision of the default ground's home landblock and its neighbours from the dats (a few seconds): <see cref="Create(DatSet, ILogSink, HuntingGround)"/> with the fight's default ground.</summary>
     /// <param name="dats">The dats.</param>
     /// <param name="log">Where the walk logs.</param>
-    public static HoltburgApproach Create(DatSet dats, ILogSink log)
+    public static HoltburgApproach Create(DatSet dats, ILogSink log) => Create(dats, log, new FightOptions().GroundProfile);
+
+    /// <summary>Builds the collision of the ground's home landblock (<see cref="HuntingGround.Home"/>, 2-R10) and its neighbours from the dats (a few seconds).</summary>
+    /// <param name="dats">The dats.</param>
+    /// <param name="log">Where the walk logs.</param>
+    /// <param name="ground">The ground whose home lifestone the bind walks to.</param>
+    public static HoltburgApproach Create(DatSet dats, ILogSink log, HuntingGround ground)
     {
         ArgumentNullException.ThrowIfNull(dats);
         ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(ground);
         var geometry = new PhysicsGeometryLibrary(dats);
-        return new HoltburgApproach(dats, geometry, HoltburgLapsScenario.AttachAround(dats, geometry, LandblockCoord.Holtburg), log);
+        return new HoltburgApproach(dats, geometry, HoltburgLapsScenario.AttachAround(dats, geometry, LandblockCoord.FromId(ground.Home.LifestoneCell)), log, ground.Home);
     }
 
     /// <inheritdoc/>
@@ -139,7 +157,7 @@ public sealed class HoltburgApproach : IApproachWalk
             // The teleport's position did not place it (no Tick saw it, or it landed before Prepare): place it from the session's own settled position.
             if (session.State.Self.Position is not { } here || !_world.IsAttached(LandblockCoord.FromId(here.CellId)))
             {
-                Failure = "the approach walker is not placed and the player's position is not in Holtburg's landblock";
+                Failure = $"the approach walker is not placed and the player's position is not in {_home.Town}'s landblock (the ground's home, cell 0x{_home.LifestoneCell:X8})";
                 return false;
             }
 
@@ -157,6 +175,7 @@ public sealed class HoltburgApproach : IApproachWalk
         var route = new ScriptedRoute("lifestone-approach", [new RouteGoal(target, stopWithinMetres, Stop: true, DwellSeconds: 0)]);
         _driver?.Abandon();
         _driver = new RouteDriver(_walker.Controller, route, _move!);
+        _driver.KeysPressedAgain += line => _log.Warn(LogCategory, line); // M5 7 D153 (D141): a held key let go by something else was pressed again
         description = $"from cell 0x{from.CellId:X8} toward cell 0x{target.CellId:X8}, stopping within {stopWithinMetres:0.0##} m";
         return true;
     }
@@ -228,7 +247,7 @@ public sealed class HoltburgApproach : IApproachWalk
         {
             if (!_world.IsAttached(LandblockCoord.FromId(move.Position.CellId)))
             {
-                continue; // an arrival outside Holtburg (the login's, a teleport to the den)
+                continue; // an arrival outside the home's landblocks (the login's, a teleport to the ground)
             }
 
             if (!_placed)

@@ -1,6 +1,7 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Actions.Trackers;
+using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
@@ -38,7 +39,11 @@ public enum VitalsKeeperState
 /// <param name="MinManaPercent">The least mana share.</param>
 /// <param name="NextCastMana">The mana the station's next cast needs (its <see cref="GearCasts.ManaCeiling"/>); 0 when it casts nothing.</param>
 /// <param name="NoManaRest">True when the station's place forbids waiting for mana (a mana shortfall the transfer cannot cover then ends <c>Blocked why=mana:...</c>).</param>
-public readonly record struct VitalsNeeds(int MinHealthPercent = 0, int MinStaminaPercent = 0, int MinManaPercent = 0, uint NextCastMana = 0, bool NoManaRest = false);
+/// <param name="NextCastFloor">
+/// The next cast's try floor (M5 1 K5, D15: <see cref="ManaOrder.FloorOf"/>), the partner of <paramref name="NextCastMana"/>: with the tries on (<c>--cast-mana-tries</c> above 0) the mana need is met at the floor, because the
+/// station's own attempt tries the real spell from there; 0 (the default) or the tries off: the ceiling, as before. Placed last so every positional caller keeps its meaning.
+/// </param>
+public readonly record struct VitalsNeeds(int MinHealthPercent = 0, int MinStaminaPercent = 0, int MinManaPercent = 0, uint NextCastMana = 0, bool NoManaRest = false, uint NextCastFloor = 0);
 
 /// <summary>
 /// The vitals keeper (M4 P5a lane C2; the design's section 3.3): one policy for the three characters, stepped like <see cref="RebuffDriver.Tick"/> (no blocking waits), acting only through <see cref="IActionApi"/> and
@@ -64,7 +69,12 @@ public readonly record struct VitalsNeeds(int MinHealthPercent = 0, int MinStami
 /// <para><b>Casts</b> need the magic combat mode: the keeper enters it when <see cref="CombatModeGuard"/> allows it with what the player wields, and returns to peace before <see cref="VitalsKeeperState.Ready"/>. A
 /// refused mode sets the spells aside for the keeper's life, logged once (a fighter with a sword and no caster: the potion and the kit remain). A level that fizzles <see cref="MaxFizzlesInRow"/> times in a row is set
 /// aside until the next <see cref="NeedsFor"/>.</para>
-/// <para><b>The verdict</b> (<see cref="VerdictFields"/>, report-only in its first gate): <c>vitals_min=h/s/m heals= kits= potions= rests= rest_s= transfers=</c>.</para>
+/// <para><b>The mana order</b> (M5 1 K5, D15 and D27, <see cref="ManaOrder"/>): with <c>--cast-mana-tries</c> above 0 the keeper's own casts are sent from their try floor with the tries, a need is met at the station's
+/// <see cref="VitalsNeeds.NextCastFloor"/>, and under it the mage dances (Stamina to Mana Self pressed until it lands), drinks a Mana Potion only when the stamina is too low for a transfer and otherwise rests in peace
+/// for stamina; the fighters keep D40's order with the transfer now a dance at their stamina gate. Every press of a dance counts as one action against <see cref="MaxActionsPerPass"/> (a dance, and the fizzle and Mana Conversion tries of any other cast, are cut to the actions
+/// left), and the rests keep their cap. <c>--cast-mana-tries 0</c> is the order before K5, exactly.</para>
+/// <para><b>The verdict</b> (<see cref="VerdictFields"/>, report-only in its first gate): <c>vitals_min=h/s/m heals= kits= potions= rests= rest_s= transfers=</c>, and, once the keeper cast, the cast policy's
+/// <c>mana_tries= mana_refusals= mana_landed= busy= resists= proved=</c>, and where a dance ran <c>mana_presses= dances= dances_landed=</c>.</para>
 /// </remarks>
 public sealed class VitalsKeeper
 {
@@ -82,6 +92,9 @@ public sealed class VitalsKeeper
 
     /// <summary>Fizzles in a row of one line after which it is set aside until the next <see cref="VitalsKeeper.NeedsFor"/>.</summary>
     public const int MaxFizzlesInRow = 3;
+
+    /// <summary>The <see cref="Why"/> of a pass the kill switch stopped (<c>Blocked why=kill-switch</c>, M5 D13).</summary>
+    public const string KillSwitchWhy = "kill-switch";
 
     /// <summary>Busy refusals (0x001D) of a heal in a row the keeper waits out (<see cref="BusyRetrySeconds"/> each, logged) before it ends <c>Blocked why=busy</c>.</summary>
     public const int MaxBusyRetries = 3;
@@ -112,6 +125,28 @@ public sealed class VitalsKeeper
     /// <summary>MotionCommand Sleeping, the lie-down emote (the key 0x10000097; ACE <c>MotionCommand.cs</c> 25-27).</summary>
     public const uint LieCommand = 0x41000014;
 
+    /// <summary>
+    /// The retry rules of the keeper's casts (M5 item 1 lane K4, D13): <see cref="CastRules.Utility(int)"/> of <see cref="MaxFizzlesInRow"/> casts, the same level, the mana read again before each retry. The streak of fizzles
+    /// across looks stays the keeper's own (<c>_fizzleRow</c>), handed to each attempt as <see cref="CastRequest.FizzlesSpent"/>, so a line still goes aside on its third fizzle in a row, whichever attempts they fell in.
+    /// </summary>
+    private static readonly CastRules FizzleRules = CastRules.Utility(MaxFizzlesInRow);
+
+    /// <summary>The Stamina to Mana Self rows of <see cref="VitalsMeans.StaminaToManaSelf"/>, looked up once (<see cref="BuffStatMods.TransferOf"/> allocates).</summary>
+    private static readonly TransferRow?[] DanceRows = [.. VitalsMeans.StaminaToManaSelf.Select(BuffStatMods.TransferOf)];
+
+    private readonly CastRules _triesRules;
+    private readonly CastTally _tally = new();
+    private readonly DanceLevel[] _danceLevels = new DanceLevel[7];
+    private readonly SpellInfo?[] _danceInfos = new SpellInfo?[7];
+    private readonly HashSet<uint> _floorNoted = [];
+    private readonly bool[] _triesSpent = new bool[4];
+    private CastRules? _danceRules;
+    private CastRules? _cappedRules;
+    private CastRules? _cappedBase;
+    private CastChatProof? _danceProof;
+    private bool _castIsDance;
+    private uint _castFloor;
+
     private readonly IGameSessionView _session;
     private readonly IReadOnlyDictionary<uint, SpellInfo> _spells;
     private readonly VitalsOptions _options;
@@ -120,6 +155,8 @@ public sealed class VitalsKeeper
     private readonly List<uint> _scratch = [];
     private readonly int[] _fizzleRow = new int[4];
     private readonly bool[] _lineAside = new bool[4];
+    private readonly uint[] _castIds = new uint[1];
+    private CastAttempt? _cast;
 
     private RecoveryOptions _recovery;
     private Pending _pending;
@@ -152,6 +189,7 @@ public sealed class VitalsKeeper
     private bool _staminaPotionNoted;
     private bool _fighterOrderNoted;
     private int _passTransfers;
+    private int _castRow;
     private uint _vitalBefore;
     private VitalWait _vitalWait;
     private double _vitalWaitUntil;
@@ -175,6 +213,7 @@ public sealed class VitalsKeeper
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _recovery = options.Recovery;
+        _triesRules = options.Mana.On ? FizzleRules.WithManaTries(options.Mana.Tries, options.Mana.TrySpacingSeconds) : FizzleRules; // made once: the forms build a name string
     }
 
     private enum SwapPhase
@@ -225,6 +264,9 @@ public sealed class VitalsKeeper
     /// <summary>The needs of the last <see cref="NeedsFor"/>.</summary>
     public VitalsNeeds Needs { get; private set; }
 
+    /// <summary>The mana order's options the keeper runs with (<c>--cast-mana-*</c>); the stations that hand it a mana need read them to work out the same try floor (M5 1 fix B, G2).</summary>
+    public ManaOrderOptions ManaOptions => _options.Mana;
+
     /// <summary>True while one of the keeper's actions is in flight.</summary>
     public bool Busy => _pending != Pending.None || _swapPhase != SwapPhase.None;
 
@@ -266,6 +308,18 @@ public sealed class VitalsKeeper
 
     /// <summary>Fizzles of the keeper's casts.</summary>
     public int Fizzles { get; private set; }
+
+    /// <summary>Stamina-to-mana dances begun (M5 D27).</summary>
+    public int Dances { get; private set; }
+
+    /// <summary>Dances that landed.</summary>
+    public int DancesLanded { get; private set; }
+
+    /// <summary>The presses of every dance (each one action against <see cref="MaxActionsPerPass"/>).</summary>
+    public int DancePresses { get; private set; }
+
+    /// <summary>The cast policy's counts over every cast of the keeper (<see cref="CastTally"/>).</summary>
+    public CastTally Tally => _tally;
 
     /// <summary>Rests begun.</summary>
     public int Rests { get; private set; }
@@ -314,6 +368,7 @@ public sealed class VitalsKeeper
         _skillAt = double.NaN;
         Array.Clear(_fizzleRow);
         Array.Clear(_lineAside);
+        Array.Clear(_triesSpent);
         var r = _options.Recovery;
         var below = Math.Max(r.BelowPercent, Math.Clamp(needs.MinHealthPercent, 0, 100));
         _recovery = r with { BelowPercent = below, UntilPercent = Math.Max(r.UntilPercent, below) };
@@ -322,7 +377,7 @@ public sealed class VitalsKeeper
             LogCategory,
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"vitals: needs health {below}% (until {_recovery.UntilPercent}%), stamina {Math.Max(_options.StaminaBelowPercent, needs.MinStaminaPercent)}%, mana {needs.MinManaPercent}% and {needs.NextCastMana} for the next cast{(needs.NoManaRest ? " (no mana rest)" : string.Empty)}; now {Shares()}{(vitae > 0 ? $"; vitae {vitae}% (reported, not acted on)" : string.Empty)}"));
+                $"vitals: needs health {below}% (until {_recovery.UntilPercent}%), stamina {Math.Max(_options.StaminaBelowPercent, needs.MinStaminaPercent)}%, mana {needs.MinManaPercent}% and {needs.NextCastMana} for the next cast{(_options.Mana.On && needs.NextCastFloor > 0 ? $" (its try floor {needs.NextCastFloor})" : string.Empty)}{(needs.NoManaRest ? " (no mana rest)" : string.Empty)}; now {Shares()}{(vitae > 0 ? $"; vitae {vitae}% (reported, not acted on)" : string.Empty)}"));
         State = VitalsKeeperState.Working;
         if (_pending == Pending.None && !PostureDown && !_enteredMagic && !_swappedIn && _swapPhase == SwapPhase.None && Met())
         {
@@ -345,6 +400,12 @@ public sealed class VitalsKeeper
         if (_pending != Pending.None && !Settle(now))
         {
             return State;
+        }
+
+        if (_session.Actions.KillSwitch)
+        {
+            // M5 D13: the keeper's actions are automation, so the kill switch reaches the whole pass. The action in flight finished above; nothing more is sent (a swap half in flight is not stepped either).
+            return State is VitalsKeeperState.Working or VitalsKeeperState.Resting ? Block(KillSwitchWhy, "the kill switch is on: the keeper sends nothing more") : State;
         }
 
         if (_swapPhase != SwapPhase.None)
@@ -434,6 +495,13 @@ public sealed class VitalsKeeper
 
         // Mana, for the next cast.
         var need = Math.Max(Needs.NextCastMana, (uint)Math.Ceiling(Math.Clamp(Needs.MinManaPercent, 0, 100) * (double)mMax / 100));
+        if (_options.Mana.On)
+        {
+            // M5 1 K5: the mana order (D15, D27); --cast-mana-tries 0 keeps the order below, exactly as before.
+            var floorNeed = FloorNeed(need, mMax);
+            return m < floorNeed ? ManaOrderStep(now, m, mMax, s, sMax, need, floorNeed, staminaUntil) : Finish(now);
+        }
+
         if (m < need)
         {
             if (need > mMax)
@@ -476,6 +544,164 @@ public sealed class VitalsKeeper
         return Finish(now);
     }
 
+    /// <summary>The station's mana need with the tries on: its <see cref="VitalsNeeds.NextCastFloor"/> (at most the ceiling) when it gave one, else the ceiling; never under its <see cref="VitalsNeeds.MinManaPercent"/>.</summary>
+    private uint FloorNeed(uint ceilingNeed, uint mMax)
+    {
+        if (!_options.Mana.On || Needs.NextCastFloor == 0 || Needs.NextCastMana == 0)
+        {
+            return ceilingNeed;
+        }
+
+        return Math.Max(Math.Min(Needs.NextCastFloor, Needs.NextCastMana), (uint)Math.Ceiling(Math.Clamp(Needs.MinManaPercent, 0, 100) * (double)mMax / 100));
+    }
+
+    /// <summary>
+    /// The mana branch through <see cref="ManaOrder"/> (M5 1 K5): the mage dances first, drinks only when the stamina is too low for a transfer, else rests in peace for stamina; the fighters drink, then dance at their
+    /// stamina gate within <see cref="FighterTransferCap"/>, then rest. A wait is a rest for mana, or <c>Blocked why=mana:</c> where the station allows no rest.
+    /// </summary>
+    private VitalsKeeperState ManaOrderStep(double now, uint m, uint mMax, uint s, uint sMax, uint need, uint floorNeed, int staminaUntil)
+    {
+        if (need > mMax)
+        {
+            return Block(string.Create(CultureInfo.InvariantCulture, $"mana-max:{need}/{mMax}"), $"the next cast needs {need} mana and the maximum is {mMax}");
+        }
+
+        var q = _session.State.Self.Qualities;
+        ManaOrder.TryManaConversion(q, out var mc);
+        var count = FillDanceLevels(q);
+        var potions = !_manaPotionAside && VitalsMeans.FindManaPotions(_session.State, _scratch, out _, out var held) ? held : 0;
+        var fighter = _options.FighterOrder;
+        var input = new ManaOrderInput
+        {
+            Mana = m,
+            ManaMax = mMax,
+            Stamina = s,
+            StaminaMax = sMax,
+            ManaConversion = mc,
+            Need = new ManaNeed(need, floorNeed),
+            ManaPotions = potions,
+            Profile = fighter ? ManaProfile.Fighter : ManaProfile.Mage,
+            FighterGatePercent = staminaUntil,
+            FighterTransfersLeft = FighterTransferCap - _passTransfers,
+        };
+        var decision = ManaOrder.Decide(input, _danceLevels.AsSpan(0, count), _options.Mana);
+        if (fighter && potions == 0 && !_fighterOrderNoted)
+        {
+            _fighterOrderNoted = true;
+            var staminaPct = 100.0 * s / sMax;
+            var allowed = staminaPct >= staminaUntil && _passTransfers < FighterTransferCap;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: fighter mana order: no Mana Potion to drink ({(_manaPotionAside ? "set aside" : "none held")}); Stamina to Mana Self (the dance) only at stamina {staminaUntil}% or more and at most {FighterTransferCap} casts a pass (now stamina {staminaPct:0}%, {_passTransfers} cast(s)): {(allowed ? "allowed" : "not allowed")}; else a rest in peace, about {(floorNeed - m) * ManaRegenSecondsPerPoint:0} s for {floorNeed - m} mana (1 mana a {ManaRegenSecondsPerPoint:0} s tick, no stance factor for mana)"));
+        }
+
+        var at = string.Create(CultureInfo.InvariantCulture, $"mana {m} of {mMax}, {floorNeed} needed{(floorNeed < need ? $" (the try floor under {need})" : string.Empty)}");
+        switch (decision.Step)
+        {
+            case ManaStep.Ready:
+            case ManaStep.TryReal:
+                return Finish(now);
+            case ManaStep.Potion:
+                if (VitalPotionStep(true, m, at) is { } drink)
+                {
+                    return drink;
+                }
+
+                break;
+            case ManaStep.Dance:
+                if (CanCast(VitalsLine.StaminaToManaSelf, m, out _, forDance: true) && _danceInfos[decision.DanceIndex] is { } info)
+                {
+                    if (fighter)
+                    {
+                        _passTransfers++;
+                    }
+
+                    return Cast(VitalsLine.StaminaToManaSelf, info, at + "; " + decision.Reason, dance: true);
+                }
+
+                break;
+            case ManaStep.RestStamina:
+                if (!Needs.NoManaRest)
+                {
+                    return RestFor(Rest.Stamina, now, string.Create(CultureInfo.InvariantCulture, $"{at}: {decision.Reason}, to stamina {decision.StaminaTarget} (now {s})"));
+                }
+
+                break; // a station that allows no mana rest allows no rest for the transfer's stamina either: Blocked below
+        }
+
+        if (Needs.NoManaRest)
+        {
+            return Block(string.Create(CultureInfo.InvariantCulture, $"mana:{m}/{floorNeed}"), "the next cast needs more mana, the mana order has nothing to press or drink (" + decision.Reason + ") and the station allows no rest");
+        }
+
+        return RestFor(Rest.Mana, now, at);
+    }
+
+    /// <summary>
+    /// M5 4 G1: what the pack holds when the level floor applies to a keeper line (Heal Self, Revitalize Self, Stamina to Mana Self: the pack holds the Life Magic focus, so ACE casts on the foci formula: <see cref="LevelFloor"/>), else null.
+    /// A level the pack cannot pay for is named once, as the buff cycle names its own (the live dance fell to level V at mana 1, whose Gold Scarab no stock line carries, and ACE refused it 0x0400; a Heal Self short of mana falls the same way).
+    /// </summary>
+    private IReadOnlyDictionary<uint, int>? FloorFor(VitalsLine line)
+    {
+        var held = LevelFloor.HeldFor(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
+        if (held is null)
+        {
+            return null;
+        }
+
+        var ids = VitalsMeans.IdsOf(line);
+        for (var i = 0; i < ids.Count; i++)
+        {
+            if (_spells.TryGetValue(ids[i], out var info) && LevelFloor.ShortOf(held, info, out var need) && _floorNoted.Add(info.Id))
+            {
+                _log.Warn(LogCategory, "vitals: " + info.Name + " needs " + need + "; skipped (the level floor)");
+            }
+        }
+
+        return held;
+    }
+
+    /// <summary>The Stamina to Mana Self levels the book holds at the cast chance, lowest first, into <c>_danceLevels</c>; their count.</summary>
+    private int FillDanceLevels(PlayerQualities q)
+    {
+        var book = _session.State.Self.Spellbook;
+        var ids = VitalsMeans.StaminaToManaSelf;
+        var skillRead = false;
+        var skill = 0u;
+        var count = 0;
+        var held = FloorFor(VitalsLine.StaminaToManaSelf);
+        for (var i = 0; i < ids.Count; i++)
+        {
+            if (!book.Knows(ids[i]) || !_spells.TryGetValue(ids[i], out var info) || DanceRows[i] is not { } row)
+            {
+                continue;
+            }
+
+            if (held is not null && LevelFloor.ShortOf(held, info, out _))
+            {
+                continue; // M5 4 G1: the level floor: a level whose foci-formula scarab the pack lacks is not pressed (named once by FloorFor); the keeper rests for the mana instead
+            }
+
+            if (!skillRead)
+            {
+                if (!GearCasts.TryCurrentSkill(q, GearCasts.SkillOf(info.School), out skill, out _))
+                {
+                    return 0;
+                }
+
+                skillRead = true;
+            }
+
+            if (GearCasts.Chance(skill, info.Power) < _options.CastChance)
+            {
+                continue;
+            }
+
+            _danceInfos[count] = info;
+            _danceLevels[count++] = new DanceLevel(info.Id, GearCasts.ManaCeiling(info, 0), info.Power, row);
+        }
+
+        return count;
+    }
+
     /// <summary>
     /// The hunt's question before an attack: false under <c>--vitals-attack-stamina</c> (15%) of stamina, or with the vitals unknown, with the reason in <paramref name="why"/>.
     /// </summary>
@@ -508,7 +734,7 @@ public sealed class VitalsKeeper
     /// <param name="targetInReach">True when the target can hit or be hit now (then a fight goes on: no potion).</param>
     public bool TryInFightPotion(bool targetInReach)
     {
-        if (!_options.InFightPotion || targetInReach || _pending != Pending.None)
+        if (!_options.InFightPotion || targetInReach || _pending != Pending.None || _session.Actions.KillSwitch)
         {
             return false;
         }
@@ -539,7 +765,7 @@ public sealed class VitalsKeeper
 
         _noPotionWarned = false;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: in-fight potion 0x{potion:X8} ({count} held) at {pct:0}% health (under {_options.InFightPotionBelowPercent}%), the target out of reach"));
-        _handle = _session.Actions.Drink(potion, ActionSource.Host);
+        _handle = _session.Actions.Drink(potion, ActionSource.Automation);
         _pending = Pending.InFightPotion;
         return true;
     }
@@ -547,7 +773,7 @@ public sealed class VitalsKeeper
     /// <summary>The verdict fields (report-only in their first gate): <c>vitals_min=h/s/m heals= kits= potions= rests= rest_s= transfers=</c>, and <c>cast=needs-swap</c> when a fighter holds its caster in the pack and the keeper cast nothing for want of the swap (M4 P5a C1b).</summary>
     public string VerdictFields() => string.Create(
         CultureInfo.InvariantCulture,
-        $"vitals_min={Pct(MinHealthPercent)}/{Pct(MinStaminaPercent)}/{Pct(MinManaPercent)} heals={Heals} kits={Kits} potions={Potions} rests={Rests} rest_s={RestSeconds:0} transfers={Transfers} mana_potions={ManaPotions} stamina_potions={StaminaPotions}{(ReferenceEquals(_castOff, NeedsSwap) ? " cast=needs-swap" : string.Empty)}{(Swaps > 0 ? $" swaps={Swaps}" : string.Empty)}");
+        $"vitals_min={Pct(MinHealthPercent)}/{Pct(MinStaminaPercent)}/{Pct(MinManaPercent)} heals={Heals} kits={Kits} potions={Potions} rests={Rests} rest_s={RestSeconds:0} transfers={Transfers} mana_potions={ManaPotions} stamina_potions={StaminaPotions}{(_tally.Attempts > 0 ? " " + _tally.Fields : string.Empty)}{(Dances > 0 ? $" mana_presses={DancePresses} dances={Dances} dances_landed={DancesLanded}" : string.Empty)}{(ReferenceEquals(_castOff, NeedsSwap) ? " cast=needs-swap" : string.Empty)}{(Swaps > 0 ? $" swaps={Swaps}" : string.Empty)}");
 
     private static string Pct(double value) => double.IsNaN(value) ? "-" : Math.Floor(value).ToString("0", CultureInfo.InvariantCulture);
 
@@ -601,7 +827,7 @@ public sealed class VitalsKeeper
                 }
 
                 _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: potion 0x{potionGuid:X8} ({potions} held) at {at}"));
-                return Send(Pending.Potion, _session.Actions.Drink(potionGuid, ActionSource.Host));
+                return Send(Pending.Potion, _session.Actions.Drink(potionGuid, ActionSource.Automation));
             case RecoveryDecision.KitLastResort:
                 return UseKit(kitGuid, kitUses, chance, at + " (the last resort)");
             default:
@@ -617,7 +843,7 @@ public sealed class VitalsKeeper
         }
 
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: kit 0x{kit:X8} ({uses} use(s) left) at {at}, estimated chance {chance:0.00}, healing {_healing}"));
-        return Send(Pending.Kit, _session.Actions.UseWithTarget(kit, _session.State.Self.Guid, ActionSource.Host));
+        return Send(Pending.Kit, _session.Actions.UseWithTarget(kit, _session.State.Self.Guid, ActionSource.Automation));
     }
 
     private void RefreshHealingSkill(double now)
@@ -657,7 +883,7 @@ public sealed class VitalsKeeper
 
     // ------------------------------------------------------------------------------------------------ casts
 
-    private bool CanCast(VitalsLine line, uint mana, out SpellInfo? info)
+    private bool CanCast(VitalsLine line, uint mana, out SpellInfo? info, bool forDance = false)
     {
         info = null;
         if (_castOff is not null || _lineAside[(int)line])
@@ -671,15 +897,36 @@ public sealed class VitalsKeeper
             return false;
         }
 
-        info = VitalsMeans.Pick(state.Self.Qualities, state.Self.Spellbook, _spells, line, _options.CastChance, out _);
-        if (info is null || mana < GearCasts.ManaCeiling(info, state.Self.Inventory.Equipped.Count))
+        info = VitalsMeans.Pick(state.Self.Qualities, state.Self.Spellbook, _spells, line, _options.CastChance, out _, FloorFor(line));
+        if (info is null)
         {
             return false;
         }
 
+        // M5 1 K5 (D15): with the tries on, a line is cast from its try floor (a 0x0401 inside the tries is expected); once its tries are spent it waits for the ceiling until the next station's needs. The dance presses at
+        // any mana (the order chose a level a press can land at).
+        var ceiling = GearCasts.ManaCeiling(info, state.Self.Inventory.Equipped.Count);
+        _castFloor = 0;
+        if (!forDance && mana < ceiling)
+        {
+            if (!_options.Mana.On || _triesSpent[(int)line])
+            {
+                return false;
+            }
+
+            ManaOrder.TryManaConversion(state.Self.Qualities, out var mc);
+            var floor = ManaOrder.FloorOf(ceiling, info.Power, ceiling, mc, _options.Mana, (info.Flags & SpellFlags.IgnoresManaConversion) != 0);
+            if (mana < floor)
+            {
+                return false;
+            }
+
+            _castFloor = floor;
+        }
+
         if (state.Self.Qualities.CombatMode != CombatModes.Magic && CombatModeGuard.Check(CombatMode.Magic, state) is { } refusal)
         {
-            if (FighterItems.Find(state, _scratch, GearKit.Wand.Wcid, out _, out var wielded) && !wielded)
+            if (CasterOnlyInPack(state))
             {
                 if (_swap is not null)
                 {
@@ -699,7 +946,34 @@ public sealed class VitalsKeeper
         return true;
     }
 
-    private VitalsKeeperState Cast(VitalsLine line, SpellInfo info, string why)
+    /// <summary>
+    /// True when a caster (an item whose ItemType has the Caster bit, <see cref="GearKit.ItemTypeCaster"/>: wand, staff or orb) is held in a pack and none is equipped (M5 item 3 w1): the keeper's "caster in the pack" read for the swap. It is the item's
+    /// type, never one weenie: the mage's wand is the kit's wielded vendor line (the ground's <c>supplies.kit</c>: the Wand 2472), no longer the retired loot wand (The Healer's Heart 8552), and the fighters' caster is found the same way.
+    /// </summary>
+    private bool CasterOnlyInPack(GameState state)
+    {
+        GearInventory.Collect(state, _scratch);
+        var inventory = state.Self.Inventory;
+        var inPack = false;
+        for (var i = 0; i < _scratch.Count; i++)
+        {
+            if (!state.Objects.TryGet(_scratch[i], out var item) || (item.ItemType & GearKit.ItemTypeCaster) == 0)
+            {
+                continue;
+            }
+
+            if (inventory.Find(_scratch[i]).Kind == InventoryPlaceKind.Equipped)
+            {
+                return false;
+            }
+
+            inPack = true;
+        }
+
+        return inPack;
+    }
+
+    private VitalsKeeperState Cast(VitalsLine line, SpellInfo info, string why, bool dance = false)
     {
         if (StandFirst())
         {
@@ -719,13 +993,57 @@ public sealed class VitalsKeeper
         {
             _enteredMagic = true;
             _log.Info(LogCategory, "vitals: entering the magic mode for " + info.Name);
-            return Send(Pending.Mode, _session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host));
+            return Send(Pending.Mode, _session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation));
         }
 
         _castLine = line;
         _castName = info.Name;
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: cast {info.Name} ({info.Id}) at {why}"));
-        return Send(Pending.Cast, _session.Actions.Cast(info.Id, ActionSource.Host));
+        _castIsDance = dance;
+        CastRules rules;
+        if (dance)
+        {
+            // Each press is one action against the pass's cap, so the dance is cut to the actions left (Send counts the first press, SettleCast the rest).
+            var presses = Math.Max(1, Math.Min(_options.Mana.DancePresses, MaxActionsPerPass - _actions));
+            if (_danceRules is null || _danceRules.MaxTries != presses)
+            {
+                _danceRules = CastRules.ManaDance(presses, _options.Mana.TrySpacingSeconds);
+            }
+
+            rules = _danceRules;
+            _castFloor = 0;
+            Dances++;
+        }
+        else
+        {
+            // M5 3 m4 (m5-keeper-tries-cap, review 1-R8): the fizzle tries and the Mana Conversion tries are casts too, so the attempt is cut to the actions the pass has left (Send counts the first, SettleCast the rest).
+            var baseRules = _castFloor > 0 ? _triesRules : FizzleRules;
+            var left = Math.Max(1, MaxActionsPerPass - _actions);
+            if (_cappedRules is null || !ReferenceEquals(_cappedBase, baseRules) || _cappedRules.MaxTries != left)
+            {
+                _cappedBase = baseRules;
+                _cappedRules = baseRules with { MaxTries = left };
+            }
+
+            rules = _cappedRules;
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: {(dance ? "dance" : "cast")} {info.Name} ({info.Id}) at {why}{(dance || _castFloor > 0 ? $" ({rules.Name}{(_castFloor > 0 ? $", from its try floor {_castFloor}" : string.Empty)})" : string.Empty)}"));
+        _castIds[0] = info.Id;
+        _castRow = dance ? 0 : _fizzleRow[(int)line];
+        _cast ??= new CastAttempt(_session.Actions, _session.State, _log, _spells); // made on the first cast: a host's view may not hold its Action API until then
+        _cast.Start(
+            new CastRequest
+            {
+                Levels = _castIds,
+                Rules = rules,
+                Purpose = "vitals " + info.Name,
+                FizzlesSpent = _castRow,
+                WornItems = _session.State.Self.Inventory.Equipped.Count,
+                ManaTryFloor = _castFloor,
+                Proof = dance ? _danceProof ??= new CastChatProof(_session.State, _spells) : null, // M5 1 fix B (G5): a landed press is proved by ACE's transfer line; the other casts ask no proof
+            },
+            _now);
+        return Send(Pending.Cast, null);
     }
 
     // ------------------------------------------------------------------------------------------------ rest and posture
@@ -755,7 +1073,7 @@ public sealed class VitalsKeeper
 
             _enteredMagic = false;
             _log.Info(LogCategory, "vitals: entering peace to rest (combat mode halves health and stamina regeneration)");
-            return Send(Pending.Mode, _session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host));
+            return Send(Pending.Mode, _session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation));
         }
 
         if (_options.Posture != RestPosture.Stand && !PostureDown && !_postureFailed)
@@ -802,7 +1120,7 @@ public sealed class VitalsKeeper
 
     // ------------------------------------------------------------------------------------------------ settling
 
-    private VitalsKeeperState Send(Pending kind, ActionHandle handle)
+    private VitalsKeeperState Send(Pending kind, ActionHandle? handle)
     {
         _pending = kind;
         _handle = handle;
@@ -822,6 +1140,19 @@ public sealed class VitalsKeeper
     /// <summary>Reads the outcome of the action in flight; false while it has none.</summary>
     private bool Settle(double now)
     {
+        if (_pending == Pending.Cast)
+        {
+            // The keeper's casts go through the cast policy (M5 D13): the attempt carries the fizzle retries and answers once.
+            if (_cast!.Step(now) == CastEnd.Running)
+            {
+                return false;
+            }
+
+            _pending = Pending.None;
+            SettleCast(_cast.Report);
+            return true;
+        }
+
         if (_handle?.Outcome is not { } outcome)
         {
             return false;
@@ -841,9 +1172,6 @@ public sealed class VitalsKeeper
             case Pending.ManaPotion:
             case Pending.StaminaPotion:
                 SettleVitalPotion(kind == Pending.ManaPotion, (HealHandle)handle, outcome, now);
-                break;
-            case Pending.Cast:
-                SettleCast(outcome);
                 break;
             case Pending.Mode:
                 if (!outcome.Succeeded)
@@ -1031,7 +1359,7 @@ public sealed class VitalsKeeper
 
         _vitalBefore = current;
         _log.Info(LogCategory, $"vitals: {(mana ? "Mana" : "Stamina")} Potion 0x{guid:X8} ({count} held) at {at}");
-        return Send(mana ? Pending.ManaPotion : Pending.StaminaPotion, _session.Actions.Drink(guid, ActionSource.Host));
+        return Send(mana ? Pending.ManaPotion : Pending.StaminaPotion, _session.Actions.Drink(guid, ActionSource.Automation));
     }
 
     /// <summary>Steps the caster swap's half in flight (M4 P5b J3a): In done lets the casts go on; Out done lets <see cref="Finish"/> end the pass; a failed half blocks the keeper with <c>swap:&lt;step&gt;</c> (a failed In already restored the weapon).</summary>
@@ -1055,47 +1383,93 @@ public sealed class VitalsKeeper
         }
     }
 
-    private void SettleCast(ActionOutcome outcome)
+    private void SettleCast(in CastReport report)
     {
         var line = (int)_castLine;
-        if (outcome.Kind == ActionOutcomeKind.ServerError && outcome.Code == GearCasts.FizzleCode)
+        var row = _castRow + report.Fizzles;
+        Fizzles += report.Fizzles;
+        _actions += Math.Max(0, report.Tries - 1); // the retries are casts too: the pass's cap counts them as the looks did
+        _tally.Add(report);
+        if (_castIsDance)
         {
-            Fizzles++;
-            if (++_fizzleRow[line] >= MaxFizzlesInRow)
+            SettleDance(report);
+            return;
+        }
+
+        if (report.End == CastEnd.ManaShort && report.ManaRefusals > 0 && _options.Mana.On)
+        {
+            // D15: a 0x0401 inside the tries is expected, never a failure; once they are spent the line waits for its ceiling until the next station's needs (the order's step 3).
+            _fizzleRow[line] = row;
+            _triesSpent[line] = true;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: {_castName}: {report.ManaRefusals} Mana Conversion tries refused (0x0401, nothing charged); {VitalsMeans.NameOf(_castLine)} now waits for its ceiling"));
+            return;
+        }
+
+        if (report.End.Succeeded())
+        {
+            _fizzleRow[line] = 0;
+            switch (_castLine)
+            {
+                case VitalsLine.HealSelf:
+                    HealSelfCasts++;
+                    break;
+                case VitalsLine.RevitalizeSelf:
+                    Revitalizes++;
+                    break;
+                default:
+                    Transfers++;
+                    break;
+            }
+
+            _log.Info(LogCategory, report.Fizzles == 0 ? $"vitals: {_castName} landed" : $"vitals: {_castName} landed after {report.Fizzles} fizzle(s)");
+            return;
+        }
+
+        _fizzleRow[line] = row;
+        if (report.End == CastEnd.Fizzled || (report.End == CastEnd.ManaShort && report.ManaRefusals == 0 && report.Fizzles > 0))
+        {
+            // Three fizzles in a row, whichever attempts they fell in, set the line aside; the mana read under the retry's ceiling (nothing sent) is a fizzle the next look decides on.
+            if (row >= MaxFizzlesInRow)
             {
                 _lineAside[line] = true;
-                _log.Warn(LogCategory, $"vitals: {_castName} fizzled {_fizzleRow[line]} times in a row; {VitalsMeans.NameOf(_castLine)} is set aside until the next station's needs");
+                _log.Warn(LogCategory, $"vitals: {_castName} fizzled {row} times in a row; {VitalsMeans.NameOf(_castLine)} is set aside until the next station's needs");
             }
             else
             {
-                _log.Info(LogCategory, $"vitals: {_castName} fizzled ({_fizzleRow[line]} in a row); the next look decides again");
+                _log.Info(LogCategory, $"vitals: {_castName} fizzled ({row} in a row); the next look decides again");
             }
 
             return;
         }
 
-        if (!outcome.Succeeded)
+        _lineAside[line] = true;
+        var last = _cast!.LastOutcome;
+        var what = last is { } outcome ? $"{outcome.Kind} 0x{outcome.Code:X4}: {outcome.Detail}" : $"{report.End.Name()}: {report.Why}";
+        _log.Warn(LogCategory, $"vitals: {_castName} was not carried out ({what}); {VitalsMeans.NameOf(_castLine)} is set aside until the next station's needs");
+    }
+
+    /// <summary>The end of a dance (D27): every press counted; a landing is a transfer; presses spent with none landed leave the next look to decide (the actions cap bounds it); any other end sets the line aside.</summary>
+    private void SettleDance(in CastReport report)
+    {
+        DancePresses += report.Tries;
+        if (report.End.Succeeded())
         {
-            _lineAside[line] = true;
-            _log.Warn(LogCategory, $"vitals: {_castName} was not carried out ({outcome.Kind} 0x{outcome.Code:X4}: {outcome.Detail}); {VitalsMeans.NameOf(_castLine)} is set aside until the next station's needs");
+            DancesLanded++;
+            Transfers++;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: the dance landed {_castName} on press {report.Tries} ({report.ManaRefusals} refused, {report.Fizzles} fizzled)"));
             return;
         }
 
-        _fizzleRow[line] = 0;
-        switch (_castLine)
+        _lineAside[(int)_castLine] = true;
+        if (report.End is CastEnd.ManaShort or CastEnd.TimeCap)
         {
-            case VitalsLine.HealSelf:
-                HealSelfCasts++;
-                break;
-            case VitalsLine.RevitalizeSelf:
-                Revitalizes++;
-                break;
-            default:
-                Transfers++;
-                break;
+            // Every press refused or fizzled: the server's costs are not the model's. Named; the line is set aside until the next station's needs (a rest for mana instead).
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: the dance of {_castName} did not land in {report.Tries} presses ({report.ManaRefusals} refused, {report.Fizzles} fizzled); {VitalsMeans.NameOf(_castLine)} is set aside until the next station's needs"));
+            return;
         }
 
-        _log.Info(LogCategory, $"vitals: {_castName} landed");
+        var what = _cast!.LastOutcome is { } outcome ? $"{outcome.Kind} 0x{outcome.Code:X4}: {outcome.Detail}" : $"{report.End.Name()}: {report.Why}";
+        _log.Warn(LogCategory, $"vitals: the dance of {_castName} was not carried out ({what}); {VitalsMeans.NameOf(_castLine)} is set aside until the next station's needs");
     }
 
     // ------------------------------------------------------------------------------------------------ the end of a pass
@@ -1123,7 +1497,7 @@ public sealed class VitalsKeeper
             if (_session.State.Self.Qualities.CombatMode == CombatModes.Magic)
             {
                 _log.Info(LogCategory, "vitals: back to peace after the keeper's casts");
-                return Send(Pending.Mode, _session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host));
+                return Send(Pending.Mode, _session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation));
             }
         }
 
@@ -1138,14 +1512,14 @@ public sealed class VitalsKeeper
         Why = why;
         State = VitalsKeeperState.Blocked;
         _log.Warn(LogCategory, $"vitals: Blocked why={why}: {detail}; {VerdictFields()}");
-        if (PostureDown && _pending == Pending.None)
+        if (PostureDown && _pending == Pending.None && !_session.Actions.KillSwitch)
         {
             _log.Info(LogCategory, "vitals: standing up (the stop key) as the keeper stops");
             _pending = Pending.Stand;
             _handle = _session.Actions.Move.Command(MotionCommands.Ready, true, ActionSource.Automation);
         }
 
-        if (_swappedIn && _swap is not null && _swapPhase == SwapPhase.None)
+        if (_swappedIn && _swap is not null && _swapPhase == SwapPhase.None && !_session.Actions.KillSwitch)
         {
             _log.Info(LogCategory, "vitals: caster swap out as the keeper stops (the weapon back in hand)");
             _swapPhase = SwapPhase.Out;
@@ -1166,7 +1540,7 @@ public sealed class VitalsKeeper
         }
 
         Note(h, hMax, s, sMax, m, mMax);
-        var need = Math.Max(Needs.NextCastMana, (uint)Math.Ceiling(Math.Clamp(Needs.MinManaPercent, 0, 100) * (double)mMax / 100));
+        var need = FloorNeed(Math.Max(Needs.NextCastMana, (uint)Math.Ceiling(Math.Clamp(Needs.MinManaPercent, 0, 100) * (double)mMax / 100)), mMax);
         return (!_recovery.Enabled || 100.0 * h / hMax >= _recovery.BelowPercent || h >= hMax)
             && 100.0 * s / sMax >= Math.Max(_options.StaminaBelowPercent, Needs.MinStaminaPercent)
             && m >= need;

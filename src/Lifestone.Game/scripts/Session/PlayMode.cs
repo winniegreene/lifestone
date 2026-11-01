@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Godot;
 using Lifestone.Client.Audio;
 using Lifestone.Client.Avatars;
+using Lifestone.Client.Diagnostics;
 using Lifestone.Client.PortalSpace;
 using Lifestone.Client.Play;
 using Lifestone.Client.RetailUi.Flow;
@@ -77,6 +78,20 @@ public sealed partial class PlayMode : Node, IPlayWorld
     private uint _destinationCell;
     private bool _loginCompleteFallback;
     private AvatarSet? _avatars;
+    private readonly List<AvatarNotice> _frameNotices = []; // the avatar set's notices of this frame: the one drain owner is _Process (M5 item 7, m5-avatar-notices-full); the look shots read this list
+    private AvatarNoticeTally? _noticeTally;
+    private ChatLogTap? _chatLog; // M5 7 F17: every chat line the server sends, logged from the session's event (no UI needed)
+    private VitalsLog? _vitalsLog; // M5 7 F17: --log-vitals-s
+    private SoakFrames? _soakFrames;
+    private DollReviewFrames? _dollFrames;
+    private ExamineReviewFrames? _examineFrames;
+    private ExamineWornFrames? _wornFrames;
+    private Lifestone.Client.RetailUi.Panels.ExamineCreatureCapture? _creatureCapture;
+    private bool _creatureCaptureLooked;
+    private ExamineCaptureFrames? _captureFrames;
+
+    /// <summary>Where the capture's proof frames go when <c>--examine-review-frames</c> names no folder (M5 7 D138).</summary>
+    public const string DefaultCaptureFramesDirectory = "cache/examine-capture";
     private SoundHookRouter? _hookSounds;
     private SessionAvatarAdapter? _adapter;
     private ServerObjectsLayer? _layer;
@@ -143,6 +158,12 @@ public sealed partial class PlayMode : Node, IPlayWorld
 
     /// <summary>Picking and the selection's projection over the world camera (G5 W7); also the retail UI layer's <see cref="ISelectionProjector"/>.</summary>
     public WorldPicking Picking => _picking!;
+
+    /// <summary>The examination's live review frames (M5 7 S6, <c>--examine-review-frames</c>), or null before the first frame made them; the play checks wait for them over the stand-in's magic item.</summary>
+    public ExamineReviewFrames? ExamineFrames => _examineFrames;
+
+    /// <summary>The capture's proof frames (M5 7 D138, with <c>--examine-capture-creatures</c>), or null without the option.</summary>
+    public ExamineCaptureFrames? CaptureFrames => _captureFrames;
 
     /// <summary>The status line (outside the shell) or the stand-in note (in the shell of an offline stand-in session).</summary>
     public PlayStatusLine Status => _status;
@@ -263,6 +284,10 @@ public sealed partial class PlayMode : Node, IPlayWorld
         if (autoEnter)
         {
             RebuffDriverHost.Install(main, services, host, ui); // M4 4.1 lane c: the auto-buff driver (--buff-auto, the Pause key); a login-check leg runs its own
+            if (services.Dats is not null)
+            {
+                AutopilotHost.Install(main, services, host, mode, ui); // M5 4 h3: the autopilot's dial (Num Lock, the tools panel's Autopilot button); a login-check leg runs its own
+            }
         }
 
         return mode;
@@ -617,6 +642,9 @@ public sealed partial class PlayMode : Node, IPlayWorld
         _bridge?.Dispose();
         _flow?.Dispose();
         _adapter?.Dispose();
+        _chatLog?.Dispose();
+        _creatureCapture?.Dispose();
+        _captureFrames?.LogNotSeen();
         if (ReferenceEquals(LivingStaticsSystem.EffectEvents, _hookSounds))
         {
             LivingStaticsSystem.EffectEvents = null;
@@ -668,6 +696,8 @@ public sealed partial class PlayMode : Node, IPlayWorld
             }
         }
 
+        DrainAvatarNotices(); // every frame, so the set's 1,024-notice list never fills in a run of hours (M5 item 7)
+
         if (!_playShotDone && _services.Options.Play.ScreenshotPath is { } shotPath)
         {
             StepPlayScreenshot(delta, shotPath);
@@ -689,6 +719,82 @@ public sealed partial class PlayMode : Node, IPlayWorld
             _destinationCell = rig.Controller.Position.CellId;
         }
 
+        // The soak frames (--soak-frame-s): the countdown starts when the player's body is first placed in the world (and again for a new login's body).
+        _soakFrames ??= new SoakFrames(_services.Options.Play.SoakFrameSeconds, _services.Options.Play.SoakFrameDirectory);
+        if (_soakFrames.Active)
+        {
+            _soakFrames.Step(GetViewport(), _rig is { } placed && !placed.Controller.Placing && placed.Controller.Position.CellId != 0 ? placed : null);
+        }
+
+        // M5 7 D129: the paper doll's live review frames (--doll-review-frames), once, the first time the doll shows.
+        _dollFrames ??= new DollReviewFrames(_services.Options.Play.DollReviewFramesDirectory, HideDeveloperHud, RestoreDeveloperHud);
+        if (_dollFrames.Active)
+        {
+            _dollFrames.Step(
+                GetViewport(),
+                _ui?.Screens?.Flow.CurrentScreen as Lifestone.Client.RetailUi.Screens.GamePlayScreen,
+                playerPlaced: _rig is { } placedRig && !placedRig.Controller.Placing && placedRig.Controller.Position.CellId != 0,
+                tunnelVisible: _portal?.Director.Machine.TunnelVisible == true,
+                playerMaterialised: _avatars?.Player?.Body.Materialised == true);
+        }
+
+        // M5 7 S6 (D136): the examination's live review frames (--examine-review-frames), once, the first magic item a container window shows.
+        _examineFrames ??= new ExamineReviewFrames(_services.Options.Play.ExamineReviewFramesDirectory, HideDeveloperHud, RestoreDeveloperHud);
+        if (_examineFrames.Active)
+        {
+            _examineFrames.Step(
+                GetViewport(),
+                _ui?.Screens?.Flow.CurrentScreen as Lifestone.Client.RetailUi.Screens.GamePlayScreen,
+                _ui?.LogicalSize ?? default,
+                playerPlaced: _rig is { } examineRig && !examineRig.Controller.Placing && examineRig.Controller.Position.CellId != 0,
+                tunnelVisible: _portal?.Director.Machine.TunnelVisible == true,
+                playerMaterialised: _avatars?.Player?.Body.Materialised == true);
+        }
+
+        // M5 7 D142: the worn caster's and robe's examination frames (--examine-worn-frames), once each, when their pages show a spell-changed value.
+        _wornFrames ??= new ExamineWornFrames(_services.Options.Play.ExamineWornFramesDirectory, HideDeveloperHud, RestoreDeveloperHud);
+        if (_wornFrames.Active)
+        {
+            _wornFrames.Step(
+                GetViewport(),
+                _ui?.Screens?.Flow.CurrentScreen as Lifestone.Client.RetailUi.Screens.GamePlayScreen,
+                _host.Session,
+                _ui?.LogicalSize ?? default,
+                playerPlaced: _rig is { } wornRig && !wornRig.Controller.Placing && wornRig.Controller.Position.CellId != 0,
+                tunnelVisible: _portal?.Director.Machine.TunnelVisible == true,
+                playerMaterialised: _avatars?.Player?.Body.Materialised == true);
+        }
+
+        // M5 7 D137: the failed-roll live capture (--examine-capture-creatures=N): each new creature the fight aims at is inspected; one Identify an ask, nothing waits.
+        if (!_creatureCaptureLooked && _services.Options.Play.ExamineCaptureCreatures is { } answers && _host.Session is { } captureSession && _ui?.Manager is { } captureUi)
+        {
+            _creatureCaptureLooked = true;
+            _creatureCapture = new Lifestone.Client.RetailUi.Panels.ExamineCreatureCapture(captureSession, captureUi.TargetMode, GodotLogSink.Instance, answers);
+            _captureFrames = new ExamineCaptureFrames(_services.Options.Play.ExamineReviewFramesDirectory ?? DefaultCaptureFramesDirectory, HideDeveloperHud, RestoreDeveloperHud); // D138: the live proof frames
+        }
+
+        if (_captureFrames is { Active: true } proof)
+        {
+            proof.Step(
+                GetViewport(),
+                _ui?.Screens?.Flow.CurrentScreen as Lifestone.Client.RetailUi.Screens.GamePlayScreen,
+                playerPlaced: _rig is { } proofRig && !proofRig.Controller.Placing && proofRig.Controller.Position.CellId != 0,
+                tunnelVisible: _portal?.Director.Machine.TunnelVisible == true,
+                playerMaterialised: _avatars?.Player?.Body.Materialised == true);
+        }
+
+        if (_creatureCapture is { Active: true } capture && _ui?.Screens?.Flow.CurrentScreen is Lifestone.Client.RetailUi.Screens.GamePlayScreen { PanelHost.Examine: not null })
+        {
+            capture.Step();
+        }
+
+        // M5 7 F17: the vitals line every --log-vitals-s seconds (one clock compare a frame; the text is built when a line is due).
+        _vitalsLog ??= new VitalsLog(_services.Options.Play.LogVitalsSeconds, GodotLogSink.Instance);
+        if (_vitalsLog.Enabled)
+        {
+            _vitalsLog.Step(Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency, _host.Session?.State.Self.Qualities);
+        }
+
         // g3b: the radar follows the live physics body (the server's last position lags it) and the selection (docs/retail-ui.md section 21.4).
         if (_ui?.Screens?.Flow.CurrentScreen is Lifestone.Client.RetailUi.Screens.GamePlayScreen { RadarUi: { SelectedProvider: null } radar })
         {
@@ -706,6 +812,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
         if (_ui?.Screens?.Flow.CurrentScreen is Lifestone.Client.RetailUi.Screens.GamePlayScreen { SelectionUi: { } shellSelection })
         {
             shellSelection.SelectedProvider ??= () => Selection.Selected;
+            shellSelection.SelectRequester ??= guid => Selection.Select(guid); // M5 7 D122: the paperdoll figure's left click
             shellSelection.ProjectorProvider ??= () => _ui?.SelectionProjector;
             shellSelection.Indicator.Enabled = _portal?.Presenter.SelectionIndicatorEnabled ?? true;
         }
@@ -735,6 +842,22 @@ public sealed partial class PlayMode : Node, IPlayWorld
         }
     }
 
+    /// <summary>
+    /// Moves the avatar set's notices of this frame into <see cref="_frameNotices"/> (one reused list, nothing allocated on a frame without any) and hands them to the tally, which counts them
+    /// by kind and logs each problem kind at most once a minute. The look shots read the same list for their parent-failure check.
+    /// </summary>
+    private void DrainAvatarNotices()
+    {
+        _frameNotices.Clear();
+        if (_avatars is null || _avatars.DrainNotices(_frameNotices) == 0)
+        {
+            return;
+        }
+
+        _noticeTally ??= new AvatarNoticeTally(GodotLogSink.Instance, "avatars", _services.Options.Play.LogObjectsMetres); // --log-objects-m: the creates and deletes near the player (M5 7 F17)
+        _noticeTally.Add(_frameNotices, Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency);
+    }
+
     /// <summary>The character option "run by default" (<c>ToggleRun</c>, word 1 bit 0x400; <c>PlayerModule::ToggleRun</c>) from the PlayerDescription's options; true until the description is known (a new character's default has it on).</summary>
     internal static bool RunByDefaultOf(Lifestone.Client.Session.Contracts.PlayerQualities qualities) => !qualities.IsKnown || (qualities.CharacterOptions1 & RunByDefaultOptionMask) != 0;
 
@@ -759,6 +882,8 @@ public sealed partial class PlayMode : Node, IPlayWorld
     private void NewObjects()
     {
         _adapter?.Dispose();
+        _chatLog?.Dispose(); // one tap on the session's events, made again with the set (a log off must not leave two)
+        _chatLog = new ChatLogTap(_host.Session!.Events, GodotLogSink.Instance);
         Selection.Clear(); // a log off (and the start): the objects belong to the arrival that is over
         _avatars = new AvatarSet(_sources!, GodotLogSink.Instance) { RetailUnhideFlash = _services.Options.Play.RetailUnhideFlash, RetailSpherelessMissile = _services.Options.Play.RetailSphereless, EffectEvents = _hookSounds, ScriptTableSeen = PrepareScriptTable, PlayerSoundTableSeen = PrefetchPlayerSounds }; // --retail-unhide-flash (docs/avatars.md section 17)
         _avatars.Listener = new Lifestone.Game.World.ServerObjects.FlyCameraListener(_camera); // the sound listener is the camera (M3 4.2 x2, TODO(avatars-listener-camera) closed)
@@ -842,10 +967,49 @@ public sealed partial class PlayMode : Node, IPlayWorld
             DeferKeys: true,
             DeferFocus: true,
             Weenie: weenie);
-        var rig = PlayerRig.Build(WithRunByDefault(request, RunByDefaultOf(_host.Session.State.Self.Qualities)));
-        if (rig is null)
+        // M5 8 build: the player's build runs as three steps on three consecutive frames (avatar and first meshes, the drawn meshes, the body and camera), not in one frame of 15-25 ms.
+        // Nothing of the player is drawn or stepped until the last step (the controller is made there), and _rig is set only then.
+        _pendingBuild?.Cancel();
+        var pending = PlayerRig.BeginBuild(WithRunByDefault(request, RunByDefaultOf(_host.Session.State.Self.Qualities)));
+        _pendingBuild = pending;
+        LastPlayerBuild = pending.Work;
+        _playerBuildFrames.Clear();
+        StepPlayerBuild(pending, at, gate, avatars, recreated);
+    }
+
+    /// <summary>The player's build in progress, between its steps (null when none); a log off or a re-create cancels it (<see cref="TearDown"/>, <see cref="BuildPlayer"/>).</summary>
+    private PlayerRig.PendingBuild? _pendingBuild;
+
+    /// <summary>The last player build's steps (names, per-step milliseconds), for the play-checks' report-only line.</summary>
+    internal Lifestone.Client.Scheduling.StagedWork? LastPlayerBuild { get; private set; }
+
+    /// <summary>The process frame each step of the last player build ran in (one step per frame), for the play-checks' report-only line.</summary>
+    internal IReadOnlyList<ulong> PlayerBuildFrames => _playerBuildFrames;
+
+    private readonly List<ulong> _playerBuildFrames = [];
+
+    /// <summary>True when the rig existed before the build's last step ran: the player would have been usable half built (must stay false).</summary>
+    internal bool PlayerSeenHalfBuilt { get; private set; }
+
+    /// <summary>Runs the next step of <paramref name="pending"/> and, unless it was the last, posts the one after to the next frame.</summary>
+    private void StepPlayerBuild(PlayerRig.PendingBuild pending, Lifestone.Data.World.CellFrame at, PresenceGatedMovementSink gate, AvatarSet avatars, bool recreated)
+    {
+        if (!ReferenceEquals(_pendingBuild, pending))
         {
-            Log.Error(LogCategory, "the player could not be built; the world stays paused", ("recreated", recreated));
+            return; // cancelled between two steps
+        }
+
+        pending.RunNext();
+        _playerBuildFrames.Add(Engine.GetProcessFrames());
+        if (pending.Work.HasNext && _rig is not null)
+        {
+            PlayerSeenHalfBuilt = true;
+        }
+
+        if (pending.Failed)
+        {
+            _pendingBuild = null;
+            Log.Error(LogCategory, "the player could not be built; the world stays paused", ("recreated", recreated), ("failed_after", pending.Work.NextName ?? "the last step"));
             if (_services.Options.IsAutomated)
             {
                 GetTree().Quit(1);
@@ -854,11 +1018,25 @@ public sealed partial class PlayMode : Node, IPlayWorld
             return;
         }
 
+        if (pending.Work.HasNext)
+        {
+            Post(() => StepPlayerBuild(pending, at, gate, avatars, recreated));
+            return;
+        }
+
+        _pendingBuild = null;
+        FinishPlayerBuild(pending.Rig!, at, gate, avatars, recreated);
+    }
+
+    /// <summary>The player is built: bind it to the session and start the keys and the world around it in the next frames (what followed <c>PlayerRig.Build</c> in one frame before the build was staged).</summary>
+    private void FinishPlayerBuild(PlayerRig rig, Lifestone.Data.World.CellFrame at, PresenceGatedMovementSink gate, AvatarSet avatars, bool recreated)
+    {
         _rig = rig;
         MovementGate = gate;
         rig.Controller.Picking = _picking;
         rig.Controller.Selection = Selection;
         rig.Controller.Actions = _host.Session!.Actions;
+        rig.Controller.TargetMode = _ui?.Manager.TargetMode; // M5 7 S6: the toolbar's Examine with nothing selected asks for the object the next click names
         BindMoveIntents(rig, _host.Session.Actions.Move);
         if (_layer is not null)
         {
@@ -919,6 +1097,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
         move.Bind(rig.Controller.Walker.Controller, rig.Controller.Walker.Controller.Options.RunByDefault);
         _humanKey = move.ReportHumanKey;
         rig.Controller.HumanKey += _humanKey;
+        rig.Controller.KeyLock = move.KeyLock; // M5 7 D145: the movement keys do nothing while the autopilot holds the lock
         _boundMove = move;
     }
 
@@ -930,12 +1109,16 @@ public sealed partial class PlayMode : Node, IPlayWorld
             _humanKey = null;
         }
 
+        rig.Controller.KeyLock = null;
+
         _boundMove?.Unbind(rig.Controller.Walker.Controller);
         _boundMove = null;
     }
 
     private void TearDown(PlayLeaveReason reason)
     {
+        _pendingBuild?.Cancel(); // a log off between two steps of the player's build: the nodes its steps added go
+        _pendingBuild = null;
         if (_portal is not null)
         {
             _portal.Attachments.CollisionSource = null;

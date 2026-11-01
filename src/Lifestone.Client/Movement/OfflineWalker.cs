@@ -1,5 +1,7 @@
+using System.Numerics;
 using Lifestone.Client.Avatars;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Physics;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.Animation;
 using Lifestone.Data.Dat;
@@ -36,6 +38,8 @@ public sealed class OfflineWalker
     public const uint HumanMotionTableId = 0x09000001;
 
     private const string LogCategory = "movement";
+
+    private long _enteredSeen;
 
     private OfflineWalker(PhysicsWorld world, PhysicsObj physics, IPhysicsWeenie weenie, IMovementSink sink, MovementOptions options, ILogSink log)
     {
@@ -148,6 +152,65 @@ public sealed class OfflineWalker
     /// </summary>
     /// <returns>False when no valid position was found there.</returns>
     public bool Place(in CellFrame at) => Physics.EnterWorld(at, slide: true);
+
+    /// <summary>
+    /// The placements of <see cref="ReplaceAfterObjectCreate"/> that found no valid position (M5 item 5 F5), so the walker stayed where it was: retail's
+    /// <c>CTransition::find_placement_position</c> (11.6096 0x0050CC40) refuses a spot it cannot validate before any sliding search, as inside a building's hull
+    /// in an outdoor cell; without this count such a refusal read as "clear".
+    /// </summary>
+    public int ReplacementsRefused { get; private set; }
+
+    /// <summary>
+    /// The hosts' per-frame check (M5 item 5 F1; the headless body and the game's player controller both call it): when the server-object host put an object into the
+    /// world since the last call (<see cref="ServerObjectPhysicsStats.EnteredWorld"/>: a create, a recreate, a return, a forced placement; the host's own placement does
+    /// not meet the player, <see cref="PhysicsObj.EnterWorldPastPlayer"/>), a walker placed in a cell is put out of whatever now overlaps it
+    /// (<see cref="ReplaceAfterObjectCreate"/>). A walker not yet placed (waiting for its landblock) is placed with the objects there, so the count is only taken.
+    /// Allocates nothing.
+    /// </summary>
+    /// <param name="objects">The host's counters, or null when no host keeps server objects.</param>
+    /// <returns>The metres the walker moved (0 when nothing entered, when it is not placed, or when it was clear).</returns>
+    public float ReplaceAfterObjectsEntered(ServerObjectPhysicsStats? objects)
+    {
+        var entered = objects?.EnteredWorld ?? 0;
+        if (entered == _enteredSeen)
+        {
+            return 0f;
+        }
+
+        _enteredSeen = entered;
+        if (Physics.Cell is null || Physics.PlacementPending)
+        {
+            return 0f;
+        }
+
+        return ReplaceAfterObjectCreate();
+    }
+
+    /// <summary>
+    /// Puts a grounded walker out of any server object that appeared on it (M5 item 5 l1 and F1, <c>TODO(m5-create-overlap)</c>): the same sliding placement at its own position
+    /// (<c>CPhysicsObj::SetPosition</c> with Placement and Slide, the one <c>CPhysicsObj::enter_world</c>, 11.6096 0x00516E10, and so <see cref="Place"/>, runs). Retail's player is placed with
+    /// the objects of its cell already created, so its placement slides it out of them; this session can create an object after the teleport (a lifestone after a recall, a creature
+    /// coming into view on the player's spot; the transition then finds the walker already in the object and holds it: measured, 0.00 m in four headings), so the body is placed
+    /// again when a collision object appears. Nothing moves when nothing overlaps it; the walker's position is the body's only, the server's stays where the server put the player.
+    /// </summary>
+    /// <returns>The metres the walker moved (0 when it did not, when it is in the air, or when no valid position was found: then counted in
+    /// <see cref="ReplacementsRefused"/>).</returns>
+    public float ReplaceAfterObjectCreate()
+    {
+        if (!OnGround)
+        {
+            return 0f;
+        }
+
+        var before = Physics.Position;
+        if (Physics.SetPosition(before, SetPositionFlags.Placement | SetPositionFlags.Slide) != SetPositionError.OK)
+        {
+            ReplacementsRefused++;
+            return 0f;
+        }
+
+        return Vector3.Distance(Physics.Position.Frame.Origin, before.Frame.Origin);
+    }
 
     /// <summary>
     /// One frame at <paramref name="now"/> (the host's monotonic seconds): when retail's 30 Hz gate lets physics run,

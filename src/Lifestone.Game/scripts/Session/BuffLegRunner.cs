@@ -96,6 +96,7 @@ public sealed partial class BuffLegRunner : Node
     private Phase _phase = Phase.Loading;
     private Reseating _reseating = Reseating.Find;
     private uint _wand;
+    private uint _wandWcid;
     private double _runSeconds;
     private double _phaseStart;
     private string? _failure;
@@ -142,7 +143,11 @@ public sealed partial class BuffLegRunner : Node
         var dats = services.Dats ?? throw new InvalidOperationException("the buff leg needs the dats (Main checks for them first)");
         var key = host.Options.Account;
         var buffOptions = BuffOptions.FromArguments(CommandLineArgument.ParseAll(OS.GetCmdlineUserArgs()));
-        foreach (var error in buffOptions.Errors)
+        // M5 3 w1 (D46): the leg builds the kit of the --fight-ground (the den by default), as the fight leg does; a bad key is the leg's option error and keeps the default.
+        var fight = FightOptions.FromArguments(CommandLineArgument.ParseAll(OS.GetCmdlineUserArgs()));
+        var ground = fight.GroundProfile;
+        var errors = buffOptions.Errors.Concat(fight.Errors.Where(e => e.StartsWith("--fight-ground:", StringComparison.Ordinal))).ToList();
+        foreach (var error in errors)
         {
             Log.Error(LogCategory, "buff: " + error);
         }
@@ -155,7 +160,7 @@ public sealed partial class BuffLegRunner : Node
             _mode = mode,
             _ui = ui,
             _buffOptions = buffOptions,
-            _optionError = buffOptions.Errors.Count == 0 ? null : "bad buff option: " + string.Join("; ", buffOptions.Errors),
+            _optionError = errors.Count == 0 ? null : "bad buff option: " + string.Join("; ", errors),
             _shotPath = services.Options.Play.BuffShotPath,
         };
 
@@ -166,7 +171,7 @@ public sealed partial class BuffLegRunner : Node
             {
                 var table = SpellTableData.Load(dats);
                 var built = System.Diagnostics.Stopwatch.GetTimestamp();
-                var kit = GearKit.Build(table.Spells, LoginName(key));
+                var kit = GearKit.Build(table.Spells, LoginName(key), ground: ground);
                 return (table, kit, System.Diagnostics.Stopwatch.GetElapsedTime(built).TotalMilliseconds);
             },
             CancellationToken.None,
@@ -318,6 +323,7 @@ public sealed partial class BuffLegRunner : Node
             return;
         }
 
+        _wandWcid = _loading.Result.Kit.WandItem.Wcid; // M5 3 w1: the kit's wielded line (the ground's vendor Wand), never weenie 8552
         Go(Phase.Login);
     }
 
@@ -529,7 +535,7 @@ public sealed partial class BuffLegRunner : Node
         }
     }
 
-    private static bool IsWand(GameState state, uint guid) => state.Objects.TryGet(guid, out var o) && o.Weenie.WeenieClassId == GearKit.Wand.Wcid;
+    private bool IsWand(GameState state, uint guid) => state.Objects.TryGet(guid, out var o) && o.Weenie.WeenieClassId == _wandWcid;
 
     // ------------------------------------------------------------------------------------------------ the buff scenario
 

@@ -1,0 +1,128 @@
+{
+  "key": "low-b-belt",
+  "name": "Low B belt",
+  "kind": "outdoor",
+  "sources": {
+    "landblocks": "the cells below: the high word of each outdoor cell id (six landblocks: 0xA3B1, 0xA4B0, 0xA4B1, 0xA5AF, 0xA5B0, 0xA6AF), from today's HuntGround.LowB (M4 1.1 s4a)",
+    "arrival": "the first place of a hunt: outdoor.cells[0], at its stop point (HuntScenario.NextCell); an outdoor ground has no portal, so the heading is not used",
+    "walk": "not used by an outdoor ground: the hunt's cell travels are the travel seam's point goals (HuntScenario.NextCell, TravelPurpose.Cell), not a room-graph walk; these are the dungeon walk's defaults (no doorways, stop within 1.0 m, no dwell, a leg at most WayfindScenario.LegMarginSeconds = 300 s)",
+    "storeys": "none: an outdoor ground has no storeys",
+    "no_go": "none: the hunt keeps out of no cell by a list; it keeps to dry, walkable terrain (outdoor.cells[].terrain and HuntGround.SeekHeight)",
+    "targets": "none: an outdoor ground's creatures are outdoor.creatures and the hunt takes those in level_band; which classes a character will not fight is the character's (FighterTemplate.AvoidedTargets), not the ground's",
+    "level_band": "today's HuntGround.LowB band 8-20: ACE rolls a generator's children by cumulative probability, so the band is 8 to 20 (M4 1.1's SELECT, the correction of spec 5.9)",
+    "portal": "none: the hunt goes from Holtburg by a place or on foot, with no portal",
+    "home": "a measure (session.md section 41, M4 4.2 FS): Holtburg's lifestone in cell 0xA9B40019 and the known point (84, 7.7) off it, z 94 (TravelStations.HoltburgLifestone); the ground is hunted from Holtburg and returns there",
+    "vendors": "none: the hunt's selling and its kit buying are the journey's shop stations at Holtburg (HuntOptions, ShopStations), not this profile",
+    "spell_plan": "none: the hunters fight with a melee weapon or a bow (FighterTemplate); an outdoor ground has no spell plan",
+    "components": "none: no spell plan, no components",
+    "supplies": "none: an outdoor ground buys nothing from its profile (D48, m5-plan.md section 4.5 row m0): the hunters shop at the journey stations at Holtburg (HuntOptions, ShopStations) and carry no spell components, so the section is empty: no stock lines, no kit and a purse of 0; burden_trip_percent 90 is the section default and is not used by an outdoor ground",
+    "hold_spots": "none: today's hunt stands at its cells and holds no spot",
+    "respawn": "none listed: the creatures are ACE encounters, not placed generator instances with fixed guids (the pinned world SQL v0.9.296, encounter table: generator wcid 1999 \"Low B Aluvian Generator\" at nine of the ten cells, 2001 at 0xA4B10012, each child's delay 1200 s); ACE creates the generator at the spot when the landblock loads",
+    "tour": "none: the hunt visits outdoor.cells in their order",
+    "outdoor": "cells: today's HuntGround.LowB (M4 1.1 s4a: the cell ids and map coordinates from the pinned world SQL, nearest Holtburg first; terrain the dat test's finding of 2026-10-20, re-read by HuntingGroundDatTests) with the stop point at the cell's centre, (cell x * 24 + 12, cell y * 24 + 12), as the hunt has always placed, z 0 because the terrain height is read from the dats at the point and never copied; creatures: today's HuntGround.LowBTable (the pinned world SQL v0.9.296, generators 1999 and 2001 three levels down, 37 rows, levels 4 to 30), spawn_mass computed from the same SQL: the mean over the ten cells of the chance that one roll of the cell's encounter generator (cumulative probability rows, nested generators multiplied, a creature that is itself a generator counted with its young) spawns the creature; acquire_radius_m 60 is HuntScenario.MeleeRange (a missile hunt's 35 m is the weapon's, HuntScenario.MissileRange); cell_cap 8 is HuntScenario.OnFootMaxCells (the on-foot search's bound, M4 P5b fix FC-a3); expected_yield_per_spot is the sum of spawn_mass over the creatures in level_band"
+  },
+  "landblocks": [
+    "0xA3B1", "0xA4B0", "0xA4B1", "0xA5AF", "0xA5B0", "0xA6AF"
+  ],
+  "arrival": {
+    "cell": "0xA5B00032",
+    "origin": { "x": 156, "y": 36, "z": 0 },
+    "heading": {
+      "w": 1,
+      "z": 0
+    }
+  },
+  "walk": {
+    "doorway_lean": 0,
+    "stop_within_m": 1.0,
+    "stop_dwell_s": 0,
+    "leg_s": 300
+  },
+  "storeys": [],
+  "no_go": [],
+  "targets": [],
+  "level_band": {
+    "min": 8,
+    "max": 20
+  },
+  "portal": null,
+  "home": {
+    "town": "Holtburg",
+    "lifestone_cell": "0xA9B40019",
+    "lifestone_point": { "x": 84, "y": 7.7, "z": 94 }
+  },
+  "vendors": [],
+  "spell_plan": [],
+  "components": [],
+  "supplies": {
+    "stock": [],
+    "kit": [],
+    "burden_trip_percent": 90,
+    "purse": {
+      "coin": 0,
+      "notes": []
+    }
+  },
+  "hold_spots": [],
+  "respawn": {
+    "generators": [],
+    "slots": []
+  },
+  "tour": [],
+  "outdoor": {
+    "cells": [
+      { "cell": "0xA5B00032", "north": 38.95, "east": 30.65, "terrain": "dry", "spot": { "x": 156, "y": 36, "z": 0 } },
+      { "cell": "0xA4B0003F", "north": 39.45, "east": 29.95, "terrain": "dry", "spot": { "x": 180, "y": 156, "z": 0 } },
+      { "cell": "0xA5B0000C", "north": 39.15, "east": 30.15, "terrain": "dry", "spot": { "x": 36, "y": 84, "z": 0 } },
+      { "cell": "0xA4B0003E", "north": 39.35, "east": 29.95, "terrain": "dry", "spot": { "x": 180, "y": 132, "z": 0 } },
+      { "cell": "0xA6AF000D", "north": 38.45, "east": 30.95, "terrain": "dry", "spot": { "x": 36, "y": 108, "z": 0 } },
+      { "cell": "0xA4B1000E", "north": 40.15, "east": 29.35, "terrain": "dry", "spot": { "x": 36, "y": 132, "z": 0 } },
+      { "cell": "0xA6AF000C", "north": 38.35, "east": 30.95, "terrain": "dry", "spot": { "x": 36, "y": 84, "z": 0 } },
+      { "cell": "0xA5AF003D", "north": 38.45, "east": 30.75, "terrain": "dry", "spot": { "x": 180, "y": 108, "z": 0 } },
+      { "cell": "0xA4B10012", "north": 39.75, "east": 29.45, "terrain": "dry", "spot": { "x": 60, "y": 36, "z": 0 } },
+      { "cell": "0xA3B1003F", "north": 40.25, "east": 29.15, "terrain": "dry", "spot": { "x": 180, "y": 156, "z": 0 } }
+    ],
+    "creatures": [
+      { "wcid": 182, "name": "Auroch Yearling", "level": 4, "spawn_mass": 0.0376 },
+      { "wcid": 26684, "name": "Blood Shrethlet", "level": 7, "spawn_mass": 0.005 },
+      { "wcid": 6, "name": "Banderling Scout", "level": 8, "spawn_mass": 0.1238 },
+      { "wcid": 4110, "name": "Blood Shreth", "level": 8, "spawn_mass": 0.005 },
+      { "wcid": 215, "name": "Blue Phyntos Wasp", "level": 8, "spawn_mass": 0.1138 },
+      { "wcid": 192, "name": "Drudge Prowler", "level": 8, "spawn_mass": 0.010975 },
+      { "wcid": 1464, "name": "Drudge Robber", "level": 8, "spawn_mass": 0.000975 },
+      { "wcid": 7, "name": "Drudge Skulker", "level": 8, "spawn_mass": 0.010975 },
+      { "wcid": 193, "name": "Drudge Slinker", "level": 8, "spawn_mass": 0.01 },
+      { "wcid": 940, "name": "Drudge Sneaker", "level": 8, "spawn_mass": 0.010975 },
+      { "wcid": 7990, "name": "Field Ursuin", "level": 8, "spawn_mass": 0.049 },
+      { "wcid": 948, "name": "Mosswart Feeder", "level": 8, "spawn_mass": 0.003 },
+      { "wcid": 2612, "name": "Outcast Monouga", "level": 8, "spawn_mass": 0.1226 },
+      { "wcid": 12017, "name": "Red Phyntos Drone", "level": 8, "spawn_mass": 0.0031 },
+      { "wcid": 12, "name": "Red Phyntos Wasp", "level": 8, "spawn_mass": 0.0031 },
+      { "wcid": 223, "name": "Reedshark Pup", "level": 8, "spawn_mass": 0.01875 },
+      { "wcid": 6535, "name": "Small Shadow Child", "level": 8, "spawn_mass": 0.021 },
+      { "wcid": 20, "name": "Auroch Bull", "level": 9, "spawn_mass": 0.0047 },
+      { "wcid": 181, "name": "Auroch Cow", "level": 9, "spawn_mass": 0.0094 },
+      { "wcid": 26689, "name": "Field Ursuin Cub", "level": 9, "spawn_mass": 0.049 },
+      { "wcid": 26687, "name": "Hunter Shrethlet", "level": 11, "spawn_mass": 0.075 },
+      { "wcid": 221, "name": "Adult Reedshark", "level": 15, "spawn_mass": 0.01875 },
+      { "wcid": 937, "name": "Banderling Guard", "level": 15, "spawn_mass": 0.0141 },
+      { "wcid": 947, "name": "Barker Mosswart", "level": 15, "spawn_mass": 0.003 },
+      { "wcid": 1631, "name": "Drudge Servant", "level": 15, "spawn_mass": 0.0324 },
+      { "wcid": 1632, "name": "Drudge Slave", "level": 15, "spawn_mass": 0.0054 },
+      { "wcid": 11989, "name": "Drudge Vagabond", "level": 15, "spawn_mass": 0.0039 },
+      { "wcid": 4111, "name": "Hunter Shreth", "level": 15, "spawn_mass": 0.075 },
+      { "wcid": 1622, "name": "Mire Phyntos Wasp", "level": 15, "spawn_mass": 0.006 },
+      { "wcid": 211, "name": "Mudlurk Mosswart", "level": 15, "spawn_mass": 0.0455 },
+      { "wcid": 12004, "name": "Outcast Lord", "level": 15, "spawn_mass": 0.003 },
+      { "wcid": 18, "name": "Reedshark Elder", "level": 15, "spawn_mass": 0.01125 },
+      { "wcid": 222, "name": "Veteran Reedshark", "level": 15, "spawn_mass": 0.01875 },
+      { "wcid": 11537, "name": "Virtuous Doll", "level": 15, "spawn_mass": 0.014 },
+      { "wcid": 8010, "name": "Broken Fragment", "level": 20, "spawn_mass": 0.03 },
+      { "wcid": 946, "name": "Mite Squire", "level": 20, "spawn_mass": 0.054 },
+      { "wcid": 233, "name": "Tumerok Warrior", "level": 30, "spawn_mass": 0.0108 }
+    ],
+    "acquire_radius_m": 60,
+    "cell_cap": 8,
+    "expected_yield_per_spot": 0.9802
+  }
+}

@@ -7,9 +7,10 @@ namespace Lifestone.Client.RetailUi.LifestonePanels;
 
 /// <summary>
 /// The keys that open Lifestone's own panels (owner decision D41): <b>F7</b> toggles the tools panel and <b>Scroll Lock</b> opens the automation inspector; and (M4 4.1 lane c) <b>Pause</b> toggles the auto-buff
-/// (the re-buff driver, <c>--buff-auto</c>). All are keys retail's
+/// (the re-buff driver, <c>--buff-auto</c>); and (M5 4 h2, D20) <b>Num Lock</b> was the autopilot's toggle until M5 7 D145: the autopilot is started and stopped only by <c>/auto</c> and <c>/stop</c> in the chat now, so Num Lock
+/// stays Lifestone's key (bound here, so it reaches nothing of retail's) but only answers with a chat line saying so (<see cref="AutopilotKeyHint"/>). All are keys retail's
 /// default game map (KEYMAP <c>gmDefault</c>, MasterInputMap 0x14000000, <c>gmDefaultMap</c>) does not bind to anything, with or without Shift, Ctrl or Alt (and the engine map,
-/// KEYMAP <c>Default</c> 0x14000002, binds none of them either): F7, Scroll Lock and Pause are DirectInput scan codes 0x41, 0x46 and 0xC5, and F1-F6 and F8-F12 are all bound in <c>gmDefaultMap</c>
+/// KEYMAP <c>Default</c> 0x14000002, binds none of them either): F7, Scroll Lock, Pause and Num Lock are DirectInput scan codes 0x41, 0x46, 0xC5 and 0x45, and F1-F6 and F8-F12 are all bound in <c>gmDefaultMap</c>
 /// (<c>LifestoneHotkeysTests</c> proves it over the dats). They were free in M1 too (F7 was the interiors' debug key, dropped in play mode by D41).
 /// </summary>
 /// <remarks>
@@ -41,6 +42,18 @@ public sealed class LifestoneHotkeys : IInputActionSink
     /// <summary>The inspector key: Scroll Lock, DirectInput scan code 0x46.</summary>
     public const int InspectorKey = DikScanCodes.Scroll;
 
+    /// <summary>The action of Num Lock: the autopilot's toggle from M5 4 h2 (D20) to M5 7 D145; since D145 it does nothing to the autopilot and only answers with a hint (<see cref="AutopilotKeyHint"/>).</summary>
+    public const uint AutopilotAction = 0x7F000004;
+
+    /// <summary>M5 7 D145: the hint a Num Lock press shows in the chat (the play host wires <see cref="AutopilotKeyHint"/> to show it).</summary>
+    public const string AutopilotKeyHintLine = "Lifestone: Num Lock no longer starts or stops the autopilot; type /auto or /stop in the chat.";
+
+    /// <summary>
+    /// The autopilot key: Num Lock, DirectInput scan code 0x45. The first of the candidates D20 ordered that retail's maps leave unbound (the unbound keyboard keys of 0x14000000 and 0x14000002 are the right Shift, Caps Lock,
+    /// F7, Num Lock, Scroll Lock, numpad 7/9/1/3, the 102nd key, Sys Rq, Pause and the Apps key; Insert, Home, End, Page Up and Page Down are all bound). <c>LifestoneHotkeysTests</c> proves it over the dats, in every input map.
+    /// </summary>
+    public const int AutopilotKey = DikScanCodes.NumLock;
+
     /// <summary>The priority the hotkeys are registered at: above a focused text's maps (<see cref="UiElementManager.FocusInputMapPriority"/>), so typing in the panel's own field does not eat them.</summary>
     public const int Priority = UiElementManager.FocusInputMapPriority + 500;
 
@@ -56,12 +69,13 @@ public sealed class LifestoneHotkeys : IInputActionSink
         _log = log;
     }
 
-    /// <summary>Lifestone's bindings: F7 to <see cref="OpenToolsAction"/>, Scroll Lock to <see cref="OpenInspectorAction"/>, Pause to <see cref="AutoBuffAction"/>, no meta keys.</summary>
+    /// <summary>Lifestone's bindings: F7 to <see cref="OpenToolsAction"/>, Scroll Lock to <see cref="OpenInspectorAction"/>, Pause to <see cref="AutoBuffAction"/>, Num Lock to <see cref="AutopilotAction"/>, no meta keys.</summary>
     public static IReadOnlyList<RetailBinding> Bindings { get; } =
     [
         new(InputMap, OpenToolsAction, RetailKeyBindings.Keyboard(ToolsKey), 0, FunctionKeyActivation),
         new(InputMap, OpenInspectorAction, RetailKeyBindings.Keyboard(InspectorKey), 0, FunctionKeyActivation),
         new(InputMap, AutoBuffAction, RetailKeyBindings.Keyboard(AutoBuffKey), 0, FunctionKeyActivation),
+        new(InputMap, AutopilotAction, RetailKeyBindings.Keyboard(AutopilotKey), 0, FunctionKeyActivation),
     ];
 
     /// <summary>Called when F7 is pressed (the tools panel's toggle).</summary>
@@ -72,6 +86,12 @@ public sealed class LifestoneHotkeys : IInputActionSink
 
     /// <summary>Called when Pause is pressed (the auto-buff's toggle, wired by the play host); null until the host wires it.</summary>
     public Action? ToggleAutoBuff { get; set; }
+
+    /// <summary>M5 7 D145: called when Num Lock is pressed, with <see cref="AutopilotKeyHintLine"/> (the play host shows it in the chat); null: the press is only logged. It never reaches the autopilot.</summary>
+    public Action<string>? AutopilotKeyHint { get; set; }
+
+    /// <summary>How many times Num Lock was pressed.</summary>
+    public int AutopilotPresses { get; private set; }
 
     /// <summary>How many times Pause was pressed.</summary>
     public int AutoBuffPresses { get; private set; }
@@ -91,7 +111,7 @@ public sealed class LifestoneHotkeys : IInputActionSink
         ArgumentNullException.ThrowIfNull(router);
         if (router.Bindings is not { } current)
         {
-            _log.Error("lifestone", "F7, Scroll Lock and Pause are registered but the host has set no key bindings on the router yet, so they do nothing until it does (TODO(g7-hotkeys-unbound))");
+            _log.Error("lifestone", "F7, Scroll Lock, Pause and Num Lock are registered but the host has set no key bindings on the router yet, so they do nothing until it does (TODO(g7-hotkeys-unbound))");
         }
         else if (!current.Bindings.Contains(Bindings[0]))
         {
@@ -158,6 +178,11 @@ public sealed class LifestoneHotkeys : IInputActionSink
                     _log.Warn("lifestone", "Pause (the auto-buff toggle) was pressed but nothing is wired to it (TODO(m4-autobuff-key-unwired): the play host wires ToggleAutoBuff when it starts)");
                 }
 
+                return true;
+            case AutopilotAction:
+                AutopilotPresses++;
+                _log.Info("lifestone", "Num Lock was pressed: it does nothing to the autopilot since M5 7 D145 (/auto and /stop in the chat are its controls); " + (AutopilotKeyHint is null ? "no hint is wired" : "the hint is shown in the chat"));
+                AutopilotKeyHint?.Invoke(AutopilotKeyHintLine);
                 return true;
             default:
                 return false;

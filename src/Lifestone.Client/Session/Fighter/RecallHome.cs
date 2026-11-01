@@ -1,5 +1,6 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
@@ -28,7 +29,7 @@ public enum RecallStatus
 /// caster in (<see cref="CasterSwap"/>, <see cref="SwapDirection.In"/>: the weapon and ammunition to the pack, the caster wielded, the magic mode) and swaps back out when it has arrived (or when the recall failed after the swap in);
 /// BSD Mage wields its wand already and casts alone (the magic mode is entered only when it is not in it). P5b's stations call it between stations; nothing here wires a journey.
 /// <para>M4 P5b J1: the spell and the destination's landblock are parameters (defaults Lifestone Recall 1635 and Holtburg 0xA9B4), so Primary Portal Recall (spell 48, <see cref="PrimaryPortalRecallSpell"/>) to the tied portal's destination
-/// (the Black Spawn Den, landblock 0x0105, <see cref="DenLandblock"/>) runs the same steps; the journey's travel seam (<c>JourneyTravel</c>) uses both.</para>
+/// (the Black Spawn Den, landblock 0x0105; the caller passes the ground's arrival landblock, <c>GroundRules.ArrivalLandblock</c>) runs the same steps; the journey's travel seam (<c>JourneyTravel</c>) uses both.</para>
 /// </summary>
 /// <remarks>
 /// <para><b>Steps and the failure name.</b> The steps are <c>present</c> (the character must be in the world and not in portal space), <c>swap-in</c>, <c>spell</c> (the spellbook, once the description has arrived, lacks spell 1635), <c>mode</c>
@@ -55,9 +56,6 @@ public sealed class RecallHome : IDisposable
     /// <summary>Primary Portal Recall (Item Enchantment): ACE teleports to the tied portal's destination 2 s after the cast, or answers 0x04A3 when no portal is tied (M4 P5b W0, pinned live).</summary>
     public const uint PrimaryPortalRecallSpell = 48;
 
-    /// <summary>The landblock of the Black Spawn Den's arrival (the den portal's destination, cell 0x01050375): where Primary Portal Recall lands once the den portal is tied (M4 P5b W0).</summary>
-    public const uint DenLandblock = 0x0105;
-
     /// <summary>The landblock of Holtburg's lifestone (the BSD Mage's bind, M3 D34; the fighters bind there too in P5b's first station).</summary>
     public const uint HoltburgLandblock = 0xA9B4;
 
@@ -70,6 +68,9 @@ public sealed class RecallHome : IDisposable
     /// <summary>Seconds one whole recall may take, swap halves included.</summary>
     public const double MaxSeconds = 150.0;
 
+    /// <summary>The <see cref="Failure"/> step of a recall the kill switch stopped (<c>recall:kill-switch</c>, M5 D13).</summary>
+    public const string KillSwitchStep = "kill-switch";
+
     /// <summary>The fizzles one recall retries (a named cap, not retail's: Lifestone's own); the next fizzle fails the recall <c>recall:cast</c>. At the 0.9 chance rule five in a row is one in a hundred thousand.</summary>
     public const int MaxFizzles = 5;
 
@@ -79,8 +80,13 @@ public sealed class RecallHome : IDisposable
     /// </summary>
     public const double BusyWaitSeconds = 15.0;
 
+    /// <summary>The cast's retry rules (M5 item 1 lane K4, D13): <see cref="CastRules.Travel(int)"/> of <see cref="MaxFizzles"/> same-level retries, sent at once with no mana check between them, as the recall always did.</summary>
+    private static readonly CastRules FizzleRules = CastRules.Travel(MaxFizzles);
+
     private readonly IGameSessionView _session;
     private readonly IActionApi _actions;
+    private readonly CastAttempt _attempt;
+    private readonly uint[] _castIds;
     private readonly GameState _state;
     private readonly CasterSwap? _swap;
     private readonly uint _homeLandblock;
@@ -92,6 +98,8 @@ public sealed class RecallHome : IDisposable
 
     private Phase _phase;
     private ActionHandle? _pending;
+    private bool _casting;
+    private int _fizzlesSeen;
     private double _started;
     private double _castEnded;
     private double _teleportSeenAt;
@@ -129,6 +137,8 @@ public sealed class RecallHome : IDisposable
         _state = session.State;
         _swap = swap;
         _log = log ?? throw new ArgumentNullException(nameof(log));
+        _attempt = new CastAttempt(session.Actions, session.State, log);
+        _castIds = [spellId];
         _homeLandblock = homeLandblock & 0xFFFF;
         _spell = spellId;
         _spellName = SpellName(spellId);
@@ -233,6 +243,9 @@ public sealed class RecallHome : IDisposable
         _busySince = double.NaN;
         _swapIn = false;
         _pending = null;
+        _rearm = null;
+        _rearmed = false;
+        _casting = false;
         _started = now;
         Status = RecallStatus.Running;
         _log.Info(LogCategory, "recall: begin " + _spellName + (_swap is null ? string.Empty : " (with the caster swap)"));
@@ -267,6 +280,13 @@ public sealed class RecallHome : IDisposable
         if (now - _started > MaxSeconds && _phase != Phase.SwapOut)
         {
             return Fail("teleport", $"the whole recall took more than {MaxSeconds:0} s", now);
+        }
+
+        if (_actions.KillSwitch && (_phase is Phase.SwapIn or Phase.Mode || (_phase == Phase.Cast && !_casting)))
+        {
+            // M5 D13: the recall's mode change and cast are automation, so the kill switch stops the recall before it sends them. The caster swap is not restored (its halves are the swap's own, not the kill switch's to stop, and
+            // restoring is a send); a cast already in flight finishes and is judged by the attempt (Cancelled once it does).
+            return EndFailed(KillSwitchStep, "the kill switch is on: the recall sends nothing more", now, restore: false);
         }
 
         switch (_phase)
@@ -325,9 +345,34 @@ public sealed class RecallHome : IDisposable
             return Status;
         }
 
+        if (_rearm is { } rearm)
+        {
+            if (rearm.Outcome is not { } wielded)
+            {
+                return Status;
+            }
+
+            _rearm = null;
+            _log.Info(LogCategory, $"recall: rearm: {Describe(wielded)}; a caster held now: {(HeldCaster.Held(_state) ? "yes" : "no")}");
+        }
+
         if (_pending is null)
         {
-            _pending = _actions.SetCombatMode(CombatMode.Magic);
+            // M5 7 D139 (l): ACE answers a magic mode with no caster held by setting peace (Player_Combat.cs 872-882), so the mage wields the best caster of its packs first, once per recall (a fighter's caster is the swap's).
+            if (_swap is null && !_rearmed && CombatModeGuard.Read(_state) is { Caster: null, Unknown: 0 })
+            {
+                _rearmed = true;
+                if (HeldCaster.Rearm(_state, new SelfEquipJudge([], 0, _ => null), out var why) is not { } caster)
+                {
+                    return Fail("mode", "no caster held: " + why, now);
+                }
+
+                _log.Info(LogCategory, "recall: no caster held: wield " + why + " before the magic mode");
+                _rearm = _actions.Wield(caster.Guid, (EquipMask)SelfEquipJudge.Held, ActionSource.Automation);
+                return Status;
+            }
+
+            _pending = _actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation);
             return Status;
         }
 
@@ -345,9 +390,12 @@ public sealed class RecallHome : IDisposable
         return Status;
     }
 
+    private ActionHandle? _rearm;
+    private bool _rearmed;
+
     private RecallStatus StepCast(double now)
     {
-        if (_pending is null)
+        if (!_casting)
         {
             // FC-a1: ACE answers a cast sent into the player's busy chain (a corpse pickup's return stance, a heal's Ready) 0x001D; wait for the Action API's rule to clear, bounded, then cast once. A 0x001D after that is a failure.
             if (_actions.BusyReason is { } busy)
@@ -370,33 +418,35 @@ public sealed class RecallHome : IDisposable
             }
 
             _log.Info(LogCategory, "recall: casting " + _spellName + " (" + _spell.ToString(CultureInfo.InvariantCulture) + ")");
-            _pending = _actions.Cast(_spell);
+            _casting = true;
+            _fizzlesSeen = 0;
+            _attempt.Start(new CastRequest { Levels = _castIds, Rules = FizzleRules, Purpose = "recall " + _spellName }, now);
             return Status;
         }
 
         if (_refusal != 0 && NameOfRefusal(_refusal) is { } named)
         {
             // ACE told the refusal as a WeenieError chat line; the cast's own outcome follows (UseDone).
+            _casting = false;
+            _attempt.Stop("ACE refused: " + named, now);
             return Fail("cast", "ACE refused: " + named, now);
         }
 
-        if (_pending.Outcome is not { } outcome)
+        // P5a-R4: a fizzle is counted and the cast retried inside the cap, not a failed recall (the same rule as the harm-heal script's); the retries are the attempt's now (Travel: MaxFizzles of them, sent at once).
+        var running = _attempt.Step(now) == CastEnd.Running;
+        NoteFizzles(_attempt.Report.Fizzles);
+        if (running)
         {
             return Status;
         }
 
-        _pending = null;
-        if (outcome.Kind == ActionOutcomeKind.ServerError && outcome.Code == GearCasts.FizzleCode)
+        _casting = false;
+        var report = _attempt.Report;
+        var last = _attempt.LastOutcome;
+        var described = last is { } outcome ? Describe(outcome) : $"{report.End.Name()}: {report.Why}";
+        if (report.End == CastEnd.Fizzled)
         {
-            // P5a-R4: a fizzle is counted and the cast retried inside the cap, not a failed recall (the same rule as the harm-heal script's).
-            _fizzles++;
-            if (++_fizzlesThisRecall > MaxFizzles)
-            {
-                return Fail("cast", $"{_spellName} fizzled {_fizzlesThisRecall} times in one recall, over the cap of {MaxFizzles}: " + Describe(outcome), now);
-            }
-
-            _log.Warn(LogCategory, $"recall: {_spellName} fizzled (fizzle {_fizzlesThisRecall} of at most {MaxFizzles}); casting again");
-            return Status;
+            return Fail("cast", $"{_spellName} fizzled {_fizzlesThisRecall} times in one recall, over the cap of {MaxFizzles}: " + described, now);
         }
 
         if (_refusal != 0)
@@ -404,14 +454,33 @@ public sealed class RecallHome : IDisposable
             return Fail("cast", "ACE refused: " + (NameOfRefusal(_refusal) ?? "WeenieError 0x" + _refusal.ToString("X4", CultureInfo.InvariantCulture)), now);
         }
 
-        if (!outcome.Succeeded)
+        if (report.End == CastEnd.Cancelled && _actions.KillSwitch)
         {
-            return Fail("cast", Describe(outcome), now);
+            return EndFailed(KillSwitchStep, "the kill switch is on: the recall sends nothing more (" + report.Why + ")", now, restore: false);
+        }
+
+        if (!report.End.Succeeded())
+        {
+            return Fail("cast", described, now);
         }
 
         _castEnded = now;
         _phase = Phase.Teleport;
         return Status;
+    }
+
+    // Counts and logs each fizzle the attempt has met since the last look (one line a fizzle, as when each was its own cast); the one over the cap fails the recall instead of retrying.
+    private void NoteFizzles(int total)
+    {
+        while (_fizzlesSeen < total)
+        {
+            _fizzlesSeen++;
+            _fizzles++;
+            if (++_fizzlesThisRecall <= MaxFizzles)
+            {
+                _log.Warn(LogCategory, $"recall: {_spellName} fizzled (fizzle {_fizzlesThisRecall} of at most {MaxFizzles}); casting again");
+            }
+        }
     }
 
     private RecallStatus StepTeleport(double now)
@@ -482,6 +551,8 @@ public sealed class RecallHome : IDisposable
         _firstFailure ??= "recall:" + step;
         _firstDetail ??= detail;
         _log.Error(LogCategory, $"recall: failed at {step}: {detail}");
+        _casting = false;
+        _attempt.Stop("the recall failed at " + step, now);
         if (restore && _swap is not null && _swapIn && _phase != Phase.SwapOut)
         {
             _phase = Phase.SwapOut;

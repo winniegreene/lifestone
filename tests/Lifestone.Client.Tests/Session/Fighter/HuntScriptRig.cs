@@ -411,6 +411,25 @@ internal sealed partial class HuntScriptRig : IDisposable
         Sink.OnCreateObject(Ctx, new CreateObjectMsg(guid, ModelData.Empty, physics, weenie), isUpdate: false);
     }
 
+    /// <summary>
+    /// M5 7 P7u: the placed creature <paramref name="guid"/> attacks the player every <paramref name="every"/> seconds while it lives, for <paramref name="forSeconds"/> at most: each attack is an 0x01B4 EvasionDefenderNotification
+    /// ("You evaded X!"), as the item-end gate's log heard the wasp and the drudge (the blows never land: the player's health is the test's own).
+    /// </summary>
+    public void AttacksPlayer(uint guid, double every = 1.0, double forSeconds = double.PositiveInfinity)
+    {
+        var until = Now + forSeconds;
+        void Next()
+        {
+            if (_creatures.TryGetValue(guid, out var creature) && !creature.Dead && Now <= until)
+            {
+                Sink.OnEvasionDefenderNotification(Ctx, Header(0x01B4), new EvasionDefenderNotificationEvent(creature.Name));
+                At(every, Next);
+            }
+        }
+
+        At(0, Next);
+    }
+
     /// <summary>Gives the next corpse these items (name, wcid) instead of the default Bowl and Smock.</summary>
     public List<(string Name, uint Wcid, uint ItemType, uint Value)>? CorpseLoot { get; set; }
 

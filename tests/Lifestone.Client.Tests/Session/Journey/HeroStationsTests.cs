@@ -1,3 +1,4 @@
+using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
 
 namespace Lifestone.Client.Tests.Session.Journey;
@@ -41,9 +42,12 @@ public sealed class HeroStationsTests
     [Fact]
     public void A_filmed_hero_journey_opens_the_attributes_during_the_deaths_rebuff_and_the_inventory_while_a_hunt_loots()
     {
-        Assert.Equal(HeroPanels.CharacterInfo, HeroPanels.Want(StationKinds.Death, "rebuff", false));
+        Assert.Equal(HeroPanels.CharacterInfo, HeroPanels.Want(StationKinds.Death, DeathScenario.HandlerStagePrefix + "rebuff", false)); // M5 3 d4: the stage the live scenario reports is handler-rebuff
+        Assert.Equal("handler-rebuff", DeathScenario.HandlerStagePrefix + "rebuff");
+        Assert.Equal(0u, HeroPanels.Want(StationKinds.Death, "rebuff", false)); // the retired M4 name no longer opens it
+        Assert.Equal(0u, HeroPanels.Want(StationKinds.Death, DeathScenario.HandlerStagePrefix + "relines", false));
         Assert.Equal(0u, HeroPanels.Want(StationKinds.Death, "death-wait", false));
-        Assert.Equal(0u, HeroPanels.Want(StationKinds.Death, "corpse", true)); // the death's own corpse trip is not the hunt's loot
+        Assert.Equal(0u, HeroPanels.Want(StationKinds.Death, DeathScenario.HandlerStagePrefix + "corpse-loot", true)); // the death's own corpse trip is not the hunt's loot
         Assert.Equal(HeroPanels.Inventory, HeroPanels.Want(JourneyStationNames.Hunt, null, true));
         Assert.Equal(0u, HeroPanels.Want(JourneyStationNames.Hunt, null, false));
         Assert.Equal(0u, HeroPanels.Want(StationKinds.Vendor, null, true)); // the vendor window opens itself

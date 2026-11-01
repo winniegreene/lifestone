@@ -20,10 +20,20 @@ internal sealed class SpellTableHost
 {
     private volatile IReadOnlyDictionary<uint, SpellInfo>? _spells;
     private volatile IReadOnlyDictionary<uint, uint>? _setups;
+    private readonly SetsBox _sets = new();
 
-    private SpellTableHost(Func<IReadOnlyDictionary<uint, SpellInfo>> loadSpells, Func<IReadOnlyDictionary<uint, uint>?> loadSetups, ILogSink log, TimeProvider time)
+    private SpellTableHost(Func<IReadOnlyDictionary<uint, SpellInfo>> loadSpells, Func<IReadOnlyDictionary<uint, uint>?> loadSetups, ILogSink log, TimeProvider time, SetsBox? sets = null)
     {
+        _sets = sets ?? new SetsBox();
         Loaded = Task.Run(() => Load(loadSpells, loadSetups, log, time));
+    }
+
+    /// <summary>The SpellTable's equipment sets (set id, then the piece count, then the spells cast), or null before the load or without one (M5 7 D137).</summary>
+    internal IReadOnlyDictionary<uint, IReadOnlyDictionary<uint, IReadOnlyList<uint>>>? SpellSets => _spells is null ? null : _sets.Value;
+
+    private sealed class SetsBox
+    {
+        public volatile IReadOnlyDictionary<uint, IReadOnlyDictionary<uint, IReadOnlyList<uint>>>? Value;
     }
 
     /// <summary>Completes when the worker has finished (loaded or failed; never faults).</summary>
@@ -39,7 +49,19 @@ internal sealed class SpellTableHost
     internal static SpellTableHost Start(DatSet dats, ILogSink log, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(dats);
-        return Start(() => SpellTableData.Load(dats).Spells, LoadProjectileSetups, log, time);
+        var sets = new SetsBox();
+        var host = new SpellTableHost(
+            () =>
+            {
+                var table = SpellTableData.Load(dats);
+                sets.Value = table.SpellSets; // M5 7 D137: the equipment sets the examine window's set details read (published with the spells)
+                return table.Spells;
+            },
+            LoadProjectileSetups,
+            log,
+            time,
+            sets);
+        return host;
     }
 
     /// <summary>Starts the two loads on a worker (the seam the tests use: neither runs on the calling thread).</summary>

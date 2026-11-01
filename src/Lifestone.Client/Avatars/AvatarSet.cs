@@ -5,6 +5,7 @@ using System.Numerics;
 using Lifestone.Client.Audio;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Interiors;
+using Lifestone.Client.Physics;
 using Lifestone.Client.PortalSpace;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.Animation;
@@ -70,7 +71,13 @@ public enum AvatarNoticeKind
 /// <param name="Kind">What happened.</param>
 /// <param name="Guid">The object.</param>
 /// <param name="Detail">Why, for failures and problems.</param>
-public readonly record struct AvatarNotice(AvatarNoticeKind Kind, uint Guid, string? Detail = null);
+/// <param name="Name">The object's name for a Created, Recreated or Deleted notice (M5 7 F17: the host's object lines), else null.</param>
+/// <param name="Distance">The metres from the player at that moment for those notices, or <see cref="UnknownDistance"/> (no player yet, or the object has no place).</param>
+public readonly record struct AvatarNotice(AvatarNoticeKind Kind, uint Guid, string? Detail = null, string? Name = null, float Distance = AvatarNotice.UnknownDistance)
+{
+    /// <summary>The distance of a notice that has none.</summary>
+    public const float UnknownDistance = -1f;
+}
 
 /// <summary>Counters of the avatar set; every unknown and every ignored message is counted, never silently dropped.</summary>
 public sealed class AvatarStats
@@ -202,6 +209,33 @@ public sealed class AvatarStats
     /// <summary>Server objects drawn somewhere and back on consecutive frames, by position or by pose (the hero takes' flicker, <see cref="AvatarJumpWatch"/>).</summary>
     public long CreatureFlips { get; internal set; }
 
+    /// <summary>Blips (the interpolation manager gave up on a server position and the body was placed there) caused by a player's object holding the body back (M5 item 5 F4; the blip counters by cause).</summary>
+    public long BlipsByPlayer { get; internal set; }
+
+    /// <summary>Blips after another creature held the body back.</summary>
+    public long BlipsByCreature { get; internal set; }
+
+    /// <summary>Blips after another object (a door, a lifestone) held the body back.</summary>
+    public long BlipsByObject { get; internal set; }
+
+    /// <summary>Blips after the environment (terrain, a building, a cell's walls) held the body back.</summary>
+    public long BlipsByEnvironment { get; internal set; }
+
+    /// <summary>Blips after only a refused step-up or edge slide was recorded.</summary>
+    public long BlipsByStep { get; internal set; }
+
+    /// <summary>Blips with no short transition before them (the body was not held back by anything the transitions met: unhosted, or slow for another reason).</summary>
+    public long BlipsUnexplained { get; internal set; }
+
+    /// <summary>Held-back reports written (<c>TODO(m5-creature-held-back)</c>, at most <see cref="AvatarSet.MaxHeldBackLogs"/>).</summary>
+    public long HeldBackLogged { get; internal set; }
+
+    /// <summary>Held-back reports only counted: past the session's limit, inside a creature's 5 s, or with debug logging off.</summary>
+    public long HeldBackCounted { get; internal set; }
+
+    /// <summary>The blip counters by cause in one read.</summary>
+    public AvatarBlipCauses BlipCauses => new(BlipsByPlayer, BlipsByCreature, BlipsByObject, BlipsByEnvironment, BlipsByStep, BlipsUnexplained);
+
     /// <summary>Avatars stepped by the last advance.</summary>
     public int SteppedLastFrame { get; internal set; }
 
@@ -213,6 +247,123 @@ public sealed class AvatarStats
 
     /// <summary>Whether the last advance stepped every avatar before its deadline.</summary>
     public bool LastFrameComplete { get; internal set; } = true;
+
+    /// <summary>Server-object transitions run by the last advance (M5 item 5, D45: one per hosted object whose origin moved, per step).</summary>
+    public int TransitionsLastFrame { get; internal set; }
+
+    /// <summary>Server-object transitions run since the set was made.</summary>
+    public long Transitions { get; internal set; }
+
+    /// <summary>The time the last advance spent in server-object transitions, in <see cref="Stopwatch"/> ticks (summed over the avatars).</summary>
+    public long TransitionTicksLastFrame { get; internal set; }
+
+    /// <summary>The most any one advance spent in server-object transitions, in <see cref="Stopwatch"/> ticks (a running maximum).</summary>
+    public long TransitionTicksMax { get; internal set; }
+
+    /// <summary>The most server-object transitions any one advance ran.</summary>
+    public int TransitionsMax { get; internal set; }
+
+    /// <summary>The time the last advance spent in server-object transitions, in milliseconds.</summary>
+    public double TransitionMsLastFrame => TransitionTicksLastFrame * 1000.0 / Stopwatch.Frequency;
+
+    /// <summary>The most any one advance spent in server-object transitions, in milliseconds.</summary>
+    public double TransitionMsMax => TransitionTicksMax * 1000.0 / Stopwatch.Frequency;
+
+    /// <summary>Placements (a teleport, a far position, a blip) the host's object found no valid position for: the avatar stayed where it was, as retail's does.</summary>
+    public long PlacementsRefused { get; internal set; }
+
+    /// <summary>Advances run since the set was made (the frames the means of <see cref="PhysicsCost"/> divide by).</summary>
+    public long Advances { get; internal set; }
+
+    /// <summary>The time all advances spent in server-object transitions, in <see cref="Stopwatch"/> ticks.</summary>
+    public long TransitionTicks { get; internal set; }
+
+    /// <summary>
+    /// Sliding placements through the host's objects in the last advance (M5 item 5 F1, 5-R6): the avatars' teleports, far positions and blips
+    /// (refused ones too: a blocked creature's blip is asked again every frame, as retail's <c>InterpolationManager::UseTime</c> asks), and the creates passed to the host (its
+    /// <c>enter_world</c>, or nothing for an object without collision) since the advance before.
+    /// </summary>
+    public int PlacementsLastFrame { get; internal set; }
+
+    /// <summary>Sliding placements since the set was made.</summary>
+    public long Placements { get; internal set; }
+
+    /// <summary>The time the last advance spent in sliding placements, in <see cref="Stopwatch"/> ticks.</summary>
+    public long PlacementTicksLastFrame { get; internal set; }
+
+    /// <summary>The most any one advance spent in sliding placements, in <see cref="Stopwatch"/> ticks (a running maximum).</summary>
+    public long PlacementTicksMax { get; internal set; }
+
+    /// <summary>The time all advances spent in sliding placements, in <see cref="Stopwatch"/> ticks.</summary>
+    public long PlacementTicks { get; internal set; }
+
+    /// <summary>The time the last advance spent in sliding placements, in milliseconds.</summary>
+    public double PlacementMsLastFrame => PlacementTicksLastFrame * 1000.0 / Stopwatch.Frequency;
+
+    /// <summary>The most any one advance spent in sliding placements, in milliseconds.</summary>
+    public double PlacementMsMax => PlacementTicksMax * 1000.0 / Stopwatch.Frequency;
+
+    /// <summary>The frame's physics cost and jump counts in one read (for a host's report line; a copy, allocates nothing).</summary>
+    public AvatarPhysicsCost PhysicsCost => new(
+        TransitionsLastFrame,
+        TransitionMsLastFrame,
+        TransitionMsMax,
+        Advances > 0 ? TransitionTicks * 1000.0 / Stopwatch.Frequency / Advances : 0.0,
+        PlacementsLastFrame,
+        PlacementMsLastFrame,
+        PlacementMsMax,
+        Advances > 0 ? PlacementTicks * 1000.0 / Stopwatch.Frequency / Advances : 0.0,
+        PlacementsRefused,
+        CreatureJumps,
+        CreatureFlips,
+        BlipCauses);
+}
+
+/// <summary>
+/// The avatars' physics cost (M5 item 5 F1, 5-R6 and the lead's #9): the server-object transitions and the sliding placements, the last frame's,
+/// the most in any frame and the mean per frame (milliseconds), with the refused placements and the jump watch's counts, read in one call
+/// (<see cref="AvatarStats.PhysicsCost"/>).
+/// </summary>
+/// <param name="Transitions">Transitions in the last advance.</param>
+/// <param name="TransitionMs">Their time in the last advance.</param>
+/// <param name="TransitionMsMax">The most in any advance.</param>
+/// <param name="TransitionMsMean">The mean per advance.</param>
+/// <param name="Placements">Sliding placements in the last advance (the creates since the advance before included).</param>
+/// <param name="PlacementMs">Their time in the last advance.</param>
+/// <param name="PlacementMsMax">The most in any advance.</param>
+/// <param name="PlacementMsMean">The mean per advance.</param>
+/// <param name="PlacementsRefused">Placements refused since the set was made.</param>
+/// <param name="CreatureJumps">Jumps the watch counted (<see cref="AvatarStats.CreatureJumps"/>).</param>
+/// <param name="CreatureFlips">Flips the watch counted (<see cref="AvatarStats.CreatureFlips"/>).</param>
+/// <param name="Blips">Blips by what held the body back (<see cref="AvatarStats.BlipCauses"/>).</param>
+public readonly record struct AvatarPhysicsCost(
+    int Transitions,
+    double TransitionMs,
+    double TransitionMsMax,
+    double TransitionMsMean,
+    int Placements,
+    double PlacementMs,
+    double PlacementMsMax,
+    double PlacementMsMean,
+    long PlacementsRefused,
+    long CreatureJumps,
+    long CreatureFlips,
+    AvatarBlipCauses Blips = default);
+
+/// <summary>Blips since the set was made, by what held the body back in the transitions before it (M5 item 5 F4; a body blipped with no short transition before it is <paramref name="None"/>).</summary>
+/// <param name="Player">A player's object.</param>
+/// <param name="Creature">Another creature.</param>
+/// <param name="Object">Another object (a door, a lifestone).</param>
+/// <param name="Environment">Terrain, a building or a cell's walls.</param>
+/// <param name="Step">Only a refused step or edge.</param>
+/// <param name="None">No short transition before the blip.</param>
+public readonly record struct AvatarBlipCauses(long Player, long Creature, long Object, long Environment, long Step, long None)
+{
+    /// <summary>All blips counted.</summary>
+    public long Total => Player + Creature + Object + Environment + Step + None;
+
+    /// <summary>The counts as one report token: <c>player=0 creature=2 object=0 env=3 step=0 none=1</c>.</summary>
+    public override string ToString() => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"player={Player} creature={Creature} object={Object} env={Environment} step={Step} none={None}");
 }
 
 /// <summary>One avatar of the set: its body and what drawing it needs.</summary>
@@ -303,6 +454,12 @@ public sealed class AvatarSet : ITargetWorld
     private const string LogCategory = "avatars";
 
     private readonly ILogSink _log;
+    private IServerObjectPhysics? _serverObjects;
+    private bool _serverObjectTransitions = true;
+    private bool _missileTransitionsLogged;
+    private bool _remoteContactLogged;
+    private long _createPlacementTicks;
+    private int _createPlacements;
     private readonly int _seed;
     private readonly Dictionary<uint, Avatar> _avatars = [];
     private readonly List<Avatar> _order = [];
@@ -319,9 +476,16 @@ public sealed class AvatarSet : ITargetWorld
     private bool _lightSourcesFullLogged;
     private bool _multiLightLogged;
     private long _jumpsLogged;
+    private long _heldBackLogged;
 
     /// <summary>How many jumps and flips <see cref="AvatarJumpWatch"/> logs before it only counts them (<see cref="AvatarStats.CreatureJumps"/>, <see cref="AvatarStats.CreatureFlips"/>).</summary>
     public const int MaxJumpLogs = 40;
+
+    /// <summary>How many held-back reports are written in a session before they are only counted (<c>TODO(m5-creature-held-back)</c>).</summary>
+    public const int MaxHeldBackLogs = 40;
+
+    /// <summary>The least time between two held-back reports of one creature, in seconds.</summary>
+    public const double HeldBackLogSeconds = 5.0;
 
     /// <param name="sources">The dats.</param>
     /// <param name="log">The log, or none.</param>
@@ -371,6 +535,38 @@ public sealed class AvatarSet : ITargetWorld
     /// Clamps grounded objects to the ground under them (owner decision D24, <c>--remote-ground-clamp</c>); null is off.
     /// </summary>
     public IGroundProbe? GroundProbe { get; set; }
+
+    /// <summary>
+    /// The server-object physics host the set feeds (M5 D70): creates, moves (the server's and the avatars' own steps),
+    /// state changes, parenting, pickups and deletes, so doors, lifestones, NPCs and creatures stop the player's
+    /// transitions; null is off (nothing is fed). Set before the first create.
+    /// </summary>
+    public IServerObjectPhysics? ServerObjects
+    {
+        get => _serverObjects;
+        set
+        {
+            _serverObjects = value;
+            UpdateTransitions();
+        }
+    }
+
+    /// <summary>
+    /// The avatars' steps and placements run retail's transitions through <see cref="ServerObjects"/> when it offers them
+    /// (<see cref="IAvatarTransitions"/>, M5 item 5, D45), so creatures collide with each other, the player, doors and
+    /// lifestones; false is the path without collision (D24), for before-and-after measures
+    /// (<c>--server-object-transitions=off</c>, <see cref="AvatarsOptions.ServerObjectTransitions"/>; a diagnostics switch,
+    /// not a glitch flag). Default on.
+    /// </summary>
+    public bool ServerObjectTransitions
+    {
+        get => _serverObjectTransitions;
+        set
+        {
+            _serverObjectTransitions = value;
+            UpdateTransitions();
+        }
+    }
 
     /// <summary>Receives the avatars' effect events (sounds); without one they are counted as dropped.</summary>
     public IEffectEventSink? EffectEvents { get; set; }
@@ -630,6 +826,7 @@ public sealed class AvatarSet : ITargetWorld
         if (_avatars.TryGetValue(create.Guid, out var old))
         {
             Remove(old);
+            ServerObjects?.Remove(create.Guid);
             Stats.Recreated++;
         }
 
@@ -661,6 +858,7 @@ public sealed class AvatarSet : ITargetWorld
         // An object created Hidden plays its Hidden script here (set_description applies the state through set_state,
         // after the script table: the portal track's HiddenTransition).
         body.Describe(create, now, withInterpreter: !create.IsSelf, _problems);
+        body.Transitions = TransitionsFor(body, create.IsSelf);
         _avatars[create.Guid] = avatar;
         _order.Add(avatar);
         if (body.IsProjectile)
@@ -734,6 +932,31 @@ public sealed class AvatarSet : ITargetWorld
             body.Place(position.Normalized());
         }
 
+        if (ServerObjects is { } host)
+        {
+            var placeStart = Stopwatch.GetTimestamp();
+            host.Create(
+                new ServerObjectDescription(create.Guid, create.SetupId, create.Scale, create.PhysicsState, create.IsCreature, create.IsSelf, create.DescriptionFlags),
+                body.InWorld ? body.Position : null);
+            _createPlacementTicks += Stopwatch.GetTimestamp() - placeStart;
+            _createPlacements++;
+
+            // The create's sliding placement (enter_world) may have put the object beside another object: the body stands where its object does,
+            // so its next step's transition starts there (and the feed does not force the object back onto what it slid off).
+            if (body.Transitions is { } hosted && body.InWorld && hosted.TryGetPosition(create.Guid, out var placedAt) && !ServerObjectPhysicsHost.SamePlace(placedAt, body.Position))
+            {
+                body.Place(placedAt);
+            }
+
+            foreach (var (childGuid, _) in create.Children)
+            {
+                if (_avatars.TryGetValue(childGuid, out var child))
+                {
+                    FeedPosition(child);
+                }
+            }
+        }
+
         AttachWaitingChildren(avatar);
         RegisterLight(avatar, create);
         if (create.IsSelf)
@@ -765,7 +988,7 @@ public sealed class AvatarSet : ITargetWorld
             AddNotice(new AvatarNotice(AvatarNoticeKind.AppearanceProblem, create.Guid, detail));
         }
 
-        AddNotice(new AvatarNotice(recreate || old is not null ? AvatarNoticeKind.Recreated : AvatarNoticeKind.Created, create.Guid));
+        AddNotice(new AvatarNotice(recreate || old is not null ? AvatarNoticeKind.Recreated : AvatarNoticeKind.Created, create.Guid, null, create.Name, DistanceToPlayer(body)));
         return AvatarApply.Applied;
     }
 
@@ -781,9 +1004,12 @@ public sealed class AvatarSet : ITargetWorld
             return AvatarApply.UnknownObject;
         }
 
+        var name = avatar.Created.Name;
+        var distance = DistanceToPlayer(avatar.Body); // before the removal: the notice says how far the object was
         Remove(avatar);
+        ServerObjects?.Remove(guid);
         Stats.Deleted++;
-        AddNotice(new AvatarNotice(AvatarNoticeKind.Deleted, guid));
+        AddNotice(new AvatarNotice(AvatarNoticeKind.Deleted, guid, null, name, distance));
         return AvatarApply.Applied;
     }
 
@@ -806,6 +1032,7 @@ public sealed class AvatarSet : ITargetWorld
         }
 
         Stats.Moves++;
+        FeedPosition(avatar);
         return AvatarApply.Applied;
     }
 
@@ -894,6 +1121,7 @@ public sealed class AvatarSet : ITargetWorld
 
         Stats.StateChanges++;
         var change = avatar.Body.SetState(state);
+        ServerObjects?.SetState(guid, state);
         if (change != HiddenChange.None)
         {
             Stats.HiddenChanges++;
@@ -921,11 +1149,14 @@ public sealed class AvatarSet : ITargetWorld
         {
             child.PendingParent = (parentGuid, location, placement);
             child.Body.PickUp();
+            ServerObjects?.LeaveWorld(childGuid);
             return AvatarApply.Applied;
         }
 
         child.PendingParent = null;
-        if (!child.Body.SetParent(parent.Body, location, placement))
+        var parented = child.Body.SetParent(parent.Body, location, placement);
+        FeedPosition(child);
+        if (!parented)
         {
             ParentFailed(childGuid, parentGuid, location);
             return AvatarApply.Failed;
@@ -1032,6 +1263,7 @@ public sealed class AvatarSet : ITargetWorld
 
         avatar.PendingParent = null;
         avatar.Body.PickUp();
+        ServerObjects?.LeaveWorld(guid);
         Stats.Pickups++;
         return AvatarApply.Applied;
     }
@@ -1076,6 +1308,12 @@ public sealed class AvatarSet : ITargetWorld
         Player?.Advance(now, step);
         var complete = true;
         var stepped = 0;
+        long transitionTicks = 0;
+        var transitionCount = 0;
+        var placementTicks = _createPlacementTicks;
+        var placementCount = _createPlacements;
+        _createPlacementTicks = 0;
+        _createPlacements = 0;
         var count = _order.Count;
         for (var n = 0; n < count; n++)
         {
@@ -1089,6 +1327,23 @@ public sealed class AvatarSet : ITargetWorld
             if (!avatar.IsPlayer)
             {
                 avatar.Body.Advance(now, step);
+                var (ticks, transitions, refused, placeTicks, placements) = avatar.Body.TakeTransitionCost();
+                transitionTicks += ticks;
+                transitionCount += transitions;
+                Stats.PlacementsRefused += refused;
+                placementTicks += placeTicks;
+                placementCount += placements;
+                FeedPosition(avatar);
+                if (avatar.Body.TakeBlip(out var blipCause))
+                {
+                    CountBlip(blipCause);
+                }
+
+                if (avatar.Body.TakeHeldBack())
+                {
+                    ReportHeldBack(avatar.Body, now);
+                }
+
                 if (avatar.Body.JumpWatch.Check(avatar.Body, avatar.Body.LastQuantum) is { } jump)
                 {
                     ReportJump(avatar.Guid, jump);
@@ -1099,8 +1354,33 @@ public sealed class AvatarSet : ITargetWorld
         }
 
         _cursor = complete || count == 0 ? 0 : (_cursor + stepped) % count;
+        ServerObjects?.Tick();
         Stats.SteppedLastFrame = stepped;
         Stats.LastFrameComplete = complete;
+        Stats.TransitionsLastFrame = transitionCount;
+        Stats.Transitions += transitionCount;
+        Stats.TransitionTicksLastFrame = transitionTicks;
+        Stats.TransitionTicksMax = Math.Max(Stats.TransitionTicksMax, transitionTicks);
+        Stats.TransitionsMax = Math.Max(Stats.TransitionsMax, transitionCount);
+        Stats.TransitionTicks += transitionTicks;
+        Stats.PlacementsLastFrame = placementCount;
+        Stats.Placements += placementCount;
+        Stats.PlacementTicksLastFrame = placementTicks;
+        Stats.PlacementTicksMax = Math.Max(Stats.PlacementTicksMax, placementTicks);
+        Stats.PlacementTicks += placementTicks;
+        Stats.Advances++;
+        if (transitionCount > 0 && !_remoteContactLogged)
+        {
+            _remoteContactLogged = true;
+            if (_log.IsEnabled(LogSeverity.Info))
+            {
+                _log.Write(
+                    LogSeverity.Info,
+                    LogCategory,
+                    "TODO(m5-remote-contact): a hosted body stepped; its contact is the server's Grounded flag carried into the transition, where retail takes the transition's contact with gravity (MoveOrTeleport 0x00516E30, UpdateObjectInternal 0x005161B0), not integrated here (D24, D72)",
+                    []);
+            }
+        }
 
         _listener = Listener is { } listener && listener.TryGetListener(out var heard) ? heard : viewer.Position;
         UpdateDynamicLights(viewer);
@@ -1253,6 +1533,63 @@ public sealed class AvatarSet : ITargetWorld
 
     // ----- helpers -----
 
+    /// <summary>
+    /// The transitions a body runs through: the host's, while <see cref="ServerObjectTransitions"/> is on, for a body that is not
+    /// the player's and not a projectile. A projectile keeps the path without collision (its flight and impact are the
+    /// projectile track's: <c>TODO(m5-missile-transitions)</c>, logged once).
+    /// </summary>
+    private IAvatarTransitions? TransitionsFor(AvatarBody body, bool isSelf)
+    {
+        if (!_serverObjectTransitions || _serverObjects is not IAvatarTransitions transitions || isSelf)
+        {
+            return null;
+        }
+
+        if (body.IsProjectile)
+        {
+            if (!_missileTransitionsLogged && _log.IsEnabled(LogSeverity.Info))
+            {
+                _missileTransitionsLogged = true;
+                _log.Write(LogSeverity.Info, LogCategory, "TODO(m5-missile-transitions): projectiles fly without the server-object transitions (retail runs a missile's transition with PathClipped)", []);
+            }
+
+            return null;
+        }
+
+        return transitions;
+    }
+
+    private void UpdateTransitions()
+    {
+        for (var i = 0; i < _order.Count; i++)
+        {
+            var avatar = _order[i];
+            avatar.Body.Transitions = TransitionsFor(avatar.Body, avatar.IsPlayer);
+        }
+    }
+
+    /// <summary>
+    /// Feeds the host where the avatar is now: its position while it is in the world on its own, else out of the world
+    /// (held, contained, or out of its cell). The host does nothing for an unchanged position or for an object it keeps
+    /// nothing for, so a standing crowd costs a lookup each and allocates nothing.
+    /// </summary>
+    private void FeedPosition(Avatar avatar)
+    {
+        if (ServerObjects is not { } host || avatar.IsPlayer)
+        {
+            return;
+        }
+
+        if (avatar.Body.InWorld)
+        {
+            host.Move(avatar.Guid, avatar.Body.Position);
+        }
+        else
+        {
+            host.LeaveWorld(avatar.Guid);
+        }
+    }
+
     private bool Find(uint guid, [NotNullWhen(true)] out Avatar? avatar)
     {
         if (_avatars.TryGetValue(guid, out avatar))
@@ -1304,7 +1641,9 @@ public sealed class AvatarSet : ITargetWorld
             if (child.PendingParent is { } pending && pending.Parent == parent.Guid)
             {
                 child.PendingParent = null;
-                if (!child.Body.SetParent(parent.Body, pending.Location, pending.Placement))
+                var parented = child.Body.SetParent(parent.Body, pending.Location, pending.Placement);
+                FeedPosition(child);
+                if (!parented)
                 {
                     ParentFailed(child.Guid, parent.Guid, pending.Location);
                 }
@@ -1328,10 +1667,17 @@ public sealed class AvatarSet : ITargetWorld
         AddNotice(new AvatarNotice(AvatarNoticeKind.ParentFailed, child, detail));
     }
 
-    /// <summary>The most notices kept for <see cref="DrainNotices"/>; the oldest are dropped past it (no host drains them every frame).</summary>
+    /// <summary>The most notices kept for <see cref="DrainNotices"/>; the oldest are dropped past it. A host drains them every frame (play mode does, M5 item 7: <c>AvatarNoticeTally</c>); a host that never does fills the list and gets one overflow warning.</summary>
     public const int MaxNotices = 1024;
 
     private bool _loggedNoticeOverflow;
+
+    // The metres from the player's body to this one (M5 7 F17, the host's object lines), or the unknown distance when either has no place yet or the player is this body.
+    private float DistanceToPlayer(AvatarBody body)
+    {
+        var player = _playerBody?.Position ?? Player?.Body.Position;
+        return player is { CellId: not 0 } here && body.Parent is null && body.Position.CellId != 0 ? PositionFrames.Distance(here, body.Position) : AvatarNotice.UnknownDistance;
+    }
 
     private void AddNotice(AvatarNotice notice)
     {
@@ -1343,7 +1689,7 @@ public sealed class AvatarSet : ITargetWorld
             if (!_loggedNoticeOverflow)
             {
                 _loggedNoticeOverflow = true;
-                _log.Write(LogSeverity.Warning, LogCategory, $"the notice list is full ({MaxNotices}); the oldest notices are dropped (counted in the stats; nothing drains them every frame in play mode)", []);
+                _log.Write(LogSeverity.Warning, LogCategory, $"the notice list is full ({MaxNotices}); the oldest notices are dropped (counted in the stats; the host is not draining them every frame)", []);
             }
         }
 
@@ -1389,10 +1735,82 @@ public sealed class AvatarSet : ITargetWorld
                 new LogField("quantum_ms", string.Create(c, $"{jump.Quantum * 1000.0:0.0}")),
                 new LogField("from_server_m", string.Create(c, $"{jump.ServerMetres:0.00}")),
                 new LogField("from_player_m", string.Create(c, $"{jump.PlayerMetres:0.00}")),
+                new LogField("short_transits", jump.ShortTransits),
+                new LogField("blocked_by", jump.Obstacle.Describe()),
+                new LogField("step_refused", jump.ShortTransits > 0 && jump.Obstacle.StepRefused),
+                new LogField("behind_m", string.Create(c, $"{jump.BehindMetres:0.00}")),
             ]);
         if (_jumpsLogged == MaxJumpLogs)
         {
             _log.Write(LogSeverity.Warning, LogCategory, $"{MaxJumpLogs} server-object jumps or flips are logged; later ones are only counted (AvatarStats.CreatureJumps, CreatureFlips)", []);
+        }
+    }
+
+    /// <summary>Counts a placed blip under what held the body back before it (<see cref="AvatarStats.BlipCauses"/>).</summary>
+    private void CountBlip(AvatarObstacleKind cause)
+    {
+        switch (cause)
+        {
+            case AvatarObstacleKind.Player:
+                Stats.BlipsByPlayer++;
+                break;
+            case AvatarObstacleKind.Creature:
+                Stats.BlipsByCreature++;
+                break;
+            case AvatarObstacleKind.Object:
+                Stats.BlipsByObject++;
+                break;
+            case AvatarObstacleKind.Environment:
+                Stats.BlipsByEnvironment++;
+                break;
+            case AvatarObstacleKind.Step:
+                Stats.BlipsByStep++;
+                break;
+            default:
+                Stats.BlipsUnexplained++;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// <c>TODO(m5-creature-held-back)</c>, report only: a hosted creature's transitions ended short
+    /// <see cref="AvatarBody.HeldBackFrames"/> frames in a row. At most one debug line per creature per <see cref="HeldBackLogSeconds"/> and
+    /// <see cref="MaxHeldBackLogs"/> a session, then only counted.
+    /// </summary>
+    private void ReportHeldBack(AvatarBody body, double now)
+    {
+        if (_heldBackLogged >= MaxHeldBackLogs || now - body.HeldBackLoggedAt < HeldBackLogSeconds || !_log.IsEnabled(LogSeverity.Debug))
+        {
+            Stats.HeldBackCounted++;
+            return;
+        }
+
+        _heldBackLogged++;
+        Stats.HeldBackLogged++;
+        body.HeldBackLoggedAt = now;
+        var c = CultureInfo.InvariantCulture;
+        var at = body.Position.Origin;
+        var asked = body.LastShortRequested;
+        var obstacle = body.LastObstacle;
+        _log.Write(
+            LogSeverity.Debug,
+            LogCategory,
+            "TODO(m5-creature-held-back): a hosted creature's transitions ended short of the requested position ten frames in a row (AvatarBody.HeldBackFrames); the fields name what held it back",
+            [
+                new LogField("guid", string.Create(c, $"0x{body.Guid:X8}")),
+                new LogField("blocked_by", obstacle.Describe()),
+                new LogField("step_refused", obstacle.StepRefused),
+                new LogField("cell", string.Create(c, $"0x{body.Position.CellId:X8}")),
+                new LogField("at", string.Create(c, $"{at.X:0.00},{at.Y:0.00},{at.Z:0.00}")),
+                new LogField("asked", string.Create(c, $"{asked.X:0.00},{asked.Y:0.00},{asked.Z:0.00}")),
+                new LogField("server", body.ServerPosition is { } server ? string.Create(c, $"0x{server.CellId:X8}:{server.Origin.X:0.00},{server.Origin.Y:0.00},{server.Origin.Z:0.00}") : "none"),
+                new LogField("behind_m", string.Create(c, $"{body.BehindMetres:0.00}")),
+                new LogField("short_run", body.ShortRun),
+                new LogField("short_transits", body.ShortTransits),
+            ]);
+        if (_heldBackLogged == MaxHeldBackLogs)
+        {
+            _log.Write(LogSeverity.Debug, LogCategory, $"{MaxHeldBackLogs} held-back reports are logged; later ones are only counted (AvatarStats.HeldBackCounted)", []);
         }
     }
 

@@ -17,7 +17,7 @@ namespace Lifestone.Client.Session.StandIn;
 /// <list type="bullet">
 /// <item><b>Cast</b> (0x0048, 0x004A; <c>Player_Magic.cs</c> <c>HandleActionMagicCastUnTargetedSpell</c> 270-335, <c>HandleActionCastTargetedSpell</c> 76-205). Outside the magic combat mode ACE
 /// answers only UseDone 0 (283-285, 83-92); a spell the character does not know is UseDone <see cref="MagicInvalidSpellType"/> (129-132, 320-322); a spell the character cannot cast
-/// fizzles (<c>GetCastingPreCheckStatus</c> 528-540, then WeenieError 0x028A 0x0402 at 917-918). A self enchantment is added to the registry (<c>EnchantmentManager.Add</c>
+/// fizzles (<c>GetCastingPreCheckStatus</c> 528-540, then WeenieError 0x028A 0x0402 at 917-918). M5 1 K2: a cast costs the rolled mana (<see cref="Lifestone.Client.Session.Casting.ManaConversionModel"/>, <c>StandInWorld.Cast.cs</c>): a cost over the mana held is answered UseDone 0x0401 at once with nothing charged (<c>Player_Magic.cs</c> 566-585), a fizzle costs 5. A self enchantment is added to the registry (<c>EnchantmentManager.Add</c>
 /// <c>Managers/EnchantmentManager.cs</c> 134-262, <c>WorldObject_Magic.cs</c> 405-452: GameEvent 0x02C2 with the entry the manager built, the spell's own power and duration); a projectile spell creates the
 /// projectile (a placeholder object, below); every cast ends with UseDone 0x01C7 one second after the effect (the recoil, <c>Player_Magic.cs</c> 977-990). With a cast planner the effect comes at the end of the words' and the gestures' timeline (<c>StandInWorld.Cast.cs</c>).</item>
 /// <item><b>SetCombatMode</b> (0x0053; <c>Player_Combat.cs</c> <c>HandleActionChangeCombatMode</c> 737-776): the private int update 0x02CD for property 40 (<c>Creature_Combat.cs</c> 120, 176, 201, 246).</item>
@@ -32,7 +32,7 @@ namespace Lifestone.Client.Session.StandIn;
 /// stack between the world and the pack (3048-3053), which the stand-in does not have.</item>
 /// </list>
 /// Placeholders, each named and logged where it is used: the spell's stat modifier (ACE's world database, not the dat: <c>TODO(m3-standin-spell-statmods)</c>), the magic skill the fizzle rule reads
-/// (<c>TODO(m3-standin-magic-skill)</c>) and the missing mana and component rules (<c>TODO(m3-standin-cast-mana)</c>, <c>TODO(m3-standin-cast-components)</c>); the words, the gestures, the effect scripts and the vital spells are <c>StandInWorld.Cast.cs</c> (M3 2.1 s2a). A war spell whose projectile the host knows flies and hits as ACE's does (<c>StandInWorld.Combat.cs</c>, M3 3.1 fb); any other is <c>TODO(m3-standin-projectile-model)</c>: a placeholder object named as such, at the player, deleted a moment later.
+/// (<c>TODO(m3-standin-magic-skill)</c>) and the missing component rule (<c>TODO(m3-standin-cast-components)</c>; the mana rule is real since M5 1 K2: <c>TODO(m3-standin-cast-mana)</c> is closed); the words, the gestures, the effect scripts and the vital spells are <c>StandInWorld.Cast.cs</c> (M3 2.1 s2a). A war spell whose projectile the host knows flies and hits as ACE's does (<c>StandInWorld.Combat.cs</c>, M3 3.1 fb); any other is <c>TODO(m3-standin-projectile-model)</c>: a placeholder object named as such, at the player, deleted a moment later.
 /// </summary>
 internal sealed partial class StandInWorld
 {
@@ -214,7 +214,6 @@ internal sealed partial class StandInWorld
     private void CastNow(IAcSessionSink sink, uint spellId, uint target)
     {
         var self = _reducer.State.Self;
-        Placeholder("m3-standin-cast-mana", "the stand-in's cast costs no mana");
         Placeholder("m3-standin-cast-components", "the stand-in's cast burns no spell components");
         if (self.Qualities.CombatMode != CombatModes.Magic)
         {
@@ -237,15 +236,23 @@ internal sealed partial class StandInWorld
             return;
         }
 
+        // M5 1 K2: ACE rolls the cost once, before the spell's words, and answers UseDone 0x0401 at once, with nothing charged, when it is over the mana held (Player_Magic.cs 566-585); the charge comes with the effect (StandInWorld.Cast.cs).
+        if (!TryRollCastCost(info, target, out var cost))
+        {
+            ManaRefusals++;
+            UseDone(sink, CastTracker.ManaCode);
+            return;
+        }
+
         // ACE's sequence (StandInWorld.Cast.cs): the words, the gestures, then the effect (or the fizzle) at the plan's EffectTime and UseDone after the recoil. Without a plan: the effect now, UseDone a second after it.
         var plan = info is null ? null : PlanFor(info);
         if (plan is not null)
         {
-            PlayCast(sink, spellId, info, target, plan);
+            PlayCast(sink, spellId, info, target, plan, cost);
             return;
         }
 
-        ResolveCast(sink, spellId, info, target, null);
+        ResolveCast(sink, spellId, info, target, null, cost);
         UseDoneAfterRecoil();
     }
 

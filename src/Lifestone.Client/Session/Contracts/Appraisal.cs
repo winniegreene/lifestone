@@ -13,6 +13,9 @@ public static class AppraisalIds
     /// <summary>PropertyInt 1 ItemType (a flag word).</summary>
     public const uint ItemType = 1;
 
+    /// <summary>PropertyFloat 152 ElementalDamageMod (a caster's bonus to elemental damage: 1.03 is +3%; M5 7 F30).</summary>
+    public const uint ElementalDamageMod = 152;
+
     /// <summary>PropertyInt 5 EncumbranceVal (the burden).</summary>
     public const uint Burden = 5;
 
@@ -112,8 +115,8 @@ public readonly record struct WieldRequirement(int Type, int Skill, int Difficul
 
 /// <summary>
 /// What the server said about one object: GameEvent 0x00C9 IdentifyObjectResponse, kept by guid (M4 3.2 s2; the wire is s0's <see cref="IdentifyResponseMsg"/>, docs/handoff-m4-3-2.md). The tables are by property id with typed
-/// readers for the ids an examine panel shows (<see cref="AppraisalIds"/>), a reader is null when the table lacks its id. <see cref="Success"/> false is a result, not an error: ACE still sends the tables in full and withholds
-/// the creature profile, the item enchantments, the creature's attributes and armour levels (spec 5.6, <c>AppraiseInfo.cs:334-345, 556-597</c>). An answer with no section at all (<see cref="IsNotFound"/>) is ACE's reply to a
+/// readers for the ids an examine panel shows (<see cref="AppraisalIds"/>), a reader is null when the table lacks its id. <see cref="Success"/> false is a result, not an error: ACE still sends the tables in full, and for a creature
+/// the creature profile with its health alone (<c>CreatureProfile(creature, false)</c>), withholding the item enchantments, the creature's attributes, other vitals, ratings and armour levels (spec 5.6, <c>AppraiseInfo.cs:334-345, 556-597</c>). An answer with no section at all (<see cref="IsNotFound"/>) is ACE's reply to a
 /// guid it cannot find (flags 0, success 0; capture.md C3).
 /// </summary>
 public sealed class Appraisal
@@ -302,6 +305,15 @@ public sealed class Appraisal
 
     /// <summary>A creature's current health from its profile, or null (no profile: an item, or a failed roll).</summary>
     public uint? CreatureHealth => Creature?.Health;
+
+    /// <summary>The creature profile's flags (0x8 ShowAttributes: a successful roll; 0 for ACE's failed one), or null without a profile (M5 7 D137).</summary>
+    public uint? CreatureProfileFlags => Creature?.Flags;
+
+    /// <summary>True when the creature profile carries the attributes and the other vitals (a successful roll's ShowAttributes).</summary>
+    public bool CreatureShowsAttributes => Creature?.Strength is not null;
+
+    /// <summary>The hook profile's flags (0x1 Inscribable, 0x2 IsHealer, 0x4 IsFood, 0x8 IsLockpick; ACE <c>HookFlags</c>), or null without a hook profile (M5 7 D137).</summary>
+    public uint? HookFlags => Hook?.Flags;
 
     /// <summary>A creature's maximum health from its profile, or null.</summary>
     public uint? CreatureHealthMax => Creature?.HealthMax;

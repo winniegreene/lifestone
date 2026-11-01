@@ -49,7 +49,9 @@ public sealed class J3bTravelDatTests(DatSetFixture fixture, ITestOutputHelper o
             foreach (var spell in new uint[] { 1635, 2644 })
             {
                 var info = spells[spell];
-                foreach (var id in SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, account).Where(c => c != 0).Distinct())
+                // M5 3 m1: the mage casts on the foci formula (the scarab and the Prismatic Tapers), so its kit holds those; the fighters' kits hold the account's full formula as before.
+                var needed = fighter is null ? GearKit.FociFormulaCounts(info.Formula).Keys.ToList() : SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, account).Where(c => c != 0).Distinct().ToList();
+                foreach (var id in needed)
                 {
                     Assert.True(ComponentWeenies.TryGetByComponent(id, out var weenie), $"component {id}");
                     Assert.True(held.Contains(weenie.Wcid), $"{account}: spell {spell} ({info.Name}) needs component {id} (wcid {weenie.Wcid}), which the kit does not carry");

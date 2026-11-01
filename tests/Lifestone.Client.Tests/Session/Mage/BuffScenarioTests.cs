@@ -18,7 +18,7 @@ namespace Lifestone.Client.Tests.Session.Mage;
 public sealed class BuffScenarioTests
 {
     private static readonly Regex Verdict = new(
-        @"^gear=(wielded|failed) worn=\d buffs=\d+/24 levels=(n/a|(\w+:(I|II|III|IV|V|VI|VII|VIII|-),){23}\w+:(I|II|III|IV|V|VI|VII|VIII|-)) rebuffed=(yes|no) forced=(yes|no) min_remaining_s=(\d+|n/a) transfers=\d+/\d+ revitalizes=\d+ fizzles=\d+ mana_min=(\d+|n/a) cycle_s=\d+ misses=\S+ surpassed=\d+$",
+        @"^gear=(wielded|failed) worn=\d buffs=\d+/24 levels=(n/a|(\w+:(I|II|III|IV|V|VI|VII|VIII|-),){23}\w+:(I|II|III|IV|V|VI|VII|VIII|-)) rebuffed=(yes|no) forced=(yes|no) min_remaining_s=(\d+|n/a) transfers=\d+/\d+ revitalizes=\d+ fizzles=\d+ mana_min=(\d+|n/a) cycle_s=\d+ mana_tries=\d+ mana_refusals=\d+ mana_landed=\d+ busy=\d+ resists=\d+ proved=\d+( mana_presses=\d+ dances=\d+ dances_landed=\d+)? misses=\S+ surpassed=\d+$",
         RegexOptions.CultureInvariant);
 
     /// <summary>The session view over the scripted rig: the real read model, clock, bus and Action API.</summary>
@@ -125,6 +125,44 @@ public sealed class BuffScenarioTests
     }
 
     [Fact]
+    public void The_autopilots_own_station_ends_within_a_second_of_its_last_cast_with_no_driver_wait()
+    {
+        // M5 7 F24 (soak round 3: the station sat idle 30 s at the lifestone waiting for the re-buff driver's first check): unattended, the ordered cycle's end is the station's end.
+        var t = new Rig(options: new BuffOptions { Auto = true, DriverUnattended = true });
+        var scenario = new BuffScenario(t.Kit, t.Caster.Table, t.Options, t.R.H.Log, endSession: false);
+        var status = ScenarioStatus.Running;
+        for (var i = 0; i < 40000 && status == ScenarioStatus.Running; i++)
+        {
+            status = t.Frame(scenario, 0.25);
+        }
+
+        Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
+        var lastCast = t.Caster.Answered.Max(x => x.At);
+        Assert.InRange(t.Now - lastCast, 0, 2.5); // a frame or two: no 30 s idle
+        Assert.Contains(t.R.H.Log.Lines, l => l.Contains("no driver wait, the station ends now (F24)", StringComparison.Ordinal));
+        Assert.DoesNotContain(t.R.H.Log.Lines, l => l.Contains("the re-buff driver next", StringComparison.Ordinal));
+        Assert.Equal([CombatModes.Magic], t.Caster.ModesSent); // M5 7 F25 (D93): the autopilot's own station leaves the magic mode up for its next station
+        Assert.Contains(t.R.H.Log.Lines, l => l.Contains("the stance holds: the magic mode stays up for the autopilot's next station (F25)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_persons_buff_returns_to_peace_at_its_end_and_only_the_autopilots_own_station_holds_the_magic_mode()
+    {
+        // M5 7 F25 (D93): the stance holds only for the autopilot's own station (DriverUnattended); a person's buff (or the login check's) ends in peace as before
+        var t = new Rig(options: new BuffOptions { Auto = false });
+        var scenario = new BuffScenario(t.Kit, t.Caster.Table, t.Options, t.R.H.Log, endSession: false);
+        var status = ScenarioStatus.Running;
+        for (var i = 0; i < 40000 && status == ScenarioStatus.Running; i++)
+        {
+            status = t.Frame(scenario, 0.25);
+        }
+
+        Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
+        Assert.Equal(CombatModes.NonCombat, t.Caster.ModesSent[^1]);
+        Assert.DoesNotContain(t.R.H.Log.Lines, l => l.Contains("the stance holds", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void With_the_driver_on_there_is_no_forced_pass_and_the_drivers_own_pass_recasts_from_the_margin_of_the_shortest_line()
     {
         var t = new Rig(options: new BuffOptions { Auto = true });
@@ -169,6 +207,8 @@ public sealed class BuffScenarioTests
         Assert.StartsWith("gear=wielded worn=5 buffs=24/24 levels=Focus:VII,", verdict, StringComparison.Ordinal);
         Assert.Contains(" rebuffed=yes forced=yes ", verdict, StringComparison.Ordinal);
         Assert.EndsWith(" misses=none surpassed=0", verdict, StringComparison.Ordinal);
+        Assert.Contains(" cycle_s=", verdict, StringComparison.Ordinal);
+        Assert.Contains(" " + BuffLegVerdict.CastFieldsOf(scenario.CycleResult, scenario.ForcedResult) + " misses=none", verdict, StringComparison.Ordinal); // M5 1 fix B (G1): the cast policy's fields, both passes summed, report-only
         Assert.Equal(0, scenario.Gear.GearSteps); // a ready mage: the gear stage sent nothing
         Assert.Contains(t.R.H.Log.Lines, l => l.Contains("verdict gear=wielded", StringComparison.Ordinal));
 
@@ -253,7 +293,7 @@ public sealed class BuffScenarioTests
     public void A_failure_in_the_cycle_logs_off_before_it_is_reported_and_the_verdict_says_what_was_done()
     {
         // Mana 5 and no regeneration: the cycle's mana wait runs out (30 s) and fails the pass.
-        var t = new Rig(mana: 5, options: new BuffOptions { ManaWaitSeconds = 30 });
+        var t = new Rig(mana: 5, options: new BuffOptions { ManaWaitSeconds = 30, Mana = Lifestone.Client.Session.Vitals.ManaOrderOptions.Ceiling }); // M5 1 K5: the ceiling order's wait (--cast-mana-tries 0)
         t.Caster.ManaRegenPerSecond = 0;
         var scenario = t.Scenario(endSession: true);
         var status = ScenarioStatus.Running;
@@ -315,6 +355,33 @@ public sealed class BuffScenarioTests
     }
 
     [Fact]
+    public void With_noGrant_the_gear_stage_sends_no_item_for_a_stock_line_it_is_short_of_and_the_run_still_buffs_while_the_default_stage_asks_the_mod_M5_3_F2()
+    {
+        // M5 3 F2 (closes 3-R3, DoD 6): the mage journey's buff station runs this gear stage after play has burned components; it must verify, never top up with the item verb.
+        var scarab = new GearItem(691, "Lead Scarab", GearKind.Component, GearKit.WeenieTypeSpellComponent, GearKit.ItemTypeSpellComponents, EquipMask.None, 20, 100, GearKit.ComponentBurden);
+
+        var granting = new Rig();
+        var asks = new BuffScenario(GearKit.Of([.. granting.Kit.Items, scarab]), granting.Caster.Table, granting.Options, granting.R.H.Log, endSession: false);
+        for (var i = 0; i < 40 && asks.Failure is null; i++)
+        {
+            granting.Frame(asks);
+        }
+
+        Assert.True(granting.R.Api.Tools.Verbs.Counts.Item > 0, "the default gear stage asks the mod for the missing Lead Scarabs (the contrast of this test)");
+
+        var t = new Rig();
+        var scenario = new BuffScenario(GearKit.Of([.. t.Kit.Items, scarab]), t.Caster.Table, t.Options, t.R.H.Log, endSession: false, noGrant: true);
+        var status = t.Run(scenario);
+
+        Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
+        Assert.Equal(0, t.R.Api.Tools.Verbs.Counts.Total); // no mod verb of any kind
+        Assert.Equal(0, t.R.H.Net.ToolRequests().Count(r => r is not null && r.StartsWith("@lifestone item ", StringComparison.Ordinal)));
+        Assert.Contains(t.R.H.Log.Lines, l => l.Contains("Lead Scarab", StringComparison.Ordinal) && l.Contains("is held 0 of 20 and play grants nothing", StringComparison.Ordinal));
+        Assert.Contains(t.R.H.Log.Lines, l => l.Contains("kit verified in the pack (no grant", StringComparison.Ordinal));
+        Assert.Matches(Verdict, scenario.VerdictFields());
+    }
+
+    [Fact]
     public void A_missed_line_fails_the_run_and_a_run_without_a_session_to_end_reports_the_failure_at_once()
     {
         var t = new Rig();
@@ -356,7 +423,7 @@ public sealed class BuffScenarioTests
     [Fact]
     public void The_scenario_allocates_nothing_while_the_cycle_waits_for_mana()
     {
-        var t = new Rig(mana: 5);
+        var t = new Rig(mana: 5, options: new BuffOptions { Mana = Lifestone.Client.Session.Vitals.ManaOrderOptions.Ceiling }); // M5 1 K5: the ceiling order's wait (--cast-mana-tries 0)
         t.Caster.ManaRegenPerSecond = 0;
         var scenario = t.Scenario();
         for (var i = 0; i < 400 && scenario.Cycle?.Stage != BuffCycle.StageManaWait; i++)

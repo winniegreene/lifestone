@@ -431,6 +431,44 @@ public sealed class ReducerInventoryTests
     }
 
     [Fact]
+    public void M5_7_D139_l_a_refused_move_of_a_wielded_item_ACE_had_unwielded_ends_in_the_main_pack_as_ACE_put_it_not_in_the_hands()
+    {
+        // ACE's DoHandleActionPutItemInContainer (Player_Inventory.cs 1268-1340) for a held wand sent to a full pack: 02DA Wielder 0, 02CE CurrentWieldedLocation 0 (TryDequipObjectWithNetworking 396-405), then the pack's
+        // refusal (the transient string and 0x00A0), then the silent itemRootOwner.TryAddToInventory: the main pack at slot 0, with no message.
+        const uint Held = 0x01000000;
+        var r = new Rig();
+        r.Describe([new ContentDesc(Sword, 0)], [new EquippedDesc(Staff, Held, 0)]);
+        var staff = r.Item(Staff, "Wand", itemType: 0x8000, wielder: Player, wielded: Held);
+        r.Send(AceM3Writers.PublicUpdateInstanceId(1, Staff, 3, 0));
+        r.Send(AceM3Writers.PublicUpdatePropertyInt(1, Staff, 10, 0));
+        Assert.Equal(Staff, r.Inventory.EquippedAt(Held)); // the zeros alone change no membership (a wield sends them too)
+        r.Send(AceM3Writers.InventoryServerSaysFailed(Player, r.Next(), Staff, 0));
+
+        Assert.Equal([new InventoryFailed(Staff, 0)], r.Failures);
+        Assert.Null(r.Inventory.EquippedAt(Held));
+        Assert.Equal(new InventoryPlace(InventoryPlaceKind.MainPack, Player, 0, 0), r.Inventory.Find(Staff));
+        Assert.Equal([new InventoryEntry(Staff, 0), new InventoryEntry(Sword, 0)], r.Inventory.Pack);
+        Assert.Equal(new InventoryChanged(InventoryChangeKind.Unwielded, Staff, Player, 0, 0, 0, -1, Held), r.Changes[^1]);
+        Assert.Equal((Player, null, null), (staff.ContainerId, staff.WielderId, staff.Weenie.CurrentlyWieldedLocation));
+        Assert.Contains(r.Harness.Log.Entries, e => e.Message.Contains("not back in the hands", StringComparison.Ordinal));
+
+        // A refusal with no unwield before it (ACE's checks before the dequip, 790-960) leaves a wielded item where it is.
+        var r2 = new Rig();
+        r2.Describe([], [new EquippedDesc(Staff, Held, 0)]);
+        r2.Send(AceM3Writers.InventoryServerSaysFailed(Player, r2.Next(), Staff, 0));
+        Assert.Equal(Staff, r2.Inventory.EquippedAt(Held));
+
+        // An unwield that completes (its 0022) clears the mark: a later 0x00A0 for the item changes nothing more.
+        var r3 = new Rig();
+        r3.Describe([], [new EquippedDesc(Staff, Held, 0)]);
+        r3.Send(AceM3Writers.PublicUpdateInstanceId(1, Staff, 3, 0));
+        r3.Send(Put(r3, Staff, Player, 0));
+        r3.Send(Wield(r3, Staff, Held));
+        r3.Send(AceM3Writers.InventoryServerSaysFailed(Player, r3.Next(), Staff, 0));
+        Assert.Equal(Staff, r3.Inventory.EquippedAt(Held));
+    }
+
+    [Fact]
     public void None_of_the_eight_codes_is_counted_as_not_applied_or_unknown()
     {
         var r = new Rig();

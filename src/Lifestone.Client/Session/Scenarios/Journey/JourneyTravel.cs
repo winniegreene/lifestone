@@ -5,6 +5,7 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.World;
 using Lifestone.Data.World;
@@ -18,7 +19,7 @@ namespace Lifestone.Client.Session.Scenarios.Journey;
 public delegate ActionHandle JourneyPlace(IGameSessionView session, TeleportDestination destination);
 
 /// <summary>
-/// The journeys' places (M4 P5b 3.4): Holtburg (the lifestone's landblock 0xA9B4), the den's arrival (landblock 0x0105), the belt camp (cell 0xA5B00032)
+/// The journeys' places (M4 P5b 3.4): Holtburg (the lifestone's landblock 0xA9B4), the dungeon's arrival (the ground's profile), the belt camp (cell 0xA5B00032)
 /// and the forest (cell 0x9FB50039), the ground cells the W0 runs used; and whether the player stands at one.
 /// </summary>
 public static class JourneyGrounds
@@ -26,18 +27,33 @@ public static class JourneyGrounds
     /// <summary>Holtburg's landblock (the lifestone 0xA9B40019).</summary>
     public const uint HoltburgLandblock = RecallHome.HoltburgLandblock;
 
-    /// <summary>The den's landblock (the den portal's destination).</summary>
-    public const uint DenLandblock = RecallHome.DenLandblock;
-
     /// <summary>Holtburg's town position (ACViewer's Locations.txt, <see cref="WorldLocations.Holtburg"/>): the pre-journey recovery's place.</summary>
     public static TeleportDestination Holtburg { get; } = new("Holtburg", [], WorldLocations.Holtburg, "journey: Holtburg (WorldLocations.Holtburg)");
 
-    /// <summary>The den's arrival (<see cref="BlackSpawnDen.Arrival"/>, cell 0x01050375): the den's budgeted place when no portal is tied.</summary>
-    public static TeleportDestination Den { get; } = new(
-        "Black Spawn Den",
-        [],
-        new WorldLocation("Black Spawn Den", new CellPosition(BlackSpawnDen.Arrival.CellId, BlackSpawnDen.Arrival.Frame.Origin), true, WorldLocations.HeadingFromQuaternion(BlackSpawnDen.Arrival.Frame.Orientation.W, BlackSpawnDen.Arrival.Frame.Orientation.Z)),
-        "journey: the den portal's destination (BlackSpawnDen.Arrival)");
+    /// <summary>The dungeon ground (any dungeon profile of <see cref="GroundCatalog"/>) whose landblocks hold <paramref name="cell"/>, or null. Allocates nothing.</summary>
+    /// <param name="cell">The full cell id.</param>
+    public static HuntingGround? DungeonOf(uint cell)
+    {
+        var all = GroundCatalog.All;
+        for (var i = 0; i < all.Count; i++)
+        {
+            if (all[i].Kind == GroundKind.Dungeon && all[i].InLandblocks(cell))
+            {
+                return all[i];
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The dungeon ground whose landblocks hold <paramref name="cell"/>, the journey's own ground first (M5 3 p1, closes the first half of 2-R12 <c>journey-portal-per-ground</c>): <paramref name="journeyGround"/> when it is a dungeon and holds the cell, else (a journey
+    /// built without a ground, or a cell in another ground's landblocks) the catalog's search of <see cref="DungeonOf(uint)"/>. Allocates nothing.
+    /// </summary>
+    /// <param name="cell">The full cell id.</param>
+    /// <param name="journeyGround">The journey's dungeon ground (<see cref="JourneyContext.Dungeon"/>), or null.</param>
+    public static HuntingGround? DungeonOf(uint cell, HuntingGround? journeyGround) =>
+        journeyGround is { Kind: GroundKind.Dungeon } own && own.InLandblocks(cell) ? own : DungeonOf(cell);
 
     /// <summary>The belt camp's cell (the Low B row's first, 0xA5B00032: W0's wayfind target).</summary>
     public static HuntCell BeltCell => HuntGround.LowB.Cells[0];
@@ -51,14 +67,15 @@ public static class JourneyGrounds
     /// </summary>
     /// <param name="where">Where.</param>
     /// <param name="height">The terrain height at (cell, x, y) in landblock-local metres (<c>HuntGround.SeekHeight</c> over the dats), or null.</param>
-    public static TeleportDestination? For(StationWhere where, Func<uint, float, float, float?>? height)
+    /// <param name="dungeon">The journey's dungeon ground (<see cref="JourneyContext.Dungeon"/>, <c>--fight-ground</c>): <see cref="StationWhere.Den"/> is its arrival (the dungeon's budgeted place when no portal is tied). Required for the den, never read for the other places.</param>
+    public static TeleportDestination? For(StationWhere where, Func<uint, float, float, float?>? height, HuntingGround? dungeon = null)
     {
         switch (where)
         {
             case StationWhere.Holtburg:
                 return Holtburg;
             case StationWhere.Den:
-                return Den;
+                return DungeonOrThrow(dungeon).ArrivalDestination();
             case StationWhere.Belt:
             case StationWhere.Forest:
                 var cell = where == StationWhere.Belt ? BeltCell : ForestCell;
@@ -78,10 +95,14 @@ public static class JourneyGrounds
     /// <param name="position">The player's position, or null (unknown: false).</param>
     public static bool Indoors(CellFrame? position) => position is { } at && (at.CellId & 0xFFFF) >= 0x100;
 
-    /// <summary>True when <paramref name="position"/> is at <paramref name="where"/>: Holtburg's or the den's landblock, a landblock of the belt's or the forest's hunt cells; always for Here.</summary>
+    private static HuntingGround DungeonOrThrow(HuntingGround? dungeon) =>
+        dungeon ?? throw new ArgumentNullException(nameof(dungeon), "the den is the journey's dungeon ground (JourneyContext.Dungeon, --fight-ground): a caller that names StationWhere.Den passes it (TODO(journey-ground-option) closed by M5 item 2 k2)");
+
+    /// <summary>True when <paramref name="position"/> is at <paramref name="where"/>: Holtburg's landblock, a landblock of the journey's dungeon ground (<paramref name="dungeon"/>), a landblock of the belt's or the forest's hunt cells; always for Here.</summary>
     /// <param name="where">Where.</param>
     /// <param name="position">The player's position, or null (unknown: false, except for Here).</param>
-    public static bool At(StationWhere where, CellFrame? position)
+    /// <param name="dungeon">The journey's dungeon ground (<see cref="JourneyContext.Dungeon"/>): the den is this ground's landblocks. Required for the den, never read for the other places.</param>
+    public static bool At(StationWhere where, CellFrame? position, HuntingGround? dungeon = null)
     {
         if (where == StationWhere.Here)
         {
@@ -97,7 +118,7 @@ public static class JourneyGrounds
         return where switch
         {
             StationWhere.Holtburg => landblock == HoltburgLandblock,
-            StationWhere.Den => landblock == DenLandblock,
+            StationWhere.Den => DungeonOrThrow(dungeon).InLandblocks(at.CellId),
             StationWhere.Belt => HuntGround.LowB.Cells.Any(c => c.CellId >> 16 == landblock),
             StationWhere.Forest => HuntGround.LowNorthForestMix.Cells.Any(c => c.CellId >> 16 == landblock),
             _ => false,
@@ -109,9 +130,10 @@ public static class JourneyGrounds
 /// The journey's travel seam (M4 P5b 3.4, lanes.md contract 1). The means follow the purpose:
 /// <list type="bullet">
 /// <item><b>Ground</b>: none when the player already stands within the destination's tolerance (its landblock and within <see cref="ToleranceMetres"/>; its
-/// landblock for the den); to the den by Primary Portal Recall (48) when <see cref="JourneyFacts.PortalTied"/> is true, else the budgeted place; to the belt or the
-/// forest the budgeted place.</item>
-/// <item><b>Home</b>: none in Holtburg's landblock, else Lifestone Recall (1635) through <see cref="RecallHome.ForCharacter"/> (the fighters over their caster swap);
+/// landblock for a dungeon ground); to a dungeon ground (the journey's own, <see cref="JourneyContext.Dungeon"/>) by the ground's Primary Portal Recall (48) unless <see cref="JourneyFacts.PortalTieOf"/> says untied: tied is a recall, unknown is a recall TRIED (a fresh
+/// character after the build is tied, but no journey can read the link; ACE's 0x04A3 answer sets untied), untied fails <c>travel:ground:untied</c> (named <c>TODO(m6-first-tie-walk)</c>) and so does the way to the ground's portal front: the journey makes no place to a
+/// dungeon or its portal (D50: the build ties, the owner's cheat layer is build time only); to the belt or the forest the budgeted place.</item>
+/// <item><b>Home</b>: none in the destination's landblock (the journey's home town), else Lifestone Recall (1635) through <see cref="RecallHome.ForCharacter"/> (the fighters over their caster swap);
 /// counted in <see cref="JourneyFacts.Recalls"/>; <see cref="JourneyFacts.LifestoneTied"/> follows the outcome.</item>
 /// <item><b>Seek, Cell, Vendor, Corpse, Spot, Bind</b>: on foot through the host's runner, the request passed unchanged (an object goal, <see cref="TravelRequest.ObjectGuid"/> not 0, is
 /// built by the host from the object, its range and its sight; the destination is then a hint); with no runner the leg fails <c>travel:run:no-runner</c>.</item>
@@ -133,6 +155,7 @@ public sealed partial class JourneyTravel : IJourneyTravel
     private readonly ILogSink _log;
     private readonly IJourneyRunnerHost? _runners;
     private readonly JourneyPlace _place;
+    private readonly HuntingGround? _dungeon;
     private Leg? _current;
 
     /// <summary>The journey's travel for <paramref name="character"/>.</summary>
@@ -141,8 +164,10 @@ public sealed partial class JourneyTravel : IJourneyTravel
     /// <param name="log">Where the travel logs.</param>
     /// <param name="runners">The host's runner, or null (every run purpose then fails <c>travel:run:no-runner</c>).</param>
     /// <param name="place">The place verb, or null for <see cref="ToolPlace"/>.</param>
-    public JourneyTravel(string character, JourneyFacts facts, ILogSink log, IJourneyRunnerHost? runners = null, JourneyPlace? place = null)
+    /// <param name="dungeon">The journey's dungeon ground (<see cref="JourneyContext.Dungeon"/>): the ground a Ground travel into its landblocks is a recall to, and whose tie is read; null finds the ground by the cell in the catalog (<see cref="JourneyGrounds.DungeonOf(uint)"/>).</param>
+    public JourneyTravel(string character, JourneyFacts facts, ILogSink log, IJourneyRunnerHost? runners = null, JourneyPlace? place = null, HuntingGround? dungeon = null)
     {
+        _dungeon = dungeon;
         _character = character ?? throw new ArgumentNullException(nameof(character));
         _facts = facts ?? throw new ArgumentNullException(nameof(facts));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -198,7 +223,6 @@ public sealed partial class JourneyTravel : IJourneyTravel
     private Leg Start(IGameSessionView session, TravelRequest request, double now)
     {
         var destination = request.Destination;
-        var landblock = destination.Location.Position.CellId >> 16;
         if (request.ObjectGuid != 0 && WithinObjectRange(session, request))
         {
             return None(request);
@@ -207,13 +231,14 @@ public sealed partial class JourneyTravel : IJourneyTravel
         switch (request.Purpose)
         {
             case TravelPurpose.Home:
-                if (InLandblock(session, JourneyGrounds.HoltburgLandblock))
+                var homeLandblock = destination.Location.Position.CellId >> 16; // the journey's home town: the destination's, never a constant (M5 3 p1, 2-R10)
+                if (InLandblock(session, homeLandblock))
                 {
                     return None(request);
                 }
 
                 _log.Info(LogCategory, $"journey travel: home by Lifestone Recall ({destination.Name})");
-                return new RecallLeg(this, RecallHome.ForCharacter(session, _character, _log), home: true);
+                return new RecallLeg(this, RecallHome.ForCharacter(session, _character, _log, homeLandblock), home: true, ground: null);
 
             case TravelPurpose.Ground:
                 if (request.ObjectGuid == 0 && AlreadyThere(session, destination))
@@ -221,10 +246,14 @@ public sealed partial class JourneyTravel : IJourneyTravel
                     return None(request);
                 }
 
-                if (landblock == JourneyGrounds.DenLandblock && _facts.PortalTied == true)
+                if (GroundOf(destination.Location.Position.CellId) is { } dungeon)
                 {
-                    _log.Info(LogCategory, $"journey travel: to {destination.Name} by Primary Portal Recall (the den portal is tied)");
-                    return new RecallLeg(this, RecallHome.ForCharacter(session, _character, _log, JourneyGrounds.DenLandblock, RecallHome.PrimaryPortalRecallSpell), home: false);
+                    return ToDungeon(session, request, dungeon);
+                }
+
+                if (PortalFrontOf(destination) is { } front)
+                {
+                    return Untied(request, front, "the way to its portal's front");
                 }
 
                 return Place(session, request);
@@ -238,6 +267,55 @@ public sealed partial class JourneyTravel : IJourneyTravel
 
                 return new RunLeg(this, _runners.Run(session, request, now));
         }
+    }
+
+    /// <summary>The ground a Ground travel to <paramref name="cell"/> enters: the journey's own, else the catalog's (<see cref="JourneyGrounds.DungeonOf(uint, HuntingGround?)"/>).</summary>
+    private HuntingGround? GroundOf(uint cell) => JourneyGrounds.DungeonOf(cell, _dungeon);
+
+    /// <summary>The dungeon ground whose portal's front cell is the destination's cell (the untied mage's way to its portal), or null.</summary>
+    private HuntingGround? PortalFrontOf(TeleportDestination destination)
+    {
+        var cell = destination.Location.Position.CellId;
+        if (_dungeon is { Kind: GroundKind.Dungeon, Portal: { } own })
+        {
+            return own.FrontCell == cell ? _dungeon : null;
+        }
+
+        var all = GroundCatalog.All;
+        for (var i = 0; i < all.Count; i++)
+        {
+            if (all[i].Kind == GroundKind.Dungeon && all[i].Portal is { } p && p.FrontCell == cell)
+            {
+                return all[i];
+            }
+        }
+
+        return null;
+    }
+
+    private Leg ToDungeon(IGameSessionView session, TravelRequest request, HuntingGround dungeon)
+    {
+        var tie = _facts.PortalTieOf(dungeon.Key);
+        if (tie == PortalTie.Untied)
+        {
+            return Untied(request, dungeon, "the way to its arrival");
+        }
+
+        _log.Info(
+            LogCategory,
+            tie == PortalTie.Tied
+                ? $"journey travel: to {request.Destination.Name} by Primary Portal Recall (the {dungeon.Key} portal is tied)"
+                : $"journey travel: to {request.Destination.Name} by Primary Portal Recall TRIED (the {dungeon.Key} tie is not known: a build ties it, but no journey can read the link from the player description; ACE's 0x04A3 answer sets untied)");
+        return new RecallLeg(this, RecallHome.ForCharacter(session, _character, _log, dungeon.ArrivalLandblock(), dungeon.Portal?.RecallSpell ?? RecallHome.PrimaryPortalRecallSpell), home: false, ground: dungeon.Key);
+    }
+
+    /// <summary>The refusal of a way a character not tied to the ground's portal has none for: no place (D50), the first tie's walk is M6's.</summary>
+    private Leg Untied(TravelRequest request, HuntingGround dungeon, string what)
+    {
+        _log.Warn(
+            LogCategory,
+            $"journey travel: REFUSED the {request.Purpose} travel to '{request.Destination.Name}' ({what}): the {dungeon.Key} portal is not tied, and a mage with no tie reaches a portal by the first tie's walk, not a place (TODO(m6-first-tie-walk)): {UntiedFailure}");
+        return new FixedLeg(TravelMeans.None, UntiedFailure);
     }
 
     private Leg None(TravelRequest request)
@@ -264,6 +342,9 @@ public sealed partial class JourneyTravel : IJourneyTravel
         return new PlaceLeg(_place(session, request.Destination), name);
     }
 
+    /// <summary>The failure of a Ground travel that needs a tie the character does not have.</summary>
+    public const string UntiedFailure = "travel:ground:untied";
+
     private static bool InLandblock(IGameSessionView session, uint landblock) =>
         session.State.Self.Position is { } at && at.CellId >> 16 == landblock;
 
@@ -283,7 +364,7 @@ public sealed partial class JourneyTravel : IJourneyTravel
         return Vector3.Distance(at.Frame.Origin, it.Frame.Origin) <= request.Range;
     }
 
-    private static bool AlreadyThere(IGameSessionView session, TeleportDestination destination)
+    private bool AlreadyThere(IGameSessionView session, TeleportDestination destination)
     {
         if (session.State.Self.Position is not { } at)
         {
@@ -296,7 +377,7 @@ public sealed partial class JourneyTravel : IJourneyTravel
             return false;
         }
 
-        if (to.CellId >> 16 == JourneyGrounds.DenLandblock)
+        if (GroundOf(to.CellId) is not null)
         {
             return true;
         }
@@ -399,7 +480,7 @@ public sealed partial class JourneyTravel : IJourneyTravel
         }
     }
 
-    private sealed class RecallLeg(JourneyTravel owner, RecallHome? recall, bool home) : Leg
+    private sealed class RecallLeg(JourneyTravel owner, RecallHome? recall, bool home, string? ground) : Leg
     {
         private bool _begun;
         private TravelStatus _end = TravelStatus.Running;
@@ -435,9 +516,9 @@ public sealed partial class JourneyTravel : IJourneyTravel
                     {
                         owner._facts.LifestoneTied = true;
                     }
-                    else
+                    else if (ground is not null)
                     {
-                        owner._facts.PortalTied = true;
+                        owner._facts.SetPortalTie(ground, PortalTie.Tied);
                     }
 
                     return End(TravelStatus.Arrived, null);
@@ -446,9 +527,10 @@ public sealed partial class JourneyTravel : IJourneyTravel
                     {
                         owner._facts.LifestoneTied = false;
                     }
-                    else if (recall.Refusal == 0x04A3)
+                    else if (recall.Refusal == 0x04A3 && ground is not null)
                     {
-                        owner._facts.PortalTied = false;
+                        owner._facts.SetPortalTie(ground, PortalTie.Untied);
+                        owner._log.Warn(LogCategory, $"journey travel: the recall to {ground} was refused untied (WeenieError 0x04A3 YouMustLinkToPortalToRecall): the tie is untied; the way to the portal is the first tie's walk (TODO(m6-first-tie-walk))");
                     }
 
                     var step = recall.Failure is { } f && f.StartsWith("recall:", StringComparison.Ordinal) ? f["recall:".Length..] : recall.Failure ?? "unknown";

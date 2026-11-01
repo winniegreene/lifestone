@@ -34,6 +34,12 @@ internal sealed class S5KinematicBody : IPlayerMovementIntents, INavBody
     public const float SideSpeed = 1.25f;
     public const float TurnDegreesPerSecond = 90f;
 
+    /// <summary>The turn rate of a running player, in degrees a second (about 200: <see cref="NavRunner.CrossTrackMetres"/>'s note on the physics step).</summary>
+    public const float RunningTurnDegreesPerSecond = 200f;
+
+    /// <summary>The rate the held turn key turns the body, in degrees a second (<see cref="TurnDegreesPerSecond"/> unless a test sets the running player's).</summary>
+    public float TurnRate { get; set; } = TurnDegreesPerSecond;
+
     private readonly Dictionary<uint, int> _held = [];
 
     public S5KinematicBody(float x, float y, float heading = 0f)
@@ -116,12 +122,12 @@ internal sealed class S5KinematicBody : IPlayerMovementIntents, INavBody
         var t = (float)dt;
         if (Holds(MotionCommands.TurnRight))
         {
-            Heading += TurnDegreesPerSecond * t;
+            Heading += TurnRate * t;
         }
 
         if (Holds(MotionCommands.TurnLeft))
         {
-            Heading -= TurnDegreesPerSecond * t;
+            Heading -= TurnRate * t;
         }
 
         Heading = ((Heading % 360f) + 360f) % 360f;

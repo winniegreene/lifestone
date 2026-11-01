@@ -1,5 +1,6 @@
 using Godot;
 using Lifestone.Client.RetailUi.Input;
+using Lifestone.Game.Core;
 
 namespace Lifestone.Game.RetailUi;
 
@@ -71,10 +72,13 @@ public partial class RetailUiInput : Node
 
         if (what == NotificationApplicationFocusOut)
         {
+            // M5 7 D153 (log everything): a lost focus lets go of every held key (CommandInterpreter::LoseKeyboardFocus), so a walk that stops can be traced to it.
+            Log.Info("input", "the window lost the focus: every held key and button is let go", ("was_active", _router.ClientActive));
             _router.SetClientActive(false);
         }
         else if (what == NotificationApplicationFocusIn)
         {
+            Log.Info("input", "the window has the focus", ("was_active", _router.ClientActive));
             _router.SetClientActive(true);
         }
         else if (what == NotificationWMMouseExit)

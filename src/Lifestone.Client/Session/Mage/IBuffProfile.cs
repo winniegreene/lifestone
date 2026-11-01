@@ -17,7 +17,7 @@ public interface IBuffProfile
     /// <summary>The buff lines in the order the cycle casts them: the profile's leading lines first, then the other "Mastery Self" lines, then the rest in the profile's order.</summary>
     IReadOnlyList<ProfileLine> BuffOrder { get; }
 
-    /// <summary>Every spell id the build teaches the character with <c>spell learn</c>, in line order then list order (the lines first, then the extras).</summary>
+    /// <summary>Every spell id the build teaches the character with <c>spell learn</c>, in line order then list order (the lines first, then the extras); a line learned by play (<see cref="ProfileLine.ByPlay"/>) is not among them.</summary>
     IReadOnlyList<uint> SpellsToLearn { get; }
 
     /// <summary>The line named <paramref name="name"/> (the profile's name for it), or null.</summary>
@@ -69,7 +69,7 @@ public sealed class BuffProfile : IBuffProfile
         _byName = Lines.ToFrozenDictionary(l => l.Name);
         _spells = Lines.SelectMany(l => l.Spells).DistinctBy(s => s.Id).ToFrozenDictionary(s => s.Id);
         BuffOrder = Order(Lines, leadingLines);
-        SpellsToLearn = [.. Lines.SelectMany(l => l.Spells).Select(s => s.Id), .. extraSpells];
+        SpellsToLearn = [.. Lines.Where(l => !l.ByPlay).SelectMany(l => l.Spells).Select(s => s.Id), .. extraSpells]; // M5 7 P7j: a line learned by play is never granted
         ManaTransferLine = LineNamed(TransferLineName) ?? throw new InvalidOperationException("the profile of " + characterName + " has no line " + TransferLineName);
         StaminaRestoreLine = LineNamed(BoostLineName) ?? throw new InvalidOperationException("the profile of " + characterName + " has no line " + BoostLineName);
     }

@@ -129,7 +129,7 @@ public sealed class RetailUiFramesPlanTests
     public void The_vendor_windows_offline_frame_is_an_extra_frame_with_a_unique_file_safe_name_that_clashes_with_no_other_frame()
     {
         // M4 3.2 s4b: one review frame of PLACEHOLDER content (the stand-in's Thelnoth and shop), saved in the extra folder by the play-checks' vendor rows.
-        Assert.Equal(["vendor-buy-sell"], PanelFramesPlan.VendorContentFrames);
+        Assert.Equal(["vendor-buy-sell", "examine-vendor-row-standin"], PanelFramesPlan.VendorContentFrames); // M5 7 S6 adds the shop row examined by a right click
         Assert.Equal("vendor-buy-sell", PanelFramesPlan.VendorBuySellFrame);
         Assert.Equal("vendor-buy-sell.png", ShellFramesPlan.FileName(PanelFramesPlan.VendorBuySellFrame));
         Assert.Matches("^[a-z0-9]+(-[a-z0-9]+)*$", PanelFramesPlan.VendorBuySellFrame);
@@ -144,7 +144,7 @@ public sealed class RetailUiFramesPlanTests
     {
         // M4 3.2 s4c: the play-checks' examine rows save the panel on the stand-in (PLACEHOLDER content: a labelled subset of ACE's tables, TODO(m4-standin-appraise-tables)) in the extra folder; the lead's panel shot is a different file.
         var names = PanelFramesPlan.OfflineExamineFrames;
-        Assert.Equal(["examine-kit-standin"], names);
+        Assert.Equal(["examine-kit-standin", "examine-chest-magic-standin", "examine-inscribe-here-standin", "examine-inscribed-standin", "examine-failed-roll-standin"], names); // M5 7 S6 and D137 add theirs
         Assert.Equal("examine-kit-standin", PanelFramesPlan.ExamineStandInFrame);
         Assert.Equal("examine-kit-standin.png", ShellFramesPlan.FileName(PanelFramesPlan.ExamineStandInFrame));
         Assert.All(names, name => Assert.Matches("^[a-z0-9]+(-[a-z0-9]+)*$", name));

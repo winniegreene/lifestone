@@ -467,7 +467,24 @@ public sealed class PhysicsWorld : IGroundProbe, IPhysicsCellSource
     /// its own height.</para>
     /// <para>Main thread (or the headless tick) only. Allocation-free.</para>
     /// </remarks>
-    public bool TryGroundZ(in CellFrame at, PhysSphere foot, out float z, out Plane contact)
+    public bool TryGroundZ(in CellFrame at, PhysSphere foot, out float z, out Plane contact) =>
+        TryGroundZ(at, foot, fixedWorldOnly: false, out z, out contact);
+
+    /// <summary>
+    /// The route planner's ground probe: <see cref="TryGroundZ(in CellFrame, PhysSphere, out float, out Plane)"/> over the fixed world only
+    /// (terrain, cells, buildings and landblock statics), passing every moving object's shadow (<see cref="ObjectInfo.FixedWorldOnly"/>): a
+    /// closed door, an NPC or a creature standing on a sample is not a hole in the route, because the runner meets them at walk time (the
+    /// door step, the creature layer, the stuck ladder). M5 item 5 fix F3. Not retail: Lifestone's own planner tool.
+    /// </summary>
+    /// <param name="at">Where to probe.</param>
+    /// <param name="foot">The body's lowest sphere.</param>
+    /// <param name="z">The origin height on the ground found.</param>
+    /// <param name="contact">The ground's plane.</param>
+    /// <returns>True when walkable ground lies within the window.</returns>
+    public bool TryFixedGroundZ(in CellFrame at, PhysSphere foot, out float z, out Plane contact) =>
+        TryGroundZ(at, foot, fixedWorldOnly: true, out z, out contact);
+
+    private bool TryGroundZ(in CellFrame at, PhysSphere foot, bool fixedWorldOnly, out float z, out Plane contact)
     {
         z = 0f;
         contact = default;
@@ -489,6 +506,7 @@ public sealed class PhysicsWorld : IGroundProbe, IPhysicsCellSource
         {
             const float stepDown = GroundProbeRise + GroundProbeDrop;
             transition.InitObject(GroundProbeObject, GroundProbeState, PhysicsState.Gravity, 1.0f, 0f, stepDown);
+            transition.ObjectInfo.FixedWorldOnly = fixedWorldOnly;
             Span<PhysSphere> sphere = [foot];
             transition.InitSphere(sphere, 1.0f);
             transition.InitPath(cell, start, start);

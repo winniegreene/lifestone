@@ -88,6 +88,14 @@ public sealed class SessionReplayer
 
         _used = true;
         using var reader = SessionRecordingReader.Open(recording, leaveOpen: true);
+
+        // M5 7 P7d: a recording made before the orphan rule (no clientRules in its header) replays under the rules its live client applied.
+        _reducer.KeepsOrphans = reader.Header.ClientRules < RecordingHeader.ClientRulesDropOrphans;
+        if (_reducer.KeepsOrphans)
+        {
+            Log.Info("replay", "the recording predates the orphan rule (M5 7 P7d): orphaned objects are kept as its live client kept them", new LogField("client_rules", reader.Header.ClientRules));
+        }
+
         var counts = default(ReplayCounts);
         while (reader.TryRead(out var frame))
         {
@@ -121,6 +129,11 @@ public sealed class SessionReplayer
             // The recording keeps no tick boundaries, so a frame that arrives earlier in the same tick as the creating one can still
             // expire it here and not live: a window of less than one frame (TODO(replay-tick-boundary): record the tick ends to close it).
             _reducer.ExpireParked();
+
+            // Then the client-side cull, as the live tick runs it after the expiry (GameSession.Tick, M5 0 c1): a recording that leaves an area for 25 s (M5 3's build tie, a place out and back)
+            // culls live, so its replay must cull too, at the frame's time (the same sub-frame window as the expiry). The replayer gives the cull no cells, so inside an interior cell the
+            // landblock and its eight neighbours count as visible (TODO(m5-object-cull-cells), logged once); the headless host's recordings outdoors replay exactly.
+            _reducer.CullObjects();
         }
 
         _reducer.FlushExpiryLines();

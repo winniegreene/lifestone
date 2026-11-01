@@ -228,6 +228,15 @@ internal static class ActionPolicy
     /// <summary>A player-tool request: until the mod's reply (m2-plan §4.12).</summary>
     internal const double ToolSeconds = 5;
 
+    /// <summary>
+    /// M5 8 (<c>m5-8-place-not-in-world</c>, D141, D152): how long a player-scope tool request waits for the world, once before sending (the client's own state says the player is not in the world) and once after the mod answered
+    /// <c>not-in-world</c> (the mod's <c>where</c> is asked every <see cref="ToolWorldProbeSeconds"/> until the player is in a landblock), before it fails with the named reason.
+    /// </summary>
+    internal const double ToolWorldWaitSeconds = 20;
+
+    /// <summary>M5 8: the spacing of the <c>where</c> probes while a request waits for the mod's landblock check to pass.</summary>
+    internal const double ToolWorldProbeSeconds = 1;
+
     /// <summary>Talk and Tell together: 4 a second, bursts of 8.</summary>
     internal const double ChatPerSecond = 4;
 

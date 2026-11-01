@@ -5,6 +5,7 @@ using System.Text;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.State;
 using Lifestone.Client.Session.Recording;
+using Lifestone.Net.Dispatch;
 using Lifestone.Net.Messages;
 using Lifestone.Tests.Shared.Net;
 using Lifestone.Net.Session;
@@ -95,6 +96,57 @@ public sealed class ReplayTests(ITestOutputHelper output, DatSetFixture fixture)
         Assert.Equal(PhysicsState.Ethereal, replayed.State);
         Assert.True(result.DigestMatches, "the replayed state differs from the live one");
         Assert.Equal(digest, GameStateDigest.Compute(replayer.State));
+    }
+
+    /// <summary>
+    /// M5 7 P7d (D139 row f): a corpse whose F747 takes its contents with it live replays to its digest under the recording's own client rules, and a
+    /// recording whose header predates the rule (no <c>clientRules</c>, read as <see cref="RecordingHeader.ClientRulesKeepOrphans"/>) replays with the
+    /// orphan kept, as its live client kept it (round 13's 20261029T011454Z recording: two orphans).
+    /// </summary>
+    [Theory]
+    [InlineData(RecordingHeader.CurrentClientRules)]
+    [InlineData(RecordingHeader.ClientRulesKeepOrphans)]
+    public void A_deleted_corpses_contents_replay_under_the_recordings_own_client_rules(int rules)
+    {
+        const uint Corpse = 0x80000A00;
+        const uint Loot = 0x80000A01;
+        using var h = new LiveHarness(header: new RecordingHeader { Runner = "test", CreatedUtc = DateTimeOffset.UnixEpoch, Scenario = "harness", ClientRules = rules });
+        h.Present();
+        h.Server.Inject(AceWireWriters.ObjectCreate(new AceCreateObject
+        {
+            Guid = Corpse,
+            PhysicsState = (uint)(PhysicsState.Gravity | PhysicsState.ReportCollisions),
+            Position = new AcePosition(ScriptedAceSession.AcademyCell, 60f, -20f, 0.005f),
+            Setup = 0x02000001,
+            Sequences = [1, 1, 1, 1, 1, 1, 1, 1, 1],
+            Name = "Corpse of Tusker",
+            WeenieClassId = 21,
+        }));
+        h.Server.Inject(AceWireWriters.ObjectCreate(new AceCreateObject { Guid = Loot, Sequences = [1, 1, 1, 1, 1, 1, 1, 1, 1], Name = "Mana Stone", WeenieClassId = 2434, Container = Corpse }));
+        h.Run();
+        Assert.True(h.State.Objects.Contains(Loot));
+        h.Server.Inject(AceWireWriters.ObjectDelete(Corpse, 1));
+        h.Run();
+        Assert.False(h.State.Objects.Contains(Corpse));
+        Assert.False(h.State.Objects.Contains(Loot)); // the live client (this build) drops it whatever the header says
+
+        h.Dispose();
+        var log = new RecordingLogSink();
+        var replayer = new SessionReplayer(log);
+        var result = replayer.Replay(new MemoryStream(h.RecordingBytes()));
+        Assert.Equal(rules, result.Header.ClientRules);
+        Assert.False(replayer.State.Objects.Contains(Corpse));
+        if (rules >= RecordingHeader.ClientRulesDropOrphans)
+        {
+            Assert.True(result.DigestMatches, "the replayed state differs from the live one");
+            Assert.False(replayer.State.Objects.Contains(Loot));
+            Assert.DoesNotContain(log.Entries, e => e.Message.Contains("predates the orphan rule", StringComparison.Ordinal));
+        }
+        else
+        {
+            Assert.True(replayer.State.Objects.Contains(Loot)); // as a client made before P7d kept it
+            Assert.Single(log.Entries, e => e.Message.Contains("predates the orphan rule", StringComparison.Ordinal));
+        }
     }
 
     [Fact]
@@ -244,8 +296,28 @@ public sealed class ReplayTests(ITestOutputHelper output, DatSetFixture fixture)
         foreach (var path in RealRecordings.Find())
         {
             var bytes = File.ReadAllBytes(path);
-            var first = new SessionReplayer(spells: lookup).Replay(new MemoryStream(bytes));
+            var replayer = new SessionReplayer(spells: lookup);
+            var notDecoded = new HashSet<(uint Opcode, uint EventType)>();
+            using var tap = replayer.Events.SubscribeRaw((direction, _, fragment, queue, body) =>
+            {
+                // M5 6 w1: the dispatcher's own verdict on every server message, to name the ones net still leaves unknown.
+                if (direction == MessageDirection.Inbound)
+                {
+                    var result = InboundDispatcher.Dispatch(new InboundContext(fragment, queue, 0), body, new NullInbound());
+                    if (result.Outcome == DispatchOutcome.Unknown)
+                    {
+                        notDecoded.Add((result.Opcode, result.EventType));
+                    }
+                }
+            });
+            var first = replayer.Replay(new MemoryStream(bytes));
             var name = Path.GetFileName(path);
+
+            // M5 6 w1 (D31): the login notices GE 0x0029, 0x0021 and 0x0295 and the property updates GM 0x02D9 and 0x02DB are decoded, so
+            // none of the five is counted as unknown. (Not asserted for every message: 24 all-zero server messages of 36 to 48 bytes, opcode 0, in 14 of
+            // the 470 recordings under cache/ are still unknown, a recorder or server artefact nobody has named: TODO(m5-6-zero-messages).)
+            Assert.DoesNotContain(notDecoded, n => n.Opcode == MessageOpcodes.GameEvent && n.EventType is 0x0029 or 0x0021 or 0x0295);
+            Assert.DoesNotContain(notDecoded, n => n.Opcode is 0x02D9 or 0x02DB);
             output.WriteLine($"{name}: {first.Frames} frames, end {first.End}, trailer digest matches {(first.DigestMatches is { } m ? m.ToString() : "n/a")}");
             Assert.True(first.Malformed == 0, $"{name}: net could not parse {first.Malformed} server message(s): {string.Join(", ", first.MalformedOpcodes.Select(o => "0x" + o.ToString("X4", CultureInfo.InvariantCulture)))}");
             Assert.True(first.HandlerFailures == 0, $"{name}: {first.HandlerFailures} handler failure(s)");
@@ -258,6 +330,11 @@ public sealed class ReplayTests(ITestOutputHelper output, DatSetFixture fixture)
 
             Assert.Equal(EventStreamHash(bytes, out _), EventStreamHash(bytes, out _));
         }
+    }
+
+    /// <summary>A handler that ignores everything: only the dispatcher's verdict on a message matters to the replay test above.</summary>
+    private sealed class NullInbound : IInboundMessageHandler
+    {
     }
 
     /// <summary>The SHA-256 of every event's text, in publish order, over a replay of <paramref name="recording"/>.</summary>

@@ -1,6 +1,7 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Actions.Trackers;
+using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
@@ -133,6 +134,12 @@ public sealed class HarmHealScript
     private readonly List<uint> _scratch = [];
     private readonly List<uint> _known = [];
     private readonly List<uint> _affordable = [];
+    private readonly uint[] _castIds = new uint[1];
+    private CastAttempt? _attempt;
+    private readonly CastRules _harmRules;
+    private readonly CastRules _harmTriesRules;
+    private readonly CastRules _healRules;
+    private readonly CastRules[] _transferRules;
 
     private Phase _phase;
     private Pend _pend;
@@ -140,6 +147,14 @@ public sealed class HarmHealScript
     private Await _await;
     private Pend _awaitFor;
     private uint _awaitFrom;
+
+    // M5 7 P7p: the heal window, from a kit's, a potion's or a Heal Self's send to its judge: what it restored (the handle's HealResult, the "restores N points" line) and the hits the character took meanwhile.
+    private IDisposable? _windowChat;
+    private IDisposable? _windowCombat;
+    private int _windowRestoredResult;
+    private int _windowRestoredLine;
+    private long _windowHits;
+    private int _windowHitCount;
     private double _awaitUntil;
     private double _notBefore;
     private double _t0;
@@ -210,6 +225,18 @@ public sealed class HarmHealScript
         _swap = swap;
         _options = options ?? new HarmHealOptions();
         _log = log ?? throw new ArgumentNullException(nameof(log));
+
+        // M5 D13: the script's casts go through the cast policy. The harm and the heal retry a fizzle with no count inside their cap (Timed); the transfer's fizzles count against the round's cap of top-ups
+        // (Utility of the casts still allowed, the harm cap as its time), as each fizzled top-up did before; the rules are made once.
+        _harmRules = CastRules.Timed(_options.HarmCapSeconds);
+        _harmTriesRules = _keeper.ManaOptions.On ? _harmRules.WithManaTries(_keeper.ManaOptions.Tries, _keeper.ManaOptions.TrySpacingSeconds) : _harmRules; // made once: the forms build a name string
+        _healRules = CastRules.Timed(_options.HealCapSeconds);
+        _transferRules = new CastRules[Math.Max(0, _options.MaxManaTopUps) + 1];
+        for (var casts = 1; casts < _transferRules.Length; casts++)
+        {
+            _transferRules[casts] = CastRules.Utility(casts).WithMaxSeconds(_options.HarmCapSeconds);
+        }
+
     }
 
     /// <summary>Where the script is.</summary>
@@ -331,7 +358,7 @@ public sealed class HarmHealScript
             }
         }
 
-        if (_handle is not null && !SettleHandle())
+        if ((_handle is not null || _pend is Pend.Cast or Pend.HealCast or Pend.Transfer) && !SettleHandle())
         {
             return State;
         }
@@ -399,7 +426,7 @@ public sealed class HarmHealScript
         }
 
         _log.Info(LogCategory, $"harm-heal: the combat mode is {current}, not peace: setting peace");
-        return Send(Pend.Mode, _session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host));
+        return Send(Pend.Mode, _session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation));
     }
 
     private HarmHealState StepSwap(SwapDirection direction)
@@ -460,6 +487,7 @@ public sealed class HarmHealScript
         {
             _manaRestStarted = true;
             ManaRestNeed = HarmManaNeed(health, maxHealth);
+            ManaRestFloor = _restFloor; // set by HarmManaNeed: the same rounds' try floors (the ceiling's value with the tries off or no Mana Conversion)
             if (mana >= ManaRestNeed)
             {
                 _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"harm-heal: harm round {_harmRound} needs {ManaRestNeed} mana; {mana} held"));
@@ -472,7 +500,7 @@ public sealed class HarmHealScript
             _restStart = _now;
             _restTransfers0 = _keeper.Transfers;
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"harm-heal: harm round {_harmRound} needs {ManaRestNeed} mana and {mana} is held: the vitals keeper restores it first"));
-            _keeper.NeedsFor(new VitalsNeeds(NextCastMana: ManaRestNeed));
+            _keeper.NeedsFor(new VitalsNeeds(NextCastMana: ManaRestNeed, NextCastFloor: ManaRestFloor)); // G2: the keeper funds the round to the try floor, and the harm casts try from there (HarmFloor)
         }
 
         var state = _keeper.Step(_now);
@@ -501,13 +529,15 @@ public sealed class HarmHealScript
     /// <summary>The mana the harms of a round need from <paramref name="health"/> (see <see cref="StepManaRest"/>); 0 when no level is castable or the health is at the target.</summary>
     private uint HarmManaNeed(uint health, uint maxHealth)
     {
+        _restFloor = 0;
         var q = _session.State.Self.Qualities;
         var book = _session.State.Self.Spellbook;
         var worn = _session.State.Self.Inventory.Equipped.Count;
         var castable = new List<uint>();
+        var held = LevelFloor.HeldFor(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
         foreach (var id in VitalsMeans.HarmSelf)
         {
-            if (book.Knows(id) && _spells.TryGetValue(id, out var info) && GearCasts.TryCurrentSkill(q, GearCasts.SkillOf(info.School), out var skill, out _) && GearCasts.Chance(skill, info.Power) >= _options.CastChance)
+            if (book.Knows(id) && _spells.TryGetValue(id, out var info) && GearCasts.TryCurrentSkill(q, GearCasts.SkillOf(info.School), out var skill, out _) && GearCasts.Chance(skill, info.Power) >= _options.CastChance && !Unpayable(held, info))
             {
                 castable.Add(id);
             }
@@ -521,10 +551,52 @@ public sealed class HarmHealScript
 
         var net = Math.Max(1.0, level.MeanHarm - _rise);
         var casts = Math.Ceiling((health - _options.TargetShare * maxHealth) / net);
-        var need = casts * GearCasts.ManaCeiling(picked, worn);
+        var ceiling = GearCasts.ManaCeiling(picked, worn);
+        var need = casts * ceiling;
         q.TryGetVitalLevels(MageTemplate.MaxMana, out _, out var maxMana);
+        _restFloor = (uint)Math.Min(casts * HarmFloor(picked, ceiling), Math.Min(need, maxMana));
         return (uint)Math.Min(need, maxMana);
     }
+
+    private uint _restFloor;
+
+    /// <summary>
+    /// True when the pack casts Life Magic on the foci formula (it holds the focus) and lacks a component of <paramref name="info"/>'s formula: the level floor (<see cref="LevelFloor"/>, as the buff cycle's). M5 3 gate round 3:
+    /// Harm Self II needs an Iron Scarab the ground's kit does not carry, and ACE refused it with 0x0400. The skip is logged once per spell.
+    /// </summary>
+    private bool Unpayable(IReadOnlyDictionary<uint, int>? held, SpellInfo info)
+    {
+        if (held is null || !LevelFloor.ShortOf(held, info, out var need))
+        {
+            return false;
+        }
+
+        if (_noted.Add("floor:" + info.Id.ToString(CultureInfo.InvariantCulture)))
+        {
+            _log.Warn(LogCategory, $"harm-heal: {info.Name} needs {need}; skipped (the level floor)");
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The try floor of a Harm Self level (M5 1 fix B, G2; <see cref="ManaOrder.FloorOf"/>): the least mana at which a Mana Conversion try lands at the try chance, at most <paramref name="ceiling"/>; the ceiling itself with the tries
+    /// off (<c>--cast-mana-tries 0</c>) or no Mana Conversion, so today's economy is unchanged there. Reads the skill's enchantments, so callers ask it only when the mana is under the ceiling.
+    /// </summary>
+    private uint HarmFloor(SpellInfo info, uint ceiling)
+    {
+        var mana = _keeper.ManaOptions;
+        if (!mana.On)
+        {
+            return ceiling;
+        }
+
+        ManaOrder.TryManaConversion(_session.State.Self.Qualities, out var conversion);
+        return ManaOrder.FloorOf(ceiling, info.Power, ceiling, conversion, mana, (info.Flags & SpellFlags.IgnoresManaConversion) != 0);
+    }
+
+    /// <summary>The mana of the last harm round's floor need (<see cref="ManaRestNeed"/>'s partner, handed to the keeper as <see cref="VitalsNeeds.NextCastFloor"/>).</summary>
+    public uint ManaRestFloor { get; private set; }
 
     /// <summary>The mana a harm round asked for last (M4 P5a fix r4; <see cref="StepManaRest"/>).</summary>
     public uint ManaRestNeed { get; private set; }
@@ -553,15 +625,17 @@ public sealed class HarmHealScript
         _known.Clear();
         _affordable.Clear();
         var worn = _session.State.Self.Inventory.Equipped.Count;
+        var held = LevelFloor.HeldFor(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
         foreach (var id in VitalsMeans.HarmSelf)
         {
-            if (!book.Knows(id) || !_spells.TryGetValue(id, out var info) || !GearCasts.TryCurrentSkill(q, GearCasts.SkillOf(info.School), out var skill, out _) || GearCasts.Chance(skill, info.Power) < _options.CastChance)
+            if (!book.Knows(id) || !_spells.TryGetValue(id, out var info) || !GearCasts.TryCurrentSkill(q, GearCasts.SkillOf(info.School), out var skill, out _) || GearCasts.Chance(skill, info.Power) < _options.CastChance || Unpayable(held, info))
             {
                 continue;
             }
 
             _known.Add(id);
-            if (mana >= GearCasts.ManaCeiling(info, worn))
+            var harmCeiling = GearCasts.ManaCeiling(info, worn);
+            if (mana >= harmCeiling || mana >= HarmFloor(info, harmCeiling)) // G2: a level is affordable from its try floor (the ceiling with the tries off)
             {
                 _affordable.Add(id);
             }
@@ -596,13 +670,24 @@ public sealed class HarmHealScript
         if (_session.State.Self.Qualities.CombatMode != CombatModes.Magic)
         {
             _log.Info(LogCategory, "harm-heal: entering the magic mode for Harm Self");
-            return Send(Pend.Mode, _session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host));
+            return Send(Pend.Mode, _session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation));
         }
 
         _cast = choice.Level;
         _awaitFrom = health;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"harm-heal: cast {HarmSelfPlan.Describe(choice.Level!.Value)} at {health} of {maxHealth} ({100.0 * health / maxHealth:0}%), mana {mana}"));
-        return Send(Pend.Cast, _session.Actions.Cast(choice.Level!.Value.SpellId, ActionSource.Host));
+        var harmSpell = choice.Level!.Value.SpellId;
+        var tryFloor = 0u;
+        if (_spells.TryGetValue(harmSpell, out var harmInfo))
+        {
+            var ceilingNow = GearCasts.ManaCeiling(harmInfo, _session.State.Self.Inventory.Equipped.Count);
+            if (mana < ceilingNow && HarmFloor(harmInfo, ceilingNow) is var floor && floor < ceilingNow)
+            {
+                tryFloor = floor; // under the ceiling the cast tries from its floor (a 0x0401 inside the tries is expected)
+            }
+        }
+
+        return SendCast(Pend.Cast, harmSpell, tryFloor > 0 ? _harmTriesRules : _harmRules, "harm-heal harm", tryFloor);
     }
 
     /// <summary>
@@ -631,14 +716,14 @@ public sealed class HarmHealScript
         if (q.CombatMode != CombatModes.Magic)
         {
             _log.Info(LogCategory, "harm-heal: entering the magic mode for Stamina to Mana Self");
-            state = Send(Pend.Mode, _session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host));
+            state = Send(Pend.Mode, _session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation));
             return true;
         }
 
         _topUps++;
         _awaitManaFrom = mana;
         _log.Info(LogCategory, $"harm-heal: the mana ({mana} of {maxMana}) does not pay for the Harm Self level wanted: cast {info.Name} ({info.Id}), top-up {_topUps} of {_options.MaxManaTopUps}");
-        state = Send(Pend.Transfer, _session.Actions.Cast(info.Id, ActionSource.Host));
+        state = SendCast(Pend.Transfer, info.Id, _transferRules[_options.MaxManaTopUps - _topUps + 1], "harm-heal mana top-up");
         return true;
     }
 
@@ -648,10 +733,17 @@ public sealed class HarmHealScript
         why = "Stamina to Mana Self: no level is known";
         var book = _session.State.Self.Spellbook;
         var ids = VitalsMeans.StaminaToManaSelf;
+        var held = LevelFloor.HeldFor(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
         for (var i = ids.Count - 1; i >= 0; i--)
         {
             if (!book.Knows(ids[i]) || !_spells.TryGetValue(ids[i], out var info))
             {
+                continue;
+            }
+
+            if (Unpayable(held, info))
+            {
+                why = "Stamina to Mana Self: no level the pack can pay for (the level floor)"; // M5 4 G1: named once by Unpayable
                 continue;
             }
 
@@ -737,7 +829,8 @@ public sealed class HarmHealScript
         _kitMissing = maxHealth - health;
         _kitUsesBefore = _session.State.Objects.TryGet(kit, out var kitObject) ? kitObject.Weenie.Structure : null;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"harm-heal: kit 0x{kit:X8} ({uses} use(s) left) at {health} of {maxHealth} ({100.0 * health / maxHealth:0}%), try {_kitTries} of {_options.MaxKitTries}"));
-        return Send(Pend.Kit, _session.Actions.UseWithTarget(kit, _session.State.Self.Guid, ActionSource.Host));
+        OpenHealWindow();
+        return Send(Pend.Kit, _session.Actions.UseWithTarget(kit, _session.State.Self.Guid, ActionSource.Automation));
     }
 
     private HarmHealState StepPotion()
@@ -755,7 +848,8 @@ public sealed class HarmHealScript
         _awaitFrom = health;
         _potionHeldBefore = held;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"harm-heal: potion 0x{potion:X8} ({held} held) at {health} of {maxHealth} ({100.0 * health / maxHealth:0}%)"));
-        return Send(Pend.Potion, _session.Actions.Drink(potion, ActionSource.Host));
+        OpenHealWindow();
+        return Send(Pend.Potion, _session.Actions.Drink(potion, ActionSource.Automation));
     }
 
     private HarmHealState StepHealSpell()
@@ -771,11 +865,24 @@ public sealed class HarmHealScript
         }
 
         var q = _session.State.Self.Qualities;
-        var info = VitalsMeans.Pick(q, _session.State.Self.Spellbook, _spells, VitalsLine.HealSelf, _options.CastChance, out var why);
+        var held = LevelFloor.HeldFor(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic); // M5 4 G1: the level floor for Heal Self too (named once per level)
+        if (held is not null)
+        {
+            var heals = VitalsMeans.HealSelf;
+            for (var i = 0; i < heals.Count; i++)
+            {
+                if (_spells.TryGetValue(heals[i], out var healLevel))
+                {
+                    Unpayable(held, healLevel);
+                }
+            }
+        }
+
+        var info = VitalsMeans.Pick(q, _session.State.Self.Spellbook, _spells, VitalsLine.HealSelf, _options.CastChance, out var why, held);
         if (info is null)
         {
             // P5a round 3: under a vitae penalty (BSD Mage at 40%: Life Magic 310) no known Heal Self level may reach the 0.9 rule. Not a failure: the best known level is cast, its fizzles counted, the heal cap still decides.
-            info = VitalsMeans.PickBestChance(q, _session.State.Self.Spellbook, _spells, VitalsLine.HealSelf, out var best);
+            info = VitalsMeans.PickBestChance(q, _session.State.Self.Spellbook, _spells, VitalsLine.HealSelf, out var best, held);
             if (info is null)
             {
                 return Fail("heal-nospell:" + why);
@@ -792,12 +899,13 @@ public sealed class HarmHealScript
         if (q.CombatMode != CombatModes.Magic)
         {
             _log.Info(LogCategory, "harm-heal: entering the magic mode for Heal Self");
-            return Send(Pend.Mode, _session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host));
+            return Send(Pend.Mode, _session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation));
         }
 
         _awaitFrom = health;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"harm-heal: cast {info.Name} ({info.Id}) at {health} of {maxHealth} ({100.0 * health / maxHealth:0}%)"));
-        return Send(Pend.HealCast, _session.Actions.Cast(info.Id, ActionSource.Host));
+        OpenHealWindow();
+        return SendCast(Pend.HealCast, info.Id, _healRules, "harm-heal heal");
     }
 
     private HarmHealState StepKeeper()
@@ -842,9 +950,33 @@ public sealed class HarmHealScript
         return State;
     }
 
+    /// <summary>Starts a cast attempt (the policy sends the first try now and the retries later) and waits for it in <see cref="SettleHandle"/>.</summary>
+    private HarmHealState SendCast(Pend kind, uint spell, CastRules rules, string purpose, uint tryFloor = 0)
+    {
+        _castIds[0] = spell;
+        _attempt ??= new CastAttempt(_session.Actions, _session.State, _log, _spells);
+        _attempt.Start(new CastRequest { Levels = _castIds, Rules = rules, Purpose = purpose, WornItems = _session.State.Self.Inventory.Equipped.Count, ManaTryFloor = tryFloor }, _now);
+        _pend = kind;
+        _handle = null;
+        return State;
+    }
+
     /// <summary>Reads the outcome of the action in flight; false while it has none.</summary>
     private bool SettleHandle()
     {
+        if (_pend is Pend.Cast or Pend.HealCast or Pend.Transfer)
+        {
+            if (_attempt!.Step(_now) == CastEnd.Running)
+            {
+                return false;
+            }
+
+            var cast = _pend;
+            _pend = Pend.None;
+            SettleCast(cast, _attempt.Report);
+            return State == HarmHealState.Running && _await == Await.None;
+        }
+
         if (_handle?.Outcome is not { } outcome)
         {
             return false;
@@ -863,36 +995,49 @@ public sealed class HarmHealScript
                 }
 
                 return State == HarmHealState.Running;
-            case Pend.Cast:
-            case Pend.HealCast:
-            case Pend.Transfer:
-                SettleCast(kind, outcome);
-                return State == HarmHealState.Running && _await == Await.None;
             default:
                 SettleHeal(kind, (HealHandle)handle, outcome);
                 return State == HarmHealState.Running && _await == Await.None;
         }
     }
 
-    private void SettleCast(Pend kind, ActionOutcome outcome)
+    private void SettleCast(Pend kind, in CastReport report)
     {
         var name = kind == Pend.Cast ? (_cast is { } c ? HarmSelfPlan.Describe(c) : "Harm Self") : kind == Pend.Transfer ? "Stamina to Mana Self" : "Heal Self";
-        if (outcome.Kind == ActionOutcomeKind.ServerError && outcome.Code == GearCasts.FizzleCode)
+        _ownFizzles += report.Fizzles;
+        if (kind == Pend.Transfer)
         {
-            _ownFizzles++;
+            _topUps += Math.Max(0, report.Tries - 1); // each fizzled top-up counted against the round's cap, as when every cast was its own look
+        }
+
+        if (report.End.Succeeded())
+        {
+            if (report.Fizzles > 0)
+            {
+                _log.Info(LogCategory, $"harm-heal: {name} fizzled {report.Fizzles} time(s) before it landed (fizzles {_ownFizzles})");
+            }
+
+            _await = kind == Pend.Cast ? Await.Drop : kind == Pend.Transfer ? Await.Mana : Await.Rise;
+            _awaitFor = kind;
+            _awaitUntil = _now + _options.SettleSeconds;
+            return;
+        }
+
+        // A fizzle the attempt ran out of tries or time on, or the mana read under the retry's ceiling (nothing sent): the same as a fizzle was, counted and decided again inside the cap.
+        if (report.Fizzles > 0 && (report.End is CastEnd.Fizzled or CastEnd.TimeCap || (report.End == CastEnd.ManaShort && report.ManaRefusals == 0)))
+        {
             _log.Info(LogCategory, $"harm-heal: {name} fizzled (fizzle {_ownFizzles}); the next look decides again, inside the cap");
             return;
         }
 
-        if (!outcome.Succeeded)
+        var what = kind == Pend.Cast ? "harm" : kind == Pend.Transfer ? "transfer" : "heal";
+        if (report.End == CastEnd.Cancelled && _session.Actions.KillSwitch)
         {
-            Fail($"{(kind == Pend.Cast ? "harm" : kind == Pend.Transfer ? "transfer" : "heal")}-refused:{outcome.Kind}:0x{outcome.Code:X4}");
+            Fail("kill-switch");
             return;
         }
 
-        _await = kind == Pend.Cast ? Await.Drop : kind == Pend.Transfer ? Await.Mana : Await.Rise;
-        _awaitFor = kind;
-        _awaitUntil = _now + _options.SettleSeconds;
+        Fail(_attempt!.LastOutcome is { } o ? $"{what}-refused:{o.Kind}:0x{o.Code:X4}" : $"{what}-refused:{report.End.Name()}:0x{report.Code:X4}");
     }
 
     private void SettleHeal(Pend kind, HealHandle handle, ActionOutcome outcome)
@@ -933,6 +1078,8 @@ public sealed class HarmHealScript
             CheckPotion(handle.Result);
         }
 
+        _windowRestoredResult = handle.Result is { Kind: HealResultKind.Healed or HealResultKind.Drank, Amount: > 0 } restored ? restored.Amount : 0; // M5 7 P7p: Confirmed with restored > 0
+
         if (kind == Pend.Kit && handle.Result is { Kind: HealResultKind.FailedRoll })
         {
             KitLost++;
@@ -959,11 +1106,13 @@ public sealed class HarmHealScript
             return false;
         }
 
+        var heal = _await == Await.Rise;
+        var rose = health > _awaitFrom;
         var moved = _await switch
         {
             Await.Drop => health < _awaitFrom,
             Await.Mana => mana > _awaitManaFrom,
-            _ => health > _awaitFrom,
+            _ => HealLanded(rose, _windowRestoredResult, _windowRestoredLine),
         };
         if (!moved && _now < _awaitUntil)
         {
@@ -976,9 +1125,16 @@ public sealed class HarmHealScript
         {
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"harm-heal: the mana moved {_awaitManaFrom} -> {mana} after the {kind}"));
         }
-        else if (moved)
+        else if (moved && !heal)
         {
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"harm-heal: the vital moved {_awaitFrom} -> {health} of {maxHealth} ({100.0 * health / maxHealth:0}%) after the {kind}"));
+        }
+
+        if (heal)
+        {
+            // M5 7 P7p (D141): a heal is judged on what it restored, not on the health alone: a hit in the same window (the item-end gate's Gold Phyntos Wasp, 39 points while the potion restored 25) can leave it lower.
+            _log.Info(LogCategory, HealWindowLine(kind, _awaitFrom, health, maxHealth, moved, rose));
+            CloseHealWindow();
         }
 
         switch (kind)
@@ -1049,6 +1205,123 @@ public sealed class HarmHealScript
 
         return State == HarmHealState.Running;
     }
+
+    // ------------------------------------------------------------------------------------------------ the heal window
+
+    /// <summary>
+    /// M5 7 P7p (D141): true when a heal landed: the health rose, or the action was Confirmed with a restored amount over 0 (the kit's Healed, the potion's Drank: <paramref name="restoredResult"/>), or the server's
+    /// "restores N points" line with N over 0 arrived in the window (<paramref name="restoredLine"/>; a Heal Self's line, or a potion's whose handle did not read it). A heal that restored nothing and raised nothing did not land.
+    /// </summary>
+    /// <param name="rose">True when the health rose over the window.</param>
+    /// <param name="restoredResult">The handle's restored amount, or 0.</param>
+    /// <param name="restoredLine">The restore line's amount, or 0.</param>
+    public static bool HealLanded(bool rose, int restoredResult, int restoredLine) => rose || restoredResult > 0 || restoredLine > 0;
+
+    /// <summary>
+    /// The window's line, logged at each heal's judge: <c>harm-heal: the potion landed: health 98 -&gt; 84 of 200 (42%), net -14: potion +25, hits -39 (1 hit(s)); restored by the result 25, by the line 25</c>; or <c>did not land</c>.
+    /// </summary>
+    private string HealWindowLine(Pend kind, uint from, uint health, uint maxHealth, bool landed, bool rose)
+    {
+        var what = kind switch
+        {
+            Pend.Kit => "kit",
+            Pend.Potion => "potion",
+            _ => "heal",
+        };
+        var restored = Math.Max(_windowRestoredResult, _windowRestoredLine);
+        var net = (long)health - from;
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"harm-heal: the {what} {(landed ? "landed" : "did not land")}: health {from} -> {health} of {maxHealth} ({100.0 * health / Math.Max(1u, maxHealth):0}%), net {net:+0;-0;0}: {what} +{restored}, hits -{_windowHits} ({_windowHitCount} hit(s)); restored by the result {_windowRestoredResult}, by the line {_windowRestoredLine}; the health {(rose ? "rose" : "did not rise")}");
+    }
+
+    private void OpenHealWindow()
+    {
+        _windowRestoredResult = 0;
+        _windowRestoredLine = 0;
+        _windowHits = 0;
+        _windowHitCount = 0;
+        _windowChat ??= _session.Events.Subscribe<ChatReceived>(OnWindowChat);
+        _windowCombat ??= _session.Events.Subscribe<CombatEvent>(OnWindowCombat);
+    }
+
+    private void CloseHealWindow()
+    {
+        _windowChat?.Dispose();
+        _windowCombat?.Dispose();
+        _windowChat = null;
+        _windowCombat = null;
+    }
+
+    private void OnWindowChat(in ChatReceived e)
+    {
+        var text = e.Line.Text;
+        if (TryRestoredHealth(text, out var restored))
+        {
+            _windowRestoredLine += restored;
+            return;
+        }
+
+        if (e.Line.ChatType != FightTally.MagicChatType || e.Line.Kind != ChatKind.System)
+        {
+            return;
+        }
+
+        var line = FightTally.Classify(text, out var amount, out _);
+        if (line == MagicLineKind.DamageTaken || (line == MagicLineKind.DrainTaken && text.Contains(" points of your health", StringComparison.OrdinalIgnoreCase)))
+        {
+            _windowHits += amount;
+            _windowHitCount++;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"harm-heal: a hit in the heal window: {amount} point(s) ({text.Trim()})"));
+        }
+    }
+
+    private void OnWindowCombat(in CombatEvent e)
+    {
+        if (e.Kind == CombatEventKind.DefenseHit)
+        {
+            _windowHits += e.Damage;
+            _windowHitCount++;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"harm-heal: a hit in the heal window: {e.Damage} point(s) from {e.Who}"));
+        }
+    }
+
+    /// <summary>
+    /// The health a server line says was restored: the potion's "The Potion of Healing restores 25 points of your Health." (capture C3) and a Heal Self's "You cast Heal Self VI and restore 52 points of your health." (ACE's
+    /// <c>SpellMessages</c> for a boost on the caster); false for any other line, and for another vital's.
+    /// </summary>
+    /// <param name="text">The line.</param>
+    /// <param name="points">The points restored.</param>
+    public static bool TryRestoredHealth(string text, out int points)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        points = 0;
+        foreach (var verb in RestoreVerbs)
+        {
+            var at = text.IndexOf(verb, StringComparison.Ordinal);
+            if (at < 0)
+            {
+                continue;
+            }
+
+            var rest = text.AsSpan(at + verb.Length);
+            var end = rest.IndexOf(" points of your ", StringComparison.Ordinal);
+            if (end <= 0 || !int.TryParse(rest[..end], NumberStyles.None, CultureInfo.InvariantCulture, out var n))
+            {
+                continue;
+            }
+
+            if (rest[(end + " points of your ".Length)..].StartsWith("health", StringComparison.OrdinalIgnoreCase))
+            {
+                points = n;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static readonly string[] RestoreVerbs = [" restores ", " restore "];
 
     // ------------------------------------------------------------------------------------------------ checks
 
@@ -1164,8 +1437,10 @@ public sealed class HarmHealScript
 
     private HarmHealState Fail(string why)
     {
+        CloseHealWindow();
         _failWhy ??= why;
         _log.Warn(LogCategory, $"harm-heal: failed: {why}");
+        _attempt?.Stop("the script failed: " + why, _now);
         _handle = null;
         _pend = Pend.None;
         _await = Await.None;

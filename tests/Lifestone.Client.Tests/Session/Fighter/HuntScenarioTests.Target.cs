@@ -4,6 +4,7 @@ using Lifestone.Client.Session;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Data.Tests;
 using Lifestone.Data.World;
 using Lifestone.Tests.Shared;
@@ -290,6 +291,67 @@ public sealed partial class HuntScenarioTests
         Assert.Equal(HuntScenario.MaxCells, scenario.CellsVisited);
         Assert.True(scenario.Returned);
         Assert.EndsWith(" returned=yes", scenario.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void On_foot_the_forest_hunt_walks_to_all_33_spots_in_the_loop_each_to_the_spots_point_and_says_the_expected_yield_first_M5_2_g3()
+    {
+        // D42 (m5-hunt-band-empty): the archer's journey hunt could fail on eight empty spots while 25 more stood unvisited. The forest's cap is the profile's 33, each walk goes to the encounter spot (the generator's corner,
+        // 17 m from the cell's centre) and one INFO line before the walk says what to expect. The scripted rig holds no creature at all, so every spot is empty and the search ends by the acquire's own name.
+        var options = new HuntOptions { Ground = HuntGroundChoice.Forest, Kills = 1, Seconds = 100000, Sell = false, BuyKits = 0 };
+        var travel = new J2aRecordingTravel();
+        using var rig = HuntScriptRig.Create(log => new HuntScenario(options with { Travel = travel }, log, _ => 40f, options.GroundRow, endSession: false) { SeekHeight = (_, _, _) => 40f }, quitAfter: 100000);
+        travel.Rig = rig;
+
+        var status = rig.Run(100000);
+
+        var forest = HuntGround.LowNorthForestMix;
+        Assert.Equal(ScenarioStatus.Failed, status);
+        Assert.Equal(33, rig.Scenario.CellLimit);
+        Assert.Equal(33, rig.Scenario.CellsVisited); // not OnFootMaxCells' eight
+        var walks = travel.Requests.Where(r => r.Purpose == TravelPurpose.Cell).ToArray();
+        Assert.Equal(33, walks.Length);
+        Assert.Equal(forest.Cells.Select(c => c.CellId), walks.Select(r => r.Destination.Location.Position.CellId)); // the loop's order
+        Assert.Equal(forest.Cells.Select(c => new Vector2(c.StopX, c.StopY)), walks.Select(r => new Vector2(r.Destination.Location.Position.Local.X, r.Destination.Location.Position.Local.Y))); // the spots, not the centres
+        Assert.All(walks, r => Assert.Equal(40.5f, r.Destination.Location.Position.Local.Z)); // the terrain height at the spot plus half a metre
+        Assert.StartsWith("acquire: no creature of the table in the band 30-40 within 60 m of the player after 33 cell(s) (38 creatures are listed", rig.Scenario.Failure, StringComparison.Ordinal);
+        Assert.True(rig.Logged("(cell 33 of at most 33)"), rig.Tail());
+        Assert.True(rig.Logged("place loc at (168, 0, 40.5) (cell 1 of at most 33)"), rig.Tail()); // the first spot: cell 0x9FB50039's corner, not its centre (180, 12)
+
+        var yield = rig.Log.Lines.Single(l => l.Contains("ground: expected yield before the walk", StringComparison.Ordinal));
+        Assert.Contains("33 spot(s) of Low North Forest Mix to visit, 0.342 usable creature(s) a spot for the band 30-40 (13 of the 38 listed creatures; a camp counts once)", yield, StringComparison.Ordinal);
+        Assert.EndsWith("the chance no spot holds one 0 (report-only)", yield, StringComparison.Ordinal);
+        Assert.True(rig.LineAt("ground: expected yield before the walk") < rig.LineAt("ground: cell "), "the yield is said before the first walk");
+    }
+
+    [Fact]
+    public void The_archers_expected_yield_is_0_167_a_spot_over_the_forest_and_its_hunt_walks_up_to_33_spots_M5_2_g3()
+    {
+        var options = new HuntOptions { Weapon = HuntWeapon.Missile, Ground = HuntGroundChoice.Forest, Kills = 1, Seconds = 100000, Sell = false, BuyKits = 0 };
+        var travel = new J2aRecordingTravel();
+        using var rig = HuntScriptRig.Create(log => new HuntScenario(options with { Travel = travel }, log, _ => 40f, options.GroundRow, endSession: false, template: FighterTemplate.Archer) { SeekHeight = (_, _, _) => 40f }, FighterTemplate.Archer.Name, quitAfter: 100000);
+        travel.Rig = rig;
+
+        Assert.True(rig.RunUntil(() => rig.Logged("ground: expected yield"), 600), rig.Tail());
+
+        Assert.Equal(33, rig.Scenario.CellLimit);
+        var yield = rig.Log.Lines.Single(l => l.Contains("ground: expected yield before the walk", StringComparison.Ordinal));
+        Assert.Contains("33 spot(s) of Low North Forest Mix to visit, 0.167 usable creature(s) a spot for the band 20-30 (6 of the 33 listed creatures; a camp counts once), 5.51 over the 33 spot(s)", yield, StringComparison.Ordinal);
+        Assert.Contains("the chance no spot holds one 0.0024", yield, StringComparison.Ordinal); // 0.833^33; with the old eight cells it was 0.23
+    }
+
+    [Fact]
+    public void A_row_built_by_hand_without_spawn_masses_says_its_yield_is_not_known_and_keeps_the_hunts_own_cap_M5_2_g3()
+    {
+        var row = HuntGround.LowB with { Table = [new HuntCreature(7990, "Field Ursuin", 8)], CellCap = null };
+        var travel = new J2aRecordingTravel();
+        using var rig = HuntScriptRig.Create(log => new HuntScenario(new HuntOptions { Travel = travel }, log, _ => 40f, row, endSession: false), quitAfter: 100000);
+        travel.Rig = rig;
+
+        Assert.True(rig.RunUntil(() => rig.Logged("ground: expected yield"), 600), rig.Tail());
+
+        Assert.Equal(HuntScenario.OnFootMaxCells, rig.Scenario.CellLimit); // no cap in the row: the hunt's own
+        Assert.True(rig.Logged("ground: expected yield: not known (Low B belt has 8 spot(s) to visit but its table has no spawn mass); report-only"), rig.Tail());
     }
 
     [Fact]

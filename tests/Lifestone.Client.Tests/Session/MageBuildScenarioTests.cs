@@ -4,7 +4,10 @@ using Lifestone.Client.Session;
 using Lifestone.Client.Session.Hosting;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Data.CharacterCreation;
+using Lifestone.Data.Magic;
+using Lifestone.Data.Tests;
 using Lifestone.Net.Messages;
 using Lifestone.ServerTools;
 using Lifestone.Tests.Shared;
@@ -19,7 +22,7 @@ namespace Lifestone.Client.Tests.Session;
 /// and <see cref="ArenaProfile"/>, so the tests follow the template when its split changes. The scripted ACE has no dats: the XpTable is a synthetic one
 /// (<see cref="ScriptedMage.SyntheticTable"/>).
 /// </summary>
-public sealed class MageBuildScenarioTests
+public sealed class MageBuildScenarioTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private static readonly Regex Verdict = new(
         @"^mage=(ready|built|failed) level=\d+ template=(ok|short)( template_short=.+?)? spells=\d+/\d+ built_steps=\d+( fresh=(recreated|created|none) purged=\d+ refill=(none|level-up:\d+->\d+|failed))?$",
@@ -33,10 +36,10 @@ public sealed class MageBuildScenarioTests
     /// <summary>A run of the scenario over a scripted ACE with the mage in the state <paramref name="shape"/> gives it (null: the account has no mage).</summary>
     private sealed class Run : IDisposable
     {
-        public Run(Func<XpTableData, ScriptedAceSession, ScriptedMage>? shape, Action<ScriptedAceSession>? server = null, bool fresh = false, Action<ScriptedPurge>? purge = null, int levels = 275)
+        public Run(Func<XpTableData, ScriptedAceSession, ScriptedMage>? shape, Action<ScriptedAceSession>? server = null, bool fresh = false, Action<ScriptedPurge>? purge = null, int levels = 275, GearKit.KitPlan? kit = null, int level = MageTemplate.TargetLevel)
         {
             Table = ScriptedMage.SyntheticTable(levels);
-            Scenario = new MageBuildScenario(Table, HeadlessCharacterTests.StandInClasses(), Log, freshCharacter: fresh);
+            Scenario = new MageBuildScenario(Table, HeadlessCharacterTests.StandInClasses(), Log, freshCharacter: fresh, kitPlan: kit, level: level);
             Runner = HeadlessRunner.StartWith(
                 new HeadlessRunOptions { Session = new SessionOptions { Account = "test" }, QuitAfterSeconds = 600 },
                 Scenario,
@@ -62,7 +65,7 @@ public sealed class MageBuildScenarioTests
                     }
                     else
                     {
-                        Mage = ScriptedMage.Fresh(Table, Server, MageTemplate.CharacterName);
+                        Mage = ScriptedMage.Fresh(Table, Server, MageTemplate.CharacterName, MageTemplate.BuildFor(level));
                         Mage.Attach();
                     }
 
@@ -167,6 +170,150 @@ public sealed class MageBuildScenarioTests
             verdict);
         Assert.True(run.Mage.Level >= MageTemplate.TargetLevel);
         Assert.DoesNotContain(MageTemplate.CharacterName, verdict, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_build_at_level_80_sends_that_levels_experience_trains_what_its_plan_trains_and_judges_by_that_plan_M5_7_F3_D87()
+    {
+        const int Soak = 80;
+        using var run = new Run(null, level: Soak);
+        var result = run.Finish();
+        var plan = run.Scenario.Plan;
+
+        Assert.True(result.Ok, result.Failure);
+        Assert.Equal(Soak, plan.Level);
+        Assert.NotEqual(MageTemplate.Targets.Select(t => t.Ranks), plan.Targets.Select(t => t.Ranks)); // level 80's plan, not 126's
+        Assert.Equal([(long)run.Table.XpForLevel(Soak)], run.Mage.XpAsked);
+        var steps = run.Scenario.SentSteps;
+        Assert.Equal(1 + plan.Trained.Count + plan.Targets.Count + Chunks, steps.Count);
+        for (var i = 0; i < plan.Trained.Count; i++)
+        {
+            Assert.StartsWith($"train skill {plan.Trained[i]} for {MageTemplate.TrainCredits[plan.Trained[i]]} credits", steps[1 + i], StringComparison.Ordinal);
+        }
+
+        var raises = steps.Skip(1 + plan.Trained.Count).Take(plan.Targets.Count).ToArray();
+        for (var i = 0; i < raises.Length; i++)
+        {
+            Assert.StartsWith("raise " + plan.Targets[i].Name + " ", raises[i], StringComparison.Ordinal);
+        }
+
+        var verdict = run.Scenario.VerdictFields();
+        Assert.Matches(Verdict, verdict);
+        Assert.Contains($"level={Soak} template=ok", verdict, StringComparison.Ordinal);
+        Assert.Equal(Soak, run.Mage.Level);
+    }
+
+    [Fact]
+    public void A_ready_level_80_mage_is_only_verified_by_its_own_plan_and_the_default_plan_would_find_it_short_M5_7_F3_D87()
+    {
+        const int Soak = 80;
+        using var run = new Run((table, server) =>
+        {
+            var plan = MageTemplate.PlanAt(table, Soak);
+            return ScriptedMage.Ready(table, server, MageTemplate.CharacterName, plan);
+        }, level: Soak);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure);
+        Assert.Empty(run.Mage.XpAsked); // nothing is sent to a mage that already meets level 80
+        Assert.Contains($"mage=ready level={Soak} template=ok", run.Scenario.VerdictFields(), StringComparison.Ordinal);
+
+        using var wrong = new Run((table, server) => ScriptedMage.Ready(table, server, MageTemplate.CharacterName, MageTemplate.PlanAt(table, Soak)));
+        var short126 = wrong.Finish(); // the same mage judged at the default 126 is not ready: the build goes on to bring it to 126's experience and stops at the Melee Defense it does not have (M5 7 F6: the traditional mage is no gate mage)
+        Assert.NotEmpty(wrong.Mage.XpAsked);
+        Assert.False(short126.Ok);
+        Assert.Contains("Melee Defense", short126.Failure, StringComparison.Ordinal);
+    }
+
+    [RequiresDatsFact]
+    public void With_a_kit_plan_the_build_asks_the_mod_for_the_kit_after_the_template_and_a_refusal_fails_it_by_name_M5_3_m1()
+    {
+        // M5 3 m1 (D8, D38, D49): the build grants the ground's kit, foci, stock and purse once the template is met (stage granting). The scripted ACE has no inventory and answers every item request "does not do that", so the
+        // run proves the stage is entered after the template, the load is logged, and a refusal (or an unknown pack) fails the run naming the grant; the grants themselves are proved by GearKitTests (SpawnGear on the stand-in) and MageKitTests (the plan).
+        var plan = GearKit.KitPlan.For(GroundCatalog.Get(FightOptions.DefaultGround), SpellTableData.Load(fixture.Dats).Spells, "test");
+        using var run = new Run(Ready, kit: plan);
+        var result = run.Finish();
+
+        Assert.False(result.Ok);
+        Assert.Contains(run.Log.Lines, l => l.Contains("the build ended met; granting the kit, the four foci, the stock and the purse", StringComparison.Ordinal) && l.Contains(plan.LoadLine, StringComparison.Ordinal));
+        Assert.Contains(run.Log.Lines, l => l.Contains("kit of " + FightOptions.DefaultGround, StringComparison.Ordinal) && l.Contains("load: ", StringComparison.Ordinal));
+        Assert.Contains("granting", result.Failure ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain(run.Scenario.SentSteps, s => s.StartsWith("kit ", StringComparison.Ordinal)); // never recorded as granted
+        Assert.Empty(run.Mage.XpAsked); // a ready mage: nothing else was sent
+    }
+
+    [RequiresDatsFact]
+    public void A_built_mage_is_a_fresh_build_that_grants_and_a_mage_with_an_empty_pack_is_one_too_and_both_log_why_M5_3_F2()
+    {
+        // 3-R4: the build's grants are decided by what the character holds. The scripted ACE has no inventory, so a ready mage here holds no kit (fresh by its pack) and a created one was below its target (fresh by its level);
+        // the gate's re-created BSD Mage still builds and grants everything once. The ready case, a mage holding its kit, is DecideGrant's table below.
+        var plan = GearKit.KitPlan.For(GroundCatalog.Get(FightOptions.DefaultGround), SpellTableData.Load(fixture.Dats).Spells, "test");
+
+        using var empty = new Run(Ready, kit: plan);
+        empty.Finish();
+        Assert.Equal("fresh", empty.Scenario.Grant);
+        Assert.Contains(empty.Log.Lines, l => l.Contains("build: fresh (the pack holds no ", StringComparison.Ordinal) && l.Contains("the kit is missing", StringComparison.Ordinal));
+        Assert.Contains(empty.Log.Lines, l => l.Contains("the build ended met; granting the kit", StringComparison.Ordinal));
+
+        using var built = new Run(null, kit: plan);
+        built.Finish();
+        Assert.Equal("fresh", built.Scenario.Grant);
+        Assert.Contains(built.Log.Lines, l => l.Contains("build: fresh (the character was below its target", StringComparison.Ordinal));
+        Assert.Contains(built.Log.Lines, l => l.Contains("the build ended met; granting the kit", StringComparison.Ordinal));
+    }
+
+    [RequiresDatsFact]
+    public void A_ready_mage_that_holds_its_kit_grants_nothing_and_names_a_stock_line_under_its_keep_on_every_dungeon_M5_3_F2()
+    {
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        var dungeons = GroundCatalog.All.Where(g => g.Kind == GroundKind.Dungeon && g.Supplies.Kit.Count > 0).ToList();
+        Assert.True(dungeons.Count >= 2);
+        foreach (var ground in dungeons)
+        {
+            var plan = GearKit.KitPlan.For(ground, spells, "test");
+            var whole = plan.Kit.Items.ToDictionary(i => i.Wcid, i => i.Stack); // the pack of a mage that has just been built: every line at its keep
+
+            var ready = MageBuildScenario.DecideGrant(plan, freshCharacter: false, belowTarget: false, whole);
+            Assert.False(ready.Fresh, ground.Key);
+            Assert.Empty(ready.StockShort);
+
+            // A day of play: tapers burned, the purse's coin gone (the purse is not a kit line), one stock line gone altogether. Still a ready mage: verified, the shortages named, nothing to grant.
+            var stock = plan.Kit.Items.Where(i => i.Kind == GearKind.Component).ToList();
+            var spent = new Dictionary<uint, int>(whole);
+            spent[stock[0].Wcid] = stock[0].Stack - 7;
+            spent.Remove(stock[1].Wcid);
+            var played = MageBuildScenario.DecideGrant(plan, freshCharacter: false, belowTarget: false, spent);
+            Assert.False(played.Fresh, ground.Key);
+            Assert.Equal(
+                [
+                    $"build: {stock[0].Name} is 7 under its keep; play does not top it up (M5 DoD 6)",
+                    $"build: {stock[1].Name} is {stock[1].Stack} under its keep; play does not top it up (M5 DoD 6)",
+                ],
+                played.StockShort);
+
+            // A pack with no robe, no wand or no focus is a mage with no kit: fresh, naming the line.
+            var focus = plan.Kit.Items.First(i => i.Kind == GearKind.Focus);
+            var bare = new Dictionary<uint, int>(whole);
+            bare.Remove(focus.Wcid);
+            var kitless = MageBuildScenario.DecideGrant(plan, freshCharacter: false, belowTarget: false, bare);
+            Assert.True(kitless.Fresh, ground.Key);
+            Assert.Contains(focus.Name, kitless.Reason, StringComparison.Ordinal);
+
+            // A character the build had to raise, and the gate's re-created one, are fresh whatever the pack holds.
+            Assert.True(MageBuildScenario.DecideGrant(plan, freshCharacter: false, belowTarget: true, whole).Fresh, ground.Key);
+            Assert.True(MageBuildScenario.DecideGrant(plan, freshCharacter: true, belowTarget: false, whole).Fresh, ground.Key);
+        }
+    }
+
+    [Fact]
+    public void Without_a_kit_plan_the_build_never_enters_the_granting_stage_M5_3_m1()
+    {
+        using var run = new Run(Ready);
+        var result = run.Finish();
+
+        Assert.True(result.Ok, result.Failure);
+        Assert.DoesNotContain(run.Log.Lines, l => l.Contains("granting", StringComparison.Ordinal));
+        Assert.DoesNotContain(run.Scenario.SentSteps, s => s.StartsWith("kit ", StringComparison.Ordinal));
     }
 
     [Fact]

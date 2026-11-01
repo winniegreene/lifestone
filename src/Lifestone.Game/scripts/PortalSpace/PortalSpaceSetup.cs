@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Godot;
 using Lifestone.Client.Audio;
 using Lifestone.Client.PortalSpace;
+using Lifestone.Client.Rendering;
 using Lifestone.Client.World;
 using Lifestone.Data.Effects;
 using Lifestone.Game.Audio;
@@ -160,6 +161,14 @@ public static class PortalSpaceSetup
                 busy => camera.InputSuspended = busy, // retail is busy through the whole sequence; the hidden camera must not fly (G2's busy count is a TODO)
                 transition.Arm);
             main.AddChild(presenter);
+
+            // M5 7 P7d (D139 row e): each arrival frees the textures and meshes no place since the previous arrival used (the town trips' growth).
+            if (services.Render is { } render)
+            {
+                var trim = new ArrivalCacheTrim(render.Caches, GodotLogSink.Instance);
+                presenter.Arrived += () => trim.OnArrival();
+            }
+
             if (portal.Hold && !frames)
             {
                 presenter.StartHeld();

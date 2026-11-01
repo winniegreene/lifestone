@@ -212,7 +212,7 @@ public static class SpellFormulaRules
 
     private static uint Slot(uint[] c, int index) => index is >= 0 and < 8 ? c[index] : 0;
 
-    /// <summary>Retail <c>MagicSystem::DeterminePowerLevelOfComponent</c>: scarab power 1–10, 0 for other components.</summary>
+    /// <summary>Retail <c>MagicSystem::DeterminePowerLevelOfComponent</c> (11.6096 0x005BE310): scarab power 1–10, 0 for other components. <c>SpellFormula::GetPowerLevelOfPowerComponent</c> (0x005BDA10) asks it of slot 0.</summary>
     public static int PowerLevelOfComponent(uint componentId) => componentId switch
     {
         1 => 1,

@@ -346,6 +346,7 @@ public sealed partial class RoutePlay
         var audit = _audit!;
         _driver = new RouteDriver(_walker!.Controller, _route);
         _driver.Stopped += _ => audit.CompleteLap();
+        _driver.KeysPressedAgain += line => _log.Warn(LogCategory, line); // M5 7 D153 (D141): a held key let go by something else was pressed again
     }
 
     /// <summary>

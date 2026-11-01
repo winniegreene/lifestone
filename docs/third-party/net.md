@@ -52,6 +52,8 @@ src/Lifestone.Net/Messages/Login/CharacterErrorCode.cs
 | `MotionCommandTable.cs` | DatReaderWriter `Generated/Enums/MotionCommand.generated.cs` (its 409 values equal ACE's `ACE.Entity/Enum/MotionCommand.cs`) | 412 entries indexed by low word. Corrections from doc 13: Invalid is 0x80000000; CombatEat 0x10000110, CombatDrink 0x10000111 and NextMonster 0x09000112 added; PreviousMonster…ClosestPlayer shifted to 0x09000113-0x09000117; SideBySideVitals and WoahDuplicate2 renamed StretchUI and AI_TelegraphCast. Checked by hand against a local 11.6096 exe dump: all 412 ids match; N9 makes that a test. |
 | `PhysicsState.cs` | ACE `ACE.Entity/Enum/PhysicsState.cs` | The physics-state bits of CreateObject and SetState. |
 | `CharacterErrorCode.cs` | ACE `ACE.Server/Network/Enum/CharacterError.cs` | The F659 codes (retail `ID_CHAR_ERROR_*`). |
+| `Messages/Events/ConfirmationEvents.cs` | ACE `ACE.Entity/Enum/ConfirmationType.cs` (lines 3-13), `GameEventConfirmationRequest.cs:10-12`, `GameEventConfirmationDone.cs:10-11` | M5 6 w1. The confirmation kinds as ACE names them (an unknown value is kept raw); the request's and the done's layouts. Retail: `CM_Character::DispatchUI_ConfirmationRequest` 0x006A3BB0, `DispatchUI_ConfirmationDone` 0x006A1C40 (11.6096). |
+| `Messages/Events/LoginNoticeEvents.cs` | ACE `GameEventSetTurbineChatChannels.cs:10-19` (values `Entity/TurbineChatChannel.cs:5-18`), `GameEventCharacterTitle.cs:10-18`, `GameEventFriendsListUpdate.cs:12-19, 65-98` | M5 6 w1. The three login notices, decoded and ignored by name; the friends list's two inner lists are empty as ACE writes them (ACE's TODOs at lines 88 and 93). |
 
 ### The OpenAC transport (N1)
 

@@ -46,6 +46,9 @@ internal enum HeadlessScenario
 
     /// <summary>One of the three journeys (<c>--journey=mage|melee|archer</c>, M4 P5b J4): the plan's stations from one login, on foot.</summary>
     Journey,
+
+    /// <summary>The autopilot (M5 4 h1, D57): BSD Mage's outer loop over the journey's stations until <c>--autopilot-minutes</c>, <c>--autopilot-level</c> or a stop request (<c>AutopilotScenario</c>); changes the character.</summary>
+    Autopilot,
 }
 
 /// <summary>
@@ -113,11 +116,20 @@ internal sealed record HeadlessOptions
     /// <summary>The journey's plan (<c>--journey</c>), or null when the scenario is not <c>journey</c>.</summary>
     internal JourneyPlan? Journey { get; init; }
 
+    /// <summary>M5 7 D146: <c>--gear-grant-only=WCID:COUNT</c>, the gear scenario grants exactly this and nothing else (the owner's exception for one test run), or null.</summary>
+    internal (uint Wcid, int Count)? GearGrantOnly { get; init; }
+
+    /// <summary>The autopilot's options (<c>--autopilot-*</c>); the defaults (no stop rule) when the scenario is not <c>autopilot</c>.</summary>
+    internal Lifestone.Client.Session.Autopilot.AutopilotOptions Autopilot { get; init; } = new();
+
     /// <summary><c>--fighter-recreate</c> (M4 P5a C5, D40): <c>--scenario=fighter-build</c> on the Brawler or the Archer deletes (pending deletion) and re-creates a character whose creation attributes differ from the template's.</summary>
     internal bool FighterRecreate { get; init; }
 
     /// <summary><c>--fresh-character</c> (M4 fresh B1, D44/D45): <c>--scenario=fighter-build</c> on the Brawler or the Archer, or <c>--scenario=mage-build</c>, deletes the live character from the character list, creates and builds the template's, and purges the old copies with the mod.</summary>
     internal bool FreshCharacter { get; init; }
+
+    /// <summary><c>--mage-level</c> (M5 7 F3, D87): the level <c>--scenario=mage-build</c> builds the mage to; <see cref="MageTemplate.TargetLevel"/> (126) by default.</summary>
+    internal int MageLevel { get; init; } = MageTemplate.TargetLevel;
 
     /// <summary>The Session group's values.</summary>
     internal SessionOptions Session { get; init; } = new();
@@ -147,6 +159,8 @@ internal sealed record HeadlessOptions
         errors.AddRange(hunt.Errors);
         var wayfind = WayfindOptions.FromArguments(arguments);
         errors.AddRange(wayfind.Errors);
+        var autopilot = Lifestone.Client.Session.Autopilot.AutopilotOptions.FromArguments(arguments);
+        errors.AddRange(autopilot.Errors);
         var o = new HeadlessOptions();
         FighterTemplate? requestedFighter = null;
         JourneyPlan? journey = null;
@@ -175,7 +189,8 @@ internal sealed record HeadlessOptions
                             ("death-and-regear", HeadlessScenario.DeathAndRegear),
                             ("hunt", HeadlessScenario.Hunt),
                             ("wayfind", HeadlessScenario.Wayfind),
-                            ("journey", HeadlessScenario.Journey)),
+                            ("journey", HeadlessScenario.Journey),
+                            ("autopilot", HeadlessScenario.Autopilot)),
                     };
                     break;
                 case "--journey":
@@ -191,6 +206,19 @@ internal sealed record HeadlessOptions
                     if (requestedFighter is null)
                     {
                         errors.Add($"{argument.Name}: '{argument.Value}' is not one of {string.Join(", ", FighterTemplate.All.Select(t => t.Key))}");
+                    }
+
+                    break;
+                case "--gear-grant-only":
+                    var pair = argument.Value.Split(':');
+                    if (pair.Length == 2 && uint.TryParse(pair[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var grantWcid) && grantWcid > 0
+                        && int.TryParse(pair[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var grantCount) && grantCount is >= 1 and <= 100)
+                    {
+                        o = o with { GearGrantOnly = (grantWcid, grantCount) };
+                    }
+                    else
+                    {
+                        errors.Add($"{argument.Name}: '{argument.Value}' is not WCID:COUNT with a count of 1 to 100");
                     }
 
                     break;
@@ -340,10 +368,32 @@ internal sealed record HeadlessOptions
                 session = session with { Account = journey.Account };
             }
         }
+        else if (o.Scenario == HeadlessScenario.Autopilot)
+        {
+            // M5 4 h1: the autopilot is the mage's (BSD Mage on the test account), the journey's account rule; --journey may only name the mage.
+            var plan = JourneyPlans.Mage;
+            if (journey is not null && journey.Name != plan.Name)
+            {
+                errors.Add($"--journey: --scenario=autopilot runs the {plan.Name} plan only");
+            }
+
+            if (session.Account is { } autopilotAccount && !string.Equals(autopilotAccount, plan.Account, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add($"--account: --scenario=autopilot runs on the test account '{plan.Account}' only; the value is not shown");
+            }
+
+            journey = plan;
+            session = session with { Account = plan.Account };
+        }
         else if (arguments.Any(a => a.Name == "--journey"))
         {
             errors.Add("--journey: only --scenario=journey takes it");
             journey = null;
+        }
+
+        if (o.Scenario != HeadlessScenario.Autopilot && arguments.Any(a => a.Name is "--autopilot-minutes" or "--autopilot-level" or "--autopilot-trip-after-kills" or "--autopilot-test-death"))
+        {
+            errors.Add("--autopilot-minutes, --autopilot-level, --autopilot-trip-after-kills and --autopilot-test-death: only --scenario=autopilot takes them");
         }
 
         var recreate = false;
@@ -381,7 +431,32 @@ internal sealed record HeadlessOptions
             fresh = false;
         }
 
-        return o with { Session = session, Buff = buff, Fight = fight, Death = death, Hunt = hunt, Wayfind = wayfind, Fighter = fighter, FighterRecreate = recreate, FreshCharacter = fresh, Journey = o.Scenario == HeadlessScenario.Journey ? journey : null, Arguments = raw, Errors = errors };
+        var mageLevel = MageTemplate.TargetLevel;
+        foreach (var argument in arguments)
+        {
+            if (argument.Name == "--mage-level")
+            {
+                var asked = OptionValues.Int(argument, errors, MageTemplate.TargetLevel);
+                if (o.Scenario == HeadlessScenario.Journey && journey is not null && !string.Equals(journey.Character, MageTemplate.CharacterName, StringComparison.Ordinal))
+                {
+                    errors.Add("--mage-level: --scenario=journey takes it with --journey=mage only (the level of the mage's build it verifies)");
+                }
+                else if (o.Scenario is not (HeadlessScenario.MageBuild or HeadlessScenario.Journey))
+                {
+                    errors.Add("--mage-level: only --scenario=mage-build and --scenario=journey (M5 7 F14) take it");
+                }
+                else if (asked < MageTemplate.MinLevel || asked > MageTemplate.TargetLevel)
+                {
+                    errors.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"--mage-level: '{argument.Value}' is not a level {MageTemplate.MinLevel} to {MageTemplate.TargetLevel} (below {MageTemplate.TargetLevel} the mage is the traditional build without Melee Defense; {MageTemplate.TargetLevel} is the gate's)"));
+                }
+                else
+                {
+                    mageLevel = asked;
+                }
+            }
+        }
+
+        return o with { Session = session, MageLevel = mageLevel, Buff = buff, Fight = fight, Death = death, Hunt = hunt, Wayfind = wayfind, Fighter = fighter, FighterRecreate = recreate, FreshCharacter = fresh, Journey = o.Scenario is HeadlessScenario.Journey or HeadlessScenario.Autopilot ? journey : null, Autopilot = autopilot, Arguments = raw, Errors = [.. errors.Distinct(StringComparer.Ordinal)] }; // one line per distinct problem: BuffOptions and FightOptions both parse --cast-mana-* (M5 1 fix B, G3)
     }
 
     private static string? Required(CommandLineArgument argument, List<string> errors, string what)

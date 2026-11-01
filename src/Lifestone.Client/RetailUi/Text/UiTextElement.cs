@@ -93,6 +93,7 @@ public class UiTextElement : UiScrollable, IUiTickTarget
     private readonly GlyphLayout _trailer = new();
     private UiGlyph[] _scratch = new UiGlyph[32];
     private int _marginLeft;
+    private int _designMarginRight;
     private int _marginRight;
     private int _marginTop;
     private int _marginBottom;
@@ -265,6 +266,7 @@ public class UiTextElement : UiScrollable, IUiTickTarget
                 break;
             case UiPropertyIds.TextRightMargin:
                 _marginRight = value is UiIntegerProperty right ? right.Value : 0;
+                _designMarginRight = _marginRight;
                 DetermineMarginValues();
                 SetDirty();
                 break;
@@ -598,7 +600,45 @@ public class UiTextElement : UiScrollable, IUiTickTarget
 
         return font is null
             ? new UiGlyph(c, null, color, 0, 0)
-            : new UiGlyph(c, font, color, font.GetCharWidth(c), font.MaxCharHeight);
+            : new UiGlyph(c, font, color, Math.Max(0, font.GetCharWidth(c) + Tracking), font.MaxCharHeight);
+    }
+
+    // ---------------------------------------------------------------- M5 7 D132: the fitted stack count (a Lifestone glitch fix, not retail)
+
+    /// <summary>Pixels added to each glyph's advance, in the layout and the drawing: 0, retail's, unless <see cref="SetSqueeze"/> set it (M5 7 D132's fitted stack count).</summary>
+    public int Tracking { get; private set; }
+
+    /// <summary>The right margin the element's own property gives (retail's), whatever <see cref="SetSqueeze"/> set.</summary>
+    public int DesignRightMargin => _designMarginRight;
+
+    /// <summary>
+    /// The fitted stack count's layout (M5 7 D132; Lifestone's, not retail's): <paramref name="tracking"/> pixels added to each glyph's advance and the right margin
+    /// <paramref name="rightMargin"/> (null: the element's own). Set before the text: a glyph takes its advance when it is added. <c>SetSqueeze(0, null)</c> is retail's layout.
+    /// </summary>
+    public void SetSqueeze(int tracking, int? rightMargin)
+    {
+        Tracking = tracking;
+        _marginRight = rightMargin ?? _designMarginRight;
+        DetermineMarginValues();
+        SetDirty();
+    }
+
+    /// <summary>The width <paramref name="text"/> takes in the current font with <paramref name="tracking"/>, and whether it fits the box less the left margin and <paramref name="rightMargin"/>.</summary>
+    public bool Fits(string text, int tracking, int rightMargin)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (CurrentFont is not { } font)
+        {
+            return true;
+        }
+
+        var width = 0;
+        foreach (var c in text)
+        {
+            width += Math.Max(0, font.GetCharWidth(c) + tracking);
+        }
+
+        return width <= Box.Width - _marginLeft - rightMargin;
     }
 
     private string ResolveString(in UiStringRef reference, UiStringVariables? variables = null)
@@ -741,6 +781,27 @@ public class UiTextElement : UiScrollable, IUiTickTarget
         var maxWidth = TryGetIntegerProperty(UiPropertyIds.ElementMaxWidth, out var max) ? max : Manager.DisplaySize.Width;
         _glyphs.Recalculate(maxWidth - _marginRight - _marginLeft, OneLine, out var width, out var height);
         ResizeTo(_marginLeft + _marginRight + width, height + _marginTop + _marginBottom);
+    }
+
+    /// <summary>
+    /// <c>UIElement_Text::InqSizewMargins</c> (11.4186 0x00469660, 11.6096 0x004698F0), its default form: the size, margins
+    /// included, that <paramref name="text"/> takes in this element's font and colour when laid out no wider than the
+    /// element's maximum width property (else the display), as <see cref="ResizeToPaper"/> lays out; the element's own
+    /// text and size are untouched. No text measures 0 by 0.
+    /// </summary>
+    public (int Width, int Height) InqSizeWithMargins(in UiStringRef text)
+    {
+        var resolved = ResolveString(text);
+        if (resolved.Length == 0)
+        {
+            return (0, 0);
+        }
+
+        var maxWidth = TryGetIntegerProperty(UiPropertyIds.ElementMaxWidth, out var max) ? max : Manager.DisplaySize.Width;
+        var layout = new GlyphLayout();
+        layout.AddText(0, _scratch.AsSpan(0, InqGlyphs(resolved)));
+        layout.Recalculate(maxWidth - _marginRight - _marginLeft, OneLine, out var width, out var height);
+        return (width + _marginLeft + _marginRight, height + _marginTop + _marginBottom);
     }
 
     /// <summary>
@@ -917,7 +978,7 @@ public class UiTextElement : UiScrollable, IUiTickTarget
                     }
                 }
 
-                x += advance;
+                x += advance + Tracking;
             }
 
             if (position == CursorPosition)

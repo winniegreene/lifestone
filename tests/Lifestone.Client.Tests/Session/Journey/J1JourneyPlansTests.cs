@@ -36,14 +36,20 @@ public sealed class J1JourneyPlansTests
     public void The_mage_plan_is_pinned_in_order_with_no_expiry_and_one_teleport()
     {
         var p = JourneyPlans.Mage;
-        Assert.Equal(("mage", "BSD Mage", "test", StationWhere.Den, 1), (p.Name, p.Character, p.Account, p.Ground, p.TeleportBudget));
+        Assert.Equal(("mage", "BSD Mage", "test", StationWhere.Den, 0), (p.Name, p.Character, p.Account, p.Ground, p.TeleportBudget));
         Assert.Equal(
-            ["build-verify", "gear", "buff", "cast-facts", "kit-refused", "harm-heal", "bind", "den-travel", "den-fight", "death", "recall-home"],
+            ["build-verify", "gear", "buff", "cast-facts", "kit-refused", "harm-heal", "bind", "den-travel", "den-fight", "logistics", "death", "recall-home"],
             p.Stations.Select(s => s.Name));
         Assert.DoesNotContain(p.Stations, s => s.Name.Contains("expiry", StringComparison.Ordinal));
         Assert.Equal(StationWhere.Den, OwnNeeds(p, "den-fight").Where);
         Assert.Equal(StationWhere.Here, OwnNeeds(p, "den-travel").Where);
-        Assert.Equal(1100, p.ExpectedSeconds);
+        Assert.Equal(1315, p.ExpectedSeconds); // the den fight is 215 s since k2 (it was 150): the walk to the second storey and three kills; the logistics trip after it is 150 s (M5 3 c2a)
+        var trip = p.Stations.Single(s => s.Name == "logistics");
+        Assert.Equal(StationKinds.Logistics, trip.Kind);
+        Assert.Equal(JourneyPlans.MageLogisticsSeconds, trip.ExpectedSeconds);
+        Assert.Equal(JourneyPlans.TripForced, trip.Arguments[JourneyPlans.TripArgument]); // D52: the gate's trip is forced
+        Assert.True(OwnNeeds(p, "logistics").Peace);
+        Assert.Equal(StationWhere.Here, OwnNeeds(p, "logistics").Where);
     }
 
     [Fact]
@@ -67,13 +73,13 @@ public sealed class J1JourneyPlansTests
             ["build-verify", "buff", "bind", "hunt", "appraise-items", "harm-heal", "recall-home", "appraise-vendor", "vendor", "shortcuts"],
             p.Stations.Select(s => s.Name));
         Assert.Equal(StationWhere.Forest, p.Stations.Single(s => s.Name == "hunt").NeedsOverride!.Where);
-        Assert.Equal(1000, p.ExpectedSeconds);
+        Assert.Equal(1080, p.ExpectedSeconds); // the forest hunt is 400 s since k2 (it was 320): the 33 spots
     }
 
     [Fact]
     public void Every_kind_is_in_the_lanes_table_names_are_unique_and_ForName_finds_each_plan()
     {
-        Assert.Equal(20, StationKinds.All.Count); // 18, and the hero plans' hotbar and corpses (the M4 hero video)
+        Assert.Equal(22, StationKinds.All.Count); // 18, the hero plans' hotbar and corpses (the M4 hero video), and M5 item 3's resupply and logistics
         foreach (var plan in JourneyPlans.All)
         {
             Assert.All(plan.Stations, s => Assert.Contains(s.Kind, StationKinds.All));

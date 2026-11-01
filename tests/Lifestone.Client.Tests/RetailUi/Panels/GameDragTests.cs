@@ -894,7 +894,17 @@ public sealed class GameDragTests(DatSetFixture fixture) : IClassFixture<DatSetF
             Assert.True(g.Drag.IsTarget(list), $"list 0x{list.ElementId:X8} takes drops");
         }
 
-        foreach (var list in outside.Except(shortcuts))
+        // M5 6 s1: the spellbook's list and the spell bars' lists carry spells (no item), so every item target refuses them; the bars also take spell drops (SpellBarEditTests).
+        var spellLists = outside.Where(static l => l.ElementId is GameSpellbookPage.ListId or GameSpellcastingPanel.ListId).ToList();
+        Assert.Contains(spellLists, static l => l.ElementId == GameSpellbookPage.ListId);
+        foreach (var list in spellLists)
+        {
+            Assert.True(list.DragSource, $"spell list 0x{list.ElementId:X8} is a drag source");
+            Assert.Equal(list.ElementId == GameSpellcastingPanel.ListId, g.Drag.IsTarget(list));
+            Assert.Equal(0, ItemCells(list));
+        }
+
+        foreach (var list in outside.Except(shortcuts).Except(spellLists))
         {
             Assert.False(list.DragSource, $"list 0x{list.ElementId:X8} is a drag source");
             Assert.False(g.Drag.IsTarget(list), $"list 0x{list.ElementId:X8} takes drops");

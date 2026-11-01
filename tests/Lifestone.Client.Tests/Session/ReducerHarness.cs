@@ -196,6 +196,9 @@ internal sealed class ReducerHarness
         Track<PlayerKilledSomething>();
         Track<MessageDropped>();
         Track<UnknownMessage>();
+        Track<ConfirmationRequested>(); // M5 6 w2
+        Track<ConfirmationClosed>();
+        Track<ObjectPropertyChanged>();
     }
 
     private void Track<T>()

@@ -88,4 +88,10 @@ public enum ChatKind
 
     /// <summary>A line the client added itself ("Logging off...", "Lifestone: teleporting to Holtburg").</summary>
     Notice,
+
+    /// <summary>
+    /// M5 7 D124: a chat channel's notice that came as GameEvent 0x028A or 0x028B (0x051B entered, 0x051C left, 0x051D Turbine Chat on; <see cref="WeenieErrorText.IsChannelNotice"/>): retail's join and leave lines, not an error.
+    /// As on a <see cref="WeenieError"/> line, <see cref="ChatLine.ChatType"/> holds the code and <see cref="ChatLine.Text"/> the string as sent (the channel's name); the chat shows <see cref="WeenieErrorText"/>'s line.
+    /// </summary>
+    ChannelNotice,
 }

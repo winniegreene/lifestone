@@ -697,6 +697,7 @@ internal sealed class Transition
             path.Walkable = null;
             path.RestoreCheckPos();
             state = CliffSlide(collisions.ContactPlane);
+            collisions.EdgeRefused = true;
             collisions.ContactPlaneValid = false;
             collisions.ContactPlaneIsWater = false;
             return false;
@@ -708,6 +709,7 @@ internal sealed class Transition
             collisions.ContactPlaneValid = false;
             collisions.ContactPlaneIsWater = false;
             state = path.PrecipiceSlide(this);
+            collisions.EdgeRefused = true;
             return state == TransitionState.Collided;
         }
 
@@ -733,12 +735,14 @@ internal sealed class Transition
             collisions.ContactPlaneIsWater = false;
             path.CacheLocalSpaceSphere(path.WalkablePos, path.WalkableScale);
             path.SetWalkableCheckPos(path.LocalSpaceSphere[0]);
+            collisions.EdgeRefused = true;
             state = path.PrecipiceSlide(this);
             return state == TransitionState.Collided;
         }
 
         path.Walkable = null;
         state = TransitionState.Collided;
+        collisions.EdgeRefused = true;
         path.CellArrayValid = true;
         return true;
     }
@@ -771,6 +775,7 @@ internal sealed class Transition
         path.Walkable = null;
         if (!stepped)
         {
+            CollisionInfo.StepRefused = true;
             path.RestoreCheckPos();
         }
 

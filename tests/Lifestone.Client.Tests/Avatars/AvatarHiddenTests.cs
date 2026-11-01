@@ -3,6 +3,8 @@ using DatReaderWriter.Enums;
 using Lifestone.Client.Avatars;
 using Lifestone.Client.PortalSpace;
 using Lifestone.Data.Animation;
+using Lifestone.Data.Appearance;
+using Lifestone.Data.Textures;
 using Lifestone.Data.Effects;
 using Lifestone.Data.Motion;
 using Lifestone.Data.Tests;
@@ -168,6 +170,62 @@ public sealed class AvatarHiddenTests(DatSetFixture fixture, ITestOutputHelper o
         // Both scripts end at time 0 (every hook starts at 0): the fade is the hook's own 0.75 s, not the script's length.
         Assert.Equal(0.0, effects.GetScript(0x3300032F)!.Length);
         Assert.Equal(0.0, effects.GetScript(0x33000331)!.Length);
+    }
+
+    /// <summary>
+    /// The bubbles round a hidden player are pink by the dats, not a missing material: each of the Hidden script
+    /// 0x33000331's 14 CreateParticle emitters draws a textured GfxObj whose texture resolves and whose visible texels are
+    /// magenta (red and blue well above green). The emitters have no total time, so the cloud lasts while the object is
+    /// hidden and ends only when the UnHide script 0x3300032F stops them (the login's arrival: retail's
+    /// <c>gmSmartBoxUI::UseTime</c>, 11.6096 0x004D7A90, sends LoginComplete only when state 6 ends; ACE then clears Hidden).
+    /// A live frame taken during the arrival shows the cloud with no body inside it, as retail's <c>CPhysicsObj::set_hidden</c>
+    /// (11.6096 0x00515760) draws it (M5 item 7, the doll-proof frames).
+    /// </summary>
+    [RequiresDatsFact]
+    public void The_hidden_scripts_bubbles_are_pink_textured_and_last_until_the_unhide_stops_them()
+    {
+        var effects = new DatEffectSource(fixture.Dats);
+        var textures = new TextureLoader(fixture.Dats);
+        var appearance = new DatAppearanceSource(textures);
+        var creates = effects.GetScript(0x33000331)!.Hooks.Select(h => h.Hook).OfType<CreateParticleHook>().ToList();
+        var stops = effects.GetScript(0x3300032F)!.Hooks.Select(h => h.Hook).OfType<StopParticleHook>().Select(h => h.EmitterId).ToHashSet();
+        Assert.Equal(14, creates.Count);
+        foreach (var create in creates)
+        {
+            Assert.Contains(create.EmitterId, stops);
+            var info = effects.GetEmitterInfo(create.EmitterInfoId)!;
+            Assert.Equal(0.0, info.TotalSeconds); // no end of its own: only the UnHide's StopParticle ends it
+            var surfaces = appearance.SurfaceIds(info.HwGfxObjId);
+            Assert.NotEmpty(surfaces);
+            foreach (var surfaceId in surfaces)
+            {
+                var decoded = textures.DecodeSurface(surfaceId, TextureDecodeMode.Rgba8)!;
+                Assert.NotNull(decoded.Texture);
+                Assert.True(decoded.Resolution!.IsResolved);
+                var (r, g, b) = MeanVisibleRgb(decoded.Texture!);
+                output.WriteLine($"emitter info 0x{create.EmitterInfoId:X8} (id {create.EmitterId}, part {create.PartIndex}) gfxobj 0x{info.HwGfxObjId:X8} surface 0x{surfaceId:X8} texture 0x{decoded.Material.SurfaceTextureId:X8} {decoded.Texture!.Width}x{decoded.Texture.Height} mean rgb ({r:0}, {g:0}, {b:0}) type {decoded.Material.Type} lifespan {info.Lifespan:0.##} s birthrate {info.Birthrate:0.###} s");
+                Assert.True(r > g + 40 && b > g + 40, $"surface 0x{surfaceId:X8} is not magenta: ({r:0}, {g:0}, {b:0})");
+            }
+        }
+    }
+
+    private static (double R, double G, double B) MeanVisibleRgb(Data.Textures.DecodedTexture texture)
+    {
+        Assert.Equal(Data.Textures.DecodedTextureFormat.Rgba8, texture.Format);
+        double r = 0, g = 0, b = 0, w = 0;
+        for (var i = 0; i + 3 < texture.Data.Length; i += 4)
+        {
+            var a = texture.HasAlpha ? texture.Data[i + 3] / 255.0 : 1.0;
+            var lum = texture.Data[i] + texture.Data[i + 1] + texture.Data[i + 2];
+            var weight = a * lum; // the bright texels are what a viewer sees (an additive or blended sprite)
+            r += texture.Data[i] * weight;
+            g += texture.Data[i + 1] * weight;
+            b += texture.Data[i + 2] * weight;
+            w += weight;
+        }
+
+        Assert.True(w > 0, $"texture 0x{texture.SourceId:X8} has no visible texel");
+        return (r / w, g / w, b / w);
     }
 
     private static (double At, TransparentHook Hook) FadeHooks(DatEffectSource effects, uint scriptId)

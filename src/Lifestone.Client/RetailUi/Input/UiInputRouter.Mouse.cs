@@ -102,6 +102,11 @@ public sealed partial class UiInputRouter
     public bool MouseButton(UiMouseButton button, bool down, bool doubleClick = false)
     {
         _mouseTaken = false;
+        if (down && button is UiMouseButton.Left or UiMouseButton.Right)
+        {
+            _manager.TargetMode.MousePressed(); // ClientUISystem::OnAction: a press ends a target mode, after it is handled (UiTargetMode.UseTime)
+        }
+
         var extra = down && doubleClick ? DoubleClickDown | NearbyDown : 0u;
         FireInputEvent(RetailKeyBindings.Mouse(button), down, extra);
         if (!down && _worldButtons.Remove(button))
@@ -605,9 +610,15 @@ public sealed partial class UiInputRouter
     /// <summary>
     /// <c>UIElementManager::StartTooltip</c> (11.4186 0x0045DE90, 11.6096 0x0045DF70, and the placing overload 11.4186
     /// 0x00459700, 11.6096 0x00459770): the old tooltip closes; the tooltip element is created as a root, its text element
-    /// (property 0x4A) takes the text and the tooltip grows to fit it, and it opens 32 pixels below and right of the mouse,
-    /// kept on the display.
+    /// (property 0x4A) takes the text, and the tooltip changes size by what the text measures
+    /// (<see cref="UiTextElement.InqSizeWithMargins"/>: laid out no wider than the text element's maximum width, else the
+    /// display) less the text element's size; the text is then laid out in its new width, the tooltip grows by any height
+    /// the text still lacks, and it opens 32 pixels below and right of the mouse, kept on the display.
     /// </summary>
+    /// <remarks>
+    /// The text is measured before the tooltip resizes: laid out in the text element's design width (tens of pixels), a
+    /// long description wrapped one word per line and the tooltip grew only in height (the owner's sighting of M5 item 7).
+    /// </remarks>
     private void StartTooltip(UiStringRef text, UiElement owner, uint tooltipId, uint layoutId)
     {
         if (TooltipElement is { } old)
@@ -630,10 +641,14 @@ public sealed partial class UiInputRouter
         }
 
         label.SetStringInfo(text);
+        var (textWidth, textHeight) = label.InqSizeWithMargins(text);
+        tooltip.ResizeTo(tooltip.Box.Width + textWidth - label.Box.Width, tooltip.Box.Height + textHeight - label.Box.Height);
         label.RecalculateGlyphList();
-        var width = tooltip.Box.Width + label.PaperWidth - label.Box.Width;
-        var height = tooltip.Box.Height + Math.Max(0, label.PaperHeight - label.Box.Height);
-        tooltip.ResizeTo(width, height);
+        if (label.PaperHeight > label.Box.Height)
+        {
+            tooltip.ResizeTo(tooltip.Box.Width, tooltip.Box.Height + label.PaperHeight - label.Box.Height);
+        }
+
         // The tooltip hangs from the root element, whose coordinates are the display's.
         var display = _manager.DisplaySize;
         var origin = _manager.DisplayOrigin;

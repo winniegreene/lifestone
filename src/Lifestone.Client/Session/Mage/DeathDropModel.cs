@@ -99,7 +99,7 @@ public readonly record struct DropVerdict(int Level, int MinDrops, int MaxDrops,
 }
 
 /// <summary>
-/// ACE's death-drop rule, re-expressed (M4 3.1 d0, D20; ACE 95ef426d, read and never pasted: <c>Entity/DeathItem.cs</c> the whole file, <c>WorldObjects/Player_Death.cs</c> 481-603 which items drop and 629-673 how many; retail's own rule is
+/// ACE's death-drop rule, re-expressed (M4 3.1 d0, D20; ACE 95ef426d, read and never pasted: <c>Entity/DeathItem.cs</c> the whole file, <c>WorldObjects/Player_Death.cs</c> 481-603 which items drop (the bonded filter, <c>Bonded == 0</c>, at 502; the "destroy" bonded items at 504-505; the "slippery" ones at 560; the bonded items' comment at 441-446) and 629-673 how many; retail's own rule is
 /// the developer spec ACE's comments quote). Pure and engine-free: it reads <see cref="CarriedItem"/> values and answers whether the death loop's needed items can be among the items a death drops.
 /// </summary>
 /// <remarks>
@@ -110,7 +110,7 @@ public readonly record struct DropVerdict(int Level, int MinDrops, int MaxDrops,
 /// destroyed (<c>HandleDestroyBonded</c>, <c>GetSlipperyItems</c>): the mage carries none of either.</para>
 /// <para><b>The variance as bounds.</b> The halving is decided before the variance, so the variance never changes who is first of a category: each candidate's final value lies in <c>[MinFinal, MaxFinal]</c> (the halved value at -10% and +10%, in float arithmetic with the
 /// truncation ACE's <c>GetValueWithVariance</c> has), and a needed item survives every draw when at least N other candidates have a MinFinal above its MaxFinal: they then rank above it in every corner of the variance, so it is never among the first N.
-/// A needed item counts at its UNHALVED best case (its value at +10%), whether or not another item of its category is above it now: the kit changes while the loop runs (a spent stack, a dropped decoy), and the answer must not rest on a halving that may go.</para>
+/// A needed item counts at its UNHALVED best case (its value at +10%), whether or not another item of its category is above it now: the kit changes while the loop runs (a spent stack, a dropped item), and the answer must not rest on a halving that may go.</para>
 /// </remarks>
 public static class DeathDropModel
 {
@@ -126,43 +126,29 @@ public static class DeathDropModel
     /// <summary>ACE's <c>DeathItems.MaxVariance</c>: the variance is a random value between minus and plus this share.</summary>
     public const float MaxVariance = 0.10f;
 
-    /// <summary>The Mana Scarab (component 193, the level VIII spells' scarab): carried, valuable and NOT needed (no loop casts a level VIII spell at its default settings: <c>cache/m4/3-1/scarab-table.md</c>).</summary>
+    /// <summary>The Mana Scarab (component 193, the level VIII spells' scarab): the M4 fixture's valuable carried item. Since M5 3 d4 nothing special-cases it: it is needed exactly when the mage's kit holds it as a stock line.</summary>
     public const uint ManaScarabWcid = 37155;
 
     /// <summary>
-    /// The kit's items ACE never takes as candidates because they are bonded (PropertyInt 33 is not 0; the lead's read-only SELECTs of the pinned world database, 2026-10-21): the Greater Amuli Shadow Coat 6600 and Leggings 6606 and the Platinum Scarab 8897.
-    /// The weenie description the live check reads carries no bonded flag, so the live check takes this list (<c>TODO(m4-decoy-bonded-flag)</c>, see <see cref="DecoyKit.Check"/>).
+    /// The death loop's needed set is the mage's own kit (M5 3 d4, D51; it was the retired loot gear, the Healer's Heart 8552 and three armour pieces, and every component the pinned map names): every line of <paramref name="kit"/>, the wielded
+    /// wand, the worn pieces, the four foci and the stock lines (the tapers, the potions, the carried scarabs), by weenie class. A line the profile marks bonded (the Platinum Scarab) is in the set and never a candidate. A kit built for another ground
+    /// has another set: the set follows the kit the scenario was made with, never a constant.
     /// </summary>
-    public static IReadOnlySet<uint> BondedKitWcids { get; } = new uint[] { 6600, 6606, 8897 }.ToFrozenSet();
-
-    /// <summary>
-    /// The needed items that are not spell components: what the loops need to kill the tuskers and cannot lose (D22): the wand (The Healer's Heart 8552) and the three worn armour pieces that are not bonded (the Olthoi Helm 3715, the Platemail Gauntlets 57
-    /// and the Sollerets 107). The Greater Amuli Shadow pieces are bonded: never candidates, so never needed here.
-    /// </summary>
-    public static IReadOnlyList<uint> NeededGear { get; } = [8552, 3715, 57, 107];
-
-    /// <summary>
-    /// The death loop's needed set, a constant: <see cref="NeededGear"/> and every spell component of <see cref="ComponentWeenies.All"/> (the kit's components are a subset) except the Mana Scarab (<see cref="ManaScarabWcid"/>); a bonded one
-    /// (the Platinum Scarab) is in the set but is never a candidate. The leather set the pack keeps is not needed.
-    /// </summary>
-    public static IReadOnlySet<uint> Needed { get; } = BuildNeeded();
-
-    private static FrozenSet<uint> BuildNeeded()
+    /// <param name="kit">The mage's kit (<see cref="GearKit.Build"/> of its ground).</param>
+    public static IReadOnlySet<uint> NeededOf(GearKit kit)
     {
-        var set = new HashSet<uint>(NeededGear);
-        foreach (var component in ComponentWeenies.All)
-        {
-            if (component.Wcid != ManaScarabWcid)
-            {
-                set.Add(component.Wcid);
-            }
-        }
-
-        return set.ToFrozenSet();
+        ArgumentNullException.ThrowIfNull(kit);
+        return kit.Items.Select(i => i.Wcid).ToFrozenSet();
     }
 
-    /// <summary>True when <paramref name="wcid"/> is in <see cref="Needed"/>.</summary>
-    public static bool IsNeeded(uint wcid) => Needed.Contains(wcid);
+    /// <summary>True when <paramref name="wcid"/> is a line of <paramref name="kit"/> (a needed item: <see cref="NeededOf"/>).</summary>
+    /// <param name="kit">The mage's kit.</param>
+    /// <param name="wcid">The weenie class id of a listed corpse entry.</param>
+    public static bool IsNeeded(GearKit kit, uint wcid)
+    {
+        ArgumentNullException.ThrowIfNull(kit);
+        return kit.ItemOf(wcid) is not null;
+    }
 
     /// <summary>ACE's <c>DeathItem.GetCategory</c>: the category of an ItemType (an exact match of one type; a combination of types, a container, a creature, money and every other type are <see cref="DeathItemCategory.None"/>).</summary>
     /// <param name="itemType">ACE's <c>ItemType</c> bits.</param>
@@ -288,7 +274,7 @@ public static class DeathDropModel
     /// (a needed item at its unhalved +10%): they outrank every needed item whatever the draw, so the first N never reach one. When no needed item is a candidate there is nothing to lose and the answer is yes.
     /// </summary>
     /// <param name="carried">What the character carries.</param>
-    /// <param name="needed">The weenie class ids that must not drop (<see cref="Needed"/> for the death loop).</param>
+    /// <param name="needed">The weenie class ids that must not drop (<see cref="NeededOf"/> for the death loop).</param>
     /// <param name="level">The character's level.</param>
     public static DropVerdict Survives(IReadOnlyList<CarriedItem> carried, IReadOnlySet<uint> needed, int level)
     {
@@ -324,8 +310,9 @@ public static class DeathDropModel
         return new DropVerdict(level, MinDrops(level), maxDrops, ranked.Length, above, bestWcid, bestMax, above == 0 ? 0 : weakest, !anyNeeded || above >= maxDrops);
     }
 
-    /// <summary><see cref="Survives(IReadOnlyList{CarriedItem}, IReadOnlySet{uint}, int)"/> with the death loop's needed set (<see cref="Needed"/>).</summary>
+    /// <summary><see cref="Survives(IReadOnlyList{CarriedItem}, IReadOnlySet{uint}, int)"/> with the mage's kit as the needed set (<see cref="NeededOf"/>).</summary>
     /// <param name="carried">What the character carries.</param>
+    /// <param name="kit">The mage's kit.</param>
     /// <param name="level">The character's level.</param>
-    public static DropVerdict Survives(IReadOnlyList<CarriedItem> carried, int level) => Survives(carried, Needed, level);
+    public static DropVerdict Survives(IReadOnlyList<CarriedItem> carried, GearKit kit, int level) => Survives(carried, NeededOf(kit), level);
 }

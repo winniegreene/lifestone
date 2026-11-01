@@ -61,6 +61,7 @@ internal sealed class GameApproachWalk : IApproachWalk
         var route = new ScriptedRoute("lifestone-approach", [new RouteGoal(target, stopWithinMetres, Stop: true, DwellSeconds: 0)]);
         _driver?.Abandon();
         _driver = new RouteDriver(walker.Controller, route, session.Actions.Move);
+        _driver.KeysPressedAgain += line => _log.Warn(LogCategory, line); // M5 7 D153 (D141): a held key let go by something else was pressed again
         description = $"from cell 0x{from.CellId:X8} toward cell 0x{target.CellId:X8}, stopping within {stopWithinMetres:0.0##} m";
         return true;
     }

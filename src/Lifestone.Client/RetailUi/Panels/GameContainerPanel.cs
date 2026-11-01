@@ -102,6 +102,52 @@ public sealed class GameContainerPanel : UiElement
     {
     }
 
+    /// <summary>The item types the examination's review frame takes (M5 7 S6): melee and missile weapons, armour, clothing, jewellery and casters, the loot that carries spells, an activation line, mana and workmanship.</summary>
+    public const uint ReviewItemTypes = 0x1 | 0x2 | 0x4 | 0x8 | 0x100 | 0x8000;
+
+    /// <summary>
+    /// What the examination's live review frames (M5 7 S6, D136, <c>--examine-review-frames</c>) still wait for, or null with <paramref name="window"/> and <paramref name="cell"/> set: the world's wait
+    /// (<see cref="GamePaperDoll.WorldReviewWait"/>: placed, no tunnel, materialised, the shell painted), then the container window shown and fully drawn (<see cref="DrawState"/>), then the first cell of its item row whose object
+    /// glows magical (UiEffects bit 0) and is of <see cref="ReviewItemTypes"/>, not among <paramref name="tried"/> (an item whose answer lacked a line, or that left before its frame).
+    /// </summary>
+    public static string? ExamineReviewFrameWait(GamePlayScreen? shell, bool playerPlaced, bool tunnelVisible, bool playerMaterialised, IReadOnlySet<uint> tried, out GameContainerPanel? window, out UiItem? cell)
+    {
+        ArgumentNullException.ThrowIfNull(tried);
+        window = null;
+        cell = null;
+        if (GamePaperDoll.WorldReviewWait(shell, playerPlaced, tunnelVisible, playerMaterialised) is { } world)
+        {
+            return world;
+        }
+
+        if (shell!.Root?.GetChildRecursive(WindowId) is not GameContainerPanel panel || !panel.IsShown || panel._items is not { IsShown: true } row || panel._context is null)
+        {
+            return "a container window to show";
+        }
+
+        if (panel.DrawState != ContainerWindowDraw.Drawn)
+        {
+            return "the container window to be drawn";
+        }
+
+        var objects = panel._context.Session.State.Objects;
+        for (var i = 0; i < row.CellCount; i++)
+        {
+            if (row.CellAt(i) is { IsEmpty: false, IsShown: true } candidate
+                && !tried.Contains(candidate.ItemId)
+                && objects.TryGet(candidate.ItemId, out var obj)
+                && (obj.ItemFields().UiEffects & 1) != 0
+                && (obj.ItemType & ReviewItemTypes) != 0)
+            {
+                window = panel;
+                cell = candidate;
+                return null;
+            }
+        }
+
+        return "a magic weapon, armour, jewellery or caster in the container window";
+    }
+
     /// <summary>The title text now ("Contents of &lt;container name&gt;"), or empty before the window drew.</summary>
     public string Title => _titleText;
 

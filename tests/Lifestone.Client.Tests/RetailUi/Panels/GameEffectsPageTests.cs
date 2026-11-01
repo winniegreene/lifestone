@@ -176,7 +176,10 @@ public sealed class GameEffectsPageTests(DatSetFixture fixture, ITestOutputHelpe
             Assert.Equal(expected[i].spell.Name, lines[i].Name);
             Assert.Equal(EffectRules.FormatDuration(expected[i].remaining), lines[i].Time);
             var item = Assert.IsAssignableFrom<UiElement>(page.ItemOf(expected[i].spell.Id));
-            Assert.Equal(expected[i].spell.IconId, item.GetChildRecursive(GameEffectsPage.RowIconId)!.Image.Did);
+            var icon = item.GetChildRecursive(GameEffectsPage.RowIconId)!;
+            Assert.Equal(Lifestone.Client.RetailUi.Rendering.UiImageLookup.Ready, s.Rig.Manager.SpellIcons.TryGetSpell(UiSpellIcon.Of(expected[i].spell), out var picture));
+            Assert.Same(picture, icon.GeneratedImage); // EffectInfoRegion: the composed picture (GetSpellIcon, M5 D147), not the raw icon
+            Assert.Equal(Lifestone.Client.RetailUi.Rendering.UiBlitMode.ThreeChannelAlpha, icon.Image.Mode);
             Assert.Equal(expected[i].spell.Name, Assert.IsAssignableFrom<Lifestone.Client.RetailUi.Text.UiTextElement>(item.GetChildRecursive(GameEffectsPage.RowNameId)).Text);
         }
 

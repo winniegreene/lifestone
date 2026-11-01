@@ -68,7 +68,7 @@ public static class InteriorLocations
 
     /// <summary>
     /// The Aluvian Black Spawn Den, landblock 0x0105: the arrival of the den's portal (wcid 7242, world database
-    /// v0.9.296, <c>Session/Mage/BlackSpawnDen.cs</c>), where the M3 fight loop (3.1) fights Tusker Slaves on the
+    /// v0.9.296, the hunting-ground profile <c>Session/Grounds/profiles/black-spawn-den-aluvian.json</c>), where the M3 fight loop (3.1) fights Tusker Slaves on the
     /// arrival's floor.
     /// </summary>
     public static readonly InteriorLocation BlackSpawnDenAluvian = Dungeon(

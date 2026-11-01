@@ -431,6 +431,145 @@ public sealed class NavRunnerTests(ITestOutputHelper output)
         Assert.Contains("no waypoints", runner.FailureReason, StringComparison.Ordinal);
     }
 
+    // M5 item 5, d1: doors on the routes. The scripted body walks north from (50, 50); a door stands in a doorway at y 65 (the crossing is given, the unit rig has no tile and no rooms).
+    private const float DoorY = 65f;
+
+    private static ScriptedDoors DoorAhead(S5Rig rig, bool open = false, bool? locked = null)
+    {
+        var block = MovementTestKit.Block.LandBlockId;
+        var door = new NavDoor(0x7A000001, new CellFrame(block | 0x29, new AcFrame(new Vector3(50f, DoorY, 0f), Quaternion.Identity)), 1f, open, locked);
+        var doors = new ScriptedDoors { FixedCrossings = d => [new DoorCrossing(d[0], block, block | 0x29, new Vector3(50f, DoorY, 0f), new Vector2(0f, 1f), null, 0f)] }.With(door);
+        doors.Where = () => rig.Body.Position;
+        return doors;
+    }
+
+    private static NavRunState RunDoors(S5Rig rig, NavRunner runner, ScriptedDoors doors, double seconds)
+    {
+        var end = rig.Body.Now + seconds;
+        while (rig.Body.Now < end && !runner.IsDone)
+        {
+            rig.Body.Advance(S5Rig.Dt);
+            doors.Now = rig.Body.Now;
+            runner.Step(rig.Body.Now);
+            rig.H.Tick(S5Rig.Dt);
+        }
+
+        return runner.State;
+    }
+
+    [Fact]
+    public void A_closed_door_on_the_route_stops_the_body_before_the_doorway_uses_it_waits_for_it_to_open_and_runs_on()
+    {
+        var rig = new S5Rig(50f, 50f, heading: 0f);
+        var doors = DoorAhead(rig);
+        var log = new RecordingLogSink();
+        using var runner = new NavRunner(rig.H.Api.Move, rig.Body, rig.Paths, log: log) { Doors = doors };
+        runner.Start(S5Rig.To(50f, 80f), rig.Body.Now);
+
+        var state = RunDoors(rig, runner, doors, 40);
+
+        output.WriteLine($"{state}: {runner.VerdictFields()}; used at y {doors.UsedAt.Select(p => p.Origin.Y).FirstOrDefault():F2}; {string.Join(", ", rig.Body.Calls)}");
+        Assert.Equal(NavRunState.Arrived, state);
+        Assert.Equal([0x7A000001u], doors.Used);
+        Assert.InRange(doors.UsedAt[0].Origin.Y, DoorY - runner.Options.DoorStandOffMetres - 0.6f, DoorY - runner.Options.DoorStandOffMetres + 0.3f); // stopped a metre before the doorway
+        Assert.False(rig.Body.Holds(MotionCommands.WalkForward));
+        Assert.InRange(rig.Body.Xy.Y, 79f, 80.7f); // and walked on through to the goal
+        Assert.Equal(1, runner.DoorUses);
+        Assert.Equal(1, runner.DoorsOpened);
+        Assert.Equal(0, runner.Rungs); // the wait at the door is not a stall
+        Assert.Contains(log.Lines, l => l.Contains("stopped at a closed door: using it", StringComparison.Ordinal) && l.Contains("purpose=door", StringComparison.Ordinal));
+        Assert.Contains("door_steps=1 door_uses=1 doors_opened=1 doors_found_open=0", runner.VerdictFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_door_that_does_not_open_ends_the_leg_Blocked_door_closed_timeout_after_one_more_use_and_the_body_never_crosses()
+    {
+        var rig = new S5Rig(50f, 50f, heading: 0f);
+        var doors = DoorAhead(rig);
+        doors.NeverOpens = true;
+        using var runner = new NavRunner(rig.H.Api.Move, rig.Body, rig.Paths) { Doors = doors };
+        runner.Start(S5Rig.To(50f, 80f), rig.Body.Now);
+
+        var state = RunDoors(rig, runner, doors, 40);
+
+        Assert.Equal(NavRunState.Blocked, state);
+        Assert.Contains("door-closed-timeout: door 0x7A000001 did not open within 5.0 s of 2 Use(s)", runner.FailureReason, StringComparison.Ordinal);
+        Assert.Equal(2, doors.Used.Count);
+        Assert.InRange(doors.UsedAtSeconds[1] - doors.UsedAtSeconds[0], runner.Options.DoorRetrySeconds, runner.Options.DoorRetrySeconds + 0.1);
+        Assert.True(rig.Body.Xy.Y < DoorY, $"stopped at {rig.Body.Xy}");
+        Assert.InRange(rig.Body.Now, runner.Options.DoorOpenSeconds, runner.Options.DoorOpenSeconds + 6.0);
+    }
+
+    [Fact]
+    public void An_open_door_is_run_through_without_a_use_and_a_run_without_a_door_feed_ignores_doors()
+    {
+        var rig = new S5Rig(50f, 50f, heading: 0f);
+        var doors = DoorAhead(rig, open: true);
+        using var runner = new NavRunner(rig.H.Api.Move, rig.Body, rig.Paths) { Doors = doors };
+        runner.Start(S5Rig.To(50f, 80f), rig.Body.Now);
+
+        Assert.Equal(NavRunState.Arrived, RunDoors(rig, runner, doors, 40));
+        Assert.Empty(doors.Used);
+        Assert.Equal(1, runner.DoorsFoundOpen);
+        Assert.Equal(0, runner.DoorUses);
+        Assert.Single(runner.DoorSteps);
+
+        var plain = new S5Rig(50f, 50f, heading: 0f);
+        plain.Runner.Start(S5Rig.To(50f, 80f), plain.Body.Now);
+        Assert.Equal(NavRunState.Arrived, plain.RunFor(40));
+        Assert.Empty(plain.Runner.DoorSteps);
+        Assert.DoesNotContain("door_steps", plain.Runner.VerdictFields(), StringComparison.Ordinal); // a run with no feed prints today's fields
+    }
+
+    [Fact]
+    public void A_door_that_closes_again_mid_crossing_is_used_once_more_and_the_second_closing_is_the_named_failure()
+    {
+        var once = new S5Rig(50f, 50f, heading: 0f);
+        var doors = DoorAhead(once);
+        doors.CloseWhen = (_, _) => once.Body.Xy.Y >= DoorY - 0.4f;
+        doors.MaxCloses = 1;
+        using var runner = new NavRunner(once.H.Api.Move, once.Body, once.Paths) { Doors = doors };
+        runner.Start(S5Rig.To(50f, 80f), once.Body.Now);
+        Assert.Equal(NavRunState.Arrived, RunDoors(once, runner, doors, 60));
+        Assert.Equal(2, runner.DoorUses); // the first open, and the one more after it closed again
+        Assert.Equal(2, runner.DoorsOpened);
+
+        var twice = new S5Rig(50f, 50f, heading: 0f);
+        var shutting = DoorAhead(twice);
+        shutting.CloseWhen = (_, _) => twice.Body.Xy.Y >= DoorY - 0.4f;
+        using var failing = new NavRunner(twice.H.Api.Move, twice.Body, twice.Paths) { Doors = shutting };
+        failing.Start(S5Rig.To(50f, 80f), twice.Body.Now);
+        Assert.Equal(NavRunState.Blocked, RunDoors(twice, failing, shutting, 60));
+        Assert.Contains("door-closed-timeout", failing.FailureReason, StringComparison.Ordinal);
+        Assert.Contains("closed again before the body was through, twice", failing.FailureReason, StringComparison.Ordinal);
+        Assert.Equal(2, shutting.Used.Count);
+    }
+
+    [Fact]
+    public void A_door_the_server_says_is_locked_blocks_the_plan_outright_named_and_a_refused_use_ends_the_leg_named()
+    {
+        var rig = new S5Rig(50f, 50f, heading: 0f);
+        var locked = DoorAhead(rig, locked: true);
+        using var runner = new NavRunner(rig.H.Api.Move, rig.Body, rig.Paths) { Doors = locked };
+        runner.Start(S5Rig.To(50f, 80f), rig.Body.Now);
+
+        Assert.Equal(NavRunState.Blocked, RunDoors(rig, runner, locked, 10));
+        Assert.Contains("door-locked: the route crosses the closed door 0x7A000001", runner.FailureReason, StringComparison.Ordinal);
+        Assert.Empty(locked.Used);
+        Assert.Equal(50f, rig.Body.Xy.Y, 0.01f); // it never moved
+
+        // A Use the kill switch or the dry run refuses is no wait: the leg ends at once, naming the outcome.
+        var dry = new S5Rig(50f, 50f, heading: 0f);
+        var doors = DoorAhead(dry);
+        doors.UseOutcome = ActionOutcomeKind.DryRun;
+        using var refused = new NavRunner(dry.H.Api.Move, dry.Body, dry.Paths) { Doors = doors };
+        refused.Start(S5Rig.To(50f, 80f), dry.Body.Now);
+        Assert.Equal(NavRunState.Blocked, RunDoors(dry, refused, doors, 40));
+        Assert.Contains("door-use-refused", refused.FailureReason, StringComparison.Ordinal);
+        Assert.Contains("DryRun", refused.FailureReason, StringComparison.Ordinal);
+        Assert.Single(doors.Used);
+    }
+
     /// <summary>A path source that answers a Found path of <c>count</c> waypoints: 0 (empty), or 1 (the goal alone, the snapped start and goal).</summary>
     private sealed class OneWaypointPaths(int count) : INavPathSource
     {

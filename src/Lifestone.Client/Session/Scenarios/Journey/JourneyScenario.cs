@@ -2,6 +2,7 @@ using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Vitals;
 using Lifestone.Net.Session;
 using Lifestone.Data.Dat;
@@ -69,6 +70,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
     private double _phaseStart;
     private LoginScenario? _login;
     private int _index;
+    private ModVerbCounter? _verbs;
     private StationSpec? _spec;
     private IStation? _station;
     private readonly Dictionary<int, IStation> _made = [];
@@ -141,16 +143,18 @@ public sealed class JourneyScenario : IScenario, IDisposable
     /// <param name="observer">The host's observer, or null for none.</param>
     /// <param name="place">The place verb, or null for <see cref="JourneyTravel.ToolPlace"/>.</param>
     /// <param name="windowFrames">The host's window frame times (<see cref="JourneyWindowSamplers"/>), or null for none (the station lines print <c>n/a</c>).</param>
-    public static JourneyContext NewContext(JourneyPlan plan, ILogSink log, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsKeeper? keeper = null, DatSet? dats = null, IJourneyRunnerHost? runners = null, IJourneyObserver? observer = null, JourneyPlace? place = null, IJourneyWindowFrames? windowFrames = null)
+    /// <param name="dungeon">The dungeon ground of the journey's den stations (<c>--fight-ground</c>: <see cref="FightOptions.GroundProfile"/>), or null for the option's default ground.</param>
+    public static JourneyContext NewContext(JourneyPlan plan, ILogSink log, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsKeeper? keeper = null, DatSet? dats = null, IJourneyRunnerHost? runners = null, IJourneyObserver? observer = null, JourneyPlace? place = null, IJourneyWindowFrames? windowFrames = null, HuntingGround? dungeon = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         var facts = new JourneyFacts { TeleportBudget = plan.TeleportBudget };
+        dungeon ??= GroundCatalog.Get(FightOptions.DefaultGround);
         return new JourneyContext
         {
             Character = plan.Character,
             Account = plan.Account,
             Log = log,
-            Travel = new JourneyTravel(plan.Character, facts, log, runners, place),
+            Travel = new JourneyTravel(plan.Character, facts, log, runners, place, dungeon),
             Spells = spells,
             Keeper = keeper,
             Dats = dats,
@@ -158,6 +162,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
             Observer = observer ?? NoJourneyObserver.Instance,
             Facts = facts,
             WindowFrames = windowFrames,
+            Dungeon = dungeon,
         };
     }
 
@@ -284,7 +289,11 @@ public sealed class JourneyScenario : IScenario, IDisposable
                 // Not in Holtburg, or indoors in its landblock (an EnvCell, cell index >= 0x100: a shop's back room, a cellar an earlier test left the character in): outdoors at the lifestone is the known state.
                 _verdict.RecoveryPlace = 1;
                 _log.Warn(JourneyVerdict.LogCategory, $"journey known-state: the player is {(JourneyGrounds.Indoors(self.Position) ? "indoors" : "not in Holtburg")} ({Cell(session)}): the pre-journey recovery place (recovery_place=1, never budgeted)");
-                _pending = _place(session, JourneyGrounds.Holtburg);
+                using (session.Tools.Verbs.RecoveryPlaces())
+                {
+                    _pending = _place(session, JourneyGrounds.Holtburg); // a recovery place: counted apart, never in places=
+                }
+
                 return Go(Phase.KnownPlace);
 
             case Phase.KnownPlace:
@@ -309,6 +318,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
                 {
                     case true:
                         _log.Info(JourneyVerdict.LogCategory, $"journey known-state peace=yes holtburg=yes recovery_place={_verdict.RecoveryPlace}");
+                        MarkVerbs(session, "the start of the stations"); // a plan with no build-verify station counts from here
                         return BeginStation(session, 0);
                     case false:
                         return Abort("known-state: peace: " + (_peaceWhy ?? "the peace mode did not show"));
@@ -329,7 +339,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
 
         if (_pending is null)
         {
-            _pending = session.Actions.SetCombatMode(CombatMode.NonCombat);
+            _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation);
             return null;
         }
 
@@ -410,9 +420,9 @@ public sealed class JourneyScenario : IScenario, IDisposable
 
         Enter("travel:" + _spec.Name, Phase.Travel);
         var where = _needs.Where;
-        if (where is StationWhere.Here or StationWhere.Den || JourneyGrounds.At(where, session.State.Self.Position))
+        if (where is StationWhere.Here or StationWhere.Den || JourneyGrounds.At(where, session.State.Self.Position, _context.Dungeon))
         {
-            if (where == StationWhere.Den && !JourneyGrounds.At(where, session.State.Self.Position))
+            if (where == StationWhere.Den && !JourneyGrounds.At(where, session.State.Self.Position, _context.Dungeon))
             {
                 _log.Info(JourneyVerdict.LogCategory, $"journey travel:{_spec.Name}: the den is reached by the den-travel station itself; nothing travels here");
             }
@@ -425,7 +435,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
         {
             request = new TravelRequest(JourneyGrounds.Holtburg, TravelPurpose.Home);
         }
-        else if (JourneyGrounds.For(where, _height) is { } ground)
+        else if (JourneyGrounds.For(where, _height, _context.Dungeon) is { } ground)
         {
             request = new TravelRequest(ground, TravelPurpose.Ground);
         }
@@ -445,7 +455,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
         if (_phase == Phase.TravelArrive)
         {
             var self = session.State.Self;
-            if (self.Travel == SelfTravel.Present && JourneyGrounds.At(_legWhere, self.Position) && Elapsed >= SettleSeconds)
+            if (self.Travel == SelfTravel.Present && JourneyGrounds.At(_legWhere, self.Position, _context.Dungeon) && Elapsed >= SettleSeconds)
             {
                 return BeginVitals();
             }
@@ -520,7 +530,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
             }
         }
 
-        if (StationPreconditions.Miss(_needs, session.State, _log) is { } miss)
+        if (StationPreconditions.Miss(_needs, session.State, _log, _context.Dungeon) is { } miss)
         {
             return Skip(session, miss, string.Empty);
         }
@@ -539,7 +549,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
         var seconds = _clock - _runStart;
         if (status == ScenarioStatus.Running)
         {
-            var limit = (_spec!.ExpectedSeconds * StationLimitFactor) + StationLimitMarginSeconds;
+            var limit = _factory.StationLimitSeconds(_spec!);
             return seconds > limit ? EndRun(session, now, ok: false, why: string.Create(CultureInfo.InvariantCulture, $"timeout:{run.Stage} (over {limit:0} s)")) : ScenarioStatus.Running;
         }
 
@@ -577,6 +587,11 @@ public sealed class JourneyScenario : IScenario, IDisposable
         var name = _spec!.Name;
         Emit(_verdict.Add(new JourneyStationResult(name, ok, seconds, fields, ok ? null : why)));
         _context.Observer.StationEnded(name, ok, now ?? _clock);
+        if (string.Equals(_spec.Kind, StationKinds.BuildVerify, StringComparison.Ordinal))
+        {
+            MarkVerbs(session, "the end of " + name); // the build's grants are build time (spec 5.6)
+        }
+
         if (ok)
         {
             return BeginStation(session, _index + 1);
@@ -594,6 +609,11 @@ public sealed class JourneyScenario : IScenario, IDisposable
         _log.Warn(JourneyVerdict.LogCategory, $"journey station {name}: skipped=precondition:{miss}" + (cause is null ? string.Empty : $" (after {cause} failed)"));
         Emit(_verdict.Add(new JourneyStationResult(name, false, 0, fields, null, "precondition:" + miss, cause)));
         _context.Observer.StationEnded(name, false, _clock);
+        if (string.Equals(_spec.Kind, StationKinds.BuildVerify, StringComparison.Ordinal))
+        {
+            MarkVerbs(session, "the end of " + name);
+        }
+
         return BeginStation(session, _index + 1);
     }
 
@@ -692,7 +712,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
 
     private ScenarioStatus RecoverFallback(IGameSessionView session, string why)
     {
-        if ((string.Equals(_plan.Name, JourneyPlans.Mage.Name, StringComparison.Ordinal) || string.Equals(_plan.Name, JourneyPlans.HeroMage.Name, StringComparison.Ordinal)) && JourneyGrounds.At(StationWhere.Den, session.State.Self.Position))
+        if ((string.Equals(_plan.Name, JourneyPlans.Mage.Name, StringComparison.Ordinal) || string.Equals(_plan.Name, JourneyPlans.HeroMage.Name, StringComparison.Ordinal)) && JourneyGrounds.At(StationWhere.Den, session.State.Self.Position, _context.Dungeon))
         {
             // The mage in the den with its hop spent: the suicide tool; the respawn is Holtburg's lifestone (its bind), the vitae stage pays for it.
             _log.Warn(JourneyVerdict.LogCategory, $"journey recover: the way home failed in the den ({why}): recovery=suicide");
@@ -704,7 +724,11 @@ public sealed class JourneyScenario : IScenario, IDisposable
 
         _verdict.RecoveryPlaces++;
         _log.Warn(JourneyVerdict.LogCategory, $"journey recover: the way home failed ({why}): one recovery place to Holtburg (recovery_places={_verdict.RecoveryPlaces}, outside the budget, judged 0 from the second gate)");
-        _pending = _place(session, JourneyGrounds.Holtburg);
+        using (session.Tools.Verbs.RecoveryPlaces())
+        {
+            _pending = _place(session, JourneyGrounds.Holtburg); // a recovery place: counted apart (recovery_places=), never in places=
+        }
+
         return Go(Phase.RecoverPlacing);
     }
 
@@ -750,9 +774,23 @@ public sealed class JourneyScenario : IScenario, IDisposable
         return Go(Phase.Done, Failure is null ? ScenarioStatus.Succeeded : ScenarioStatus.Failed);
     }
 
+    /// <summary>Takes the mod-verb counter's mark: the play's grants and places are counted from here (the end of the build-verify station, else the start of the stations).</summary>
+    private void MarkVerbs(IGameSessionView session, string where)
+    {
+        _verbs = session.Tools.Verbs;
+        _context.Facts.VerbMark = _verbs.Counts;
+        _log.Info(JourneyVerdict.LogCategory, $"journey verbs marked at {where}: {_context.Facts.VerbMark.Describe()}");
+    }
+
     private void WriteDone()
     {
         var facts = _context.Facts;
+        if (_verbs is not null)
+        {
+            facts.Verbs = _verbs.Since(facts.VerbMark);
+            _log.Info(JourneyVerdict.LogCategory, "journey verbs since the build: " + facts.Verbs.Describe());
+        }
+
         var travel = _context.Travel as JourneyTravel;
         Emit(_verdict.DoneLine(_plan.Name, facts, travel?.RouteMetres ?? 0, travel?.RunSeconds ?? 0, travel?.Rungs ?? 0, travel?.Blocked ?? 0, travel?.Sightless ?? 0));
         if (!_verdict.Ok(facts))

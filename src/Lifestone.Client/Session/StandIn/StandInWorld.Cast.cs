@@ -1,12 +1,17 @@
 // Re-expresses ACEmulator/ACE@95ef426d Source/ACE.Server/WorldObjects/Player_Magic.cs (CreatePlayerSpell, DoSpellWords, DoCastSpell_Inner's fizzle branch, FinishCast),
 // WorldObject_Magic.cs (DoSpellEffects, HandleCastSpell_Boost, HandleCastSpell_Transfer), Creature_Vitals.cs and Player_Vitals.cs (UpdateVital) and
 // WorldObject_Networking.cs (EnqueueMotionMagic) (AGPL-3.0) [with changes: the stand-in's player is the caster and the target of a self spell; the timing comes from
-// CastGesturePlanner; the resistance modifiers are 1; the boost and transfer numbers are the ACE world database's spell rows (the table below, read-only SELECT results)].
+// CastGesturePlanner; the resistance modifiers are 1; the boost and transfer numbers are the ACE world database's spell rows (the table below, read-only SELECT results);
+// M5 1 K2: the mana a cast costs is Casting.ManaConversionModel.RollCost (Creature_Magic.cs CalculateManaUsage 14-56, GetManaCost 58-100) and Player_Magic.cs CalculateManaUsage 566-585 (the refusal), with the
+// stand-in's own Mana Conversion skill; the weapon's ManaConversionMod is 1, a fellowship is one member, and the fizzle pre-check has no dice (below)].
 using DatReaderWriter.Enums;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Actions.Trackers;
+using Lifestone.Client.Session.Casting;
+using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Data.Animation;
+using Lifestone.Data.CharacterCreation;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Magic;
 using Lifestone.Net.Dispatch;
@@ -100,6 +105,115 @@ internal sealed partial class StandInWorld
 
     private readonly Random _vitalRandom = new(VitalSeed);
 
+    // --- the mana a cast costs (M5 1 K2; closes TODO(m3-standin-cast-mana)) ------------------------------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The seed of the stand-in's Mana Conversion rolls (ACE rolls with <c>ThreadSafeRandom</c>; the stand-in's is seeded, so a run repeats).</summary>
+    internal const int ManaSeed = 0x5EED_0B06;
+
+    /// <summary>ACE's Mana Conversion skill id (<c>Skill.ManaConversion</c>, 16).</summary>
+    internal const uint ManaConversionSkillId = 16;
+
+    /// <summary>
+    /// Mana Conversion's formula, (Focus + Self) / 6 (the SkillTable's entry 16, pinned against the dats by <c>The_scripted_mages_mana_conversion_formula_is_the_dats</c>): the stand-in has no SkillTable of its own. Focus is
+    /// attribute 5 and Self attribute 6.
+    /// </summary>
+    private static readonly SkillTableFormula ManaConversionFormula = new(AdditiveBonus: 0, Attribute1Multiplier: 1, Attribute2Multiplier: 1, Divisor: 6, Attribute1: 5, Attribute2: 6);
+
+    private readonly Random _manaRandom = new(ManaSeed);
+    private Func<double>? _nextManaRoll;
+
+    /// <summary>How many casts the stand-in refused for mana (UseDone 0x0401, nothing charged); the tests and the play checks' lines read it.</summary>
+    internal int ManaRefusals { get; private set; }
+
+    /// <summary>The mana the stand-in has charged for casts in total (a fizzle's 5 included).</summary>
+    internal uint ManaCharged { get; private set; }
+
+    /// <summary>ACE's fizzle pre-check as the stand-in decides it (it has no dice, <c>TODO(m3-standin-magic-skill)</c>): a spell whose power is over the fixed magic skill plus 50 fizzles.</summary>
+    internal static bool WillFizzle(SpellInfo? info) => info is not null && info.Power > PlaceholderMagicSkill + 50;
+
+    /// <summary>
+    /// The stand-in player's Mana Conversion skill as ACE's <c>CalculateManaUsage</c> reads it (<c>Creature_Magic.cs</c> 40-48): its own skill 16 (<c>SkillRules.TryCurrent</c> over the read model, the weapon's ManaConversionMod
+    /// being 1) when the description holds it trained or specialised; otherwise 0, which is untrained and pays the spell's base mana. The default stand-in description holds no skill 16, so its casts cost their base.
+    /// </summary>
+    private uint ManaConversionOfPlayer()
+    {
+        var q = _reducer.State.Self.Qualities;
+        return q.TryGetSkill(ManaConversionSkillId, out var skill) && skill.AdvancementClass >= SkillRules.TrainedClass
+            && SkillRules.TryCurrent(q, ManaConversionSkillId, in ManaConversionFormula, SkillRules.TrainedClass, out var current)
+            ? current
+            : 0;
+    }
+
+    /// <summary>
+    /// The base mana of a cast: the spell's, plus ACE's surcharges (<c>Creature_Magic.cs</c> 22-37): <c>ManaMod</c> for each worn clothing piece or shield for an armour-category Item Enchantment on the player, and for each member of
+    /// a fellowship (the stand-in's player is a fellowship of one) for a fellowship spell.
+    /// </summary>
+    private uint BaseManaOf(SpellInfo info, uint target)
+    {
+        var baseMana = info.BaseMana;
+        var self = _reducer.State.Self;
+        if (info.School == MagicSchool.ItemEnchantment && info.MetaSpellType == SpellType.Enchantment && info.Category is >= 160 and <= 189 && (target == 0 || target == self.Guid))
+        {
+            uint worn = 0;
+            for (var i = 0; i < self.Inventory.Equipped.Count; i++)
+            {
+                if ((self.Inventory.Equipped[i].Location & ClothingAndShieldMask) != 0)
+                {
+                    worn++;
+                }
+            }
+
+            baseMana += info.ManaMod * worn;
+        }
+        else if ((info.Flags & SpellFlags.FellowshipSpell) != 0)
+        {
+            baseMana += info.ManaMod;
+        }
+
+        return baseMana;
+    }
+
+    /// <summary>
+    /// ACE's cost and refusal (<c>Player_Magic.cs</c> <c>CalculateManaUsage</c> 556-585): a fizzle costs <see cref="ManaConversionModel.FizzleMana"/>, any other cast the rolled cost
+    /// (<see cref="ManaConversionModel.RollCost"/>); false when it is over the mana the player holds. Nothing is charged here: the cost comes with the effect (<see cref="ChargeMana"/>). Without the spell (the stand-in
+    /// has no spell table) a cast costs nothing, and so does a player whose description has no mana vital: both named in the log, never silent.
+    /// </summary>
+    private bool TryRollCastCost(SpellInfo? info, uint target, out uint cost)
+    {
+        cost = 0;
+        if (info is null)
+        {
+            Placeholder("m5-standin-cast-mana-spell", "the stand-in has no spell table, so a cast costs no mana and is never refused for it");
+            return true;
+        }
+
+        if (!_reducer.State.Self.Qualities.TryGetVitalLevels(Mana - 1, out var held, out _))
+        {
+            Placeholder("m5-standin-cast-mana-vital", "the stand-in's character has no mana vital in its description, so a cast costs no mana and is never refused for it");
+            return true;
+        }
+
+        cost = WillFizzle(info)
+            ? ManaConversionModel.FizzleMana
+            : ManaConversionModel.RollCost(BaseManaOf(info, target), info.Power, ManaConversionOfPlayer(), _nextManaRoll ??= () => _manaRandom.NextSingle(), (info.Flags & SpellFlags.IgnoresManaConversion) != 0);
+        if (cost <= held)
+        {
+            return true;
+        }
+
+        cost = 0;
+        return false;
+    }
+
+    /// <summary>ACE's <c>UpdateVitalDelta(Mana, -manaUsed)</c> at the gesture's end (<c>Player_Magic.cs</c> 855-858): the private update 0x02E9 with the mana left; nothing for a free cast.</summary>
+    private void ChargeMana(IAcSessionSink sink, uint cost)
+    {
+        if (cost > 0)
+        {
+            ManaCharged += (uint)-UpdateVitalDelta(sink, Mana, -(int)cost);
+        }
+    }
+
     /// <summary>The words, motions and effects the cast sequence sent in total (tests and the play checks' lines).</summary>
     internal int CastMotionsSent { get; private set; }
 
@@ -137,7 +251,7 @@ internal sealed partial class StandInWorld
     }
 
     /// <summary>Schedules the whole sequence of <paramref name="plan"/> now (the closures are made here, once; what runs each frame is the schedule's own list).</summary>
-    private void PlayCast(IAcSessionSink sink, uint spellId, SpellInfo? info, uint target, CastPlan plan)
+    private void PlayCast(IAcSessionSink sink, uint spellId, SpellInfo? info, uint target, CastPlan plan, uint cost)
     {
         var self = _reducer.State.Self;
         var start = _reducer.Clock.Now;
@@ -158,7 +272,7 @@ internal sealed partial class StandInWorld
                     schedule.At(start + step.StartTime, later => SendCastMotion(later, step.Motion, step.Speed, CastTurnSpeed));
                     break;
                 case CastStepKind.SpellEffects:
-                    schedule.At(start + step.StartTime, later => ResolveCast(later, spellId, info, target, plan));
+                    schedule.At(start + step.StartTime, later => ResolveCast(later, spellId, info, target, plan, cost));
                     break;
                 default:
                     schedule.At(start + step.StartTime, later => SendCastMotion(later, MotionCommands.Ready, 1f, null)); // FinishCast: back to the Magic-stance Ready (Player_Magic.cs 975)
@@ -195,11 +309,12 @@ internal sealed partial class StandInWorld
         sink.OnPlayEffect(Context(sink), new PlayEffectMsg(guid, script, intensity));
     }
 
-    /// <summary>What happens when the cast's gesture ends: the fizzle, or the effect and the caster's and the target's scripts.</summary>
-    private void ResolveCast(IAcSessionSink sink, uint spellId, SpellInfo? info, uint target, CastPlan? plan)
+    /// <summary>What happens when the cast's gesture ends: the mana is charged (<paramref name="cost"/>, rolled when the cast began), then the fizzle, or the effect and the caster's and the target's scripts.</summary>
+    private void ResolveCast(IAcSessionSink sink, uint spellId, SpellInfo? info, uint target, CastPlan? plan, uint cost)
     {
         var self = _reducer.State.Self;
-        if (info is not null && info.Power > PlaceholderMagicSkill + 50)
+        ChargeMana(sink, cost); // ACE consumes the mana at the gesture's end, before the fizzle or the effect (Player_Magic.cs 855-858), a fizzle's 5 included
+        if (WillFizzle(info))
         {
             // ACE: the pre-check fails when the skill is below the power minus 50, and the cast fizzles (Player_Magic.cs 528-540, 917-918); the stand-in has no dice.
             Fizzles++;

@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Numerics;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.World;
 
 namespace Lifestone.Client.Session.Scenarios.Journey;
@@ -36,8 +38,43 @@ public abstract class ShopLeg : StationLeg
     /// <summary>Thelnoth's spot (cache/m4/3-2/vendors.tsv).</summary>
     public static readonly Vector3 ThelnothAt = new(30.02f, 159.68f, 66.01f);
 
-    /// <summary>Renald's spot in his back room; the front room has no point of its own here (<c>TODO(renald-front-room-point)</c>), so the journey's request names the room and carries Renald as the object goal.</summary>
+    /// <summary>Renald's spot in his back room, behind the counter (the walks end at <see cref="RenaldStand"/> in his front room, never here).</summary>
     public static readonly Vector3 RenaldAt = new(139.23f, 18.33f, 94.01f);
+
+    /// <summary>
+    /// M5 7 P7p: the one stand point every walk to Renald the Elder ends at, as a point goal (the hunt's vendor stage, the vendor-facts station and the resupply station alike): the stop cell and the <c>stop_point</c>
+    /// the den profile names for him (<see cref="GroundVendor.StopPoint"/>), read from the profile, never copied. It lies inside ACE's use radius of him (5 m, cylinder to cylinder: <c>IsWithinUseRadiusOf</c>,
+    /// WorldObject_Use.cs:47-61 @95ef426d), so the open needs no MoveTo of ACE's: the item-end gate's walks that ended at 6.5 m from him, centre to centre, stood about 5.05 m out, and ACE's straight MoveTo from there ran into
+    /// the barrels by his counter and timed out (<c>VendorStopConfirmDatTests</c> proves both on the dats).
+    /// </summary>
+    public static (uint Cell, Vector3 Point) RenaldStand => RenaldStandOf(GroundCatalog.Get(FightOptions.DefaultGround));
+
+    /// <summary>The stop cell and stop point <paramref name="ground"/>'s profile names for Renald the Elder (weenie class <see cref="HuntScenario.RenaldWcid"/>); a profile without them throws, named (a loud stub, never a guess).</summary>
+    /// <param name="ground">The hunting ground whose profile lists the Holtburg vendors.</param>
+    public static (uint Cell, Vector3 Point) RenaldStandOf(HuntingGround ground)
+    {
+        ArgumentNullException.ThrowIfNull(ground);
+        foreach (var vendor in ground.Vendors)
+        {
+            if (vendor.Wcid == HuntScenario.RenaldWcid)
+            {
+                return (vendor.StopCell, vendor.StopPoint ?? throw new InvalidOperationException($"TODO(renald-stand): the profile '{ground.Key}' names Renald the Elder with no stop_point; every walk to him ends at it"));
+            }
+        }
+
+        throw new InvalidOperationException($"TODO(renald-stand): the profile '{ground.Key}' does not name Renald the Elder (weenie class {HuntScenario.RenaldWcid}); every walk to him ends at its stop_point");
+    }
+
+    /// <summary>
+    /// M5 7 P7p (D141, check, act, check): true when a vendor open ended other than Confirmed and the server MoveTos the movement controller ended as stuck rose while it was under way (<paramref name="stuckEndsBefore"/>, read
+    /// before the open was sent, to <paramref name="stuckEndsAfter"/>, read when it settled): ACE's walk-to-use ran into something and its chain timed out, the item-end gate's "UseDone 0 but no 0062". The named recovery is a walk to
+    /// <see cref="RenaldStand"/> and one more open.
+    /// </summary>
+    /// <param name="outcome">The open's outcome, or null while unsettled.</param>
+    /// <param name="stuckEndsBefore">The stuck ends before the open.</param>
+    /// <param name="stuckEndsAfter">The stuck ends after it.</param>
+    public static bool RefusedAfterStuckMoveTo(ActionOutcome? outcome, int stuckEndsBefore, int stuckEndsAfter) =>
+        outcome is { Kind: not ActionOutcomeKind.Confirmed } && stuckEndsAfter > stuckEndsBefore;
 
     /// <summary>Creates the leg.</summary>
     /// <param name="name">The leg's name.</param>
@@ -51,6 +88,51 @@ public abstract class ShopLeg : StationLeg
     protected uint NpcGuid { get; private set; }
 
     /// <summary>
+    /// True once a door that a walk of this station itself Used turned Ethereal (M5 item 5, d1 and F2: the runner stops at a closed door on its route, <c>purpose=door</c>, and Uses it through <see cref="SessionDoorFeed"/>;
+    /// <see cref="DoorWatch"/> reads that Use, by guid, and the door's Ethereal state; the vendor's own Use, another door and a door found open never count). Report-only: the station's <c>door_opened=</c>.
+    /// </summary>
+    protected bool DoorOpened { get; private set; }
+
+    /// <summary><c>yes</c> or <c>no</c>: <see cref="DoorOpened"/>, for the verdict line.</summary>
+    protected string DoorOpenedField => DoorOpened ? "yes" : "no";
+
+    /// <summary>The NPC's use radius: the UseRadius its weenie description sent, else the model's default (<c>W/WorldObject_Use.cs</c> 47-61, as the vendor model's close rule reads it).</summary>
+    /// <param name="npc">The NPC's object.</param>
+    public static double UseRadiusOf(WorldObject npc)
+    {
+        ArgumentNullException.ThrowIfNull(npc);
+        return npc.Weenie.UseRadius ?? State.GameStateReducer.VendorDefaultUseRadius;
+    }
+
+    /// <summary>
+    /// The centre-to-centre distance at which the shop entry counts the NPC in reach: the use radius plus the margin the vendor model's close rule stands for the two cylinder radii (ACE measures the use edge to edge;
+    /// <c>GameStateReducer.VendorCloseMarginMetres</c>), so an open the station sends is one ACE does not refuse for range.
+    /// </summary>
+    /// <param name="npc">The NPC's object.</param>
+    public static double ReachOf(WorldObject npc) => UseRadiusOf(npc) + State.GameStateReducer.VendorCloseMarginMetres;
+
+    /// <summary>
+    /// How far from an unseen vendor's own point the walk to it stops, centre to centre, in metres: <see cref="ReachOf"/> for a vendor whose use radius is not yet known, the model's default (0.6 m) plus the
+    /// close rule's margin (1.0 m), 1.6 m, inside every vendor's reach (the Holtburg vendors' UseRadius is 3 m, Renald's 5, in the pinned world database). Since M5 item 5 (D70) the vendor's own body stands in the
+    /// player's physics world, so a point goal at his own point with the 0.5 m stop tolerance is never reached: the body jams against him about 1 m out and the run ends stuck (M5 item 7's soak, round 10, Thelnoth's
+    /// cellar 0xA9B40111; <c>m5-renald-shop-floor</c>, D120). Not retail: Lifestone's own stand-off.
+    /// </summary>
+    public const double UnseenVendorReachMetres = State.GameStateReducer.VendorDefaultUseRadius + State.GameStateReducer.VendorCloseMarginMetres;
+
+    /// <summary>
+    /// The price line of a ware whose wire price (<see cref="VendorStock.PriceToBuy(VendorStockEntry, uint)"/> of one, over the vendor's 0062) differs from the profile's (<c>HuntingGround.PriceOf</c>), or null when they agree: the wire wins
+    /// (M5 item 3 m3; the profile's price is the planner's estimate, the 0062 the vendor's own).
+    /// </summary>
+    /// <param name="ware">The ware's name.</param>
+    /// <param name="vendor">The vendor's name.</param>
+    /// <param name="wire">The price of one from the 0062.</param>
+    /// <param name="profile">The profile's price, or null when the profile lists none.</param>
+    public static string? PriceNote(string ware, string vendor, uint wire, int? profile) =>
+        profile is { } p && p == wire
+            ? null
+            : string.Create(CultureInfo.InvariantCulture, $"price: {ware} at {vendor}: the wire's {wire} pyreals, the profile's {(profile is { } q ? q.ToString(CultureInfo.InvariantCulture) : "none")}: the wire's used");
+
+    /// <summary>
     /// Walks to <paramref name="who"/> and sets <see cref="NpcGuid"/> to him when he is in the object table, the player stands in one of <paramref name="cells"/> and he is within <paramref name="radius"/>. The first request stands
     /// <paramref name="offset"/> m on one side of him, the second (after a miss, <c>TODO(m4-vendor-approach)</c>) on the other. He is the nearest object whose name contains <paramref name="nameContains"/>
     /// (<see cref="ThelnothName"/>, <see cref="RenaldName"/>: the full distinguishing name, never a first name two vendors share).
@@ -58,6 +140,7 @@ public abstract class ShopLeg : StationLeg
     protected IEnumerable<ActionHandle?> GoNear(string who, string nameContains, uint[] cells, Vector3 npc, float offset, double radius)
     {
         NpcGuid = 0;
+        using var doors = new DoorWatch(S);
         foreach (var side in new[] { offset, -offset })
         {
             var known = NearestContaining(nameContains, 400);
@@ -65,6 +148,7 @@ public abstract class ShopLeg : StationLeg
             var label = $"{who} {side:+0.0;-0.0} m";
             foreach (var h in TravelTo(new TravelRequest(Destination(label, cells[0], at), TravelPurpose.Vendor, known, radius), label)) { yield return h; }
 
+            DoorOpened |= doors.DoorOpened;
             foreach (var h in Until(() => NearestContaining(nameContains, 20) != 0, NpcSeconds)) { yield return h; }
 
             NpcGuid = NearestContaining(nameContains, 20);
@@ -82,6 +166,72 @@ public abstract class ShopLeg : StationLeg
                 yield break;
             }
         }
+    }
+
+    /// <summary>
+    /// M5 7 P7p: walks to <see cref="RenaldStand"/> as a point goal (no object, no range: the stop tolerance) and sets <see cref="NpcGuid"/> to Renald the Elder (the nearest object whose name contains
+    /// <see cref="RenaldName"/>) when the object table holds him. Logs where the walk ended, the cell and his distance, centre to centre, and whether that is within <see cref="HuntScenario.RenaldUseMetres"/>.
+    /// </summary>
+    /// <param name="why">Why the walk is made, for the log (the first walk, or the recovery after a refused open).</param>
+    protected IEnumerable<ActionHandle?> GoToRenaldStand(string why)
+    {
+        NpcGuid = 0;
+        using var doors = new DoorWatch(S);
+        var (cell, point) = RenaldStand;
+        var label = "Renald's stand";
+        Log(string.Create(CultureInfo.InvariantCulture, $"Renald: {why}: a point goal to his stand 0x{cell:X8} ({point.X:0.##}, {point.Y:0.##}, {point.Z:0.##}), the den profile's stop_point, inside his 5 m use radius (no MoveTo of ACE's is needed)"));
+        foreach (var h in TravelTo(new TravelRequest(Destination(label, cell, point), TravelPurpose.Vendor), label)) { yield return h; }
+
+        DoorOpened |= doors.DoorOpened;
+        foreach (var h in Until(() => NearestContaining(RenaldName, 20) != 0, NpcSeconds)) { yield return h; }
+
+        NpcGuid = NearestContaining(RenaldName, 20);
+        var here = S.State.Self.Position;
+        var inCell = here is { } p && p.CellId == cell;
+        var distance = double.NaN;
+        if (NpcGuid != 0 && here is { } h0 && S.State.Objects.TryGet(NpcGuid, out var o) && o.Position is { } q)
+        {
+            distance = q.ToGlobal().DistanceTo(h0.ToGlobal());
+        }
+
+        var at = here is { } w ? string.Create(CultureInfo.InvariantCulture, $"0x{w.CellId:X8} ({w.Origin.X:0.00}, {w.Origin.Y:0.00}, {w.Origin.Z:0.00})") : "unknown";
+        Log(string.Create(CultureInfo.InvariantCulture, $"Renald: at his stand: the walk ended at {at}; in his front room {inCell}; the NPC {(NpcGuid == 0 ? "unknown" : "0x" + NpcGuid.ToString("X8", CultureInfo.InvariantCulture))} at {distance:0.00} m centre to centre (within {HuntScenario.RenaldUseMetres:0.0} m: {distance <= HuntScenario.RenaldUseMetres})"));
+    }
+
+    /// <summary>The last open <see cref="OpenRenald"/> sent (the recovery's when it ran), or null before the first.</summary>
+    protected ActionHandle? RenaldOpen { get; private set; }
+
+    /// <summary>The guid <see cref="RenaldOpen"/> was sent to (the recovery's walk may find him again under the same guid).</summary>
+    protected uint RenaldOpenGuid { get; private set; }
+
+    /// <summary>
+    /// M5 7 P7p (D141, check, act, check): opens Renald the Elder (<paramref name="renald"/>) and reads the movement controller's stuck ends before the send and after the settle. When the open ended other than Confirmed and ACE's
+    /// walk-to-use ended stuck in between (<see cref="RefusedAfterStuckMoveTo"/>), the named recovery runs once: the walk to <see cref="RenaldStand"/> (<see cref="GoToRenaldStand"/>), then one more open. Every step is logged by
+    /// name; the caller judges <see cref="RenaldOpen"/>, the last open sent.
+    /// </summary>
+    /// <param name="renald">His guid.</param>
+    /// <param name="what">The check's name for the log (<c>(b) OpenVendor Renald</c>).</param>
+    protected IEnumerable<ActionHandle?> OpenRenald(uint renald, string what)
+    {
+        var stuckBefore = S.Actions.Move.ServerMoveToStuckEnds;
+        RenaldOpenGuid = renald;
+        RenaldOpen = S.Actions.OpenVendor(renald, ActionSource.Host);
+        yield return RenaldOpen;
+        var stuckAfter = S.Actions.Move.ServerMoveToStuckEnds;
+        if (!RefusedAfterStuckMoveTo(RenaldOpen.Outcome, stuckBefore, stuckAfter))
+        {
+            Log($"{what}: {Describe(RenaldOpen)} (server MoveTos ended stuck: {stuckBefore} -> {stuckAfter}; no recovery needed)");
+            yield break;
+        }
+
+        Log($"{what}: {Describe(RenaldOpen)} after ACE's MoveTo ended {S.Actions.Move.LastServerMoveToEnd ?? "unknown"} (stuck ends {stuckBefore} -> {stuckAfter}): recovery: walking to his stand and opening once more");
+        foreach (var h in GoToRenaldStand("the recovery after a refused open")) { yield return h; }
+
+        RenaldOpenGuid = NpcGuid != 0 ? NpcGuid : renald;
+        var again = S.Actions.Move.ServerMoveToStuckEnds;
+        RenaldOpen = S.Actions.OpenVendor(RenaldOpenGuid, ActionSource.Host);
+        yield return RenaldOpen;
+        Log($"{what}, the recovery's open: {Describe(RenaldOpen)} (server MoveTos ended stuck: {again} -> {S.Actions.Move.ServerMoveToStuckEnds})");
     }
 
     /// <summary>The main pack's objects (ContainerType 0: no side pack, no focus).</summary>
@@ -344,7 +494,7 @@ public sealed class VendorFactsRun : ShopLeg
             parts.Add(_fields.GetValueOrDefault(key, key + "=no"));
         }
 
-        return string.Join(' ', parts) + $" problems={Problems.Count} granted={Granted} vendor_frame_max_ms={HuntLegVerdict.FrameMs(Context.WindowFrames?.VendorFrameMaxMs)}" + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
+        return string.Join(' ', parts) + $" problems={Problems.Count} granted={Granted} vendor_frame_max_ms={HuntLegVerdict.FrameMs(Context.WindowFrames?.VendorFrameMaxMs)} door_opened={DoorOpenedField}" + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
     }
 
     /// <inheritdoc />
@@ -385,7 +535,7 @@ public sealed class VendorFactsRun : ShopLeg
 
         Stage = "renald";
         _vendorWindow = false; // walking away from Thelnoth ends his visit
-        foreach (var h in GoNear("Renald", RenaldName, [RenaldFrontRoomCell, RenaldCell], RenaldAt, 2.0f, HuntScenario.RenaldUseMetres)) { yield return h; }
+        foreach (var h in GoToRenaldStand("the first walk")) { yield return h; }
 
         var renald = NpcGuid;
         if (renald == 0)
@@ -529,8 +679,10 @@ public sealed class VendorFactsRun : ShopLeg
     private IEnumerable<ActionHandle?> SellOne(uint renald)
     {
         _vendorWindow = true;
-        var open = S.Actions.OpenVendor(renald, ActionSource.Host);
-        yield return open;
+        foreach (var h in OpenRenald(renald, "(b) OpenVendor Renald")) { yield return h; }
+
+        var open = RenaldOpen!;
+        renald = RenaldOpenGuid;
         var stock = S.State.Vendor;
         if (!Confirmed(open, "(b) OpenVendor Renald") || stock is null || stock.Vendor != renald)
         {

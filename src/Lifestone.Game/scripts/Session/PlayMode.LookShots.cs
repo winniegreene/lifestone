@@ -51,7 +51,6 @@ public sealed partial class PlayMode
     private float _lookAim = float.NaN;
     private float _lookBodyBaseline = float.NaN;
     private double _lookCameraExtraSettle;
-    private readonly List<AvatarNotice> _lookNotices = [];
     private readonly Dictionary<uint, string> _lookParentFail = [];
     private readonly Dictionary<uint, long> _lookDrawnFrame = [];
     private int _lookGrantIndex;
@@ -268,9 +267,6 @@ public sealed partial class PlayMode
         _lookIndex = 0;
         _lookOpBegun = false;
         _lookOpElapsed = 0;
-        _lookNotices.Clear();
-        _ = _avatars?.DrainNotices(_lookNotices);
-        _lookNotices.Clear();
     }
 
     private void DrainLookNotices()
@@ -280,9 +276,8 @@ public sealed partial class PlayMode
             return;
         }
 
-        _lookNotices.Clear();
-        _avatars.DrainNotices(_lookNotices);
-        foreach (var notice in _lookNotices)
+        // The frame's notices were drained once by _Process (DrainAvatarNotices, the one drain owner); this reads them.
+        foreach (var notice in _frameNotices)
         {
             if (notice.Kind == AvatarNoticeKind.ParentFailed)
             {

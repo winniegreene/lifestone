@@ -273,10 +273,12 @@ public sealed partial class PlayChecks
         var first = session.Tools.SpawnGear(kit, ActionSource.Host);
         var done = await WaitFor(() => first.IsDone, 150.0);
         var held = KitLinesHeld(session, kit);
+        // M5 7 D154: a component line wider than one stack is asked for in several requests (F3, D87: PlayerTools.SpawnGear), so the lines requested, not the requests, add up with the lines already held.
+        var linesRequested = KitLinesRequested(first);
         Check(
             arrivedName,
-            done && first.Succeeded && first.Arrived && held == kit.Items.Count && first.Requested + first.AlreadyHeld == kit.Items.Count,
-            $"kit={held}/{kit.Items.Count} {first.Describe()} {kit.Describe()}");
+            done && first.Succeeded && first.Arrived && held == kit.Items.Count && linesRequested + first.AlreadyHeld == kit.Items.Count,
+            $"kit={held}/{kit.Items.Count} lines_requested={linesRequested} requests={first.Requested} {first.Describe()} {kit.Describe()}");
 
         var second = session.Tools.SpawnGear(kit, ActionSource.Host);
         var doneAgain = await WaitFor(() => second.IsDone, 10.0);
@@ -285,6 +287,18 @@ public sealed partial class PlayChecks
             rerunName,
             doneAgain && second.Succeeded && second.Requested == 0 && second.AlreadyHeld == kit.Items.Count && heldAgain == kit.Items.Count,
             $"kit_topup={second.Requested} kit={heldAgain}/{kit.Items.Count} already_held={second.AlreadyHeld}");
+    }
+
+    /// <summary>M5 7 D154: the kit lines the spawn asked for (a line in several requests counted once).</summary>
+    private static int KitLinesRequested(GearSpawn spawn)
+    {
+        var lines = new HashSet<GearItem>(ReferenceEqualityComparer.Instance); // a line by identity: two lines are never merged by equal fields
+        foreach (var grant in spawn.Grants)
+        {
+            lines.Add(grant.Item);
+        }
+
+        return lines.Count;
     }
 
     /// <summary>How many kit lines the inventory model holds in full, each with its world object: a component's count summed over its stacks, the wand or a piece once (pack or equipped). Allocation-free except the one table.</summary>

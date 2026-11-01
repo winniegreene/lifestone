@@ -471,6 +471,63 @@ public sealed class GameContainerPanelTests(DatSetFixture fixture) : IClassFixtu
     }
 
     [RequiresLocalDatsFact]
+    public void The_examine_review_frames_wait_out_portal_space_and_a_closed_or_undrawn_window_and_take_the_first_magic_wearable_from_the_list_S6()
+    {
+        // M5 7 S6 (D136, --examine-review-frames): the world's wait (the doll's, D129) first, then the container window shown and drawn, then the first entry that glows magical and is a weapon, armour, jewel or caster
+        // (a scroll glows but has no activation, mana or workmanship). The frames examine it through the list's right-click path.
+        using var g = Enter();
+        var screen = Assert.IsType<GamePlayScreen>(g.Rig.Flow.CurrentScreen);
+        var tried = new HashSet<uint>();
+        const uint Wand = 0x80000308;
+        const uint Scroll = 0x80000309;
+
+        Assert.Equal("the player to be placed in the world", GameContainerPanel.ExamineReviewFrameWait(screen, playerPlaced: false, tunnelVisible: false, playerMaterialised: true, tried, out _, out _));
+        Assert.Equal("the portal tunnel to end", GameContainerPanel.ExamineReviewFrameWait(screen, playerPlaced: true, tunnelVisible: true, playerMaterialised: true, tried, out _, out _));
+        Assert.StartsWith("the player to materialise", GameContainerPanel.ExamineReviewFrameWait(screen, playerPlaced: true, tunnelVisible: false, playerMaterialised: false, tried, out _, out _), StringComparison.Ordinal);
+        Assert.Equal("the shell to be built and painted", GameContainerPanel.ExamineReviewFrameWait(screen, true, false, true, tried, out _, out _));
+        screen.MarkPainted(3, 50.0, timedOut: false); // the host's paint (the offline rig has none)
+        Assert.Equal("a container window to show", GameContainerPanel.ExamineReviewFrameWait(screen, true, false, true, tried, out _, out _));
+
+        g.View(Corpse, (Scroll, 0), (Smock, 0), (Wand, 0));
+        g.Create(Thing(Smock, "Smock", itemType: 0x4, container: Corpse));
+        g.Frames(2);
+        Assert.Equal("the container window to be drawn", GameContainerPanel.ExamineReviewFrameWait(screen, true, false, true, tried, out _, out _)); // two entries have no object yet
+
+        var scroll = Thing(Scroll, "Scroll of Frost Bolt", itemType: 0x2000, container: Corpse);
+        g.Create(scroll with { Weenie = scroll.Weenie with { UiEffects = 1 } });
+        var wand = Thing(Wand, "Ivory Wand", itemType: 0x8000, container: Corpse);
+        g.Create(wand with { Weenie = wand.Weenie with { UiEffects = 1 } });
+        g.Frames(12);
+        Assert.Null(GameContainerPanel.ExamineReviewFrameWait(screen, true, false, true, tried, out var window, out var cell));
+        Assert.Same(g.Window, window);
+        Assert.Equal(Wand, cell!.ItemId); // the scroll glows too, but is no wearable or caster
+
+        Assert.True(window!.ItemRow!.Examine(cell)); // the right click's own path
+        var examine = Assert.IsType<GameExaminePanel>(screen.PanelHost!.Examine);
+        Assert.True(examine.IsOpen);
+        Assert.Equal(Wand, examine.ShownGuid);
+        Assert.Equal("Ivory Wand", examine.Title);
+        Assert.Equal(Wand, window.ItemRow.SelectedItemId);
+        examine.Close();
+
+        tried.Add(Wand); // an item passed over is not taken again
+        Assert.StartsWith("a magic weapon", GameContainerPanel.ExamineReviewFrameWait(screen, true, false, true, tried, out _, out _), StringComparison.Ordinal);
+
+        g.CloseContainer(Corpse);
+        g.Frames(2);
+        Assert.Equal("a container window to show", GameContainerPanel.ExamineReviewFrameWait(screen, true, false, true, new HashSet<uint>(), out _, out _));
+    }
+
+    [Fact]
+    public void The_examine_review_frame_needs_the_spells_the_activation_line_the_mana_and_the_workmanship_on_screen_S6()
+    {
+        string[] full = ["Value: 4,200", "Workmanship: Fine (6)", "Activation requires Arcane Lore: 120", "Spells: Mana Conversion Mastery Other IV, Frost Bolt III", "Spellcraft: 160.", "Mana: 600 / 600."];
+        Assert.Null(GameExaminePanel.MissingReviewLines(full));
+        Assert.Equal("activation,mana", GameExaminePanel.MissingReviewLines(["Workmanship: Fine (6)", "Spells: Frost Bolt III"]));
+        Assert.Equal("spells,activation,mana,workmanship", GameExaminePanel.MissingReviewLines(["Spells: unknown."])); // a failed roll names no spells
+    }
+
+    [RequiresLocalDatsFact]
     public void DrawState_reads_a_window_that_has_not_redrawn_yet_as_EntriesDiffer()
     {
         using var g = Enter();

@@ -164,12 +164,14 @@ public sealed class NoGcWindowTests
         Assert.Equal("held", window.Report);
         Assert.True(window.ClosePending); // not run inside the UI step that ended the window
         Assert.True(double.IsNaN(window.ClosingCollectionMilliseconds));
+        Assert.True(double.IsNaN(window.ClosingCollectionCpuMilliseconds)); // M5 7 D151
 
         var before = GC.CollectionCount(0);
         NoGcWindow.RunPendingClose(); // the next UI step's start
         Assert.True(GC.CollectionCount(0) > before, "the pending close ran no collection");
         Assert.False(window.ClosePending);
         Assert.True(window.ClosingCollectionMilliseconds >= 0.0, $"closing collection {window.ClosingCollectionMilliseconds} ms");
+        Assert.True(window.ClosingCollectionCpuMilliseconds >= 0.0, $"closing collection cpu {window.ClosingCollectionCpuMilliseconds} ms"); // M5 7 D151: how many threads collected
 
         // The same 128 MiB that the region's budget let through without a collection (the test above) now runs at least one.
         var count = GC.CollectionCount(0);

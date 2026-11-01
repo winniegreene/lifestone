@@ -3,9 +3,14 @@ using Lifestone.Client.Navigation;
 using Lifestone.Client.Session.Actions;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
+using Lifestone.Client.World;
+using Lifestone.Data.Animation;
+using Lifestone.Data.Dat;
+using Lifestone.Data.World;
 using Lifestone.Client.Tests.Session.Fighter;
 using Lifestone.Client.Tests.Session.Mage;
 using Lifestone.Net.Diagnostics;
@@ -24,6 +29,9 @@ internal sealed class J3bRig
 {
     public const uint LifestoneGuid = 0x7A9B404F;
     public const uint PortalGuid = 0x71B90000;
+
+    /// <summary>The key of the default (the den) ground: the journey facts' ties are per ground (M5 3 p1).</summary>
+    public static string DenKey => FightOptions.DefaultGround;
     public const uint HoltburgCell = 0xA9B40019;
     public const uint DenCell = 0x01050375;
     public const uint AcademyCell = 0x860201AD;
@@ -36,11 +44,13 @@ internal sealed class J3bRig
     private ushort _stateStamp = 2;
     private int _tieFizzled;
     private bool _lifestonePending;
+    private readonly bool _portalPlaced;
 
-    /// <summary>A rig for the fighter template <paramref name="fighter"/>, or for the mage when it is null.</summary>
-    public J3bRig(FighterTemplate? fighter = null, bool lifestoneInView = true)
+    /// <summary>A rig for the fighter template <paramref name="fighter"/>, or for the mage when it is null; with <paramref name="portalPlaced"/> false the portal object is known to the client but has no position yet (the den-travel station's fallback, M5 2 fix F2).</summary>
+    public J3bRig(FighterTemplate? fighter = null, bool lifestoneInView = true, bool portalPlaced = true)
     {
         _lifestonePending = !lifestoneInView;
+        _portalPlaced = portalPlaced;
         if (fighter is not null)
         {
             _swapRig = new C1bSwapRig(fighter);
@@ -123,6 +133,31 @@ internal sealed class J3bRig
     /// <summary>The Holtburg lifestone <see cref="RecallIntoLifestone"/> creates.</summary>
     public const uint HoltburgLifestoneGuid = 0x7A9B4050;
 
+    /// <summary>The Holtburg lifestone's Setup (weenie 509's CreateObject, one collision sphere).</summary>
+    public const uint HoltburgLifestoneSetup = 0x020002EE;
+
+    /// <summary>The dats the journey's context carries (the stone's shape and the body's), or null: the station then cannot measure the body against the stone.</summary>
+    public DatSet? Dats { get; set; }
+
+    /// <summary>
+    /// When set, the journey's runner host offers a view of the client's own body (<see cref="IJourneyWalks.HuntFollow"/>) standing here: the position the body's sliding placement left it at.
+    /// Null: the host has no body view (the Godot journey host's case).
+    /// </summary>
+    public CellFrame? Body { get; set; }
+
+    /// <summary>The runner host answers <see cref="Body"/> through <see cref="IJourneyWalks.BodyPosition"/> alone and has no hunt follower, as the Godot journey host does (M5 item 5 c1: the player's walker, <c>HuntFollow</c> null).</summary>
+    public bool BodyFromWalker { get; set; }
+
+    /// <summary>When set, the context's runner host (a host with its own seams, e.g. a physics cost); wins over <see cref="Body"/>.</summary>
+    public IJourneyRunnerHost? RunnersOverride { get; set; }
+
+    /// <summary>When set, the context's spell table (the dats': a station that builds the real fight kit needs every profile spell).</summary>
+    public IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? SpellsOverride { get; set; }
+
+    /// <summary>The body this rig's host reports when a recall arrives inside the lifestone and the placement put it <paramref name="metres"/> north of the stone's centre (ACE's own placement is 2.22 m north).</summary>
+    /// <param name="metres">How far north of the arrival.</param>
+    public static CellFrame BodyNorthOfArrival(float metres) => new(HoltburgCell, new AcFrame(new Vector3(11, 20 + metres, 30), Quaternion.Identity));
+
     /// <summary>True: Use of the lifestone says nothing.</summary>
     public bool UseSilent { get; set; }
 
@@ -157,11 +192,11 @@ internal sealed class J3bRig
     }
 
     /// <summary>The journey's context over this rig (a real <see cref="JourneyFacts"/>, the recording travel).</summary>
-    public JourneyContext Context(Action<JourneyFacts>? facts = null)
+    public JourneyContext Context(Action<JourneyFacts>? facts = null, HuntingGround? dungeon = null)
     {
         var f = new JourneyFacts();
         facts?.Invoke(f);
-        return new JourneyContext { Character = Character, Account = Account, Log = R.H.Log, Travel = Travel, Spells = Caster.Table, Facts = f };
+        return new JourneyContext { Character = Character, Account = Account, Log = R.H.Log, Travel = Travel, Spells = SpellsOverride ?? Caster.Table, Facts = f, Dungeon = dungeon ?? GroundCatalog.Get(FightOptions.DefaultGround), Dats = Dats, Runners = RunnersOverride ?? (Body is null ? null : BodyFromWalker ? new WalkerHost(this) : new BodyHost(this)) };
     }
 
     /// <summary>Runs a station to its end; returns the run and its final status.</summary>
@@ -186,7 +221,7 @@ internal sealed class J3bRig
     private void Object(uint guid, string name, uint flags, uint wcid, uint unused, float y)
     {
         _ = unused;
-        var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), ReducerHarness.Position(AcademyCell, 10, y), name: name);
+        var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), guid == PortalGuid && !_portalPlaced ? null : ReducerHarness.Position(AcademyCell, 10, y), name: name);
         R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { Name = name, ObjectDescriptionFlags = flags, WeenieClassId = guid == PortalGuid ? 7242u : wcid } }, isUpdate: false);
     }
 
@@ -194,7 +229,8 @@ internal sealed class J3bRig
 
     private void After(double seconds, Action what) => _later.Add((Now + seconds, what));
 
-    private void Teleport(uint cell)
+    /// <summary>Puts the player in <paramref name="cell"/> as a server teleport does (records "teleport:").</summary>
+    public void Teleport(uint cell)
     {
         Events.Add("teleport:" + cell.ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
         R.H.R.Reducer.OnPlayerTeleport(R.H.R.Context, new PlayerTeleportMsg(++_teleportStamp));
@@ -203,8 +239,34 @@ internal sealed class J3bRig
     }
 
     /// <summary>Answers every send since the last call as ACE does, and runs what is due.</summary>
+    /// <summary>The cells of the places made straight through the session's tools (M5 7 F30: the build's bind leg), in order.</summary>
+    public List<uint> PlacedCells { get; } = [];
+
+    private int _toolsSeen;
+
+    /// <summary>M5 7 F30: a place through the session's tools (the build's own, not the journey seam's) is answered as ACE does and lands the player in the rig's world (the academy cell, where the lifestone stands).</summary>
+    private void AnswerPlaces()
+    {
+        var requests = R.H.Net.ToolRequests();
+        while (_toolsSeen < requests.Count)
+        {
+            var text = requests[_toolsSeen++];
+            if (text is null || !text.StartsWith("@lifestone place ", StringComparison.Ordinal) || !Lifestone.ServerTools.ToolsWire.TryParseRequest(text["@lifestone ".Length..], out var request, out _) || request is not Lifestone.ServerTools.PlaceLocRequest loc)
+            {
+                continue;
+            }
+
+            var at = loc.At;
+            PlacedCells.Add(at.Cell);
+            var placed = new Lifestone.ServerTools.PlaceData("loc", null, Lifestone.ServerTools.ToolsWire.FormatCell(at.Cell), at.X, at.Y, at.Z, at.Qw, at.Qx, at.Qy, at.Qz);
+            R.H.ServerMessage(Lifestone.ServerTools.ToolsWire.Reply(Lifestone.ServerTools.ToolReply.Success(request.Id, Lifestone.ServerTools.ToolVerbs.Place, placed), placed.Describe()));
+            Teleport(AcademyCell);
+        }
+    }
+
     private void Pump()
     {
+        AnswerPlaces();
         var sends = R.H.Net.Sends;
         while (_seen < sends.Count)
         {
@@ -296,7 +358,7 @@ internal sealed class J3bRig
                         {
                             // The arrival's position is ReducerHarness.Move's (x 11, y 20, z 30); the lifestone stands on it.
                             var at = ReducerHarness.Position(HoltburgCell, 11, 20, 30);
-                            var basis = ReducerHarness.Create(HoltburgLifestoneGuid, ReducerHarness.Stamps(), at, name: "Life Stone");
+                            var basis = ReducerHarness.Create(HoltburgLifestoneGuid, ReducerHarness.Stamps(), at, name: "Life Stone", setup: HoltburgLifestoneSetup);
                             R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { Name = "Life Stone", ObjectDescriptionFlags = WorldObjectTable.LifestoneFlag, WeenieClassId = 509 } }, isUpdate: false);
                         }
 
@@ -322,6 +384,47 @@ internal sealed class J3bRig
 
             R.UseDone();
         });
+    }
+
+    /// <summary>A runner host that runs nothing and shows the body (<see cref="Body"/>), as the headless host's <see cref="IJourneyWalks.HuntFollow"/> does.</summary>
+    private sealed class BodyHost(J3bRig rig) : IJourneyRunnerHost, IJourneyWalks
+    {
+        public ITravelLeg Run(IGameSessionView session, TravelRequest request, double now) => throw new NotSupportedException("the rig's travel seam runs the walks");
+
+        public IFightWalk? FightWalk(JourneyContext context, HuntingGround ground) => null;
+
+        public IHuntFollow? HuntFollow(JourneyContext context) => new Follow(rig);
+
+        private sealed class Follow(J3bRig rig) : IHuntFollow
+        {
+            public string? Failure => null;
+
+            public CellFrame? Position => rig.Body;
+
+            public void Prepare(IGameSessionView session, double now)
+            {
+            }
+
+            public void Tick(IGameSessionView session, double now)
+            {
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+    }
+
+    /// <summary>The Godot journey host's shape: no hunt follower (<see cref="IJourneyWalks.HuntFollow"/> is null, the hunt reads the player from the session), the body from <see cref="IJourneyWalks.BodyPosition"/> alone.</summary>
+    private sealed class WalkerHost(J3bRig rig) : IJourneyRunnerHost, IJourneyWalks
+    {
+        public ITravelLeg Run(IGameSessionView session, TravelRequest request, double now) => throw new NotSupportedException("the rig's travel seam runs the walks");
+
+        public IFightWalk? FightWalk(JourneyContext context, HuntingGround ground) => null;
+
+        public IHuntFollow? HuntFollow(JourneyContext context) => null;
+
+        public CellFrame? BodyPosition(JourneyContext context) => rig.Body;
     }
 
     /// <summary>The journey's travel seam as a test double: it records each request and, as a run on foot, arrives on the next step (or fails with <see cref="FailWith"/>).</summary>

@@ -44,7 +44,7 @@ public abstract class ScriptLeg(string name, Action<string> log) : IStationRun
     /// <summary>What the leg's checks found wrong, one line each (empty when every check held).</summary>
     public IReadOnlyList<string> Problems => _problems;
 
-    /// <summary>The items <see cref="GrantIfMissing"/> granted (the journey's <c>granted=</c>).</summary>
+    /// <summary>The items <see cref="GrantIfMissing"/> granted and saw land (a fighter's station; the mage's grants nothing, M5 item 3 c1). The journey's <c>granted=</c> is the session counter's (<see cref="PlayerTools.Verbs"/>), this is one station's own count.</summary>
     public int Granted { get; private set; }
 
     /// <summary>True when the leg passed: it ended without a failure and every check held.</summary>
@@ -215,7 +215,7 @@ public abstract class ScriptLeg(string name, Action<string> log) : IStationRun
 
     /// <summary>
     /// M4 P4 sfix2: a consumable the test needs but an earlier test may have used up (the hunts drink the Archer's potions, the kits lose their uses). When <paramref name="find"/> returns 0 the mod's <c>item</c> verb
-    /// grants one <paramref name="wcid"/> (an item, never a creature, D23) and the leg waits until it is in the pack; the Log says so and <see cref="Granted"/> counts it. Returns the guid, or 0 when the grant failed (a failed check).
+    /// grants one <paramref name="wcid"/> (an item, never a creature, D23) and the leg waits until it is in the pack; the Log says so and <see cref="Granted"/> counts it. Returns the guid, or 0 when the grant failed (a failed check). The mage never grants (M5 item 3 c1, DoD 6): with the item missing the check fails, named, and nothing is sent.
     /// </summary>
     protected IEnumerable<ActionHandle?> GrantIfMissing(Func<uint> find, uint wcid, string what, Action<uint> found, int? stack = null)
     {
@@ -225,6 +225,14 @@ public abstract class ScriptLeg(string name, Action<string> log) : IStationRun
         if (held != 0)
         {
             found(held);
+            yield break;
+        }
+
+        if (GearScenario.WrongCharacter(S) is null)
+        {
+            // M5 item 3 c1 (DoD 6): the mage plays cheat-free, so a station of its plan never grants; it uses what the kit holds. A station that needs this item fails the check, named, and nothing is sent.
+            Log($"the pack holds no {what} (wcid {wcid}) and play grants nothing (M5 DoD 6): not granted");
+            Check(false, $"the {what} (wcid {wcid}) is not in the pack and play grants nothing (M5 DoD 6)");
             yield break;
         }
 

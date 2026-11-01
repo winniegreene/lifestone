@@ -14,7 +14,7 @@ public sealed class BuffLegVerdictTests
     private const string Gear = "gear=wielded worn=8 kit=40/40 gear_steps=0 topup=0 cast=n/a";
 
     private static readonly Regex Line = new(
-        @"^buff done ok=(true|false) gear=(wielded|failed|\?) worn=(\d+|\?) cast=(ok|fizzled|failed|n/a) buffs=\d+/\d+ rebuffed=(yes|no) forced=(yes|no) min_remaining_s=(\d+|n/a) levels=\S+ cycle_s=\d+ cast_scripts=\d+ cast_sounds=\d+ cast_windows=\d+ cast_frame_max_ms=(\d+\.\d|n/a) sounds_server=(\d+|n/a) fizzles=\d+ misses=\S+ surpassed=\d+ cast_scripts_expected=\d+( frame_over_50=yes)?( driver=on rebuff_lines=\d+ rebuff_s=(\d+|n/a))?$",
+        @"^buff done ok=(true|false) gear=(wielded|failed|\?) worn=(\d+|\?) cast=(ok|fizzled|failed|n/a) buffs=\d+/\d+ rebuffed=(yes|no) forced=(yes|no) min_remaining_s=(\d+|n/a) levels=\S+ cycle_s=\d+ cast_scripts=\d+ cast_sounds=\d+ cast_windows=\d+ cast_frame_max_ms=(\d+\.\d|n/a) sounds_server=(\d+|n/a) fizzles=\d+ misses=\S+ surpassed=\d+ cast_scripts_expected=\d+ mana_tries=\d+ mana_refusals=\d+ mana_landed=\d+ busy=\d+ resists=\d+ proved=\d+( mana_presses=\d+ dances=\d+ dances_landed=\d+)?( frame_over_50=yes)?( driver=on rebuff_lines=\d+ rebuff_s=(\d+|n/a))?$",
         RegexOptions.CultureInvariant);
 
     private static BuffResult Cycle(int cast = 30, int fizzles = 0, string[]? misses = null, string? failure = null) => new()
@@ -59,7 +59,7 @@ public sealed class BuffLegVerdictTests
         Assert.Equal("ok", outcome.Cast);
         Assert.Matches(Line, outcome.Line);
         Assert.Equal(
-            "buff done ok=true gear=wielded worn=8 cast=ok buffs=24/24 rebuffed=yes forced=yes min_remaining_s=1204 levels=Focus:VII,Will:VII cycle_s=1324 cast_scripts=12 cast_sounds=20 cast_windows=31 cast_frame_max_ms=52.0 sounds_server=3 fizzles=0 misses=none surpassed=0 cast_scripts_expected=31 frame_over_50=yes",
+            "buff done ok=true gear=wielded worn=8 cast=ok buffs=24/24 rebuffed=yes forced=yes min_remaining_s=1204 levels=Focus:VII,Will:VII cycle_s=1324 cast_scripts=12 cast_sounds=20 cast_windows=31 cast_frame_max_ms=52.0 sounds_server=3 fizzles=0 misses=none surpassed=0 cast_scripts_expected=31 mana_tries=0 mana_refusals=0 mana_landed=0 busy=0 resists=0 proved=0 frame_over_50=yes",
             outcome.Line);
     }
 
@@ -236,8 +236,26 @@ public sealed class BuffLegVerdictTests
         Assert.True(outcome.Ok, string.Join("; ", outcome.Problems));
         Assert.Matches(Line, outcome.Line);
         Assert.Equal(
-            "buff done ok=true gear=wielded worn=8 cast=ok buffs=24/24 rebuffed=yes forced=no min_remaining_s=1795 levels=Focus:VII,Will:VII cycle_s=1324 cast_scripts=12 cast_sounds=20 cast_windows=31 cast_frame_max_ms=21.4 sounds_server=3 fizzles=0 misses=none surpassed=0 cast_scripts_expected=33 driver=on rebuff_lines=3 rebuff_s=33",
+            "buff done ok=true gear=wielded worn=8 cast=ok buffs=24/24 rebuffed=yes forced=no min_remaining_s=1795 levels=Focus:VII,Will:VII cycle_s=1324 cast_scripts=12 cast_sounds=20 cast_windows=31 cast_frame_max_ms=21.4 sounds_server=3 fizzles=0 misses=none surpassed=0 cast_scripts_expected=33 mana_tries=0 mana_refusals=0 mana_landed=0 busy=0 resists=0 proved=0 driver=on rebuff_lines=3 rebuff_s=33",
             outcome.Line);
+    }
+
+    [Fact]
+    public void The_cast_policys_fields_are_the_sums_of_the_legs_passes_before_the_frame_flag_and_the_driver_fields_M5_1_fix_B()
+    {
+        // G1: the leg's line carries the CastTally fields of both passes (report-only; a pass given twice counts once).
+        var cycle = Cycle() with { ManaTries = 5, ManaRefusals = 2, ManaLanded = 1, Busy = 1, Resists = 3, Proved = 4, Dances = 1, DancesLanded = 1, DancePresses = 6 };
+        var forced = Forced() with { ManaTries = 2, ManaRefusals = 1, Resists = 1 };
+        var plain = BuffLegVerdict.Compose(Ran(cycle, forced), Measures(frame: 52.04));
+        Assert.EndsWith(" mana_tries=7 mana_refusals=3 mana_landed=1 busy=1 resists=4 proved=4 mana_presses=6 dances=1 dances_landed=1 frame_over_50=yes", plain.Line, StringComparison.Ordinal);
+        Assert.Matches(Line, plain.Line);
+
+        var driver = Driver() with { ManaTries = 3, ManaLanded = 2 };
+        var driven = BuffLegVerdict.Compose(new BuffLegScenarioResult(true, null, Gear, cycle, null, DriverOn: true, Driver: driver, RebuffSeconds: 33.4), Measures());
+        Assert.EndsWith(" mana_tries=8 mana_refusals=2 mana_landed=3 busy=1 resists=3 proved=4 mana_presses=6 dances=1 dances_landed=1 driver=on rebuff_lines=3 rebuff_s=33", driven.Line, StringComparison.Ordinal);
+        Assert.Matches(Line, driven.Line);
+
+        Assert.Equal("mana_tries=5 mana_refusals=2 mana_landed=1 busy=1 resists=3 proved=4 mana_presses=6 dances=1 dances_landed=1", BuffLegVerdict.CastFieldsOf(cycle, cycle, null));
     }
 
     [Fact]

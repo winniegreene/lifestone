@@ -5,13 +5,13 @@ namespace Lifestone.Client.RetailUi.Dialogs;
 
 /// <summary>
 /// The answer to a retail feature M3 does not build yet (a panel page with no controller, the combat panel and examination until item 3.2): retail's own message dialog with a Lifestone literal
-/// ("Not in Lifestone M3: ..."), logged as a placeholder so it is never mistaken for retail behaviour. M2's features that stay out keep <see cref="NotInM2"/> (the chat focus, the options page's
+/// ("Not in Lifestone yet: ..."), logged as a placeholder so it is never mistaken for retail behaviour. M2's features that stay out keep <see cref="NotInM2"/> (the chat focus, the options page's
 /// unbuilt choices, the login screens); this one is the panel host's and the toolbar's.
 /// </summary>
 public static class NotInM3
 {
     /// <summary>The text the dialog shows before the feature's name.</summary>
-    public const string Prefix = "Not in Lifestone M3: ";
+    public const string Prefix = "Not in Lifestone yet: ";
 
     /// <summary>
     /// Opens the message dialog for <paramref name="feature"/> (a short English name, e.g. "Map") in <paramref name="dialogs"/> and logs it as a placeholder. Returns the dialog's context.

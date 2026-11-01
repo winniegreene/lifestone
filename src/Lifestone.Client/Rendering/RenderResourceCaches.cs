@@ -25,6 +25,30 @@ public interface IRenderResourceHost<TTexture, TMaterial, TMesh>
     void FreeMesh(string key, TMesh mesh);
 }
 
+/// <summary>A mark of the three render caches' use generations (<see cref="RenderResourceCaches{TTexture, TMaterial, TMesh}.Mark"/>).</summary>
+public readonly record struct RenderCacheMark(long Textures, long Materials, long Meshes);
+
+/// <summary>One cache's entries and bytes before and after a trim (materials count themselves as bytes).</summary>
+public readonly record struct CacheTrimCounts(int CountBefore, long BytesBefore, int CountAfter, long BytesAfter)
+{
+    public int Evicted => CountBefore - CountAfter;
+
+    public long BytesFreed => BytesBefore - BytesAfter;
+}
+
+/// <summary>What <see cref="IRenderCacheTrim.TrimUnusedSince"/> did to each cache.</summary>
+public readonly record struct RenderCacheTrimResult(CacheTrimCounts Textures, CacheTrimCounts Materials, CacheTrimCounts Meshes);
+
+/// <summary>The trim half of the render caches (M5 7 P7d): what <see cref="ArrivalCacheTrim"/> drives, so it is tested without an engine.</summary>
+public interface IRenderCacheTrim
+{
+    /// <summary>Starts a new use generation in every cache and returns it.</summary>
+    RenderCacheMark Mark();
+
+    /// <summary>Evicts (and frees) every idle mesh, material and texture not used since <paramref name="mark"/>; entries in use stay.</summary>
+    RenderCacheTrimResult TrimUnusedSince(RenderCacheMark mark);
+}
+
 /// <summary>A material reference: <see cref="Key"/> is null for an uncounted material (the loud error material).</summary>
 public readonly record struct MaterialHandle<TMaterial>(MaterialKey? Key, TMaterial Material)
     where TMaterial : class;
@@ -45,7 +69,7 @@ public readonly record struct MaterialHandle<TMaterial>(MaterialKey? Key, TMater
 /// <para>Engine-agnostic: the engine supplies <see cref="IRenderResourceHost{TTexture, TMaterial, TMesh}"/>. Main thread
 /// only.</para>
 /// </remarks>
-public sealed class RenderResourceCaches<TTexture, TMaterial, TMesh>
+public sealed class RenderResourceCaches<TTexture, TMaterial, TMesh> : IRenderCacheTrim
     where TTexture : class
     where TMaterial : class
     where TMesh : class
@@ -236,6 +260,32 @@ public sealed class RenderResourceCaches<TTexture, TMaterial, TMesh>
 
     /// <summary>Drops a mesh reference.</summary>
     public void ReleaseMesh(string key) => _meshes.Release(key);
+
+    /// <summary>True when the mesh is cached (held or idle).</summary>
+    public bool ContainsMesh(string key) => _meshes.Contains(key);
+
+    /// <inheritdoc/>
+    public RenderCacheMark Mark() => new(_textures.Mark(), _materials.Mark(), _meshes.Mark());
+
+    /// <inheritdoc/>
+    /// <remarks>Meshes first, then materials, then textures: an idle entry already dropped what it held when it went idle, so the order only
+    /// keeps each cache's numbers in step with what the engine still holds.</remarks>
+    public RenderCacheTrimResult TrimUnusedSince(RenderCacheMark mark)
+    {
+        var meshes = Trim(_meshes, mark.Meshes);
+        var materials = Trim(_materials, mark.Materials);
+        var textures = Trim(_textures, mark.Textures);
+        return new RenderCacheTrimResult(textures, materials, meshes);
+
+        static CacheTrimCounts Trim<TKey, TValue>(ResourceCache<TKey, TValue> cache, long since)
+            where TKey : notnull
+            where TValue : class
+        {
+            var (count, bytes) = (cache.Count, cache.TotalBytes);
+            cache.TrimUnusedSince(since);
+            return new CacheTrimCounts(count, bytes, cache.Count, cache.TotalBytes);
+        }
+    }
 
     /// <summary>Evicts (and frees) every idle mesh, material and texture.</summary>
     public void ClearIdle()

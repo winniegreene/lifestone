@@ -33,6 +33,11 @@ public partial class Main : Node3D
     private GameServices _services = null!;
     private WorldRoot _world = null!;
     private FlyCamera _camera = null!;
+    private const ulong LensLogIntervalMilliseconds = 500; // cam-fov-resize: at most one INFO line per half second of a window drag
+    private Window? _lensWindow;
+    private Vector2 _lensSize;
+    private ulong _lensLoggedMilliseconds;
+    private bool _lensLogPending;
     private PerfOverlay? _perf;
     private CaptureReadiness? _readiness; // navigation fix: screenshot-mode idle check
     private double _runTime;
@@ -285,8 +290,10 @@ public partial class Main : Node3D
     }
 
     /// <summary>
-    /// M4 polish pass P2: the play camera draws with retail's field of view (<see cref="RetailLens"/>: the 90-degree preference turned into a vertical angle for the window's aspect, 73 degrees at 800x600) unless <c>--fov</c> says otherwise
-    /// (<c>--fov=60</c> is the old default). Explore mode keeps its 60. The window's aspect is read once here: <c>TODO(cam-fov-resize)</c>, a window resized after the start keeps the angle it had (retail recomputes it every frame).
+    /// M4 polish pass P2 and M5 6 v1 (<c>cam-fov-resize</c>, M5 D9): the play camera draws with retail's field of view (<see cref="RetailLens"/>: the 90-degree preference turned into a vertical angle for the window's aspect,
+    /// 73 degrees at 800x600) unless <c>--fov</c> says otherwise (<c>--fov=60</c> is the old default). Explore mode keeps its 60. Retail recomputes the angle every frame from the viewport it draws into
+    /// (<c>SmartBox::RenderNormalMode</c>, 11.6096 0x00453B40), so the angle follows the window here: it is set now and again whenever the root window changes size (<see cref="OnWindowResizedForLens"/>), at the cost of one
+    /// division per resize event and nothing per frame. <c>TODO(cam-fov-resize-tunnel)</c>: the portal tunnel's own lens is built once from the camera's angle at the start (<c>PortalTunnelView.Create</c>) and is not redone on a resize.
     /// </summary>
     private void ApplyRetailFov()
     {
@@ -296,21 +303,77 @@ public partial class Main : Node3D
             return;
         }
 
-        var size = GetViewport().GetVisibleRect().Size;
+        var window = GetTree().Root;
+        var size = window.GetVisibleRect().Size;
         if (size.X < 2f || size.Y < 2f)
         {
-            Log.Warn("camera", "TODO(cam-fov-resize): the window has no size yet; the camera keeps its default field of view", ("fov_degrees", _camera.Camera.Fov));
+            Log.Warn("camera", "TODO(cam-fov-resize): the window has no size yet; the camera keeps its default field of view until it has one", ("fov_degrees", _camera.Camera.Fov));
+        }
+        else
+        {
+            var fov = Lifestone.Client.Camera.RetailLens.VerticalFovDegrees(Lifestone.Client.Camera.RetailLens.DefaultFovDegrees, size.X / size.Y);
+            var was = _camera.Camera.Fov;
+            _camera.Camera.Fov = fov;
+            Log.Info("camera", "the world camera draws with retail's field of view (Render.FieldOfView 90, SmartBox::RenderNormalMode)", ("vertical_fov_degrees", fov), ("window", size.ToString()), ("was", was));
+        }
+
+        _lensWindow = window;
+        window.SizeChanged += OnWindowResizedForLens;
+    }
+
+    /// <summary>
+    /// The root window changed size (a drag, a maximise, a display change): the vertical angle is recomputed from the new aspect, as retail does each frame. The camera is set at once (one division, no allocation);
+    /// the INFO line is rate-limited to one per <see cref="LensLogIntervalMilliseconds"/>, with the last size of a drag always logged from <see cref="_Process"/>.
+    /// </summary>
+    private void OnWindowResizedForLens()
+    {
+        if (_lensWindow is null || _camera is null)
+        {
             return;
         }
 
-        var fov = Lifestone.Client.Camera.RetailLens.VerticalFovDegrees(Lifestone.Client.Camera.RetailLens.DefaultFovDegrees, size.X / size.Y);
-        _camera.Camera.Fov = fov;
-        Log.Info("camera", "the world camera draws with retail's field of view (Render.FieldOfView 90, SmartBox::RenderNormalMode)", ("vertical_fov_degrees", fov), ("window", size.ToString()), ("was", GameOptions.DefaultFov));
+        var size = _lensWindow.GetVisibleRect().Size;
+        if (size.X < 2f || size.Y < 2f)
+        {
+            return; // a minimised window: the camera keeps its angle until it has a size again
+        }
+
+        _camera.Camera.Fov = Lifestone.Client.Camera.RetailLens.VerticalFovDegrees(Lifestone.Client.Camera.RetailLens.DefaultFovDegrees, size.X / size.Y);
+        _lensSize = size;
+        _lensLogPending = true;
+        FlushLensLog(Time.GetTicksMsec());
+    }
+
+    private void FlushLensLog(ulong nowMilliseconds)
+    {
+        if (!_lensLogPending || nowMilliseconds - _lensLoggedMilliseconds < LensLogIntervalMilliseconds)
+        {
+            return;
+        }
+
+        _lensLogPending = false;
+        _lensLoggedMilliseconds = nowMilliseconds;
+        Log.Info("camera", "the window was resized; the world camera's vertical field of view follows (RetailLens)", ("vertical_fov_degrees", _camera.Camera.Fov), ("window", $"{_lensSize.X:0}x{_lensSize.Y:0}"));
+    }
+
+    public override void _ExitTree()
+    {
+        if (_lensWindow is not null && IsInstanceValid(_lensWindow))
+        {
+            _lensWindow.SizeChanged -= OnWindowResizedForLens;
+        }
+
+        _lensWindow = null;
     }
 
     public override void _Process(double delta)
     {
         _runTime += delta;
+        if (_lensLogPending)
+        {
+            FlushLensLog(Time.GetTicksMsec());
+        }
+
         var options = _services.Options;
         if (options.QuitAfterSeconds is { } limit && _runTime > limit && !_done)
         {

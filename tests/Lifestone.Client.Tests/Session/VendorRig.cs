@@ -1,3 +1,4 @@
+using System.Numerics;
 using Lifestone.Client.Session.Actions;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Net.Messages;
@@ -31,11 +32,21 @@ internal sealed class VendorRig
     private uint _event = 500;
     private uint _guid = 0x8000035F;
     private byte _seq;
+    private ushort _position = 100;
+    private ushort _placed = 1;
 
-    public VendorRig(int coins = 10000)
+    public VendorRig(int coins = 10000, Lifestone.Net.Messages.PlayerDescriptionMsg? description = null)
     {
         R = new WorldActionRig();
-        R.Describe([], []);
+        if (description is null)
+        {
+            R.Describe([], []);
+        }
+        else
+        {
+            H.Describe(description); // M5 7 P7j: a described player (skills, spellbook)
+        }
+
         Coins(coins);
         H.R.Bus.Subscribe((in VendorOpened e) => Events.Add(e));
         H.R.Bus.Subscribe((in VendorStockChanged e) => Events.Add(e));
@@ -68,6 +79,20 @@ internal sealed class VendorRig
     {
         var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), ReducerHarness.Position(Cell, x, y), name: name);
         H.R.Reducer.OnCreateObject(H.R.Context, basis with { Weenie = basis.Weenie with { Header = WeenieHeaderFlags.UseRadius, UseRadius = useRadius, WeenieClassId = wcid } }, isUpdate: false);
+    }
+
+    /// <summary>A vendor's object at a cell and point of the world (a ground's vendor at his own place), with its UseRadius and weenie class.</summary>
+    public void PlaceAt(uint guid, string name, uint cell, Vector3 at, float useRadius = 3f, uint wcid = 0)
+    {
+        var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(++_placed), new AcPosition(cell, at, Quaternion.Identity), name: name); // newer stamps each time: a re-placed vendor is not a stale create
+        H.R.Reducer.OnCreateObject(H.R.Context, basis with { Weenie = basis.Weenie with { Header = WeenieHeaderFlags.UseRadius, UseRadius = useRadius, WeenieClassId = wcid } }, isUpdate: false);
+    }
+
+    /// <summary>The player stands at <paramref name="at"/> in <paramref name="cell"/>: an own position update with the next position sequence.</summary>
+    public void StandAt(uint cell, Vector3 at)
+    {
+        _position++;
+        H.R.Reducer.OnUpdatePosition(H.R.Context, new UpdatePositionMsg(Player, PositionFlags.Grounded, new AcPosition(cell, at, Quaternion.Identity), null, null, 1, _position, 1, 1));
     }
 
     /// <summary>The player moves to x metres (in the player's cell, y 20): an own position update.</summary>
@@ -118,15 +143,18 @@ internal sealed class VendorRig
     public void Stack(uint item, uint size, uint value) => R.Raw(AceM3Writers.SetStackSize(++_seq, item, size, value));
 
     /// <summary>An F745 for something the player holds (the way a bought item or a payout stack arrives).</summary>
-    public void Arrive(uint guid, string name, uint wcid, uint itemType, uint value, ushort? stackSize = null)
+    public void Arrive(uint guid, string name, uint wcid, uint itemType, uint value, ushort? stackSize = null, ushort? maxStack = null)
     {
         var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), null, name: name, itemType: itemType);
-        var header = WeenieHeaderFlags.Container | WeenieHeaderFlags.Value | (stackSize is null ? WeenieHeaderFlags.None : WeenieHeaderFlags.StackSize);
+        var header = WeenieHeaderFlags.Container | WeenieHeaderFlags.Value | (stackSize is null ? WeenieHeaderFlags.None : WeenieHeaderFlags.StackSize) | (maxStack is null ? WeenieHeaderFlags.None : WeenieHeaderFlags.MaxStackSize);
         H.R.Reducer.OnCreateObject(
             H.R.Context,
-            basis with { Weenie = basis.Weenie with { Header = header, WeenieClassId = wcid, ContainerId = Player, Value = value, StackSize = stackSize } },
+            basis with { Weenie = basis.Weenie with { Header = header, WeenieClassId = wcid, ContainerId = Player, Value = value, StackSize = stackSize, MaxStackSize = maxStack } },
             isUpdate: false);
     }
+
+    /// <summary>GameMessage 0x0024: the item leaves the player's inventory (ACE's whole merge sends it for the source, <c>Player_Inventory.cs</c> 3096).</summary>
+    public void Remove(uint item) => R.Raw(AceM3Writers.InventoryRemoveObject(item));
 
     /// <summary>An item the player holds already (in the pack), with its Value and ItemType.</summary>
     public void Own(uint guid, string name, uint itemType, uint value, ushort? stackSize = null)
@@ -160,4 +188,267 @@ internal sealed class VendorRig
     }
 
     public int Sent(FakeSendKind kind) => H.Net.Of(kind).Count;
+}
+
+/// <summary>
+/// The server's side of a ground's home vendors, scripted from the orders <see cref="VendorRig"/> holds (M5 item 3 m3; capture C1, C2; ACE 95ef426d): <see cref="Pump"/> answers each new Use, Buy and Sell the Action API sent. A Use of a
+/// shop is its UseDone and its 0062; a Buy is the coin spent, the new stack's F745 and 0022, the refreshed 0062 and the UseDone, or a refusal (00A0 and UseDone, with the shop's text first when it has one; no text for too few pyreals, as
+/// ACE); a Sell is each item into the vendor's container and the payout (the open stock's <see cref="VendorStock.PayoutFor(WorldObject)"/>), an item of an unsellable class answered with ACE's 02EB "The X is unsellable.", and a sale of
+/// nothing the 00A0.
+/// </summary>
+internal sealed class ScriptedShop(VendorRig rig)
+{
+    private readonly Dictionary<uint, Shop> _shops = [];
+    private int _seen;
+
+    /// <summary>The Use, Buy and Sell sends answered.</summary>
+    public int Uses { get; private set; }
+
+    public int Buys { get; private set; }
+
+    public int Sells { get; private set; }
+
+    /// <summary>The DropItem sends answered (M5 7 D99).</summary>
+    public int Drops { get; private set; }
+
+    private const uint GroundStandIn = 0x7FFF0001;
+
+    /// <summary>The sales refused whole because the payout's coin stacks did not fit the free slots (M5 7 G1).</summary>
+    public int SlotRefusals { get; private set; }
+
+    /// <summary>A shop: the vendor, its mask, its rows (stack, guid, name, wcid, ItemType, Value) and how it answers.</summary>
+    internal sealed class Shop
+    {
+        public required uint Vendor { get; init; }
+
+        public required uint Mask { get; init; }
+
+        public List<(int Stack, uint Guid, string Name, uint Wcid, uint ItemType, int Value)> Rows { get; } = [];
+
+        /// <summary>A text every buy is refused with (a 02EB before the 00A0), or null.</summary>
+        public string? BuyRefusal { get; set; }
+
+        /// <summary>The weenie classes this vendor answers "is unsellable" for.</summary>
+        public HashSet<uint> Unsellable { get; } = [];
+
+        /// <summary>M5 7 D136: the MaxStackSize of a row's weenie class (on the 0062 and on the bought stack's F745), as the world data gives it; a class not named has none.</summary>
+        public Dictionary<uint, ushort> MaxStacks { get; } = [];
+
+        /// <summary>
+        /// M5 7 D136 follow-up: a vendor that lists a trade note lists all ten, as Archmage Cindrue's CreateList does (ACE-World-Database v0.9.296, rows 21060-21069): the missing ones are added as promissory notes (ItemType 0x40000, the
+        /// face as the Value, so the wire price is ACE's 1.15 times it), every note stacking to 250.
+        /// </summary>
+        public void AddTradeNotes(Func<uint> nextRow)
+        {
+            var notes = Lifestone.Client.Session.Scenarios.Journey.PurseNotes.All;
+            if (!Rows.Any(r => notes.Any(n => n.Wcid == r.Wcid)))
+            {
+                return;
+            }
+
+            foreach (var note in notes)
+            {
+                MaxStacks[note.Wcid] = 250;
+                if (!Rows.Any(r => r.Wcid == note.Wcid))
+                {
+                    Rows.Add((-1, nextRow(), note.Name, note.Wcid, VendorStock.PromissoryNoteType, note.Value));
+                }
+            }
+        }
+
+        public AceVendorRow[] Wire() => [.. Rows.Select(r => VendorRig.Row(r.Stack, r.Guid, r.Name, r.Wcid, r.ItemType, r.Value, maxStack: MaxStacks.TryGetValue(r.Wcid, out var m) ? m : null))];
+    }
+
+    /// <summary>The StackableMerge (0x0054) and StackableSplitToContainer (0x0055) sends answered (M5 7 D136).</summary>
+    public int Merges { get; private set; }
+
+    public int Splits { get; private set; }
+
+    /// <summary>Adds a shop at the sell rate 1.0 (so a row's Value is its price) and the buy rate 0.9.</summary>
+    public Shop Add(uint vendor, uint mask)
+    {
+        var shop = new Shop { Vendor = vendor, Mask = mask };
+        _shops[vendor] = shop;
+        return shop;
+    }
+
+    /// <summary>The shop of <paramref name="vendor"/>.</summary>
+    public Shop Get(uint vendor) => _shops[vendor];
+
+    /// <summary>Answers every send since the last pump.</summary>
+    public void Pump()
+    {
+        var sends = rig.H.Net.Sends;
+        for (; _seen < sends.Count; _seen++)
+        {
+            var send = sends[_seen];
+            if (send.Kind == FakeSendKind.DropItem)
+            {
+                // M5 7 D99: a drop leaves the pack (into a stand-in for the ground's landblock; ACE confirms with the same move)
+                Drops++;
+                rig.Put(send.Guid, GroundStandIn);
+                continue;
+            }
+
+            if (send.Kind == FakeSendKind.StackableMerge)
+            {
+                Merges++;
+                Merge(send.Guid, uint.Parse(send.Target!, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture), send.Index);
+                continue;
+            }
+
+            if (send.Kind == FakeSendKind.SplitToContainer)
+            {
+                Splits++;
+                Split(send.Guid, uint.Parse(send.Target!, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture), (int)send.Amount);
+                continue;
+            }
+
+            if (!_shops.TryGetValue(send.Guid, out var shop))
+            {
+                continue;
+            }
+
+            switch (send.Kind)
+            {
+                case FakeSendKind.Use:
+                    Uses++;
+                    rig.UseDone();
+                    Stock(shop);
+                    break;
+                case FakeSendKind.Buy:
+                    Buys++;
+                    Buy(shop, send.Items ?? []);
+                    break;
+                case FakeSendKind.Sell:
+                    Sells++;
+                    Sell(shop, send.Items ?? []);
+                    break;
+            }
+        }
+    }
+
+    private void Stock(Shop shop) => rig.Stock(shop.Vendor, shop.Mask, shop.Wire(), buy: 0.9f, sell: 1.0f);
+
+    private (int Size, uint Unit, WorldObject Item) StackOf(uint guid)
+    {
+        var o = rig.State.Objects.TryGet(guid, out var item) ? item : throw new InvalidOperationException($"no object 0x{guid:X8}");
+        var size = rig.State.Self.Inventory.TryGetStack(guid, out var s, out _) ? (int)s : o.Weenie.StackSize ?? 1;
+        return (size, (o.Weenie.Value ?? 0) / (uint)Math.Max(1, size), o);
+    }
+
+    /// <summary>ACE's merge inside the pack (<c>Player_Inventory.cs</c> 3072ff): a whole source is removed (0x0024, 3096) and the target's 0x0197 follows (3121-3123); a partial one sends the source's 0x0197, then the target's (3151-3161).</summary>
+    private void Merge(uint from, uint to, int amount)
+    {
+        var (fromSize, unit, _) = StackOf(from);
+        var (toSize, toUnit, _) = StackOf(to);
+        if (amount == fromSize)
+        {
+            rig.Remove(from);
+        }
+        else
+        {
+            rig.Stack(from, (uint)(fromSize - amount), (uint)(fromSize - amount) * unit);
+        }
+
+        rig.Stack(to, (uint)(toSize + amount), (uint)(toSize + amount) * toUnit);
+    }
+
+    /// <summary>ACE's split into a pack (<c>Player_Inventory.cs</c> 2243ff): the new stack's 0022 into the container, its F745, then the old stack's 0x0197 (the order the tracker's note gives).</summary>
+    private void Split(uint stack, uint container, int amount)
+    {
+        var (size, unit, item) = StackOf(stack);
+        var guid = rig.NextGuid();
+        rig.Put(guid, container);
+        rig.Arrive(guid, item.Name, item.Weenie.WeenieClassId, item.ItemType, unit * (uint)amount, (ushort)amount, item.Weenie.MaxStackSize is { } m ? (ushort)m : null);
+        rig.Stack(stack, (uint)(size - amount), (uint)(size - amount) * unit);
+    }
+
+    private void Buy(Shop shop, IReadOnlyList<(uint item, uint amount)> items)
+    {
+        var stock = rig.State.Vendor;
+        long price = 0;
+        foreach (var (item, amount) in items)
+        {
+            price += stock?.PriceToBuy(item, amount) ?? 0;
+        }
+
+        var coins = (long)rig.State.Self.Qualities.CoinValue;
+        if (shop.BuyRefusal is { } text || price > coins)
+        {
+            if (shop.BuyRefusal is { } t)
+            {
+                rig.Transient(t);
+            }
+
+            rig.Refusal();
+            rig.UseDone();
+            return;
+        }
+
+        rig.Coins((int)(coins - price));
+        foreach (var (item, amount) in items)
+        {
+            var row = shop.Rows.First(r => r.Guid == item);
+            var guid = rig.NextGuid();
+            rig.Arrive(guid, row.Name, row.Wcid, row.ItemType, (uint)(row.Value * amount), stackSize: (ushort)amount, maxStack: shop.MaxStacks.TryGetValue(row.Wcid, out var max) ? max : null);
+            rig.Put(guid);
+        }
+
+        Stock(shop);
+        rig.UseDone();
+    }
+
+    private void Sell(Shop shop, IReadOnlyList<(uint item, uint amount)> items)
+    {
+        var stock = rig.State.Vendor;
+        long payout = 0;
+        var taken = 0;
+        foreach (var (item, _) in items)
+        {
+            if (!rig.State.Objects.TryGet(item, out var o))
+            {
+                continue;
+            }
+
+            if (shop.Unsellable.Contains(o.Weenie.WeenieClassId))
+            {
+                rig.Transient($"The {o.Name} is unsellable.");
+                continue;
+            }
+
+            payout += stock?.PayoutFor(o) ?? 0;
+            taken++;
+        }
+
+        // M5 7 G1: ACE refuses the whole sale when the payout's coin stacks (25,000 each) exceed the free slots, counted before the items leave (Player_Commerce.cs 176-191 @95ef426d)
+        if (taken > 0 && (payout + 24_999) / 25_000 > Lifestone.Client.Session.Mage.MageLootRules.FreeSlots(rig.State))
+        {
+            SlotRefusals++;
+            rig.Refusal();
+            rig.UseDone();
+            return;
+        }
+
+        if (taken > 0)
+        {
+            foreach (var (item, _) in items)
+            {
+                if (rig.State.Objects.TryGet(item, out var o) && !shop.Unsellable.Contains(o.Weenie.WeenieClassId))
+                {
+                    rig.Put(item, shop.Vendor);
+                }
+            }
+        }
+
+        if (taken == 0)
+        {
+            rig.Refusal();
+            rig.UseDone();
+            return;
+        }
+
+        rig.Coins((int)(rig.State.Self.Qualities.CoinValue + payout));
+        rig.UseDone();
+    }
 }

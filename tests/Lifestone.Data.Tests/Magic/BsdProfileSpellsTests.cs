@@ -148,6 +148,12 @@ public sealed class BsdProfileSpellsTests(DatSetFixture fixture, ITestOutputHelp
             ["Aura of Defender Self I", "Aura of Defender Self II", "Aura of Defender Self III", "Aura of Defender Self IV", "Aura of Defender Self V", "Aura of Defender Self VI", "Aura of Cragstone's Will", "Aura of Incantation of Defender Self"],
             [1, 50, 100, 150, 200, 250, 300, 350],
             [1800, 1800, 1800, 1800, 1800, 2700, 3600, 5400]),
+        // M5 7 P7j (D143): Spirit Drinker, the line the mage learns by play (the Scrivener of Item Magic's scroll of IV), not by the build; six levels, no VII or VIII.
+        new("Spirit Drinker", "Spirit Drinker", MagicSchool.ItemEnchantment, SpellType.Enchantment,
+            [3253, 3254, 3255, 3256, 3257, 3258],
+            ["Aura of Spirit Drinker Self I", "Aura of Spirit Drinker Self II", "Aura of Spirit Drinker Self III", "Aura of Spirit Drinker Self IV", "Aura of Spirit Drinker Self V", "Aura of Spirit Drinker Self VI"],
+            [1, 50, 100, 150, 200, 250],
+            [1800, 1800, 1800, 1800, 1800, 2700]),
         new("Stamina to Mana Self", "Stamina to Mana Self", MagicSchool.LifeMagic, SpellType.Transfer,
             [1676, 1677, 1678, 1679, 1680, 1681, 2345, 4981],
             ["Stamina to Mana Self I", "Stamina to Mana Self II", "Stamina to Mana Self III", "Stamina to Mana Self IV", "Stamina to Mana Self V", "Stamina to Mana Self VI", "Meditative Trance", "Incantation of Stamina to Mana Self"],
@@ -205,11 +211,11 @@ public sealed class BsdProfileSpellsTests(DatSetFixture fixture, ITestOutputHelp
             }
         }
 
-        // 31 lines: 30 of 8 spells and Flame Blast of 7 (no level II in the dat); 24 buffs, the two mana lines (M3 2.1 s0a, D24) and 5 war lines.
-        Assert.Equal(31, Lines.Length);
-        Assert.Equal(247, Lines.Sum(l => l.Ids.Length));
+        // 32 lines: 30 of 8 spells, Flame Blast of 7 (no level II in the dat) and Spirit Drinker of 6 (M5 7 P7j, D143); 25 buffs, the two mana lines (M3 2.1 s0a, D24) and 5 war lines.
+        Assert.Equal(32, Lines.Length);
+        Assert.Equal(253, Lines.Sum(l => l.Ids.Length));
         Assert.Equal(7, Lines.Single(l => l.Name == "Flame Blast").Ids.Length);
-        Assert.Equal(247, Lines.SelectMany(l => l.Ids).Distinct().Count());
+        Assert.Equal(253, Lines.SelectMany(l => l.Ids).Distinct().Count());
     }
 
     [RequiresDatsFact]
@@ -221,7 +227,7 @@ public sealed class BsdProfileSpellsTests(DatSetFixture fixture, ITestOutputHelp
             // Every spell carries the line's dat root in its name, except level VII, which has its own title (second to
             // last in each line; Flame Arc's VII is "Flame Arc VII", and Flame Blast's title is also second to last).
             var withoutRoot = Enumerable.Range(0, line.Ids.Length).Where(i => !spells[line.Ids[i]].Name.Contains(line.Root, StringComparison.Ordinal)).ToArray();
-            var expected = line.Name == "Flame Arc" ? Array.Empty<int>() : [line.Ids.Length - 2];
+            var expected = line.Name is "Flame Arc" or "Spirit Drinker" ? Array.Empty<int>() : [line.Ids.Length - 2]; // Spirit Drinker stops at VI (no title of its own)
             Assert.True(expected.SequenceEqual(withoutRoot), $"{line.Name}: spells without the root '{line.Root}' at {string.Join(",", withoutRoot)}");
 
             // Within a line the power never falls from one level to the next and the duration only grows; the one exception

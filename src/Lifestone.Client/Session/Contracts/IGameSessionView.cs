@@ -55,6 +55,9 @@ public interface IGameSessionView
     /// <param name="id">The spell id.</param>
     Lifestone.Data.Magic.SpellInfo? Spell(uint id) => null;
 
+    /// <summary>The SpellTable's equipment sets (set id, then the piece count, then the spells cast; <c>SpellTableData.SpellSets</c>), or null without the table (M5 7 D137: the examine window's optional set details).</summary>
+    IReadOnlyDictionary<uint, IReadOnlyDictionary<uint, IReadOnlyList<uint>>>? SpellSets => null;
+
     /// <summary>
     /// True once the SpellTable <see cref="Spell"/> reads is loaded: a null <see cref="Spell"/> then means the table lacks the id, and a panel leaves that spell out and names it. False while the table decodes on its worker,
     /// for a session without dats (the default here) and after a load that failed: a panel waits for it (a one-shot poll) and shows nothing meanwhile, never a guess. Readiness is the table's own, never a spell's (M3 3.2

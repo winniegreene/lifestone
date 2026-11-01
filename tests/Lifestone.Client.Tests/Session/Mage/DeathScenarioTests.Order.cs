@@ -1,9 +1,12 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Scenarios.Journey;
+using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Client.Tests.Session.Fighter;
 using Lifestone.Data.Magic;
@@ -14,9 +17,9 @@ namespace Lifestone.Client.Tests.Session.Mage;
 
 /// <summary>
 /// The death loop's new order (M4 3.1 d1, D20 and D22; <see cref="DeathStages.Rebuff"/>, <see cref="DeathStages.Fight"/>) over the same scripted ACE as the rest of this class, with a scripted inner fight scenario (<see cref="ScriptedFight"/>, made by the
-/// scenario's <see cref="FightLegFactory"/> seam): the stage order with the rebuff and the fight on and with each off (both off is M4 2.2's loop), the plain kit for the regear, the inner scenario's kills counted, a death during the rebuff or the fight failing the
-/// leg with the stage named, the judged measures frozen against a fight with blows, the corpse's own listing classified (a decoy-only one recovered, one that names a gear item, <c>--death-decoys off</c>) and the decoy check of the gear stage (against the offline
-/// stand-in). The regear is not scripted on the rig (it has no inventory): the rig runs leave the regear flag out, and the stand-in test runs it.
+/// scenario's <see cref="FightLegFactory"/> seam): the stage order with the rebuff and the fight on and with each off (both off is M4 2.2's loop), the mage's own kit for the inner scenarios, the inner scenario's kills counted, a death during the rebuff or the fight failing the
+/// leg with the stage named, the judged measures frozen against a fight with blows, the corpse's own listing classified (one of ordinary items recovered, one that names a gear item, a pyreal stack, a gear item left behind) and the gear stage over the mage's own kit (against the offline
+/// stand-in; the decoys are retired, M5 D51). The rig has no inventory, so the rig runs script no gear stage; the stand-in test runs it.
 /// </summary>
 public sealed partial class DeathScenarioTests
 {
@@ -168,8 +171,129 @@ public sealed partial class DeathScenarioTests
         }
     }
 
-    private static DeathScenario Ordered(Rig rig, ScriptedHost host, DeathStages stages, DeathOptions? options = null, GearKit? kit = null, FightOptions? fight = null, BuffOptions? buff = null, IReadOnlyDictionary<uint, SpellInfo>? spells = null) =>
-        new(kit ?? GearKit.Of(Array.Empty<GearItem>()), spells ?? new Dictionary<uint, SpellInfo>(), options ?? new DeathOptions(), host.Walk, rig.R.H.Log, endSession: false, stages: stages, buff: buff, fight: fight, fightFactory: host.Make);
+    private static DeathScenario Ordered(Rig rig, ScriptedHost host, DeathStages stages, DeathOptions? options = null, GearKit? kit = null, FightOptions? fight = null, BuffOptions? buff = null, IReadOnlyDictionary<uint, SpellInfo>? spells = null)
+    {
+        var o = options ?? new DeathOptions();
+        if (o.Fight && o.Travel is null)
+        {
+            o = o with { Travel = new HandledTravel(rig) }; // M5 3 d1: the handler's corpse leg runs, its way home recalls; the places before the death are the rig's
+        }
+
+        return new(kit ?? GearKit.Of(Array.Empty<GearItem>()), spells ?? new Dictionary<uint, SpellInfo>(), o, host.Walk, rig.R.H.Log, endSession: false, stages: stages, buff: buff, fight: fight, fightFactory: host.Make);
+    }
+
+    /// <summary>
+    /// M5 3 d1: the death handler's travel over the scripted rig: the corpse leg on foot (the player stands in the corpse's cell a few steps on, a move with the session's own next stamps) and the way home as a recall (a teleport to Holtburg with the next
+    /// stamps); every other purpose (the bind, the den before the death) is today's place, which the rig answers.
+    /// </summary>
+    private sealed class HandledTravel(Rig rig) : IJourneyTravel
+    {
+        private readonly PlaceTravel _place = new();
+
+        public List<TravelRequest> Requests { get; } = [];
+
+        public bool Busy => false;
+
+        public ITravelLeg GoTo(IGameSessionView session, TravelRequest request, double now)
+        {
+            Requests.Add(request);
+            return request.Purpose switch
+            {
+                TravelPurpose.Corpse => new Leg(rig, request.Destination.Location.Position.CellId, TravelMeans.Run),
+                TravelPurpose.Home => new Leg(rig, HoltburgCell, TravelMeans.Recall),
+                _ => _place.GoTo(session, request, now),
+            };
+        }
+
+        private sealed class Leg(Rig rig, uint cell, TravelMeans means) : ITravelLeg
+        {
+            private int _steps;
+
+            public TravelMeans Means => means;
+
+            public string? Failure => null;
+
+            public string Fields => string.Empty;
+
+            public TravelStatus Step(IGameSessionView session, double now)
+            {
+                if (++_steps == 3)
+                {
+                    Move(rig, cell, teleport: means == TravelMeans.Recall);
+                }
+
+                return _steps < 3 ? TravelStatus.Running : TravelStatus.Arrived;
+            }
+
+            public void Pause()
+            {
+            }
+
+            public void Resume(double now)
+            {
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+    }
+
+    /// <summary>Moves the player with the session's own next stamps (a teleport when asked: a recall's arrival), so a later stamp of the rig's never reads stale against it.</summary>
+    private static void Move(Rig rig, uint cell, bool teleport)
+    {
+        var h = rig.R.H.R;
+        var stamps = rig.R.H.State.Self.Stamps;
+        var tele = teleport ? (ushort)(stamps.Teleport + 1) : stamps.Teleport;
+        if (teleport)
+        {
+            h.Reducer.OnPlayerTeleport(h.Context, new Lifestone.Net.Messages.PlayerTeleportMsg(tele));
+        }
+
+        h.Reducer.OnUpdatePosition(h.Context, ReducerHarness.Move(WorldActionRig.Player, 1, (ushort)(stamps.Position + 1), tele, 1, cell: cell, x: 50));
+        if (teleport)
+        {
+            rig.R.H.Unhide((ushort)(60 + tele));
+        }
+    }
+
+    /// <summary>
+    /// M5 3 d1: <see cref="Rig.Run"/> with ACE's answer to the handler's Primary Portal Recall (the rig answers the cast's UseDone itself): the spell known, the magic mode while the recall runs (the rig's mage holds no wand: the client's guard would
+    /// refuse the mode change), and 3 s after the cast the teleport into the den's arrival.
+    /// </summary>
+    private static ScenarioStatus Handled(Rig rig, DeathScenario scenario, double maxSeconds = 900, double dt = 0.25)
+    {
+        rig.R.Server((p, s) => AceM3Writers.MagicUpdateSpell(p, s, (ushort)RecallHome.PrimaryPortalRecallSpell));
+        var seen = rig.R.H.Net.Sends.Count;
+        var landAt = double.NaN;
+        var end = rig.Now + maxSeconds;
+        var status = ScenarioStatus.Running;
+        while (status == ScenarioStatus.Running && rig.Now < end)
+        {
+            status = rig.Frame(scenario, dt);
+            var sends = rig.R.H.Net.Sends;
+            for (; seen < sends.Count; seen++)
+            {
+                if (sends[seen].Kind == FakeSendKind.CastUntargetedSpell && sends[seen].Guid == RecallHome.PrimaryPortalRecallSpell)
+                {
+                    landAt = rig.Now + 3;
+                }
+            }
+
+            if (scenario.Handler?.CurrentStep == "recall" && rig.R.H.State.Self.Qualities.CombatMode != CombatModes.Magic)
+            {
+                rig.R.CombatModeIs(CombatModes.Magic);
+            }
+
+            if (rig.Now >= landAt)
+            {
+                landAt = double.NaN;
+                Move(rig, DenArrival, teleport: true);
+            }
+        }
+
+        return status;
+    }
 
     private static string Token(string fields, string name)
     {
@@ -181,53 +305,51 @@ public sealed partial class DeathScenarioTests
         return end < 0 ? fields[start..] : fields[start..end];
     }
 
-    private static WorldObject Decoy(int index, uint guid) =>
-        LootRulesTests.Item(DecoyKit.All[index].ItemType, (uint)DecoyKit.All[index].UnitValue, (ushort)DecoyKit.All[index].Burden, guid, DecoyKit.All[index].Name, DecoyKit.All[index].Wcid);
+    /// <summary>An ordinary carried item of the corpse's listing (neither gear the loops need nor coin): one of <see cref="DeathDropModelTests.Valuables"/>.</summary>
+    private static WorldObject Valuable(int index, uint guid) =>
+        LootRulesTests.Item(DeathDropModelTests.Valuables[index].ItemType, (uint)DeathDropModelTests.Valuables[index].UnitValue, 50, guid, DeathDropModelTests.Valuables[index].Name, DeathDropModelTests.Valuables[index].Wcid);
 
     private static WorldObject Gear(uint wcid, uint guid, string name) => LootRulesTests.Item(0x1, 5400, 50, guid, name, wcid);
 
-    /// <summary>The mage carries the item: its object exists and the server's 0022 puts it in the main pack (what a pick-up does).</summary>
-    private static void Carry(Rig rig, WorldObject item)
-    {
-        var h = rig.R.H.R;
-        h.Reducer.OnCreateObject(h.Context, item.Created, isUpdate: false);
-        rig.R.Server((p, s) => AceM3Writers.PutObjInContainer(p, s, item.Guid, WorldActionRig.Player, 0, 0));
-    }
+    /// <summary>M5 3 d1: the death handler's steps as the scenario shows them (the respawn and the rebuff as <c>rebuff</c>, the route, the recall and the corpse leg as <c>corpse-teleporting</c>, the loot, the items back, the item lines as <c>rebuff</c>, the fight), then the way out of the den.</summary>
+    private static readonly string[] HandlerStages = ["handler-rebuff", "handler-heal", "handler-topup", "handler-route", "handler-recall", "handler-corpse-walk", "handler-corpse-seek", "handler-corpse-open", "handler-corpse-loot", "handler-corpse-close", "handler-wear", "handler-relines", "handler-fight", "leave-den"];
 
-    private static readonly string[] AfterVitals = ["rebuff", "fight"];
-
-    private static readonly string[] TripStages = ["corpse-teleporting", "corpse-settle", "corpse-seek", "corpse-opening", "corpse-looting", "corpse-closing", "corpse-return", "corpse-return-settle"];
 
     // --- the order
 
     [Fact]
-    public void With_the_rebuff_and_the_fight_on_the_stages_after_the_respawn_are_rebuff_fight_the_trip_then_the_end()
+    public void With_the_fight_on_the_order_after_the_respawn_is_the_death_handlers_rebuff_recall_corpse_items_and_fight_with_no_place()
     {
         var rig = TripRig(3);
         var host = new ScriptedHost();
         var scenario = Ordered(rig, host, Whole);
 
-        var status = rig.Run(scenario);
+        var status = Handled(rig, scenario);
         Dump(rig, scenario);
+        output.WriteLine("death " + scenario.VerdictFields());
 
         Assert.Equal(ScenarioStatus.Succeeded, status);
         Assert.Null(scenario.Failure);
-        Assert.Equal([.. M3Stages, .. AfterVitals, .. TripStages], StageLog(rig));
-        Assert.Equal(1, host.Made); // ONE inner scenario for the rebuff and the fight
-        Assert.True(host.Inner!.Disposed);
+        Assert.Equal([.. M3Stages, .. HandlerStages], StageLog(rig));
+        Assert.Equal(2, host.Made); // the rebuff alone, then the fight alone in the den (no item line to re-cast: every line was up and nothing was worn again)
         Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
+        Assert.Equal(3, scenario.ItemsRecovered);
         Assert.Equal(DeathLegVerdict.RebuffedYes, scenario.Rebuffed);
         Assert.Equal(4, scenario.DenKills);
         var fields = scenario.VerdictFields();
-        Assert.Equal("yes", Token(fields, "rebuffed"));
-        Assert.Equal("4", Token(fields, "den_kills"));
-        Assert.Contains(" trip_abort=none rebuffed=yes den_kills=4 decoys=", fields, StringComparison.Ordinal);
+        Assert.Contains(" trip_abort=none stage_rebuffed=yes den_kills=4 pretrip_heals=", fields, StringComparison.Ordinal);
+        EachJudgedKeyOnce(scenario.VerdictFields());
+        Assert.Equal("deaths=1 corpse_recovered=yes route=recall items_back=3 vitae_grants=0 rebuffed=yes rebuffed_pretrip=yes relines=0 rearm=none", scenario.HandlerFields);
+        Assert.EndsWith(" bound=" + (scenario.Bound ? "yes" : "no") + " deaths=1 corpse_recovered=yes route=recall items_back=3 vitae_grants=0 rebuffed=yes rebuffed_pretrip=yes relines=0 rearm=none", scenario.VerdictFields(), StringComparison.Ordinal); // M5 3 d2: the death line carries the handler fields at its end
         Assert.Equal(HoltburgCell, rig.R.H.State.Self.Position?.CellId);
+        Assert.Equal(2, rig.Places.Count); // the bind and the den before the death; none after it (D51: no place)
+        Assert.Empty(rig.XpAsked); // no vitae grant
+        Assert.Empty(rig.ItemGrants); // no regear by the item verb
 
-        // The fight ran BEFORE the trip: the inner scenario's last step is before the corpse's open.
+        // The trip ran BEFORE the fight: the corpse came back, then the den's kills.
         var lines = Lines(rig).ToList();
-        Assert.True(lines.FindIndex(l => l.StartsWith("fight: done; den_kills=4", StringComparison.Ordinal)) < lines.FindIndex(l => l.StartsWith("corpse: going back for", StringComparison.Ordinal)));
-        Assert.Contains(lines, l => l.StartsWith("the stages after the respawn: rebuff, fight, corpse (", StringComparison.Ordinal));
+        Assert.True(lines.FindIndex(l => l.StartsWith("handler: corpse_recovered=yes", StringComparison.Ordinal)) < lines.FindIndex(l => l.StartsWith("fight: done; den_kills=4", StringComparison.Ordinal)));
+        Assert.Contains(lines, l => l.StartsWith("the stages after the respawn: the death handler (", StringComparison.Ordinal));
     }
 
     /// <summary>M4 P4 g3fix: the rebuff leaves the mage at 10% mana; the scripted fight reports the clock of its first fight step.</summary>
@@ -249,7 +371,7 @@ public sealed partial class DeathScenarioTests
         };
         host.OnFight = (_, step) => firstFight ??= rig.Now;
         var scenario = Ordered(rig, host, Whole, options);
-        rig.Run(scenario);
+        Handled(rig, scenario);
         Dump(rig, scenario);
         return (rig, firstFight, regenAt, scenario);
     }
@@ -288,22 +410,23 @@ public sealed partial class DeathScenarioTests
     }
 
     [Fact]
-    public void The_inner_scenario_is_made_once_with_the_buff_stage_and_the_den_stages_the_death_loops_options_and_the_shared_walk()
+    public void The_inner_scenarios_are_the_rebuff_alone_then_the_fight_alone_with_the_death_loops_options_and_the_shared_walk()
     {
         var rig = TripRig(2);
         var host = new ScriptedHost();
-        var kit = GearKit.Of(Array.Empty<GearItem>()).WithDecoys(DecoyKit.All);
+        var kit = GearKit.Of(Array.Empty<GearItem>());
         var scenario = Ordered(rig, host, Whole, new DeathOptions { FightKills = 3, FightSeconds = 90 }, kit);
 
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+        Assert.Equal(ScenarioStatus.Succeeded, Handled(rig, scenario));
 
-        Assert.Equal(FightStages.Buffs | FightStages.Place | FightStages.Mode, host.Stages);
+        Assert.Equal(2, host.Made);
+        Assert.Equal(FightStages.Mode, host.Stages); // the last one made is the fight: no place stage, the mage stands in the den after the trip
         Assert.Equal(3, host.Fight!.Kills);
         Assert.Equal(90.0, host.Fight.Seconds);
         Assert.Equal(new BuffOptions(), host.Buff);
-        Assert.Same(host.Walk, host.PassedWalk);
+        Assert.Same(host.Walk, host.PassedWalk); // the fight gets the shared walk (the rebuff gets none)
         Assert.False(host.EndSession); // the death loop owns the session
-        Assert.False(host.Kit!.HasDecoys); // the inner scenario never meets a decoy: it gets the plain kit
+        Assert.Equal(kit.Items, host.Kit!.Items); // the inner scenario gets the mage's own kit, as built (the decoys are retired, D51)
         Assert.Equal(3, scenario.DenKills);
     }
 
@@ -316,9 +439,9 @@ public sealed partial class DeathScenarioTests
         var buff = new BuffOptions { CastChance = 0.5 };
         var scenario = Ordered(rig, host, Whole, fight: fight, buff: buff);
 
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+        Assert.Equal(ScenarioStatus.Succeeded, Handled(rig, scenario));
 
-        Assert.Equal(fight, host.Fight);
+        Assert.Equal((2, 33.0), (host.Fight!.Kills, host.Fight.Seconds)); // the handler's corpse leg makes the run an embedded one: the fight's travel is the seam's
         Assert.Equal(0.5, host.Buff!.CastChance);
         Assert.Equal(2, scenario.DenKills);
     }
@@ -330,71 +453,14 @@ public sealed partial class DeathScenarioTests
         var host = new ScriptedHost();
         var scenario = Ordered(rig, host, Whole, new DeathOptions { Rebuff = false });
 
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+        Assert.Equal(ScenarioStatus.Succeeded, Handled(rig, scenario));
 
-        Assert.Equal([.. M3Stages, "fight", .. TripStages], StageLog(rig));
-        Assert.Equal(FightStages.Place | FightStages.Mode, host.Stages);
+        Assert.Equal([.. M3Stages, .. HandlerStages], StageLog(rig)); // the respawn step is shown as rebuff
+        Assert.Equal(1, host.Made);
+        Assert.Equal(FightStages.Mode, host.Stages);
         Assert.Equal(DeathLegVerdict.RebuffedSkipped, scenario.Rebuffed);
         Assert.Equal(4, scenario.DenKills);
-        Assert.Contains(" rebuffed=skipped den_kills=4 ", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void With_the_fight_off_the_order_is_2_2s_the_trip_straight_after_the_vitals_then_the_rebuff_alone()
-    {
-        var rig = TripRig(2);
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Whole, new DeathOptions { Fight = false });
-
-        var status = rig.Run(scenario);
-        Dump(rig, scenario);
-
-        Assert.Equal(ScenarioStatus.Succeeded, status);
-        Assert.Equal([.. M3Stages, .. TripStages, "rebuff"], StageLog(rig)); // the mage was in non-combat when the scripted cycle ended: no rebuff-peace
-        Assert.Equal(FightStages.Buffs, host.Stages);
-        Assert.Equal(DeathLegVerdict.RebuffedYes, scenario.Rebuffed);
-        Assert.Equal(0, scenario.DenKills);
-        Assert.Equal(0, host.Inner!.FightSteps); // the scripted scenario would go on to fight: the death loop dropped it at place
-        Assert.Equal("place", host.Inner.Stage);
-        Assert.True(host.Inner.Disposed);
-        Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
-        Assert.Contains(" rebuffed=yes den_kills=0 ", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_rebuff_alone_leaves_the_magic_mode_the_cycle_entered()
-    {
-        var rig = TripRig(1);
-        var host = new ScriptedHost() { OnBuff = (_, step) => { if (step == 1) { rig.R.CombatModeIs(CombatModes.Magic); } } };
-        var scenario = Ordered(rig, host, Whole, new DeathOptions { Fight = false });
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Equal([.. M3Stages, .. TripStages, "rebuff", "rebuff-peace"], StageLog(rig));
-        Assert.Equal(CombatModes.NonCombat, rig.R.H.State.Self.Qualities.CombatMode);
-        Assert.True(rig.ModeChanges >= 1);
-    }
-
-    [Fact]
-    public void With_the_fight_and_the_rebuff_both_off_the_loop_is_exactly_the_one_that_merged_in_2_2()
-    {
-        var rig = TripRig(3);
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Whole, new DeathOptions { Fight = false, Rebuff = false });
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Equal(0, host.Made);
-        Assert.Equal([.. M3Stages, .. TripStages], StageLog(rig));
-        Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
-        Assert.Contains(" trip_abort=none rebuffed=skipped den_kills=0 ", scenario.VerdictFields(), StringComparison.Ordinal);
-
-        // Without the two flags in the mask it is the same run.
-        var masked = TripRig(3);
-        var maskedHost = new ScriptedHost();
-        Assert.Equal(ScenarioStatus.Succeeded, masked.Run(Ordered(masked, maskedHost, Trip)));
-        Assert.Equal(0, maskedHost.Made);
-        Assert.Equal(StageLog(rig), StageLog(masked));
+        Assert.Contains(" stage_rebuffed=skipped den_kills=4 ", scenario.VerdictFields(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -404,25 +470,27 @@ public sealed partial class DeathScenarioTests
         var host = new ScriptedHost() { AllUp = false, BuffsNote = "topped-up:20" };
         var scenario = Ordered(rig, host, Whole);
 
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+        Assert.Equal(ScenarioStatus.Succeeded, Handled(rig, scenario));
 
         Assert.Equal("no", scenario.Rebuffed);
         Assert.Equal(4, scenario.DenKills);
         Assert.Contains(Lines(rig), l => l.StartsWith("rebuff: the buff stage ended with a profile line down", StringComparison.Ordinal));
-        Assert.Contains(" rebuffed=no den_kills=4 ", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(" stage_rebuffed=no den_kills=4 ", scenario.VerdictFields(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void A_failed_inner_scenario_fails_the_leg_naming_the_stage_and_the_rebuff_reads_no()
+    public void A_failed_rebuff_reads_no_and_the_trip_goes_on_and_a_failed_fight_fails_the_leg_naming_it()
     {
         var rig = TripRig(1);
         var scenario = new DeathScenario(GearKit.Of(Array.Empty<GearItem>()), new Dictionary<uint, SpellInfo>(), new DeathOptions(), new FakeWalk(), rig.R.H.Log, endSession: false, stages: Whole, fightFactory: (_, _, _, _, _, _, _, _, _) => new FailingFight());
 
-        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
+        Assert.Equal(ScenarioStatus.Failed, Handled(rig, scenario));
 
-        Assert.StartsWith("rebuff: the buff cycle failed", scenario.Failure, StringComparison.Ordinal);
+        Assert.StartsWith("fight: the buff cycle failed", scenario.Failure, StringComparison.Ordinal);
         Assert.Equal("no", scenario.Rebuffed);
+        Assert.Contains(Lines(rig), l => l.StartsWith("rebuff: the buff stage failed: the buff cycle failed", StringComparison.Ordinal));
         Assert.Contains(" died=1 ", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains("corpse_recovered=no route=recall", scenario.HandlerFields, StringComparison.Ordinal); // today's place seam has no runner: the corpse is not walked to
     }
 
     [Fact]
@@ -432,13 +500,13 @@ public sealed partial class DeathScenarioTests
         var host = new ScriptedHost() { FailInFightAt = 5, FailText = "fight: 180 s passed with kills=2 of 4" };
         var scenario = Ordered(rig, host, Whole);
 
-        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
+        Assert.Equal(ScenarioStatus.Failed, Handled(rig, scenario));
 
         Assert.Equal("fight: fight: 180 s passed with kills=2 of 4", scenario.Failure);
         Assert.Equal(2, scenario.DenKills);
         Assert.Equal("yes", scenario.Rebuffed);
-        Assert.Empty(rig.Opened);
-        Assert.Contains(" rebuffed=yes den_kills=2 ", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Single(rig.Opened); // the trip came before the fight (D51)
+        Assert.Contains(" stage_rebuffed=yes den_kills=2 ", scenario.VerdictFields(), StringComparison.Ordinal);
     }
 
     private sealed class FailingFight : IFightLeg
@@ -471,41 +539,36 @@ public sealed partial class DeathScenarioTests
     // --- a death in the rebuff or the fight
 
     [Fact]
-    public void A_death_during_the_fight_fails_the_leg_naming_the_stage_and_never_counts_in_died()
+    public void A_death_during_the_rebuff_restarts_the_handler_for_the_newer_corpse_and_never_counts_in_died()
     {
         var rig = TripRig(2);
-        rig.Lethal = true;
-        var host = new ScriptedHost() { OnFight = (_, step) => { if (step == 3) { rig.Kill(); } } };
+        var killed = false;
+        var host = new ScriptedHost() { OnBuff = (_, step) => { if (step == 2 && !killed) { killed = true; rig.Kill(); } } };
         var scenario = Ordered(rig, host, Whole);
 
-        var status = rig.Run(scenario);
+        var status = Handled(rig, scenario);
         Dump(rig, scenario);
 
-        Assert.Equal(ScenarioStatus.Failed, status);
-        Assert.StartsWith("fight: the mage died during the fight", scenario.Failure, StringComparison.Ordinal);
-        Assert.Equal("fight", scenario.Stage);
-        Assert.True(host.Inner!.Disposed);
-        Assert.Empty(rig.Opened); // no trip: the leg failed first
-        var outcome = scenario.Outcome();
-        Assert.False(outcome.Ok);
-        Assert.Contains(" died=1 ", outcome.Line, StringComparison.Ordinal); // the second death is not a second count
-        Assert.Contains(outcome.Problems, p => p.StartsWith("the death loop failed: fight: the mage died during the fight", StringComparison.Ordinal));
-        Assert.Contains(" rebuffed=yes den_kills=1 ", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Equal(ScenarioStatus.Succeeded, status);
+        Assert.Equal(2, scenario.Handler!.Deaths);
+        Assert.Single(scenario.Handler.OlderCorpses);
+        Assert.Contains(" died=1 ", scenario.VerdictFields(), StringComparison.Ordinal); // the judged measures froze at the first respawn
+        Assert.StartsWith("deaths=2 ", scenario.HandlerFields, StringComparison.Ordinal);
+
+        // 3-R2: the death line says deaths=2 once, the handler's (the run's, the corpse trip's second death included); the frozen respawn measures are respawn_deaths=1 and never collide.
+        var fields = scenario.VerdictFields();
+        EachJudgedKeyOnce(fields);
+        Assert.Equal("2", Regex.Match(fields, @"(?<![\w])deaths=(\S+)").Groups[1].Value);
+        Assert.Contains(" respawn_deaths=1 ", fields, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void A_death_during_the_rebuff_fails_the_leg_naming_the_stage_and_reads_rebuffed_no()
+    /// <summary>3-R2: each key the smoke summary and the gate judge read from the death station (their pattern, the first match) is on the death line exactly once.</summary>
+    private static void EachJudgedKeyOnce(string fields)
     {
-        var rig = TripRig(2);
-        var host = new ScriptedHost() { OnBuff = (_, step) => { if (step == 2) { rig.Kill(); } } };
-        var scenario = Ordered(rig, host, Whole);
-
-        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
-
-        Assert.StartsWith("rebuff: the mage died during the rebuff", scenario.Failure, StringComparison.Ordinal);
-        Assert.Equal("no", scenario.Rebuffed);
-        Assert.Equal(0, host.Inner!.FightSteps);
-        Assert.Contains(" died=1 ", scenario.VerdictFields(), StringComparison.Ordinal);
+        foreach (var key in new[] { "deaths", "corpse_recovered", "route", "items_back", "vitae_grants", "rebuffed", "relines", "trip_abort" })
+        {
+            Assert.True(Regex.Matches(fields, @"(?<![\w])" + key + "=").Count == 1, key + "= is not once in: " + fields);
+        }
     }
 
     // --- the measures
@@ -528,12 +591,12 @@ public sealed partial class DeathScenarioTests
             },
         };
         var scenario = Ordered(rig, host, Whole);
-        RunUntilStage(rig, scenario, "rebuff");
+        RunUntilStage(rig, scenario, "handler-rebuff");
         var before = scenario.VerdictFields();
         var hitsBefore = scenario.Tally.HitsTaken;
         var damageBefore = scenario.Tally.DamageTaken;
 
-        var status = rig.Run(scenario);
+        var status = Handled(rig, scenario);
         Dump(rig, scenario);
 
         Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
@@ -556,41 +619,23 @@ public sealed partial class DeathScenarioTests
         var rig = TripRig(2);
         var host = new ScriptedHost() { OnBuff = (_, _) => { rig.Damage = 2; rig.Lethal = false; rig.Hit(); } };
         var scenario = Ordered(rig, host, Core | DeathStages.Rebuff, new DeathOptions { Fight = false });
-        RunUntilStage(rig, scenario, "rebuff");
+        RunUntilStage(rig, scenario, "handler-rebuff");
         var hits = scenario.Tally.HitsTaken;
 
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+        Assert.Equal(ScenarioStatus.Succeeded, Handled(rig, scenario));
 
         Assert.True(scenario.Tally.HitsTaken > hits);
         Assert.Equal(string.Create(CultureInfo.InvariantCulture, $"{hits}"), Token(scenario.VerdictFields(), "hits_taken"));
     }
 
-    // --- the regear's kit
+    // --- the gear stage over the mage's own kit
 
     [Fact]
-    public void The_regear_kit_is_the_kit_without_its_decoys_and_a_plain_kit_is_left_as_it_is()
-    {
-        var rig = TripRig(1);
-        var plain = GearKit.Of(Array.Empty<GearItem>());
-        var withDecoys = plain.WithDecoys(DecoyKit.All);
-        var host = new ScriptedHost();
-
-        var decoyScenario = Ordered(rig, host, Whole, kit: withDecoys);
-        var plainScenario = Ordered(rig, host, Whole, kit: plain);
-
-        Assert.True(withDecoys.HasDecoys);
-        Assert.False(decoyScenario.RegearKit.HasDecoys);
-        Assert.Empty(decoyScenario.RegearKit.DecoyItems);
-        Assert.Equal(withDecoys.Items.Count - DecoyKit.All.Count, decoyScenario.RegearKit.Items.Count);
-        Assert.Same(plain, plainScenario.RegearKit);
-    }
-
-    [Fact]
-    public void The_gear_stage_checks_the_decoys_once_and_the_regear_with_the_plain_kit_spawns_none()
+    public void The_gear_stage_runs_over_the_mages_own_kit_and_logs_no_decoy_check_or_load_line()
     {
         var time = new ManualTimeProvider();
         var log = new RecordingLogSink();
-        var visit = new StandInVisit { EnterAfter = 0.2, UnhideAfter = 1.0, Items = DecoyKit.All.ToDictionary(d => d.Wcid, d => new StandInItemKind(d.Name, null)) };
+        var visit = new StandInVisit { EnterAfter = 0.2, UnhideAfter = 1.0 };
         using var session = GameSession.Offline(
             h =>
             {
@@ -606,8 +651,19 @@ public sealed partial class DeathScenarioTests
             session.Tick(session.Clock.Now);
         }
 
-        var kit = SmallKit().WithDecoys(DecoyKit.All);
-        var scenario = new DeathScenario(kit, new Dictionary<uint, SpellInfo>(), new DeathOptions(), null, log, endSession: false, stages: DeathStages.Gear | DeathStages.Regear);
+        // The pack holds the kit the way a build leaves it (M5 3 c2a, DoD 6): the gear stage of the death grants nothing, so the build's grant happens here, before the scenario, and the stage only verifies and wields. The kit is the ground's vendor kit
+        // (the robe and the wand the supplies list), never the retired Healer's Heart of SmallKit().
+        var kit = MagesOwnKit();
+        var spawn = session.Tools.SpawnGear(kit, ActionSource.Host);
+        Assert.Null(spawn.NotStarted);
+        for (var t = 0.0; t < 60 && !spawn.IsDone; t += 0.1)
+        {
+            time.Advance(TimeSpan.FromSeconds(0.1));
+            session.Tick(session.Clock.Now);
+        }
+
+        Assert.True(spawn.IsDone && spawn.Succeeded, spawn.Describe());
+        var scenario = new DeathScenario(kit, new Dictionary<uint, SpellInfo>(), new DeathOptions(), null, log, endSession: false, stages: DeathStages.Gear);
         var status = ScenarioStatus.Running;
         for (var t = 0.0; t < 600 && status == ScenarioStatus.Running; t += 0.1)
         {
@@ -617,204 +673,127 @@ public sealed partial class DeathScenarioTests
         }
 
         Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
-        Assert.Equal(8, scenario.Gear!.DecoyGrants); // the gear stage spawned the eight decoys
-        Assert.Equal(0, scenario.Regear!.DecoyGrants); // the regear spawned none
-        Assert.False(scenario.RegearKit.HasDecoys);
-        Assert.Single(log.Entries, e => e.Message.StartsWith("decoy check:", StringComparison.Ordinal)); // once, after the gear steps
-        Assert.Single(log.Entries, e => e.Message.StartsWith("load: ", StringComparison.Ordinal) && e.Message.Contains("of the capacity", StringComparison.Ordinal)); // 3.1 fix R7: the live load share, once, after the check (the stand-in mage is far from 95%)
-        var check = Assert.NotNull(scenario.DecoyCheckResult);
-        Assert.Equal(check.Field, scenario.DecoySafeField);
+        Assert.True(scenario.Gear!.GearSteps > 0); // the gear stage spawned and wielded the kit's own lines
+        Assert.DoesNotContain(log.Entries, e => e.Message.StartsWith("decoy check:", StringComparison.Ordinal) || e.Message.StartsWith("load: ", StringComparison.Ordinal)); // the decoy check and its load line are retired (D51)
         var fields = scenario.VerdictFields();
-        Assert.Equal(check.Field, Token(fields, "decoy_safe"));
-        Assert.Equal("n/a", Token(fields, "decoys")); // no Death stage: the pack was never counted at a death
-        Assert.Equal("skipped", Token(fields, "rebuffed"));
+        Assert.Equal("skipped", Token(fields, "stage_rebuffed"));
+        Assert.DoesNotContain("decoy", fields, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void With_decoys_off_the_gear_stage_makes_no_check_and_every_decoy_field_reads_n_a()
+    /// <summary>The mage's own kit as a build leaves it, the vendor lines of the default ground's supplies (the wielded wand and the worn robe; the foci and the stock are not wielded and play no part in the gear stage).</summary>
+    private static GearKit MagesOwnKit()
     {
-        var rig = TripRig(0);
-        rig.CorpseItems.Add(Decoy(0, 0x80000B20));
-        rig.CorpseItems.Add(Gear(GearKit.Wand.Wcid, 0x80000B21, "The Healer's Heart"));
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Whole, new DeathOptions { Decoys = false });
+        var ground = Lifestone.Client.Session.Grounds.GroundCatalog.Get(FightOptions.DefaultGround);
+        var items = new List<GearItem>();
+        foreach (var slot in new[] { Lifestone.Client.Session.Grounds.KitSlot.Wielded, Lifestone.Client.Session.Grounds.KitSlot.Worn })
+        {
+            foreach (var line in ground.Supplies.Kit.Where(k => k.Slot == slot))
+            {
+                var w = GearKit.SupplyWeenieOf(line.Wcid, ground, "kit");
+                items.Add(new GearItem(w.Wcid, line.Name, slot == Lifestone.Client.Session.Grounds.KitSlot.Wielded ? GearKind.Wand : GearKind.Armour, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.UnitBurden));
+            }
+        }
 
-        var status = rig.Run(scenario);
-        Dump(rig, scenario);
-
-        Assert.Equal(ScenarioStatus.Succeeded, status);
-        Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
-        Assert.Null(scenario.DecoysCarried);
-        Assert.Null(scenario.DecoysDropped);
-        Assert.Null(scenario.GearDropped);
-        Assert.Null(scenario.DecoysRecovered);
-        Assert.Equal("n/a", scenario.DecoySafeField);
-        Assert.Contains(" decoys=n/a decoy_safe=n/a decoys_dropped=n/a gear_dropped=n/a decoys_recovered=n/a", scenario.VerdictFields(), StringComparison.Ordinal);
-        Assert.DoesNotContain(Lines(rig), l => l.StartsWith("corpse: the listing held", StringComparison.Ordinal));
+        return GearKit.Of(items);
     }
 
-    // --- the decoys carried, and the corpse's own listing
+    // --- the corpse's own listing
 
     [Fact]
-    public void The_pack_is_counted_for_decoys_by_weenie_class_as_the_wait_among_the_tuskers_begins()
-    {
-        var rig = TripRig(1);
-        Carry(rig, Decoy(0, 0x80000C10));
-        Carry(rig, Decoy(3, 0x80000C11));
-        Carry(rig, Decoy(5, 0x80000C12));
-        Carry(rig, LootRulesTests.Item(0x80, 10, 5, 0x80000C13, "Not a decoy", 141));
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Whole);
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Equal(3, scenario.DecoysCarried);
-        Assert.Equal("3", Token(scenario.VerdictFields(), "decoys"));
-        Assert.Contains(Lines(rig), l => l.StartsWith("decoys: 3 in the pack as the wait among the tuskers begins;", StringComparison.Ordinal));
-    }
-
-    /// <summary>
-    /// M4 4.2 F1: under D37 the mage carries no decoy kit and no unbuff suicide runs, so the count reads 0 and the drop check is not made: in every journey gate it
-    /// logged a <c>NOT SAFE, the needed gear can drop</c> warning over a pack that held no decoy to judge (fresh-r2: <c>decoys=0 decoy_safe=n/a</c>).
-    /// </summary>
-    [Fact]
-    public void With_no_decoy_carried_and_no_unbuff_suicide_the_wait_makes_no_decoy_check_and_warns_nothing()
-    {
-        var rig = TripRig(1);
-        Carry(rig, LootRulesTests.Item(0x80, 10, 5, 0x80000C13, "Not a decoy", 141));
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Whole);
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Equal(0, scenario.DecoysCarried);
-        Assert.Equal("0", Token(scenario.VerdictFields(), "decoys"));
-        Assert.Contains(Lines(rig), l => l.StartsWith("decoys: none in the pack as the wait among the tuskers begins", StringComparison.Ordinal));
-        Assert.DoesNotContain(rig.Log.Entries, e => e.Severity == LogSeverity.Warning && e.Message.StartsWith("decoys:", StringComparison.Ordinal));
-        Assert.DoesNotContain(Lines(rig), l => l.StartsWith("decoys: 0 in the pack", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void A_listing_of_decoys_only_is_recovered_and_counted()
+    public void A_listing_of_ordinary_items_only_is_recovered_and_counted_and_leaves_no_gear_behind()
     {
         var rig = TripRig(0);
         for (var i = 0; i < 4; i++)
         {
-            rig.CorpseItems.Add(Decoy(i, 0x80000B20u + (uint)i));
+            rig.CorpseItems.Add(Valuable(i, 0x80000B20 + (uint)i));
         }
 
         var host = new ScriptedHost();
         var scenario = Ordered(rig, host, Whole);
 
-        var status = rig.Run(scenario);
+        var status = Handled(rig, scenario);
         Dump(rig, scenario);
 
         Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
         Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
-        Assert.Equal(4, scenario.DecoysDropped);
-        Assert.Equal(0, scenario.GearDropped);
-        Assert.Equal(4, scenario.DecoysRecovered);
-        Assert.Contains(" decoys_dropped=4 gear_dropped=0 decoys_recovered=4", scenario.VerdictFields(), StringComparison.Ordinal);
-        Assert.Contains(Lines(rig), l => l.StartsWith("corpse: the listing held 4 entries: decoys_dropped=4 gear_dropped=0 decoys_recovered=4", StringComparison.Ordinal));
+        Assert.Equal(4, scenario.ListingEntries);
+        Assert.Equal(0, scenario.GearLeft);
+        Assert.Contains(Lines(rig), l => l.StartsWith("corpse: the listing held 4 entries: gear_listed=0", StringComparison.Ordinal));
+        Assert.DoesNotContain("decoy", scenario.VerdictFields(), StringComparison.Ordinal);
     }
+
+    /// <summary>M5 3 d4: the mage's kit as the needed set reads it (a vendor wand line, the kit's wielded line): gear_left= counts the listed items of the CURRENT kit, never the retired loot gear.</summary>
+    private static GearKit MageKit => GearKit.Of([new GearItem(2472, "Wand", GearKind.Wand, GearKit.WeenieTypeCaster, GearKit.ItemTypeCaster, EquipMask.Held, 1, null, 50)]);
 
     [Fact]
     public void A_listing_that_names_a_gear_item_counts_it_and_a_recovered_one_is_no_failure()
     {
         var rig = TripRig(0);
-        rig.CorpseItems.Add(Decoy(0, 0x80000B20));
-        rig.CorpseItems.Add(Decoy(1, 0x80000B21));
-        rig.CorpseItems.Add(Gear(GearKit.Wand.Wcid, 0x80000B22, "The Healer's Heart"));
+        rig.CorpseItems.Add(Valuable(0, 0x80000B20));
+        rig.CorpseItems.Add(Valuable(1, 0x80000B21));
+        rig.CorpseItems.Add(Gear(MageKit.WandItem.Wcid, 0x80000B22, "Wand"));
+        rig.CorpseItems.Add(Gear(GearKit.Wand.Wcid, 0x80000B23, "The Healer's Heart")); // the retired loot wand: not a line of the kit, so not gear
         var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Whole);
+        var scenario = Ordered(rig, host, Whole, kit: MageKit);
 
-        var status = rig.Run(scenario);
+        var status = Handled(rig, scenario);
         Dump(rig, scenario);
 
         Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
-        Assert.Equal(2, scenario.DecoysDropped);
-        Assert.Equal(1, scenario.GearDropped);
-        Assert.Equal(2, scenario.DecoysRecovered);
+        Assert.Equal(4, scenario.ListingEntries);
         Assert.Equal(0, scenario.GearLeft); // the listed wand was taken: nothing is left behind
-        Assert.Contains(" decoys_dropped=2 gear_dropped=1 decoys_recovered=2", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(Lines(rig), l => l.StartsWith("corpse: the listing held 4 entries: gear_listed=1", StringComparison.Ordinal)); // the kit's wand only
         Assert.Equal("0", Token(scenario.VerdictFields(), "gear_left"));
         Assert.DoesNotContain(rig.Log.Entries, e => e.Severity == LogSeverity.Warning && e.Message.Contains("gear_left=", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void A_pyreal_stack_in_the_listing_is_counted_apart_and_is_neither_a_decoy_nor_gear_3_1_fix_R20()
+    public void A_pyreal_stack_in_the_listing_is_counted_apart_and_is_not_gear_3_1_fix_R20()
     {
-        // ACE puts half the pyreals on the corpse (Player_Death.cs): a mage that carries coins lists them beside its decoys. DeathLiveTests (k) reads ListingEntries less ListingCoins as `listed`, so the coins cannot fail decoys_dropped >= listed - 1.
+        // A pyreal stack on the corpse is listed apart: DeathLiveTests reads ListingEntries less ListingCoins as the listed items, so a coin stack cannot count as one.
         var rig = TripRig(0);
-        rig.CorpseItems.Add(Decoy(0, 0x80000B20));
-        rig.CorpseItems.Add(Decoy(1, 0x80000B21));
+        rig.CorpseItems.Add(Valuable(0, 0x80000B20));
+        rig.CorpseItems.Add(Valuable(1, 0x80000B21));
         rig.CorpseItems.Add(Gear(DeathDropModel.CoinWcid, 0x80000B22, "Pyreal"));
         var host = new ScriptedHost();
         var scenario = Ordered(rig, host, Whole);
 
-        var status = rig.Run(scenario);
+        var status = Handled(rig, scenario);
         Dump(rig, scenario);
 
         Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
         Assert.Equal(3, scenario.ListingEntries);
         Assert.Equal(1, scenario.ListingCoins);
-        Assert.Equal(2, scenario.DecoysDropped);
-        Assert.Equal(0, scenario.GearDropped);
         Assert.Equal(0, scenario.GearLeft);
-        var listed = scenario.ListingEntries - scenario.ListingCoins; // what the live test calls `listed`
-        Assert.Equal(2, listed);
-        Assert.True(scenario.DecoysDropped >= listed - 1);
-        Assert.Contains(Lines(rig), l => l.StartsWith("corpse: the listing held 3 entries: decoys_dropped=2 gear_dropped=0", StringComparison.Ordinal) && l.Contains("1 of them pyreal stack(s) (wcid 273", StringComparison.Ordinal));
+        Assert.Equal(2, scenario.ListingEntries - scenario.ListingCoins); // what the live test calls `listed`
+        Assert.Contains(Lines(rig), l => l.StartsWith("corpse: the listing held 3 entries: gear_listed=0", StringComparison.Ordinal) && l.Contains("1 of them pyreal stack(s) (wcid 273", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void A_needed_gear_item_that_was_listed_and_not_taken_only_warns_and_counts_gear_left_because_the_regear_already_replaced_it_3_1_fix_R2()
+    public void A_needed_gear_item_that_was_listed_and_not_taken_only_warns_and_counts_gear_left_because_the_handler_spawns_nothing_in_its_place_3_1_fix_R2()
     {
         var rig = TripRig(0);
-        rig.CorpseItems.Add(Decoy(0, 0x80000B20));
-        var wand = Gear(GearKit.Wand.Wcid, 0x80000B21, "The Healer's Heart");
+        rig.CorpseItems.Add(Valuable(0, 0x80000B20));
+        var wand = Gear(MageKit.WandItem.Wcid, 0x80000B21, "Wand");
         rig.CorpseItems.Add(wand);
         rig.SilentItems.Add(wand.Guid); // the server never answers this pick-up: it times out
         var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Whole);
+        var scenario = Ordered(rig, host, Whole, kit: MageKit);
 
-        var status = rig.Run(scenario);
+        var status = Handled(rig, scenario);
         Dump(rig, scenario);
 
         Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure); // a new judge is report-only in its first gate: no failure
         Assert.Null(scenario.Failure);
         Assert.Equal(CorpseLoot.Partial, scenario.CorpseLooted);
-        Assert.Equal(1, scenario.DecoysDropped);
-        Assert.Equal(1, scenario.GearDropped);
-        Assert.Equal(1, scenario.DecoysRecovered);
         Assert.Equal(1, scenario.GearLeft);
         Assert.Equal("1", Token(scenario.VerdictFields(), "gear_left"));
-        Assert.Contains(" decoys_dropped=1 gear_dropped=1 decoys_recovered=1 ", scenario.Outcome().Line, StringComparison.Ordinal);
         Assert.Contains(" gear_left=1", scenario.Outcome().Line, StringComparison.Ordinal);
         var warn = Assert.Single(rig.Log.Entries, e => e.Severity == LogSeverity.Warning && e.Message.Contains("gear_left=1", StringComparison.Ordinal));
-        Assert.Contains("(weenie classes " + GearKit.Wand.Wcid.ToString(CultureInfo.InvariantCulture), warn.Message, StringComparison.Ordinal);
-        Assert.Contains("the regear before the trip already replaced them, so what is left behind is a duplicate on the corpse, not a missing item", warn.Message, StringComparison.Ordinal);
+        Assert.Contains("(weenie classes " + MageKit.WandItem.Wcid.ToString(CultureInfo.InvariantCulture), warn.Message, StringComparison.Ordinal);
+        Assert.Contains("the death handler took what the corpse gave and spawns nothing in its place (D51)", warn.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("lacks them", warn.Message, StringComparison.Ordinal);
         Assert.Equal(HoltburgCell, rig.R.H.State.Self.Position?.CellId); // it was placed back, and the run went on to its end
-    }
-
-    [Fact]
-    public void In_2_2s_order_the_same_listing_only_warns_because_the_regear_after_the_trip_spawns_the_gear()
-    {
-        var rig = TripRig(0);
-        var wand = Gear(GearKit.Wand.Wcid, 0x80000B21, "The Healer's Heart");
-        rig.CorpseItems.Add(wand);
-        rig.SilentItems.Add(wand.Guid);
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Whole, new DeathOptions { Fight = false, Rebuff = false });
-
-        var status = rig.Run(scenario);
-
-        Assert.Equal(ScenarioStatus.Succeeded, status);
-        Assert.Null(scenario.Failure);
-        Assert.Equal(1, scenario.GearDropped);
-        Assert.Equal(1, scenario.GearLeft);
-        Assert.Contains(rig.Log.Entries, e => e.Severity == LogSeverity.Warning && e.Message.Contains("gear_left=1", StringComparison.Ordinal) && e.Message.Contains("not a failure in M4 2.2's order", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -825,12 +804,11 @@ public sealed partial class DeathScenarioTests
         var host = new ScriptedHost();
         var scenario = Ordered(rig, host, Whole);
 
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+        Assert.Equal(ScenarioStatus.Succeeded, Handled(rig, scenario));
 
         Assert.Equal("open-refused", scenario.TripAbort);
-        Assert.Null(scenario.DecoysDropped);
+        Assert.Null(scenario.ListingEntries);
         Assert.Null(scenario.GearLeft);
-        Assert.Contains(" decoys_dropped=n/a gear_dropped=n/a decoys_recovered=n/a", scenario.VerdictFields(), StringComparison.Ordinal);
         Assert.Equal("n/a", Token(scenario.VerdictFields(), "gear_left"));
     }
 
@@ -866,344 +844,7 @@ public sealed partial class DeathScenarioTests
                 }
             },
         };
-        return (rig, host, Ordered(rig, host, Whole, options, spells: table));
-    }
-
-    [Fact]
-    public void Under_the_minimum_after_the_fight_one_cast_of_Heal_Self_restores_the_health_and_the_trip_goes()
-    {
-        var (rig, _, scenario) = AfterAFightAt(30, 14);
-
-        var status = rig.Run(scenario);
-        Dump(rig, scenario);
-
-        Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
-        Assert.Equal([DeathScenario.HealSelfVii], rig.Casts);
-        Assert.Equal(1, scenario.PretripHeals);
-        Assert.Equal([.. M3Stages, .. AfterVitals, "pretrip-heal", .. TripStages], StageLog(rig));
-        Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
-        Assert.Equal(2, rig.ModeChanges); // into the magic mode the cast needs (the fight left the mage in non-combat), and out again
-        Assert.Equal(CombatModes.NonCombat, rig.R.H.State.Self.Qualities.CombatMode);
-        var lines = Lines(rig).ToList();
-        Assert.Contains(lines, l => l.StartsWith("corpse: the health share is 30% after the fight, under --death-recover-min-health 60%: recovering before the trip", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.StartsWith("pretrip: heal 1 of 4: Heal Self VII, health 30% before", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.StartsWith("pretrip: heal 1 landed (Sent): health 30% to 81%", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.StartsWith("pretrip: the health share is 81%, at the minimum 60% after 1 cast(s)", StringComparison.Ordinal));
-        Assert.Contains(" pretrip_heals=1", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Two_casts_when_one_is_not_enough_and_the_casts_are_logged_one_by_one()
-    {
-        var (rig, _, scenario) = AfterAFightAt(30, 6);
-
-        var status = rig.Run(scenario);
-        Dump(rig, scenario);
-
-        Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
-        Assert.Equal([DeathScenario.HealSelfVii, DeathScenario.HealSelfVii], rig.Casts);
-        Assert.Equal(2, scenario.PretripHeals);
-        Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
-        Assert.Equal(2, rig.ModeChanges); // the magic mode once for both casts
-        var lines = Lines(rig).ToList();
-        Assert.Contains(lines, l => l.StartsWith("pretrip: heal 1 of 4:", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.StartsWith("pretrip: heal 2 of 4:", StringComparison.Ordinal) && l.Contains("health 52% before", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.StartsWith("pretrip: heal 2 landed", StringComparison.Ordinal) && l.Contains("health 52% to 74%", StringComparison.Ordinal));
-        Assert.DoesNotContain(lines, l => l.StartsWith("pretrip: heal 3", StringComparison.Ordinal));
-        Assert.Contains(" pretrip_heals=2", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_cast_is_skipped_when_the_mana_is_under_the_spells_cost_and_regeneration_brings_the_health_back()
-    {
-        var (rig, _, scenario) = AfterAFightAt(30, 14, baseMana: 100, regenSeconds: 40, regenPercent: 80);
-
-        var status = rig.Run(scenario);
-        Dump(rig, scenario);
-
-        Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
-        Assert.Empty(rig.Casts);
-        Assert.Equal(0, scenario.PretripHeals);
-        Assert.Equal(0, rig.ModeChanges); // no cast, so the mage never left non-combat
-        Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
-        var lines = Lines(rig).ToList();
-        Assert.Contains(lines, l => l.StartsWith("pretrip: the mana ", StringComparison.Ordinal) && l.Contains(" is under the 100 Heal Self VII costs: no cast, regeneration only", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.StartsWith("pretrip: health 30% is under the minimum 60% with no cast to make; waiting up to 60 s for regeneration", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.StartsWith("pretrip: regeneration: health 78%", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.StartsWith("pretrip: the health share is 78%, at the minimum 60% after ", StringComparison.Ordinal) && l.Contains("s of regeneration", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void A_mage_still_under_the_minimum_after_the_casts_and_sixty_seconds_skips_the_trip_with_the_TODO()
-    {
-        var (rig, _, scenario) = AfterAFightAt(30, 1); // each cast heals a point of 28: four casts, still far under
-
-        var status = rig.Run(scenario);
-        Dump(rig, scenario);
-
-        Assert.Equal(ScenarioStatus.Succeeded, status);
-        Assert.Equal(4, rig.Casts.Count); // at most four
-        Assert.Equal(4, scenario.PretripHeals);
-        Assert.Equal(CorpseLoot.Skipped, scenario.CorpseLooted);
-        Assert.Empty(rig.Opened);
-        Assert.Equal(2, rig.Places.Count); // the bind's and the den's: no trip
-        var lines = Lines(rig).ToList();
-        Assert.Contains(lines, l => l.StartsWith("pretrip: 60 s of regeneration left the health share at", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.StartsWith("corpse: skipped (corpse_looted=skipped): the health share is ", StringComparison.Ordinal) && l.Contains("TODO(m4-death-trip-health)", StringComparison.Ordinal) && l.Contains("4 heal casts", StringComparison.Ordinal));
-        Assert.Equal([.. M3Stages, .. AfterVitals, "pretrip-heal"], StageLog(rig));
-        Assert.Equal(CombatModes.NonCombat, rig.R.H.State.Self.Qualities.CombatMode);
-        Assert.Contains(" pretrip_heals=4", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_spell_the_table_lacks_is_no_cast_and_the_wait_still_runs()
-    {
-        var rig = TripRig(1);
-        var host = new ScriptedHost { OnFight = (_, step) => { if (step == 1) { rig.SetHealth(30); rig.RegenerateTo(40, 75); } } };
-        var scenario = Ordered(rig, host, Whole);
-
-        var status = rig.Run(scenario);
-        Dump(rig, scenario);
-
-        Assert.Equal(ScenarioStatus.Succeeded, status);
-
-        Assert.Empty(rig.Casts);
-        Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
-        Assert.Contains(Lines(rig), l => l.Contains("Heal Self VII (spell 2073) is not in the SpellTable: no cast", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void At_or_above_the_minimum_after_the_fight_there_is_no_cast_and_no_recovery_stage()
-    {
-        var (rig, _, scenario) = AfterAFightAt(75, 14);
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Empty(rig.Casts);
-        Assert.Equal(0, scenario.PretripHeals);
-        Assert.Equal(0, rig.ModeChanges);
-        Assert.DoesNotContain("pretrip-heal", StageLog(rig));
-        Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
-
-        // Exactly at the minimum is at it: 13 of the vitae-reduced maximum 27, the minimum set to that very share.
-        var (atRig, _, atScenario) = AfterAFightAt(49, 14, options: new DeathOptions { RecoverMinHealthPercent = 13 * 100.0 / 27 });
-        Assert.Equal(ScenarioStatus.Succeeded, atRig.Run(atScenario));
-        Assert.Empty(atRig.Casts);
-        Assert.DoesNotContain("pretrip-heal", StageLog(atRig));
-        Assert.Equal(CorpseLoot.Yes, atScenario.CorpseLooted);
-    }
-
-    [Fact]
-    public void A_mage_that_is_already_in_the_magic_mode_casts_without_a_mode_change_and_still_leaves_it_after()
-    {
-        var (rig, host, scenario) = AfterAFightAt(30, 14);
-        host.OnFight = (_, step) =>
-        {
-            if (step == 1)
-            {
-                rig.SetHealth(30);
-                rig.R.CombatModeIs(CombatModes.Magic);
-            }
-        };
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Equal(1, scenario.PretripHeals);
-        Assert.Equal(1, rig.ModeChanges); // only the way out
-        Assert.Equal(CombatModes.NonCombat, rig.R.H.State.Self.Qualities.CombatMode);
-    }
-
-    [Fact]
-    public void A_death_during_the_recovery_fails_the_leg_naming_the_stage()
-    {
-        var (rig, _, scenario) = AfterAFightAt(30, 0);
-        RunUntilStage(rig, scenario, "pretrip-heal");
-        rig.Kill();
-
-        var status = rig.Run(scenario);
-
-        Assert.Equal(ScenarioStatus.Failed, status);
-        Assert.StartsWith("pretrip-heal: the mage died during the pretrip-heal", scenario.Failure, StringComparison.Ordinal);
-        Assert.Contains(" died=1 ", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void In_2_2s_order_the_recovery_never_runs_and_a_low_health_share_skips_the_trip_as_before()
-    {
-        var rig = TripRig(2);
-        rig.HealPoints = 14;
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Whole, new DeathOptions { Fight = false, RecoverMinHealthPercent = 90 }, spells: HealTable());
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Empty(rig.Casts);
-        Assert.Equal(0, scenario.PretripHeals);
-        Assert.Equal(CorpseLoot.Skipped, scenario.CorpseLooted);
-        Assert.DoesNotContain("pretrip-heal", StageLog(rig));
-        Assert.DoesNotContain(Lines(rig), l => l.Contains("TODO(m4-death-trip-health)", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void Another_failing_precondition_is_named_without_a_recovery()
-    {
-        var (rig, _, scenario) = AfterAFightAt(30, 14);
-        rig.NoCorpse = true; // no corpse was remembered: healing would not bring the trip back
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Empty(rig.Casts);
-        Assert.DoesNotContain("pretrip-heal", StageLog(rig));
-        Assert.Contains(Lines(rig), l => l.StartsWith("corpse: skipped (corpse_looted=skipped): no corpse of the mage was remembered", StringComparison.Ordinal));
-    }
-
-    // --- the decoy top-up after the unbuff suicide (M4 3.1 d1 follow-up F2)
-
-    private static GearKit DecoyKitFull() => GearKit.Of(Array.Empty<GearItem>()).WithDecoys(DecoyKit.All);
-
-    private static Rig BuffedRig(int carried)
-    {
-        var rig = new Rig(buffed: true);
-        rig.Damage = 3; // the tuskers' blows do not kill the buffed mage within the suicide's 15 s
-        rig.R.PrivateInt(PlayerQualities.LevelProperty, 126); // the decoy check needs the level
-        for (var i = 0; i < carried; i++)
-        {
-            Carry(rig, Decoy(i, 0x80000C20u + (uint)i));
-        }
-
-        rig.CorpseItems.Add(LootRulesTests.Item(0x80, 10, 5, 0x80000B10, "Thing 0", 141));
-        return rig;
-    }
-
-    [Fact]
-    public void After_the_unbuff_suicide_the_decoys_the_pack_lacks_are_spawned_before_the_den_stages_run_again()
-    {
-        var rig = BuffedRig(carried: 5);
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Trip, kit: DecoyKitFull());
-
-        var status = rig.Run(scenario);
-        Dump(rig, scenario);
-
-        Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
-        Assert.Equal(1, rig.Suicides);
-        Assert.Equal([DecoyKit.All[5].Wcid, DecoyKit.All[6].Wcid, DecoyKit.All[7].Wcid], rig.ItemGrants); // the kit's order, only the three the pack lacks
-        Assert.Equal(3, scenario.DecoyTopUpGrants);
-        var stages = StageLog(rig);
-        var at = stages.IndexOf("unbuff-vitals");
-        Assert.Equal(["unbuff-vitals", "unbuff-decoys", "den-place"], stages.GetRange(at, 3)); // after the suicide's vitals, before the den stages again
-        Assert.Equal(8, scenario.DecoysCarried); // counted when the wait among the tuskers begins: the pack is whole again
-        var lines = Lines(rig).ToList();
-        Assert.Single(lines, l => l.StartsWith("decoy check:", StringComparison.Ordinal)); // the re-run: the gear stage did not run here
-        Assert.Contains(lines, l => l.StartsWith("unbuff: the decoy top-up is done (3 granted); the decoy check runs again", StringComparison.Ordinal));
-        var check = Assert.NotNull(scenario.DecoyCheckResult);
-        Assert.Equal(check.Field, scenario.DecoySafeField);
-        Assert.Equal("yes", scenario.DecoySafeField);
-        Assert.Equal(check.Field, Token(scenario.VerdictFields(), "decoy_safe"));
-        Assert.Equal("8", Token(scenario.VerdictFields(), "decoys"));
-    }
-
-    [Fact]
-    public void The_top_up_says_once_that_the_suicides_corpse_stays_in_the_den_and_the_trip_goes_for_the_deaths_own()
-    {
-        var rig = BuffedRig(carried: 6);
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Trip, kit: DecoyKitFull());
-
-        var status = rig.Run(scenario);
-        Dump(rig, scenario);
-
-        Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
-        Assert.Single(Lines(rig), l => l.StartsWith("unbuff: the suicide is a death too", StringComparison.Ordinal) && l.Contains("the suicide's own corpse stays in the den", StringComparison.Ordinal) && l.Contains("is not gone back for", StringComparison.Ordinal) && l.Contains("(2 missing, 6 held)", StringComparison.Ordinal));
-        Assert.Equal(1, scenario.Suicides);
-        Assert.Equal([rig.CorpseGuid], rig.Opened); // one open: the tuskers' corpse, the last one the rig made, not the suicide's
-        Assert.Equal(rig.CorpseGuid, scenario.Tally.LastCorpseGuid);
-        Assert.Equal(CorpseLoot.Yes, scenario.CorpseLooted);
-    }
-
-    [Fact]
-    public void A_pack_that_lacks_nothing_grants_nothing_but_the_check_still_runs_again()
-    {
-        var rig = BuffedRig(carried: 8);
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Core, kit: DecoyKitFull());
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Empty(rig.ItemGrants);
-        Assert.Equal(0, scenario.DecoyTopUpGrants);
-        Assert.Contains("unbuff-decoys", StageLog(rig));
-        Assert.Contains(Lines(rig), l => l.Contains("(0 missing, 8 held)", StringComparison.Ordinal));
-        Assert.Single(Lines(rig), l => l.StartsWith("decoy check:", StringComparison.Ordinal));
-        Assert.Equal(8, scenario.DecoysCarried);
-    }
-
-    [Fact]
-    public void Without_a_suicide_there_is_no_top_up()
-    {
-        var rig = new Rig(buffed: false); // the mage holds no enchantment a death purges: the unbuff stage sends no suicide
-        rig.R.PrivateInt(PlayerQualities.LevelProperty, 126);
-        var host = new ScriptedHost();
-        var scenario = Ordered(rig, host, Core, kit: DecoyKitFull());
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Equal(0, rig.Suicides);
-        Assert.Empty(rig.ItemGrants);
-        Assert.DoesNotContain("unbuff-decoys", StageLog(rig));
-        Assert.Equal(0, scenario.DecoyTopUpGrants);
-
-        // A run without the unbuff stage at all: the same.
-        var noStage = new Rig(buffed: true);
-        noStage.Damage = 3;
-        var noStageScenario = Ordered(noStage, new ScriptedHost(), DeathStages.Bind | DeathStages.Den | DeathStages.Death, kit: DecoyKitFull());
-        Assert.Equal(ScenarioStatus.Succeeded, noStage.Run(noStageScenario));
-        Assert.Empty(noStage.ItemGrants);
-        Assert.DoesNotContain("unbuff-decoys", StageLog(noStage));
-    }
-
-    [Fact]
-    public void A_kit_without_decoys_has_no_top_up_stage_even_after_a_suicide()
-    {
-        var rig = new Rig(buffed: true);
-        rig.Damage = 3;
-        var scenario = Ordered(rig, new ScriptedHost(), Core); // the plain kit the other tests use
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Equal(1, rig.Suicides);
-        Assert.Empty(rig.ItemGrants);
-        Assert.DoesNotContain("unbuff-decoys", StageLog(rig));
-    }
-
-    [Fact]
-    public void With_decoys_off_the_suicide_is_followed_by_the_den_stages_at_once_and_nothing_is_spawned()
-    {
-        var rig = BuffedRig(carried: 3);
-        var scenario = Ordered(rig, new ScriptedHost(), Trip, new DeathOptions { Decoys = false }, DecoyKitFull());
-
-        var status = rig.Run(scenario);
-
-        Assert.True(status == ScenarioStatus.Succeeded, scenario.Failure);
-        Assert.Equal(1, rig.Suicides);
-        Assert.Empty(rig.ItemGrants);
-        Assert.DoesNotContain("unbuff-decoys", StageLog(rig));
-        Assert.Equal(0, scenario.DecoyTopUpGrants);
-        Assert.DoesNotContain(Lines(rig), l => l.StartsWith("decoy check:", StringComparison.Ordinal) || l.StartsWith("decoys:", StringComparison.Ordinal));
-        Assert.Contains(" decoys=n/a decoy_safe=n/a ", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_top_up_the_server_never_answers_fails_the_leg_naming_the_stage()
-    {
-        var rig = BuffedRig(carried: 0);
-        rig.GrantsSilent = true;
-        var scenario = Ordered(rig, new ScriptedHost(), Core, kit: DecoyKitFull());
-
-        var status = rig.Run(scenario);
-
-        Assert.Equal(ScenarioStatus.Failed, status);
-        Assert.StartsWith("unbuff: the decoy top-up", scenario.Failure, StringComparison.Ordinal);
-        Assert.Equal("unbuff-decoys", scenario.Stage);
-        Assert.Equal(0, scenario.DecoyTopUpGrants);
+        var scenario = Ordered(rig, host, Whole, (options ?? new DeathOptions()) with { Travel = new PlaceTravel() }, spells: table);
+        return (rig, host, scenario);
     }
 }

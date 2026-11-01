@@ -74,6 +74,12 @@ public sealed class PlayerTools
         }
     }
 
+    /// <summary>
+    /// The one counter of the mod's world-changing verbs this session sent (<c>item</c>, <c>xp</c>, <c>place</c>, <c>corpses rot</c>, <c>spell learn</c>), counted at the one send path of this class (M5 item 3 c1, DoD 6): a request refused at the gate
+    /// (not loopback, no mod, the kill switch, a dry run) is not counted. It is never reset: a caller marks <see cref="ModVerbCounter.Counts"/> and reads the delta.
+    /// </summary>
+    public ModVerbCounter Verbs { get; } = new();
+
     /// <summary>The last status the mod reported (the probe's, or a later <see cref="Status"/>), or null.</summary>
     public ToolStatus? LastStatus { get; private set; }
 
@@ -315,7 +321,7 @@ public sealed class PlayerTools
         foreach (var item in kit.Items)
         {
             var have = held.GetValueOrDefault(item.Wcid);
-            var missing = item.Kind == GearKind.Component ? item.Stack - have : have > 0 ? 0 : 1;
+            var missing = item.Counted ? item.Stack - have : have > 0 ? 0 : 1;
             if (missing <= 0)
             {
                 alreadyHeld++;
@@ -325,21 +331,36 @@ public sealed class PlayerTools
             wanted.Add((item, missing));
         }
 
-        // Each grant is a new pack item until it is merged, so the pack must hold them all at once.
+        // Each grant is a new pack item until it is merged, so the pack must hold them all at once. A component line that wants more than one stack (M5 7 F3, D87: a scarab line kept at 300 is three stacks of 100) is asked for in
+        // several requests, each at most the weenie's maximum stack, because the server mod clamps one request to it.
+        var requests = new List<(GearItem Item, int? Stack)>();
+        foreach (var (item, missing) in wanted)
+        {
+            if (item.Counted)
+            {
+                requests.AddRange(GearKit.StackSizes(missing, item.MaxStack).Select(size => (item, (int?)size)));
+            }
+            else
+            {
+                requests.Add((item, null));
+            }
+        }
+
+        // A side pack is a container slot of the player, not one of the main pack's item slots (M5 7 G3), so the guard counts the other grants only.
         var used = state.Self.Inventory.Pack.Count;
-        if (used + wanted.Count > GearKit.PackCapacity)
+        var mainRequests = requests.Count(r => r.Item.Kind != GearKind.Pack);
+        if (used + mainRequests > GearKit.PackCapacity)
         {
             return Refuse(
                 kit,
                 state,
-                "slot-guard: the main pack holds " + ActionText.Count(used) + " of " + ActionText.Count(GearKit.PackCapacity) + " items and the kit needs " + ActionText.Count(wanted.Count)
+                "slot-guard: the main pack holds " + ActionText.Count(used) + " of " + ActionText.Count(GearKit.PackCapacity) + " items and the kit needs " + ActionText.Count(mainRequests)
                     + " new ones (each grant takes a slot until it is merged), so the server would refuse a grant as no-room");
         }
 
         var grants = new List<GearGrant>();
-        foreach (var (item, missing) in wanted)
+        foreach (var (item, stack) in requests)
         {
-            int? stack = item.Kind == GearKind.Component ? missing : null;
             var handle = SpawnItem(item.Wcid, stack, source, item.Palette, item.Shade);
             var grant = new GearGrant(item, stack, handle);
             grants.Add(grant);
@@ -494,7 +515,8 @@ public sealed class PlayerTools
                 early = new ActionOutcome(ActionOutcomeKind.Refused, 0, e.Message);
             }
 
-            if (early is null && availabilityNow && !_api.IsOffline && Availability is not (ToolAvailability.Unknown or ToolAvailability.Ready))
+            // M5 8 (D141): outside the world is no refusal here: the tracker waits for the world, bounded, and refuses at its turn when it never comes (ToolTracker).
+            if (early is null && availabilityNow && !_api.IsOffline && Availability is not (ToolAvailability.Unknown or ToolAvailability.Ready or ToolAvailability.NotInWorld))
             {
                 early = new ActionOutcome(ActionOutcomeKind.Refused, 0, Refusal(Availability));
             }
@@ -502,6 +524,11 @@ public sealed class PlayerTools
 
         var tracker = new ToolTracker<T>(handle, request ?? new StatusRequest(requestId), text, chatLine, silent, read, observe, verdict);
         _api.Accept(tracker, early, loopbackChecked: true);
+        if (handle.Outcome is not { Kind: ActionOutcomeKind.Refused or ActionOutcomeKind.DryRun or ActionOutcomeKind.Cancelled })
+        {
+            Verbs.Record(kind); // the one seam: the request was accepted (sent, or queued on the tools lane); a refusal at the gate is no send
+        }
+
         return handle;
     }
 

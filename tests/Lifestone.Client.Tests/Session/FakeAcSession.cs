@@ -52,6 +52,13 @@ internal enum FakeSendKind
     Tell,
     LogOff,
     Quit,
+    ConfirmationResponse,
+    SetCharacterOptions,
+    TeleToLifestone,
+    TeleToMarketPlace,
+    Emote,
+    SetAfkMode,
+    SetAfkMessage,
 }
 
 /// <summary>One recorded send of a <see cref="FakeAcSession"/> (a struct, so recording into a sized list allocates nothing).</summary>
@@ -109,6 +116,16 @@ internal sealed class FakeAcSession : IAcSession
 
     /// <summary>The sends of <paramref name="kind"/>, in order.</summary>
     public List<FakeSend> Of(FakeSendKind kind) => [.. Sends.Where(s => s.Kind == kind)];
+
+    /// <summary>
+    /// The casts sent with no target or at <paramref name="self"/>, each as an untargeted send (<see cref="FakeSend.Guid"/> the spell id): a self spell goes out at the player's own guid, as retail's
+    /// <c>ClientMagicSystem::CastSpell</c> sends it (<c>CastTracker.SendTarget</c>), and a spell with no target type with none.
+    /// </summary>
+    public List<FakeSend> SelfCasts(uint self) =>
+    [
+        .. Sends.Where(s => s.Kind == FakeSendKind.CastUntargetedSpell || (s.Kind == FakeSendKind.CastTargetedSpell && s.Guid == self))
+            .Select(s => s.Kind == FakeSendKind.CastUntargetedSpell ? s : s with { Kind = FakeSendKind.CastUntargetedSpell, Guid = (uint)s.Index, Index = 0 }),
+    ];
 
     /// <summary>The texts talked, in order, without the player tools' requests (the status probe's among them).</summary>
     public List<string?> Said() => [.. Sends.Where(s => s.Kind == FakeSendKind.Talk && !IsToolRequest(s)).Select(s => s.Text)];
@@ -254,6 +271,36 @@ internal sealed class FakeAcSession : IAcSession
     /// <inheritdoc/>
     public OutboundTicket SendRemoveSpellFavorite(uint spellId, uint bar) => Send(new FakeSend(FakeSendKind.RemoveSpellFavorite, spellId, Index: (int)bar));
     public OutboundTicket SendAddSpellFavorite(uint spellId, uint index, uint bar) => Send(new FakeSend(FakeSendKind.AddSpellFavorite, spellId, Index: (int)index, Amount: bar));
+
+    /// <summary>The blocks of every SetCharacterOptions sent, in order (M5 6 w2).</summary>
+    public List<CharacterOptionsBlock> OptionBlocks { get; } = [];
+
+    /// <inheritdoc/>
+    public OutboundTicket SendConfirmationResponse(uint type, uint context, bool accepted) =>
+        Send(new FakeSend(FakeSendKind.ConfirmationResponse, context, Index: accepted ? 1 : 0, Amount: type));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSetCharacterOptions(CharacterOptionsBlock block)
+    {
+        var ticket = Send(new FakeSend(FakeSendKind.SetCharacterOptions, block.Options1, Amount: block.Options2));
+        OptionBlocks.Add(block);
+        return ticket;
+    }
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTeleToLifestone() => Send(new FakeSend(FakeSendKind.TeleToLifestone));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTeleToMarketPlace() => Send(new FakeSend(FakeSendKind.TeleToMarketPlace));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendEmote(ReadOnlySpan<char> text) => Send(new FakeSend(FakeSendKind.Emote, Text: text.ToString()));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSetAfkMode(bool afk) => Send(new FakeSend(FakeSendKind.SetAfkMode, Index: afk ? 1 : 0));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSetAfkMessage(ReadOnlySpan<char> message) => Send(new FakeSend(FakeSendKind.SetAfkMessage, Text: message.ToString()));
 
     /// <inheritdoc/>
     public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => Send(new FakeSend(FakeSendKind.GetAndWieldItem, item, Amount: equipMask));

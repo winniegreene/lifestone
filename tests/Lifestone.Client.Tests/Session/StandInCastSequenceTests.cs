@@ -236,7 +236,7 @@ public sealed class StandInCastSequenceTests
         rig.Run(plan.EndTime + 1.5);
 
         Assert.Equal(ActionOutcomeKind.Confirmed, cast.Outcome!.Value.Kind);
-        Assert.Equal(["02BB", "F74C", "F74C", "F74C", "F74C", "02C2", "F755", "F755", "F74C", "01C7"], rig.Tags);
+        Assert.Equal(["02BB", "F74C", "F74C", "F74C", "F74C", "02E9", "02C2", "F755", "F755", "F74C", "01C7"], rig.Tags); // M5 1 K2: the cast's mana (02E9) comes with the effect, before it (Player_Magic.cs 855-858)
 
         // The words: the planner's chant, spoken by the player, chat type Spellcasting.
         var words = rig.Chat.Last(l => l.Kind == ChatKind.Speech && l.ChatType == StandInWorld.SpellcastingChat);
@@ -274,7 +274,7 @@ public sealed class StandInCastSequenceTests
         rig.Run(plan.EndTime + 1.5);
 
         Assert.Equal(ActionOutcomeKind.Confirmed, cast.Outcome!.Value.Kind);
-        Assert.Equal(["02BB", "F74C", "02C2", "F755", "F755", "F74C", "01C7"], rig.Tags);
+        Assert.Equal(["02BB", "F74C", "02E9", "02C2", "F755", "F755", "F74C", "01C7"], rig.Tags);
         Assert.Equal(MotionCommandTable.ToWire(MotionCommands.MagicHeal), rig.Motions[0].Motion.Forward);
         Assert.Equal(plan.EffectTime, rig.First("02C2") - rig.First("02BB"), 0.03);
         Assert.Equal(plan.EndTime, rig.First("01C7") - rig.First("02BB"), 0.03);
@@ -290,7 +290,7 @@ public sealed class StandInCastSequenceTests
         rig.Run(plan.EndTime + 1.5);
 
         Assert.Equal((ActionOutcomeKind.ServerError, StandInWorld.FizzleError), (cast.Outcome!.Value.Kind, cast.Outcome.Value.Code));
-        Assert.Equal(["02BB", "F74C", "F74C", "F755", "028A", "F74C", "01C7"], rig.Tags);
+        Assert.Equal(["02BB", "F74C", "F74C", "02E9", "F755", "028A", "F74C", "01C7"], rig.Tags); // a fizzle keeps its 5 mana: the update comes before the fizzle script
         Assert.Equal(fizzles + 1, rig.World.Fizzles);
         var script = Assert.Single(rig.Scripts);
         Assert.Equal(((uint)PlayScript.Fizzle, StandInWorld.FizzleIntensity), (script.Script.ScriptType, script.Script.Speed));
@@ -304,19 +304,19 @@ public sealed class StandInCastSequenceTests
     public void Meditative_Trance_2345_transfers_stamina_to_mana_from_the_cycles_own_BuffStatMods_row()
     {
         // M3 2.1 fix A (2.1-R3): the stand-in's Stamina to Mana rows ARE BuffStatMods.StaminaToMana, so the VII (loss -0.75, no cap) it once lacked changes the vitals as the cycle predicts.
-        using var rig = Ready(Visit(), MeditativeTrance); // stamina 120 of 120, mana 75 of 100
+        using var rig = Ready(Visit(), MeditativeTrance); // stamina 120 of 120, mana 75 of 100; the cast costs the fixture's 1 mana first (M5 1 K2), so the transfer meets 74 of 100
         var plan = Plans[MeditativeTrance];
         var cast = rig.Session.Actions.Cast(MeditativeTrance, ActionSource.Host);
         rig.Run(plan.EndTime + 1.5);
 
         var row = Lifestone.Client.Session.Mage.BuffStatMods.TransferOf(MeditativeTrance)!.Value;
-        Lifestone.Client.Session.Mage.BuffStatMods.Transfer(row, 120, 25, out var drained, out var given);
-        Assert.Equal((14u, 25u), (drained, given)); // 60 drained, 105 given, scaled to the 25 mana misses: round(60 * 25/105) = 14
+        Lifestone.Client.Session.Mage.BuffStatMods.Transfer(row, 120, 26, out var drained, out var given);
+        Assert.Equal((15u, 26u), (drained, given)); // 60 drained, 105 given, scaled to the 26 mana misses: round(60 * 26/105) = 15
 
         Assert.True(rig.Q.TryGetVitalLevels(3, out var stamina, out _));
         Assert.True(rig.Q.TryGetVitalLevels(5, out var mana, out _));
-        Assert.Equal((120u - drained, 75u + given), (stamina, mana));
-        Assert.Contains(rig.Chat, l => l.Text == "You cast Meditative Trance on yourself and lose 14 points of stamina and also gain 25 points of mana");
+        Assert.Equal((120u - drained, 74u + given), (stamina, mana));
+        Assert.Contains(rig.Chat, l => l.Text == "You cast Meditative Trance on yourself and lose 15 points of stamina and also gain 26 points of mana");
         Assert.Equal(ActionOutcomeKind.Sent, cast.Outcome!.Value.Kind);
         Assert.DoesNotContain(rig.Log.Lines, l => l.Contains("m3-standin-vital-spell-table", StringComparison.Ordinal));
     }
@@ -332,9 +332,9 @@ public sealed class StandInCastSequenceTests
 
         Assert.Equal(ActionOutcomeKind.Confirmed, cast.Outcome!.Value.Kind);
         Assert.Equal(ActionOutcomeKind.Confirmed, second.Outcome!.Value.Kind);
-        Assert.Equal(["02C2", "01C7", "02C2", "01C7"], rig.Tags);
+        Assert.Equal(["02E9", "02C2", "01C7", "02E9", "02C2", "01C7"], rig.Tags);
         Assert.Empty(rig.Motions);
-        Assert.Equal(StandInWorld.CastRecoilSeconds, rig.Timeline[1].At - rig.Timeline[0].At, 0.03);
+        Assert.Equal(StandInWorld.CastRecoilSeconds, rig.Timeline[2].At - rig.Timeline[1].At, 0.03); // the effect (02C2, after the mana's 02E9) to UseDone
         Assert.Single(rig.Log.Lines, l => l.Contains("TODO(m3-standin-cast-plan)", StringComparison.Ordinal));
         Assert.DoesNotContain(rig.Log.Lines, l => l.Contains("m3-standin-cast-gestures", StringComparison.Ordinal));
     }
@@ -348,9 +348,12 @@ public sealed class StandInCastSequenceTests
         rig.Session.Actions.Cast(Fizzler, ActionSource.Host);
         rig.Run(Plans[Fizzler].EndTime + 1.5);
 
-        foreach (var todo in new[] { "m3-standin-cast-mana", "m3-standin-cast-components", "m3-standin-magic-skill" })
+        foreach (var todo in new[] { "m3-standin-cast-components", "m3-standin-magic-skill" })
         {
             Assert.Single(rig.Log.Lines, l => l.Contains("TODO(" + todo + ")", StringComparison.Ordinal));
         }
+
+        // M5 1 K2: the stand-in's cast costs mana now, so its placeholder is gone (and nothing replaces it while the spell table and the mana vital are there).
+        Assert.DoesNotContain(rig.Log.Lines, l => l.Contains("m3-standin-cast-mana", StringComparison.Ordinal) || l.Contains("m5-standin-cast-mana", StringComparison.Ordinal));
     }
 }

@@ -14,7 +14,7 @@ public sealed class NotInM3Tests
         var context = NotInM3.Show(scene.Manager.Dialogs, scene.Log, "Map");
 
         var dialog = Assert.IsType<UiMessageDialog>(scene.Manager.Dialogs.Find(context));
-        Assert.Equal("Not in Lifestone M3: Map", Assert.IsType<UiTextElement>(dialog.GetChildRecursive(UiDialog.TextElement)).Text);
+        Assert.Equal("Not in Lifestone yet: Map", Assert.IsType<UiTextElement>(dialog.GetChildRecursive(UiDialog.TextElement)).Text);
         Assert.True(dialog.BlocksClicks);
         Assert.Contains(scene.Log.Lines, l => l.Contains("placeholder", StringComparison.Ordinal) && l.Contains("Map", StringComparison.Ordinal) && l.Contains("M3", StringComparison.Ordinal));
     }
@@ -22,7 +22,7 @@ public sealed class NotInM3Tests
     [Fact]
     public void The_prefixes_of_the_two_milestones_differ()
     {
-        Assert.Equal("Not in Lifestone M3: ", NotInM3.Prefix);
+        Assert.Equal("Not in Lifestone yet: ", NotInM3.Prefix);
         Assert.NotEqual(NotInM2.Prefix, NotInM3.Prefix);
     }
 }

@@ -44,6 +44,12 @@ internal sealed class NoGcWindow
     /// <summary>The pause of the gen 0 collection that closed a held window, in milliseconds; NaN until it runs, and when none is due (the window was off, refused or ended early: a collection had already reset the budget).</summary>
     public double ClosingCollectionMilliseconds { get; private set; } = double.NaN;
 
+    /// <summary>
+    /// M5 7 D151: the whole process's CPU time over the closing collection, in milliseconds (NaN until it runs). Divided by the pause it is how many threads collected: server GC's dynamic heap count
+    /// (DATAS) can be down to one or two heaps at login, when the collection of the window's survivors runs on as many threads and takes 75 to 135 ms instead of 10 to 20.
+    /// </summary>
+    public double ClosingCollectionCpuMilliseconds { get; private set; } = double.NaN;
+
     /// <summary>True from the end of a held window until <see cref="RunPendingClose"/> has run its closing collection.</summary>
     public bool ClosePending => ReferenceEquals(Volatile.Read(ref s_pendingClose), this);
 
@@ -175,7 +181,9 @@ internal sealed class NoGcWindow
 
         Volatile.Write(ref s_pendingClose, null);
         var pause = GC.GetTotalPauseDuration();
+        var cpu = Environment.CpuUsage.TotalTime;
         GC.Collect(0, GCCollectionMode.Forced, blocking: true);
         window.ClosingCollectionMilliseconds = (GC.GetTotalPauseDuration() - pause).TotalMilliseconds;
+        window.ClosingCollectionCpuMilliseconds = (Environment.CpuUsage.TotalTime - cpu).TotalMilliseconds;
     }
 }

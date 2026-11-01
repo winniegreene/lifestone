@@ -1,8 +1,10 @@
 using System.Globalization;
+using Lifestone.Client.Avatars;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Magic;
 using Lifestone.Data.World;
@@ -17,13 +19,28 @@ namespace Lifestone.Client.Session.Scenarios.Journey;
 /// </summary>
 public interface IJourneyWalks
 {
-    /// <summary>The den fight's walk over the host's body (the floor's spots by the room graph), or null when the host has none.</summary>
+    /// <summary>The fight's walk over the host's body (the ground's tour by its room graph), or null when the host has none.</summary>
     /// <param name="context">The journey's context.</param>
-    IFightWalk? DenWalk(JourneyContext context);
+    /// <param name="ground">The ground the fight runs in.</param>
+    IFightWalk? FightWalk(JourneyContext context, HuntingGround ground);
 
     /// <summary>The hunt's view of the client's own body, or null when the host has none.</summary>
     /// <param name="context">The journey's context.</param>
     IHuntFollow? HuntFollow(JourneyContext context);
+
+    /// <summary>
+    /// Where the host's own body stands, or null when the host cannot say or the body is not placed (M5 item 5 c1, closes <c>TODO(m5-godot-body-position)</c>): the recall-home station's step-off measures this body against the lifestone's collision.
+    /// The default reads <see cref="HuntFollow"/> (the headless host's view); the Godot host answers from the player's walker without giving the hunt a follower (its hunt reads the player from the session).
+    /// </summary>
+    /// <param name="context">The journey's context.</param>
+    CellFrame? BodyPosition(JourneyContext context)
+    {
+        using var follow = HuntFollow(context);
+        return follow?.Position;
+    }
+
+    /// <summary>The avatars' physics cost and jump counts now (<see cref="AvatarStats.PhysicsCost"/>), read-only, for the den-fight station's report-only fields; null when the host has no avatars (the headless host): the fields print <c>n/a</c>.</summary>
+    AvatarPhysicsCost? PhysicsCost => null;
 }
 
 /// <summary>
@@ -31,7 +48,7 @@ public interface IJourneyWalks
 /// <see cref="WayfindScenario"/>) over the headless streamer's collision and tiles, its controller bound to <see cref="IActionApi.Move"/>, and a
 /// <see cref="NavRunner"/> per leg: <see cref="OutdoorPathSource"/> outdoors, <see cref="IndoorOutdoorPathSource"/> when either end is indoors
 /// (Renald's front room 0xA9B4013F, Thelnoth's cellar 0xA9B40111, the chests), and <see cref="RoomPathSource"/> over the den's floor
-/// (landblock 0x0105, lean <see cref="DenRooms.MaxLean"/>) for the fight's spots and the corpse trip. A recall or a place moves the player: the next
+/// (the ground's walkable cells at its profile's doorway lean, <see cref="GroundRooms"/>) for the fight's spots and the corpse trip. A recall or a place moves the player: the next
 /// <see cref="Tick"/> re-places the body where the server put it, once the collision round it is built. The leg and its planning are shared with the Godot
 /// host since M4 P5b J5b (<see cref="JourneyRunLeg"/>, <see cref="JourneyLegPlanner"/>); this host gives them its own body.
 /// </summary>
@@ -59,10 +76,12 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
     public const uint ThelnothCellarCell = 0xA9B40111;
 
     private readonly DatSet _dats;
+    private readonly Func<uint, float?> _setupExtent;
     private readonly ILogSink _log;
     private readonly HeadlessBody _body;
     private readonly JourneyLegPlanner _planner;
     private readonly LegBody _legBody;
+    private readonly JourneyGroundTours _tours;
     private double _lastTick = double.NaN;
     private int _teleportsSeen;
     private bool _placeWarned;
@@ -76,10 +95,12 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
     public HeadlessJourneyRunnerHost(DatSet dats, ILogSink log, Func<IGameSessionView, IMovementSink>? sinkOf = null)
     {
         _dats = dats ?? throw new ArgumentNullException(nameof(dats));
+        _setupExtent = DoorCrossings.SetupExtents(dats); // M5 5 d2 (closes TODO(door-extent-host)): built once per host, every leg's door feed reads the doors' own sizes
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _body = new HeadlessBody(dats, log, LogCategory, sinkOf) { FollowServerMoves = true }; // P5b-R1: ACE's walk-to-use and attack approach move the body, as HuntFollow did
         _planner = new JourneyLegPlanner(dats);
         _legBody = new LegBody(this);
+        _tours = new JourneyGroundTours(log, LogCategory);
     }
 
     /// <summary>The leg planner (shared with the Godot host, M4 P5b J5b).</summary>
@@ -179,6 +200,9 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
         _log.Info(LogCategory, "the body is placed", cell, new LogField("placements", Placements), new LogField("streamer", _body.Streamer!.StatsLine()));
     }
 
+    /// <summary>The body a leg on foot runs over (what <see cref="Run"/> hands every <see cref="JourneyRunLeg"/>). For tests.</summary>
+    internal IJourneyLegBody JourneyLegBody => _legBody;
+
     /// <inheritdoc />
     public ITravelLeg Run(IGameSessionView session, TravelRequest request, double now)
     {
@@ -190,7 +214,14 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
     }
 
     /// <inheritdoc />
-    public IFightWalk DenWalk(JourneyContext context) => new DenFightWalk(this);
+    /// <remarks>M5 7 P7v: every walk on a ground takes the ground's one tour for the journey (<see cref="JourneyGroundTours"/>), so the death station's wait and the corpse trip's fight know the den fight's kills and their due times.</remarks>
+    public IFightWalk FightWalk(JourneyContext context, HuntingGround ground) => new GroundFightWalk(this, ground, _tours.For(ground, () => GroundTour.For(ground, GroundGraph(ground), _log)));
+
+    /// <summary>The fight's walk over a tour given (a test's: the real one is <see cref="GroundTour.For"/>), the same walk as <see cref="FightWalk(JourneyContext, HuntingGround)"/>.</summary>
+    /// <param name="context">The journey context (not read).</param>
+    /// <param name="ground">The ground.</param>
+    /// <param name="tour">Where each leg's next waypoint, and its purpose, come from.</param>
+    public IFightWalk FightWalk(JourneyContext context, HuntingGround ground, IGroundTour tour) => new GroundFightWalk(this, ground, tour);
 
     /// <inheritdoc />
     public IHuntFollow HuntFollow(JourneyContext context) => new BodyFollow(this);
@@ -200,8 +231,9 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
     /// <param name="toCell">The goal's cell.</param>
     public INavPathSource SourceFor(uint fromCell, uint toCell) => _planner.SourceFor(fromCell, toCell, _body.Map);
 
-    /// <summary>The den's floor graph (landblock 0x0105, lean <see cref="DenRooms.MaxLean"/>), loaded once.</summary>
-    public RoomGraph DenGraph() => _planner.DenGraph();
+    /// <summary>The ground's room graph (its walkable cells at its doorway lean), loaded once per ground.</summary>
+    /// <param name="ground">The ground.</param>
+    public RoomGraph GroundGraph(HuntingGround ground) => _planner.GroundGraph(ground);
 
     /// <summary>Releases the body (the keys' binding, the streamer).</summary>
     public void Dispose()
@@ -226,6 +258,8 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
 
         public double CorridorSeconds => HeadlessJourneyRunnerHost.CorridorSeconds;
 
+        public Func<uint, float?>? SetupExtent => host._setupExtent;
+
         public NavMap? Map => host._body.Map;
 
         public CellFrame Position => host._body.Walker!.Position;
@@ -246,13 +280,26 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
         public void FollowRoute(NavRunner runner) => host._body.FollowRoute(runner);
     }
 
-    /// <summary>The den fight's walk: each leg to the next spawn cell of <see cref="Scenarios.DenWalk.Tour"/> that is not the player's, over the host's runner.</summary>
-    private sealed class DenFightWalk(HeadlessJourneyRunnerHost host) : IFightWalk
+    /// <summary>
+    /// The fight's walk: each leg to the next waypoint of the ground's <see cref="IGroundTour"/> (not the player's cell), over the host's runner (<see cref="NavRunner"/> over the ground's room graph with the creature layer). A failed leg (the runner's failure, or
+    /// over the profile's <see cref="WalkModel.LegSeconds"/>) is abandoned and the walk goes on to the next waypoint, three in a row ending it (<c>m5-fight-walk-recover</c>, <see cref="LegRecovery"/>). Entering a no-go cell of the ground stops it, named.
+    /// </summary>
+    private sealed class GroundFightWalk(HeadlessJourneyRunnerHost host, HuntingGround ground, IGroundTour tour) : IFightWalk
     {
+        private readonly LegRecovery _recovery = new(host._log);
+        private readonly LegPacing _pacing = new(); // F6: the hold and the walking seconds, the rules RunnerLegs follows (F5)
+
+        /// <inheritdoc/>
+        int? IFightWalk.LegsRecovered => _recovery.Recovered;
+
         private ITravelLeg? _leg;
-        private int _next;
+        private uint _goal;
+        private int _legs;
+        private double _legStart;
 
         public string? Failure { get; private set; }
+
+        public IGroundTour Tour => tour;
 
         public void Prepare(IGameSessionView session, double now) => host.Frame(session, now);
 
@@ -266,48 +313,51 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
                 return false;
             }
 
-            var from = host._body.Walker!.Position;
-            var graph = host.DenGraph();
-            for (var tries = 0; tries < Scenarios.DenWalk.Tour.Count; tries++)
-            {
-                var cellId = (JourneyGrounds.DenLandblock << 16) | Scenarios.DenWalk.Tour[_next++ % Scenarios.DenWalk.Tour.Count];
-                if (cellId == from.CellId || graph.RoomFrame(cellId) is not { } room)
-                {
-                    continue;
-                }
-
-                _leg?.Dispose();
-                var destination = new Navigation.TeleportDestination("den spot", [], new World.WorldLocation("den spot", new World.CellPosition(cellId, room.Origin), HasHeight: true, HeadingDegrees: 0), "journey: the den fight's spot");
-                _leg = host.Run(session, new TravelRequest(destination, TravelPurpose.Spot), now);
-                description = $"leg to 0x{cellId:X8} on foot (the room graph)";
-                return true;
-            }
-
-            Failure = $"no spot of the den's floor besides the player's cell 0x{from.CellId:X8}";
-            return false;
+            return Begin(session, host._body.Walker!.Position.CellId, now, out description);
         }
 
         public FightWalkStatus Tick(IGameSessionView session, double now)
         {
             host.Frame(session, now);
+            if (_pacing.Holding)
+            {
+                // F6 (D47): the tour named no purpose to walk: no leg; the walk "arrives" after RunnerLegs.HoldRecheckSeconds and the fight looks for a target and asks the tour again.
+                if (!_pacing.HoldOver(session.Clock.Now))
+                {
+                    return FightWalkStatus.Walking;
+                }
+
+                _pacing.Stop();
+                return FightWalkStatus.Arrived;
+            }
+
             if (_leg is null)
             {
                 return FightWalkStatus.Idle;
             }
 
+            if (host._body.Walker is { } walker && ground.IsNoGo(walker.Position.CellId))
+            {
+                Failure = GroundWalk.NoGoReason(ground, walker.Position.CellId);
+                Abandon();
+                return FightWalkStatus.Failed;
+            }
+
+            _pacing.Walked((_leg as JourneyRunLeg)?.Runner?.State == NavRunState.Running, now); // F6: the runner's walking seconds, not the time from the offer to the arrival
             switch (_leg.Step(session, now))
             {
                 case TravelStatus.Arrived:
                     _leg.Dispose();
                     _leg = null;
+                    _recovery.Arrived();
+                    tour.LegWalked(_goal, session.Clock.Now, _pacing.WalkSeconds);
                     return FightWalkStatus.Arrived;
                 case TravelStatus.Failed:
-                    Failure = _leg.Failure;
-                    _leg.Dispose();
-                    _leg = null;
-                    return FightWalkStatus.Failed;
+                    return Recover(session, now, _leg.Failure ?? "the leg failed without saying why");
                 default:
-                    return FightWalkStatus.Walking;
+                    return session.Clock.Now - _legStart > ground.Walk.LegSeconds
+                        ? Recover(session, now, string.Create(CultureInfo.InvariantCulture, $"the leg did not finish within {ground.Walk.LegSeconds:0.#} s"))
+                        : FightWalkStatus.Walking;
             }
         }
 
@@ -315,6 +365,72 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
         {
             _leg?.Dispose();
             _leg = null;
+            _pacing.Stop();
+        }
+
+        /// <summary>Plans and starts the leg to the tour's next waypoint that has a room frame, from the cell <paramref name="fromCell"/>.</summary>
+        private bool Begin(IGameSessionView session, uint fromCell, double now, out string description)
+        {
+            description = string.Empty;
+            var graph = host.GroundGraph(ground);
+            for (var tries = 0; tries < tour.Waypoints; tries++)
+            {
+                if (tour.Next(fromCell, session.Clock.Now) is not { } cellId)
+                {
+                    break;
+                }
+
+                if (tour.Purpose == TourPurpose.Hold)
+                {
+                    // F6 (D47): no purpose to walk: no leg, the player stands (RunnerLegs.Begin's rule, F5).
+                    _leg?.Dispose();
+                    _leg = null;
+                    _goal = cellId;
+                    description = _pacing.BeginHold(tour, fromCell, session.Clock.Now);
+                    return true;
+                }
+
+                if (graph.RoomFrame(cellId) is not { } room)
+                {
+                    continue;
+                }
+
+                _leg?.Dispose();
+                var destination = new Navigation.TeleportDestination("ground spot", [], new World.WorldLocation("ground spot", new World.CellPosition(cellId, room.Origin), HasHeight: true, HeadingDegrees: 0), "journey: the ground fight's spot");
+                _leg = host.Run(session, new TravelRequest(destination, TravelPurpose.Spot), now);
+                _goal = cellId;
+                _legs++;
+                _pacing.BeginWalk(now);
+                _legStart = session.Clock.Now;
+                description = $"leg to 0x{cellId:X8} on foot (the room graph)";
+                return true;
+            }
+
+            Failure = $"no spot of {ground.Name}'s tour besides the player's cell 0x{fromCell:X8}";
+            return false;
+        }
+
+        /// <summary>The leg failed: it is dropped and the walk goes on to the next waypoint from where the player stands, unless three legs in a row failed.</summary>
+        private FightWalkStatus Recover(IGameSessionView session, double now, string reason)
+        {
+            _leg?.Dispose();
+            _leg = null;
+            tour.LegFailed(_goal, session.Clock.Now);
+            if (_recovery.Failed(_legs, _goal, reason) is { } ended)
+            {
+                Failure = ended;
+                return FightWalkStatus.Failed;
+            }
+
+            var at = host._body.Walker?.Position.CellId ?? 0;
+            if (!Begin(session, at, now, out var next))
+            {
+                Failure = $"leg {_legs} failed ({reason}) and no leg to the next waypoint could be planned: " + Failure;
+                return FightWalkStatus.Failed;
+            }
+
+            host._log.Info(LogCategory, "recovered: " + next);
+            return FightWalkStatus.Walking;
         }
 
         public bool HasClearLine(in CellFrame from, in CellFrame to) => !host._body.Placed || !host._body.Confirmer.WallBetween(from, to);
@@ -393,7 +509,7 @@ public sealed class HeadlessJourneyScenario(JourneyPlan plan, IReadOnlyList<stri
         if (_journey is null)
         {
             var keeper = JourneyStations.CreateKeeper(Plan, session, spells, arguments, log);
-            var context = JourneyScenario.NewContext(Plan, log, spells, keeper, dats, Host);
+            var context = JourneyScenario.NewContext(Plan, log, spells, keeper, dats, Host, dungeon: JourneyLimits.FightOf(arguments).GroundProfile); // --fight-ground: a bad key is the station factory's error and keeps the default
             _journey = new JourneyScenario(Plan, JourneyStations.Create(Plan, arguments, dats, kitAccount), context);
         }
 

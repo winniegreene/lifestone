@@ -6,6 +6,7 @@ using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Widgets;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
@@ -123,7 +124,7 @@ public sealed partial class JourneyLegRunner
     private void StepShowpieces(IGameSessionView session, JourneyScenario scenario, string? station)
     {
         var self = session.State.Self;
-        var inDen = self.Travel == SelfTravel.Present && self.Position is { } at && (at.CellId >> 16) == BlackSpawnDen.Landblock;
+        var inDen = self.Travel == SelfTravel.Present && self.Position is { } at && _ground.InLandblocks(at.CellId);
         var casts = 0;
         uint spell = 0;
         if (scenario.CurrentRun is IStationInner { Scenario: FightScenario fight })
@@ -274,15 +275,20 @@ public sealed partial class JourneyLegRunner
             _fightStation = station;
             _fightPlan = new FightShotPlan();
             _fightPlan.Begin(stats.ProjectilesCreated, stats.ProjectileExplodes, fight.Tally.DamageLinesDealt, 0);
+            if (fight.ReviewFramesWaitForOtherStorey)
+            {
+                _fightPlan.WaitsForOtherStorey = true; // F3: --fight-storeys-min 2 or more
+                Log.Info(LogCategory, "journey: the review frames wait for a storey other than the arrival's (--fight-storeys-min) at station " + station);
+            }
             _fightHavePosition = false;
         }
 
         var self = session.State.Self;
-        var inDen = self.Travel == SelfTravel.Present && self.Position is { } at && (at.CellId >> 16) == BlackSpawnDen.Landblock;
+        var inDen = self.Travel == SelfTravel.Present && self.Position is { } at && _ground.InLandblocks(at.CellId);
         var here = self.Position is { } p ? p.Frame.Origin : default;
         var moving = !_fightHavePosition || (here - _fightLast).LengthSquared() > 0.0025f;
         (_fightLast, _fightHavePosition) = (here, self.Position is not null);
-        var due = _fightPlan.Step(_runSeconds, stats.ProjectilesCreated, stats.ProjectileExplodes, fight.Tally.DamageLinesDealt, fight.Tally.Kills, avatars.ProjectileWindowOpen, inDen, fight.Walks >= 1, moving);
+        var due = _fightPlan.Step(_runSeconds, stats.ProjectilesCreated, stats.ProjectileExplodes, fight.Tally.DamageLinesDealt, fight.Tally.Kills, avatars.ProjectileWindowOpen, inDen, fight.Walks >= 1, moving, fight.OffArrivalStorey);
         if (due < 0)
         {
             return;

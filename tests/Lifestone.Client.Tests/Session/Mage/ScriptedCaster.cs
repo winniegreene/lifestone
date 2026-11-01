@@ -1,8 +1,10 @@
 using System.Collections.Immutable;
 using DatReaderWriter.Enums;
+using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Vitals;
 using Lifestone.Data.Magic;
 using Lifestone.Net.Messages;
 using Lifestone.Tests.Shared.Net;
@@ -26,12 +28,18 @@ namespace Lifestone.Client.Tests.Session.Mage;
 /// <c>WorldObject_Weapon.cs</c> (<c>GetWeaponManaConversionModifier</c> 235-262) [with changes: the roll is a seeded <see cref="Random"/>; the mage's wand has no ManaConversionMod, so the weapon modifier is 1]. The
 /// base is the spell's base mana plus, for the armour lines, <c>ManaMod</c> for each worn piece; the scripted mage's Mana Conversion skill (<see cref="ManaConversionSkill"/>: the template's ranks, the
 /// Focus and Self formula and the strongest additive enchantment of each category, as the read model sees them) then rolls twice against the spell's power (difficulty / 2, then difficulty) and lowers the cost
-/// by the success chance less the roll times a luck roll; the cost is at least 1. Set <see cref="CeilingCost"/> to charge the ceiling instead (the worst case some tests pin).</para>
+/// by the success chance less the roll times a luck roll; the cost is at least 1. Set <see cref="CeilingCost"/> to charge the ceiling instead (the worst case some tests pin).
+/// M5 1 K2: the formula (<c>GetManaCost</c> and <c>GetSkillChance</c>) now lives in <see cref="ManaConversionModel"/>, the one source the stand-in and the keeper's try floor share; this file only draws from its own seeded
+/// <see cref="Random"/> (floats, in ACE's order: the roll, the luck, then the second roll) and passes the draws to <see cref="ManaConversionModel.RollCost"/>.</para>
 /// </summary>
 internal sealed class ScriptedCaster
 {
-    /// <summary>The Magic chat type (ACE <c>ChatMessageType.Magic</c>).</summary>
-    public const int MagicChat = 17;
+    /// <summary>
+    /// The chat type of the caster's own "You cast &lt;spell&gt; on &lt;name&gt;" lines and the vital spells' lines: ACE sends them as <c>ChatMessageType.Magic</c> = 0x07 (<c>WorldObject_Magic.cs</c> 443 and 1420-1422
+    /// @95ef426d; <c>ChatMessageType.cs</c> 98), the value of <see cref="FightTally.MagicChatType"/> and the stand-in's. M5 1 K2 fix: it was 17 (0x11, <c>Spellcasting</c>, the type of a caster's spoken words), which a
+    /// cast proof that reads the Magic type (K1's) never saw; no test depended on 17 (<c>BuffCycle</c> matches these lines by their text).
+    /// </summary>
+    public const int MagicChat = (int)FightTally.MagicChatType;
 
     /// <summary>The armour pieces the mage wears (names are the test's; item type Armor).</summary>
     public static readonly string[] PieceNames = ["Leather Cap", "Leather Vest", "Leather Gloves", "Leather Boots", "Leather Leggings"];
@@ -40,6 +48,9 @@ internal sealed class ScriptedCaster
 
     /// <summary>The Mana Potion stack a fighter's rig may hold (M4 P5a C7).</summary>
     public const uint ManaPotionGuid = 0x80000260;
+
+    /// <summary>The Stamina Potion stack a rig may hold (M5 7 F5: the refill's fallback when no Revitalize Self is payable).</summary>
+    public const uint StaminaPotionGuid = 0x80000261;
     private const uint FirstPieceGuid = 0x80000201;
     private const uint Wand = 0x01000000;
 
@@ -55,9 +66,35 @@ internal sealed class ScriptedCaster
     private readonly Dictionary<uint, uint> _topOfCategory = [];
     private readonly Queue<(uint Spell, uint Target, double Due)> _pending = new();
     private readonly Random _manaRolls;
+    private readonly Func<double> _nextManaRoll;
     private double _manaAcc;
     private double _staminaAcc;
     private byte _potionSeq;
+    private byte _wieldSeq;
+
+    /// <summary>True: a wield (0x001A) is answered as ACE answers it; false (the default): no answer.</summary>
+    public bool AnswerWields { get; set; }
+
+    /// <summary>
+    /// Takes the wand off into the main pack as ACE's unwield does (Player_Inventory.cs 400-405 and 1359 @95ef426d: 02DA Wielder 0, 02CE CurrentWieldedLocation 0, 02DA Container, then 0022): a fresh build's mage,
+    /// its kit granted and not wielded (M5 3 gate round 1). Returns the wand's guid.
+    /// </summary>
+    public uint WandToPack()
+    {
+        _rig.Raw(AceM3Writers.PublicUpdateInstanceId(++_wieldSeq, WandGuid, 3, 0));
+        _rig.Raw(AceM3Writers.PublicUpdatePropertyInt(_wieldSeq, WandGuid, 10, 0));
+        _rig.Raw(AceM3Writers.PublicUpdateInstanceId(_wieldSeq, WandGuid, 2, WorldActionRig.Player));
+        _rig.Server((p, s) => AceM3Writers.PutObjInContainer(p, s, WandGuid, WorldActionRig.Player, 0, 0));
+        _rig.Tick();
+        return WandGuid;
+    }
+    private readonly IReadOnlyCollection<uint>? _known;
+
+    /// <summary>
+    /// M5 1 F1: a projectile spell (the fight's bolt) is answered by this hook after its mana is charged (a dearer roll than the mana held is refused 0x0401 first, as every cast): the test creates the projectile and lands
+    /// the hit; the UseDone follows. Null: a projectile is not answered (as before).
+    /// </summary>
+    public Action<uint, uint>? ProjectileHook { get; set; }
 
     /// <summary>The divisor of Mana Conversion's skill formula, (Focus + Self) / 6 (the SkillTable's entry 16).</summary>
     public const int ManaConversionDivisor = 6;
@@ -67,18 +104,51 @@ internal sealed class ScriptedCaster
 
     /// <param name="lines">The lines the spell table holds: the mage's <see cref="ArenaProfile.Lines"/> by default; a fighter's rig (M4 P5a C4) passes the fighter profile's buff and mana lines.</param>
     /// <param name="fighter">A fighter template (M4 P5a C4): the attributes, the three magic skills and the vitals are the fighter's level-55 build (Creature Enchantment and Life Magic 183, Max Mana about 225), not the mage's.</param>
-    public ScriptedCaster(WorldActionRig rig, uint mana, uint stamina, int manaSeed = DefaultManaSeed, IReadOnlyList<ProfileLine>? lines = null, Lifestone.Client.Session.Fighter.FighterTemplate? fighter = null, uint manaPotions = 0)
+    /// <param name="known">M5 1 F1: the spells the PlayerDescription's spellbook holds (null, the default: none, as before).</param>
+    public ScriptedCaster(WorldActionRig rig, uint mana, uint stamina, int manaSeed = DefaultManaSeed, IReadOnlyList<ProfileLine>? lines = null, Lifestone.Client.Session.Fighter.FighterTemplate? fighter = null, uint manaPotions = 0, IReadOnlyCollection<uint>? known = null, uint staminaPotions = 0, bool withDrain = false, bool withStaminaDrain = false, uint lifeMagicRanks = 0)
     {
+        _lifeMagicRanks = lifeMagicRanks;
         _rig = rig;
+        StaminaPotions = staminaPotions;
+        _known = known;
         _fighter = fighter;
         _manaRolls = new Random(manaSeed);
+        _nextManaRoll = () => _manaRolls.NextSingle(); // the draws are floats, as before the model took the formula over (ACE's are doubles in [0, 1))
         ManaPotions = manaPotions;
-        Table = BuildTable(lines ?? ArenaProfile.Lines);
+        Table = BuildTable([.. lines ?? ArenaProfile.Lines, .. (withDrain ? new[] { DrainLine, HealLine } : []), .. (withStaminaDrain ? new[] { StaminaDrainLine } : [])]);
         Mana = mana;
         Stamina = stamina;
         rig.Spells([.. Table.Values]);
         Describe();
         rig.CombatModeIs(CombatModes.Magic); // after the description, which replaces the player's integer properties
+    }
+
+    /// <summary>M5 7 F7: Drain Health Other I to VII, the line the fight's drain rule casts (the extras' line, the dat's ids).</summary>
+    public static ProfileLine DrainLine { get; } = ArenaProfile.ExtraNamed("Drain Health Other")!;
+
+    private readonly uint _lifeMagicRanks; // M5 7 F15: a Life Magic that reaches level VI's power (0: the template's ranks)
+
+    /// <summary>M5 7 F15: Drain Stamina Other I to VII, the line the fight's stamina floor may cast at its target.</summary>
+    public static ProfileLine StaminaDrainLine { get; } = ArenaProfile.ExtraNamed("Drain Stamina Other")!;
+
+    /// <summary>M5 7 F15: the stamina a landed Drain Stamina Other of the scripted caster gives (cut to the stamina missing); 0 is a target with nothing left, where ACE still writes its landing line.</summary>
+    public uint StaminaDrainYield { get; set; } = 40;
+
+    /// <summary>M5 7 F7: Heal Self I to VII (6, 1157 to 1161, 2073; powers 1, 50, 100, 150, 200, 250 and 300: the dat's), the keeper's heal.</summary>
+    public static ProfileLine HealLine { get; } = new("Heal Self", "Heal Self", MagicSchool.LifeMagic, ProfileRole.HealSelf, [.. VitalsMeans.HealSelf.Select((id, i) => new ProfileSpell(i + 1, id, i == 6 ? "Adja's Intervention" : "Heal Self " + LevelFloor.Roman[i], (uint)(i == 0 ? 1 : i * 50), 0))]);
+
+    /// <summary>M5 7 F7: the health a landed Drain Health Other or Heal Self of the scripted caster gives (cut to the health missing).</summary>
+    public uint HealthPerCast { get; set; } = 60;
+
+    /// <summary>M5 7 F7: the caster's current health (the scripted description starts it at 200).</summary>
+    public uint Health { get; private set; } = 200;
+
+    /// <summary>M5 7 F7: sets the current health and tells the client.</summary>
+    /// <param name="health">The health.</param>
+    public void SetHealth(uint health)
+    {
+        Health = health;
+        SendVital(MageTemplate.MaxHealth, Health);
     }
 
     /// <summary>The spell table (the profile's lines, in the real table's shape).</summary>
@@ -105,6 +175,12 @@ internal sealed class ScriptedCaster
     /// <summary>The Mana Potions held (M4 P5a C7); set by the constructor's <c>manaPotions</c>, each drink restores <see cref="Lifestone.Client.Session.Fighter.FighterKit.VitalPotionBoost"/> and the potion's use is answered in <see cref="Pump"/>.</summary>
     public uint ManaPotions { get; private set; }
 
+    /// <summary>The Stamina Potions held (M5 7 F5); set by the constructor's <c>staminaPotions</c>, each drink restores <see cref="Lifestone.Client.Session.Fighter.FighterKit.VitalPotionBoost"/> stamina.</summary>
+    public uint StaminaPotions { get; private set; }
+
+    /// <summary>How many Stamina Potions were drunk (M5 7 F5).</summary>
+    public int StaminaPotionsDrunk { get; private set; }
+
     /// <summary>How many Mana Potions were drunk (M4 P5a C7).</summary>
     public int PotionsDrunk { get; private set; }
 
@@ -116,6 +192,9 @@ internal sealed class ScriptedCaster
 
     /// <summary>A hook over the untargeted casts the Action API sent (M4 P5a C1c): returns true when the test answers the cast itself, so the scripted table never sees it.</summary>
     public Func<uint, bool>? CastHook { get; set; }
+
+    /// <summary>M5 3 p1: as <see cref="CastHook"/>, for a targeted cast (the spell and its target): true when the test answers it itself.</summary>
+    public Func<uint, uint, bool>? TargetedCastHook { get; set; }
 
     /// <summary>The combat modes asked for, in order (GameAction 0x0053), each answered at once.</summary>
     public List<int> ModesSent { get; } = [];
@@ -167,10 +246,31 @@ internal sealed class ScriptedCaster
                     _pending.Enqueue(((uint)send.Guid, 0, now + CastSeconds));
                     break;
                 case FakeSendKind.CastTargetedSpell:
+                    if (send.Guid == WorldActionRig.Player && CastHook?.Invoke((uint)send.Index) == true)
+                    {
+                        break; // a self spell goes out at the caster's own guid, as retail's ClientMagicSystem::CastSpell sends it: the untargeted hook answers it
+                    }
+
+                    if (TargetedCastHook?.Invoke((uint)send.Index, send.Guid) == true)
+                    {
+                        break; // M5 3 p1: a test answers this targeted spell itself (Primary Portal Tie is no spell of the scripted table)
+                    }
+
                     _pending.Enqueue(((uint)send.Index, send.Guid, now + CastSeconds));
                     break;
                 case FakeSendKind.Use when send.Guid == ManaPotionGuid:
                     DrinkManaPotion();
+                    break;
+                case FakeSendKind.Use when send.Guid == StaminaPotionGuid:
+                    DrinkStaminaPotion();
+                    break;
+                case FakeSendKind.GetAndWieldItem when AnswerWields:
+                    // ACE's wield (Player_Inventory.cs 297-306 @95ef426d): 02DA Wielder 0, 02CE CurrentWieldedLocation 0, then 0023.
+                    var item = (uint)send.Guid;
+                    var location = (int)send.Amount;
+                    _rig.Raw(AceM3Writers.PublicUpdateInstanceId(++_wieldSeq, item, 3, 0));
+                    _rig.Raw(AceM3Writers.PublicUpdatePropertyInt(_wieldSeq, item, 10, 0));
+                    _rig.Server((p, s) => AceM3Writers.WieldObject(p, s, item, location));
                     break;
                 case FakeSendKind.ChangeCombatMode:
                     // ACE changes the mode after the stance animation and tells it with the private int update 0x02CD (Player_Combat.cs HandleActionChangeCombatMode).
@@ -199,8 +299,8 @@ internal sealed class ScriptedCaster
                 var armour = line.Role == ProfileRole.ItemBuffArmor;
                 var meta = line.Role switch
                 {
-                    ProfileRole.ManaTransfer => SpellType.Transfer,
-                    ProfileRole.StaminaRestore => SpellType.Boost,
+                    ProfileRole.ManaTransfer or ProfileRole.LifeDrain => SpellType.Transfer,
+                    ProfileRole.StaminaRestore or ProfileRole.HealSelf => SpellType.Boost,
                     ProfileRole.WarBolt or ProfileRole.WarOption => SpellType.Projectile,
                     _ => SpellType.Enchantment,
                 };
@@ -208,6 +308,7 @@ internal sealed class ScriptedCaster
                 {
                     ProfileRole.ItemBuffArmor => SpellFlags.Beneficial,
                     ProfileRole.WarBolt or ProfileRole.WarOption => SpellFlags.Projectile,
+                    ProfileRole.LifeDrain => SpellFlags.Resistable | SpellFlags.Reversed,
                     _ => SpellFlags.Beneficial | SpellFlags.SelfTargeted,
                 };
                 var baseMana = line.IsManaLine
@@ -223,11 +324,34 @@ internal sealed class ScriptedCaster
                     Category = armour ? 159 + (line.Name == "Impenetrability" ? 1u : 2u) : category,
                     ManaMod = armour ? 14u : 0u,
                     NonComponentTargetType = armour ? 0x6u : line.Role == ProfileRole.ItemBuffWand ? 0x8000u : 0u,
+                    BaseRangeConstant = line.Role == ProfileRole.LifeDrain ? 33f : 0f,
                 };
             }
         }
 
         return table;
+    }
+
+    /// <summary>A Stamina Potion (ACE <c>Food.BoostVital</c>): the potion's boost in stamina, the line, the stack, the use done (M5 7 F5).</summary>
+    private void DrinkStaminaPotion()
+    {
+        var before = Stamina;
+        _rig.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out _, out var maxStamina);
+        Stamina = Math.Min(maxStamina, Stamina + (uint)Lifestone.Client.Session.Fighter.FighterKit.VitalPotionBoost);
+        StaminaPotionsDrunk++;
+        SendVital(MageTemplate.MaxStamina, Stamina);
+        Chat($"The Stamina Potion restores {Stamina - before} points of your Stamina.");
+        StaminaPotions--;
+        if (StaminaPotions == 0)
+        {
+            _rig.Raw(AceM3Writers.InventoryRemoveObject(StaminaPotionGuid));
+        }
+        else
+        {
+            _rig.Raw(AceM3Writers.SetStackSize(++_potionSeq, StaminaPotionGuid, StaminaPotions, StaminaPotions * 170));
+        }
+
+        _rig.UseDone();
     }
 
     /// <summary>A Mana Potion (ACE <c>Food.BoostVital</c>): +25 mana, the line, the stack, the use done (M4 P5a C7).</summary>
@@ -271,7 +395,7 @@ internal sealed class ScriptedCaster
                 continue; // a fighter trains no War Magic and no Mana Conversion
             }
 
-            skills.Add(new SkillDesc(id, (ushort)t.Ranks, 1, t.Specialized ? 3u : 2u, 0, t.Specialized ? 10u : 0u, 0, 0));
+            skills.Add(new SkillDesc(id, (ushort)(id == MageTemplate.LifeMagic && _lifeMagicRanks > 0 ? (int)_lifeMagicRanks : t.Ranks), 1, t.Specialized ? 3u : 2u, 0, t.Specialized ? 10u : 0u, 0, 0));
         }
 
         // Vitals: start 0, the ranks the template buys, so the maximum is the formula's (mana 159 + Self 267 = 426, stamina 135 + Endurance 140 = 275).
@@ -297,7 +421,15 @@ internal sealed class ScriptedCaster
             pack.Add(new ContentDesc(ManaPotionGuid, 0));
         }
 
-        _rig.H.Describe(new PlayerDescriptionMsg { Attributes = attributes.ToImmutable(), Skills = skills.ToImmutable(), Vitals = vitals.ToImmutable(), Equipped = [.. equipped], Inventory = [.. pack] });
+        if (StaminaPotions > 0)
+        {
+            var basis = ReducerHarness.Create(StaminaPotionGuid, ReducerHarness.Stamps(), null, name: "Stamina Potion");
+            _rig.H.R.Reducer.OnCreateObject(_rig.H.R.Context, basis with { Weenie = basis.Weenie with { Header = Lifestone.Net.Types.WeenieHeaderFlags.Container, ContainerId = WorldActionRig.Player, ItemType = 0x80, WeenieClassId = Lifestone.Client.Session.Fighter.FighterKit.StaminaPotionWcid } }, isUpdate: false);
+            pack.Add(new ContentDesc(StaminaPotionGuid, 0));
+        }
+
+        var description = new PlayerDescriptionMsg { Attributes = attributes.ToImmutable(), Skills = skills.ToImmutable(), Vitals = vitals.ToImmutable(), Equipped = [.. equipped], Inventory = [.. pack] };
+        _rig.H.Describe(_known is null ? description : description with { Spells = _known.ToImmutableDictionary(id => id, _ => 2f) });
     }
 
     private void Wear(uint guid, string name, uint itemType, uint wcid)
@@ -395,6 +527,26 @@ internal sealed class ScriptedCaster
                 Enchant(info);
                 break;
             case SpellType.Transfer:
+                if (StaminaDrainLine.Spells.Any(x => x.Id == info.Id))
+                {
+                    _rig.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out _, out var staminaCap);
+                    var drainedStamina = Math.Min(StaminaDrainYield, staminaCap - Stamina);
+                    Stamina += drainedStamina;
+                    SendVital(MageTemplate.MaxStamina, Stamina);
+                    Chat($"You gain {drainedStamina} points of stamina due to casting {info.Name} on {(_rig.H.State.Objects.TryGet(target, out var mark) ? mark.Name : "a creature")}");
+                    break;
+                }
+
+                if (DrainPicker.Ids.Contains(info.Id))
+                {
+                    _rig.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out _, out var maxHealth);
+                    var taken = Math.Min(HealthPerCast, maxHealth - Health);
+                    Health += taken;
+                    SendVital(MageTemplate.MaxHealth, Health);
+                    Chat($"You gain {taken} points of health due to casting {info.Name} on {(_rig.H.State.Objects.TryGet(target, out var victim) ? victim.Name : "a creature")}");
+                    break;
+                }
+
                 var row = BuffStatMods.TransferOf(info.Id)!.Value;
                 _rig.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out _, out var maxMana);
                 BuffStatMods.Transfer(row, Stamina, maxMana - Mana, out var drained, out var given);
@@ -405,12 +557,25 @@ internal sealed class ScriptedCaster
                 Chat($"You cast {info.Name} on yourself and lose {drained} points of stamina and also gain {given} points of mana");
                 break;
             case SpellType.Boost:
+                if (VitalsMeans.HealSelf.Contains(info.Id))
+                {
+                    _rig.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out _, out var healthMax);
+                    var healed = Math.Min(HealthPerCast, healthMax - Health);
+                    Health += healed;
+                    SendVital(MageTemplate.MaxHealth, Health);
+                    Chat($"You cast {info.Name} and restore {healed} points of your Health.");
+                    break;
+                }
+
                 var boost = BuffStatMods.Revitalize.First(b => b.Id == info.Id);
                 _rig.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out _, out var maxStamina);
                 var gained = (uint)(boost.Boost + (boost.Variance / 2));
                 Stamina = Math.Min(maxStamina, Stamina + gained);
                 SendVital(MageTemplate.MaxStamina, Stamina);
-                Chat($"You cast {info.Name} on yourself and restore {gained} points of stamina");
+                Chat($"You cast {info.Name} and restore {gained} points of your Stamina."); // ACE's self-boost line (the cast proof reads " and restore ")
+                break;
+            case SpellType.Projectile when ProjectileHook is not null:
+                ProjectileHook(spellId, target);
                 break;
             default:
                 throw new InvalidOperationException("the scripted caster does not answer " + info.Name);
@@ -450,50 +615,13 @@ internal sealed class ScriptedCaster
         }
     }
 
-    /// <summary>ACE <c>Creature.CalculateManaUsage</c> (<c>Creature_Magic.cs</c> 14-56) from the base cost <paramref name="baseCost"/> (the ceiling: base mana plus the armour surcharge).</summary>
+    /// <summary>ACE <c>Creature.CalculateManaUsage</c> (<c>Creature_Magic.cs</c> 14-56) from the base cost <paramref name="baseCost"/> (the ceiling: base mana plus the armour surcharge); the rolls are <see cref="ManaConversionModel.RollCost"/>'s.</summary>
     private uint CalculateManaUsage(SpellInfo info, uint baseCost)
     {
-        if ((info.Flags & SpellFlags.IgnoresManaConversion) != 0)
-        {
-            return baseCost; // line 43; the trained check of the same line holds: Mana Conversion is trained later
-        }
-
-        var skill = (uint)Math.Round(ManaConversionSkill * 1.0); // line 48; the wand has no ManaConversionMod: GetWeaponManaConversionModifier is 1
-        return GetManaCost(Math.Max(info.Power, 25u), baseCost, skill);
+        // line 43: IgnoresManaConversion pays the base (the trained check of the same line holds: Mana Conversion is trained later; skill 0 pays the base too); line 48: the wand has no ManaConversionMod, so GetWeaponManaConversionModifier is 1
+        var skill = (uint)Math.Round(ManaConversionSkill * 1.0);
+        return ManaConversionModel.RollCost(baseCost, info.Power, skill, _nextManaRoll, (info.Flags & SpellFlags.IgnoresManaConversion) != 0);
     }
-
-    /// <summary>ACE <c>Creature.GetManaCost</c> (<c>Creature_Magic.cs</c> 58-100): two rolls against the spell's power (half of it, then all of it), a luck roll lowering the first.</summary>
-    private uint GetManaCost(uint difficulty, uint manaCost, uint manaConv)
-    {
-        if (manaConv == 0)
-        {
-            return manaCost;
-        }
-
-        var successChance = SkillChance(manaConv, difficulty / 2);
-        var roll = _manaRolls.NextSingle();
-        var luck = _manaRolls.NextSingle();
-        if (roll < successChance)
-        {
-            manaCost = (uint)Math.Round(manaCost * (1.0f - (successChance - (roll * luck))));
-        }
-
-        if (manaCost > 1)
-        {
-            successChance = SkillChance(manaConv, difficulty);
-            roll = _manaRolls.NextSingle();
-            if (roll < successChance)
-            {
-                manaCost = (uint)Math.Round(manaCost * (1.0f - (successChance - (roll * luck))));
-            }
-        }
-
-        return Math.Max(manaCost, 1);
-    }
-
-    /// <summary>ACE <c>SkillCheck.GetSkillChance</c> (<c>SkillCheck.cs</c> 9-14, factor 0.03).</summary>
-    private static double SkillChance(uint skill, uint difficulty) =>
-        Math.Clamp(1.0 - (1.0 / (1.0 + Math.Exp(0.03f * ((int)skill - (int)difficulty)))), 0.0, 1.0);
 
     /// <summary>ACE's <c>EnchantmentManager.Add</c> for a player caster and target: a repeat of the spell refreshes its layer, another spell of the category takes the next layer; GameEvent 0x02C2.</summary>
     private void Enchant(SpellInfo info)

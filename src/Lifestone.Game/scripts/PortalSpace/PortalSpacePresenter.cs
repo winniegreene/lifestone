@@ -53,6 +53,12 @@ public partial class PortalSpacePresenter : Node
 
     /// <summary>Told when the busy state changes (true while portal space plays): the retail UI raises and lowers its busy count from it (g6; closes <c>TODO(portal): G2 busy count</c>).</summary>
     public event Action<bool>? BusyChanged;
+
+    /// <summary>
+    /// Told once per arrival, when state 6 (<see cref="TeleportAnimState.Arriving"/>) ends and the machine is off again: the world has been shown for
+    /// the whole of state 6 (M5 7 P7d: the render caches' trim, <see cref="Lifestone.Client.Rendering.ArrivalCacheTrim"/>).
+    /// </summary>
+    public event Action? Arrived;
     private Action? _afterStep;
 
     /// <summary>
@@ -196,8 +202,13 @@ public partial class PortalSpacePresenter : Node
 
         if (frame.State != _state)
         {
+            var arrived = _state == TeleportAnimState.Arriving && frame.State == TeleportAnimState.Off;
             _state = frame.State;
             Log.Info("portal", "portal space state", ("state", frame.State), ("tunnel", frame.TunnelVisible), ("world", frame.WorldVisible), ("frame", _tunnel.CurrentFrame), ("f", frame.Lens.Focal));
+            if (arrived)
+            {
+                Arrived?.Invoke();
+            }
         }
     }
 }

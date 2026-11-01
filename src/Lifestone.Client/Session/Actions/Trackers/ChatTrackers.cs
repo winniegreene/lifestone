@@ -53,6 +53,26 @@ internal sealed class TalkTracker(ActionHandle handle, string text) : ActionTrac
 }
 
 /// <summary>
+/// <see cref="IActionApi.SetInscription"/> (M5 7 D137): GameAction 0x00BF {item, inscription}, as retail's <c>CM_Writing::Event_SetInscription</c> sends it (11.6096 0x006AA810) and ACE's <c>GameActionSetInscription</c> reads it.
+/// ACE answers nothing, so the action completes as <see cref="ActionOutcomeKind.Sent"/> when it is sent. Lane Immediate (no reply to wait for).
+/// </summary>
+internal sealed class SetInscriptionTracker(ActionHandle handle, uint item, string inscription) : ActionTracker(handle, ActionLane.Immediate, double.PositiveInfinity)
+{
+    /// <inheritdoc/>
+    internal override string WouldSend => "GameAction 0x00BF SetInscription item=0x" + item.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + " (" + ActionText.Count(inscription.Length) + " characters)";
+
+    /// <inheritdoc/>
+    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api);
+
+    /// <inheritdoc/>
+    internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
+    {
+        session!.SendSetInscription(item, inscription);
+        return new ActionOutcome(ActionOutcomeKind.Sent, 0, inscription.Length == 0 ? "inscription cleared" : "inscription written");
+    }
+}
+
+/// <summary>
 /// <see cref="IActionApi.Tell"/>: GameAction 0x005D, as retail's <c>CM_Communication::Event_TalkDirectByName</c> sends it
 /// (11.4186 0x006A4780, 11.6096 0x006A55A0). ACE confirms a tell with an F7E0 line of chat type OutgoingTell
 /// (<c>You tell ...</c>), refuses one to a character that is not online with WeenieError CharacterNotAvailable (0x052B),

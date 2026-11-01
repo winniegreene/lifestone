@@ -37,7 +37,7 @@ public sealed class GameShellG6Tests(DatSetFixture fixture) : IClassFixture<DatS
         Vitals = [new VitalDesc(1, 5, 0, 0, 52), new VitalDesc(3, 0, 0, 0, 120), new VitalDesc(5, 0, 0, 0, 75)],
     };
 
-    private (LoginRig Rig, GamePlayScreen Screen, IInboundMessageHandler Handler) EnterGame(bool describe = true, uint options1 = StandInPlayerStats.AceDefaultOptions1)
+    private (LoginRig Rig, GamePlayScreen Screen, IInboundMessageHandler Handler) EnterGame(bool describe = true, uint options1 = StandInPlayerStats.AceDefaultOptions1, IScreenLayoutStore? layouts = null)
     {
         IInboundMessageHandler? handler = null;
         var rig = new LoginRig(fixture, h =>
@@ -47,6 +47,7 @@ public sealed class GameShellG6Tests(DatSetFixture fixture) : IClassFixture<DatS
             StandInSessions.AnswerLocally(h, TimeSpan.FromSeconds(0.6));
         }, liveGame: true);
         rig.Run(2.5);
+        rig.Manager.Services.ScreenLayouts = layouts;
         rig.Flow.QueueUIMode(UiModes.GamePlay);
         rig.Frame();
         rig.Frame();
@@ -158,7 +159,7 @@ public sealed class GameShellG6Tests(DatSetFixture fixture) : IClassFixture<DatS
     // ------------------------------------------------------------------ options
 
     [RequiresLocalDatsFact]
-    public void The_options_panel_lists_every_option_and_ghosts_those_m2_does_not_honour()
+    public void The_options_panel_lists_every_option_and_ghosts_none()
     {
         var (rig, screen, _) = EnterGame();
         using var _ = rig;
@@ -166,7 +167,7 @@ public sealed class GameShellG6Tests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Equal(49, panel.Boxes.Count);
         foreach (var box in panel.Boxes)
         {
-            Assert.Equal(box.Option!.Honoured, box.State != UiStateIds.Ghosted && !box.Ghosted);
+            Assert.True(box.State != UiStateIds.Ghosted && !box.Ghosted, box.Option!.Name); // M5 6 u1 (D32): all 49 are settable
             Assert.False(string.IsNullOrWhiteSpace(box.Text), box.Option.Name);
         }
 
@@ -178,10 +179,12 @@ public sealed class GameShellG6Tests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.True(panel.Reset!.Ghosted);
     }
 
+    // This rig's stand-in has no world part (AnswerLocally), so the Action API refuses GameAction 0x01A1 as "offline session"; the answered path (the words stored, returned in the next description) is StandInRetail6Tests and the play-check. These tests read what the panel ASKED for from the
+    // action log and let the words arrive the way the server's description would (IActionApi.SetSessionOption sets the model's words).
     [RequiresLocalDatsFact]
-    public void An_honoured_option_takes_effect_on_Apply_and_swaps_the_vitals_window()
+    public void Apply_asks_for_both_words_and_the_vitals_window_follows_when_the_words_arrive()
     {
-        var (rig, screen, handler) = EnterGame();
+        var (rig, screen, _) = EnterGame();
         using var _ = rig;
         var panel = screen.OptionsPanel!;
         Assert.True(screen.StackedVitals!.Visible);
@@ -204,63 +207,134 @@ public sealed class GameShellG6Tests(DatSetFixture fixture) : IClassFixture<DatS
 
         Assert.True(rig.Click(panel.Apply));
         rig.Frame();
+        var asked = $"SetCharacterOptions options1=0x{options1Before | PlayerQualities.SideBySideVitalsOption:X8} options2=0x{rig.Session.State.Self.Qualities.CharacterOptions2:X8}";
+        Assert.Contains(rig.Log.Lines, l => l.Contains(asked, StringComparison.Ordinal)); // both words, with the changed bit
+        Assert.False(box.Saved); // the rig's stand-in refused it as offline (no world part): nothing was saved, the box still shows the unsent change and Apply stays enabled
+        Assert.True(box.Current);
+        Assert.False(panel.Apply.Ghosted);
+        Assert.True(rig.Click(panel.Reset));
+        Assert.False(box.Current);
+        Assert.True(panel.Apply.Ghosted);
+
+        rig.Session.Actions.SetSessionOption(1, PlayerQualities.SideBySideVitalsOption, true); // the words as the server returns them
+        rig.Frame();
         Assert.False(screen.StackedVitals.Visible);
         Assert.True(screen.SideBySideVitals.Visible);
         Assert.True(screen.Options!.SideBySideVitals);
-        Assert.Equal(options1Before | PlayerQualities.SideBySideVitalsOption, rig.Session.State.Self.Qualities.CharacterOptions1);
-        Assert.True(panel.Apply.Ghosted);
+        Assert.True(box.Current); // the panel follows the options
 
-        // Reset undoes a pending change; Defaults restores the honoured options' defaults.
+        // Reset undoes a pending change; Defaults sets every option's default for Apply to send.
         Assert.True(rig.Click(box));
         Assert.False(box.Current);
         Assert.True(rig.Click(panel.Reset));
         Assert.True(box.Current);
-        Assert.True(rig.Click(box));
-        Assert.True(rig.Click(panel.Apply));
-        rig.Frame();
-        Assert.True(screen.StackedVitals.Visible);
-        Assert.Equal(options1Before, rig.Session.State.Self.Qualities.CharacterOptions1);
-
-        // A description that arrives later keeps the player's choice for the session.
-        Assert.True(rig.Click(box));
-        Assert.True(rig.Click(panel.Apply));
-        handler.OnPlayerDescription(new InboundContext(0, MessageQueue.SmartBox, 0), new GameEventHeader(1, 1, 0x0013), Description());
-        Assert.True(screen.Options!.SideBySideVitals);
+        panel.RestoreDefaults();
+        Assert.False(box.Current);
+        Assert.Equal(PlayerOptionTable.All.Count(static o => o.Default), panel.Boxes.Count(static b => b.Current));
     }
 
     [RequiresLocalDatsFact]
-    public void A_ghosted_option_cannot_change_and_nothing_goes_to_the_server()
+    public void An_option_with_no_client_effect_is_not_ghosted_and_a_refused_send_claims_nothing()
     {
         var (rig, screen, _) = EnterGame();
         using var _ = rig;
         var panel = screen.OptionsPanel!;
         var options = screen.Options!;
         var run = PlayerOptionTable.All.First(static o => o.Name == "ToggleRun");
-        var before = (rig.Session.State.Self.Qualities.CharacterOptions1, rig.Session.State.Self.Qualities.CharacterOptions2);
+        Assert.False(run.Honoured);
+        var was = options.Get(run);
+        Assert.NotEqual(UiStateIds.Ghosted, panel.BoxOf(run)!.State);
 
-        Assert.False(options.TrySet(run, !options.Get(run))); // by code
-        var box = panel.BoxOf(run)!;
-        var shown = box.Current;
-        box.BroadcastElementMessage(UiMessageIds.ButtonClick); // by the page, as a click that reached a ghosted box would
-        Assert.Equal(shown, box.Current);
-        Assert.True(panel.Apply!.Ghosted);
-        Assert.False(options.Get(run) != ((PlayerOptionTable.DefaultWord1 & run.Mask) != 0));
-        Assert.Equal(before, (rig.Session.State.Self.Qualities.CharacterOptions1, rig.Session.State.Self.Qualities.CharacterOptions2));
+        Assert.False(options.TrySet(run, !was)); // the rig's stand-in refuses the send (no world part); the option does not change
+        rig.Frame();
+        Assert.Equal(was, options.Get(run));
         Assert.Equal(0, options.ChangeCount);
-        Assert.Contains(rig.Log.Lines, static l => l.Contains("ToggleRun", StringComparison.Ordinal) && l.Contains("ghosted", StringComparison.Ordinal));
+        Assert.Contains(rig.Log.Lines, static l => l.Contains("the options were not sent", StringComparison.Ordinal));
+        Assert.DoesNotContain(rig.Log.Lines, static l => l.Contains("ghosted", StringComparison.Ordinal) && l.Contains("ToggleRun", StringComparison.Ordinal));
+        Assert.False(panel.BoxOf(run)!.Changed);
     }
 
     [RequiresLocalDatsFact]
-    public void The_vivid_indicator_option_flips_its_bit_in_the_sessions_word_only()
+    public void The_vivid_indicator_option_follows_the_words_the_model_holds()
     {
         var (rig, screen, _) = EnterGame();
         using var _ = rig;
         var options = screen.Options!;
         Assert.True(options.VividTargetingIndicator);
-        Assert.True(options.TrySet(PlayerOptionTable.VividTargetingIndicator, false));
+        rig.Session.Actions.SetSessionOption(1, 0x8000, false); // the words as the server returns them
+        rig.Frame();
         Assert.False(options.VividTargetingIndicator);
         Assert.Equal(StandInPlayerStats.AceDefaultOptions1 & ~0x8000u, rig.Session.State.Self.Qualities.CharacterOptions1);
-        Assert.Equal(1, options.ChangeCount);
+    }
+
+    // ------------------------------------------------------------------ the window layout (M5 6 u1, D33)
+
+    [RequiresLocalDatsFact]
+    public void A_window_moved_and_a_chat_mask_changed_are_still_so_at_the_next_world_entry()
+    {
+        var store = new MemoryScreenLayoutStore();
+        var (rig, screen, _) = EnterGame(layouts: store);
+        using var _ = rig;
+        rig.Frame();
+        Assert.True(screen.LayoutLoaded);
+        var name = Assert.IsType<string>(screen.LayoutFileName);
+        Assert.StartsWith("UI-", name, StringComparison.Ordinal);
+        Assert.EndsWith(".txt", name, StringComparison.Ordinal);
+        Assert.Empty(store.Names); // nothing is written before the player leaves
+        var toolbar = screen.Toolbar!;
+        var home = (toolbar.Box.X0, toolbar.Box.Y0);
+        var moved = (X: home.Item1, Y: Math.Max(0, home.Item2 - 24));
+        toolbar.MoveTo(moved.X, moved.Y);
+        var chat = screen.Chat!.Windows.First(static w => w.Window.ElementId == GamePlayScreen.MainChatId);
+        var defaultMask = chat.TextTypeMask;
+        chat.TextTypeMask = defaultMask & ~1UL << 3;
+
+        rig.Flow.QueueUIMode(UiModes.CharacterManagement); // leaving the world writes the layout
+        rig.Frame();
+        Assert.Contains(name, store.Names);
+        Assert.Contains($"<TBAR> X:{moved.X} Y: {moved.Y} ", store.Read(name), StringComparison.Ordinal);
+
+        rig.Flow.QueueUIMode(UiModes.GamePlay);
+        rig.Frame();
+        rig.Frame();
+        var again = Assert.IsType<GamePlayScreen>(rig.Flow.CurrentScreen);
+        Assert.NotSame(screen, again);
+        Assert.Equal(moved, (again.Toolbar!.Box.X0, again.Toolbar.Box.Y0));
+        Assert.Equal(defaultMask & ~1UL << 3, again.Chat!.Windows.First(static w => w.Window.ElementId == GamePlayScreen.MainChatId).TextTypeMask);
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_resize_saves_the_places_under_the_old_size_loads_the_new_size_and_the_exit_names_the_file_by_the_size_at_the_save()
+    {
+        var store = new MemoryScreenLayoutStore();
+        var (rig, screen, _) = EnterGame(layouts: store);
+        using var _ = rig;
+        rig.Frame();
+        Assert.True(screen.LayoutLoaded);
+        var small = Assert.IsType<string>(screen.LayoutFileName);
+        Assert.Equal(1, screen.LayoutReads);
+        var toolbar = screen.Toolbar!;
+        var homeSmall = (toolbar.Box.X0, toolbar.Box.Y0);
+        toolbar.MoveTo(homeSmall.Item1, Math.Max(0, homeSmall.Item2 - 24));
+        var movedSmall = (toolbar.Box.X0, toolbar.Box.Y0);
+        Assert.NotEqual(homeSmall, movedSmall);
+
+        rig.Manager.SetScale(UiScalePolicy.Choose(1280, 720, 1)); // the player drags the window larger
+        rig.Frame();
+
+        Assert.Equal(2, screen.LayoutReads); // the new size's file was looked for (retail reloads "#auto" for the new size)
+        var large = Assert.IsType<string>(screen.LayoutFileName);
+        Assert.NotEqual(small, large);
+        Assert.EndsWith("-1280-720.txt", large, StringComparison.Ordinal);
+        Assert.False(screen.LastLayoutLoad.Found); // no file for the large size yet: the windows stay as they are
+        Assert.Contains($"<TBAR> X:{movedSmall.Item1} Y: {movedSmall.Item2} ", store.Read(small), StringComparison.Ordinal); // the small size's places were written under the small size's name
+        Assert.Null(store.Read(large));
+
+        toolbar.MoveTo(10, 10);
+        rig.Flow.QueueUIMode(UiModes.CharacterManagement); // leaving the world writes the layout, under the size at the time of the save
+        rig.Frame();
+        Assert.Contains("<TBAR> X:10 Y: 10 ", store.Read(large), StringComparison.Ordinal);
+        Assert.Contains($"<TBAR> X:{movedSmall.Item1} Y: {movedSmall.Item2} ", store.Read(small), StringComparison.Ordinal); // and the small size's file is not overwritten by the large size's places
     }
 
     // ------------------------------------------------------------------ logout

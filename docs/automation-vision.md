@@ -42,6 +42,8 @@
     `MoveIntents.ReportHumanKey`, and the runner ends Interrupted, releasing every key it holds (the controller's command lists are stacks, so even the key the person
     pressed carries a runner entry that must go). Headless has no human: the event never fires. A run paused by a station may be moved (a recall) without failing; `Resume`
     re-anchors and replans. The stuck recovery is a four-rung ladder ending Blocked, naming the nearest static, after three plans.
+  - *As built in M5 item 1 (D13).* The kill switch and dry run reach every Automation send of the buff passes, the keeper's casts, harm-heal, recalls and the journey's casts, so they now stop or answer those; the host's own log-offs, logins and caster-swap wields stay outside them (`docs/session.md` section 45).
+  - *As built in M5 item 7 (D145).* The autopilot's control is two chat commands, `/stop` and `/auto`, typed in the chat window and handled by the client (never sent to the server). While the autopilot runs, `HumanKeyLock` makes the movement keys do nothing and shows a rate-limited chat notice; `/stop` stops it where it stands, cancels every queued automation action, releases every held key and unlocks the keys; any stop the bot makes itself unlocks them with a reason in the chat; `/auto` re-reads every state a fight needs from the live state, fixes each gap by its named recovery, says so in chat and resumes. Num Lock and the movement-key hand-off of M5 item 4 are retired for it, and the owner took the controls and gave them back live in the 606-minute run (`docs/session.md` section 54).
 - **R7. Loud stubs.** An unimplemented action fails with a visible error. It never fakes success.
 
 ### 1.2 Observation API: what the automation layer must be able to see
@@ -121,6 +123,8 @@ Every action returns a **handle** that completes on server confirmation, an erro
 
 **E. Mission queue.** A top-level meta made of steps, for example: buff → recall → nav → combat → loot → vendor → repeat until time or condition → logout. Missions are saved and named. No calendar scheduling and no offline progress.
 
+- *As built (M5 items 4 and 7):* there is one built-in mission, not a saved, named queue: `AutopilotScenario` walks the journey's own stations (buff, travel, fight, trip, death) in cycles with the fight's external stop, the upkeep, the stop rules (`--autopilot-minutes`, `--autopilot-level`, a typed `/stop`), the watchdogs and the reconnect (D57), and since item 7 an audit at every start, reconnect and `/auto` plus a recovery table (`StartupAudit`, `RecoveryTable`, D141, D145). It plays BSD Mage on one ground's profile; saved, named missions are not built (`docs/session.md` section 54).
+
 **F. Scripting.**
 1. An **expression language** for conditions, actions and chat templates (the UB-style need).
 2. A **full scripting tier** with a sandbox and budgets, for example: 250 µs per tick per character; 2 MB per script state; no file, network or reflection access; coroutines yield on every action. The language is an open question (§5): Lua (MoonSharp) or C# scripts.
@@ -157,6 +161,11 @@ Every action returns a **handle** that completes on server confirmation, an erro
 - Profiles and missions are user files: JSON plus scripts, in a per-user profiles folder. Bundled samples live in the repo; user profiles do not. Every spell or item name in a sample is checked against the dats.
 - Runner checkpoints (state, call stack, watchdogs, nav index, variables) are saved on every state change and on exit, so a session can resume.
 - Character state belongs to ACE.
+- *As built (M5 item 4):* the autopilot's checkpoint is one JSON file (schema 1): the state, the cycle counts, the totals,
+  the cycle in progress, the minutes used and the last decision. It is written on every state change, on exit, at a stop
+  and every 60 s inside a state. A start reads its counts and budget only; the world decides the state. The game keeps it
+  at `user://autopilot/<character>.json`, the headless run in `--autopilot-checkpoint-dir`; `docs/session.md` section 54.
+- *As built (M5 item 7):* a resume trusts the file for the counts and the budget only. A start, a reconnect and `/auto` run the full audit (`AutopilotScenario.FullAudit`, `StartupAudit`, P7n, D145): every state a fight needs is read from the live world, not from what the autopilot last did, and each gap is fixed by its named recovery and checked after (`docs/session.md` section 54). The soak's stop file (`--autopilot-stop-file`) ends a run cleanly from outside.
 
 **L. Observability and UX.**
 - A live inspector: current state, the rule that fired, last action and its outcome, pending action handles, watchdogs, call stack, nav waypoint, variables.

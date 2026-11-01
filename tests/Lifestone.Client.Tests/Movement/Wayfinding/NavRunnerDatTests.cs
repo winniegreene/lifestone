@@ -1,4 +1,6 @@
 using System.Numerics;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Tests.Session.Grounds;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement;
 using Lifestone.Client.Movement.Routes;
@@ -169,7 +171,7 @@ public sealed class NavRunnerDatTests(DatSetFixture fixture, ITestOutputHelper o
     {
         var coord = new LandblockCoord(1, 5);
         var all = LandblockCellSet.Load(new CellStructureLibrary(Dats), coord);
-        var graph = DenRooms.GraphOf(all);
+        var graph = GroundRooms.GraphOf(all, DenGround.Profile);
         var world = new PhysicsWorld();
         world.Attach(new LandblockCollisionBuilder(Dats).Build(coord));
         var h = new ActionHarness(offline: true);
@@ -177,12 +179,12 @@ public sealed class NavRunnerDatTests(DatSetFixture fixture, ITestOutputHelper o
         var walker = OfflineWalker.Create(Dats, world, NullLogSink.Instance, new OfflinePlayerWeenie(FighterRunSkill), sink: audit);
         h.Api.Move.Bind(walker.Controller, walker.Controller.Options.RunByDefault);
         world.UseTime(0.0);
-        Assert.Equal(Data.Physics.Objects.SetPositionError.OK, walker.Physics.SetPositionSimple(BlackSpawnDen.Arrival, sliding: true));
+        Assert.Equal(Data.Physics.Objects.SetPositionError.OK, walker.Physics.SetPositionSimple(DenGround.Arrival, sliding: true));
         using var confirmer = new RouteConfirmer(world, walker.Physics.Setup!);
         var source = new RoomPathSource(graph);
         var now = 0.0;
         var legs = new List<string>();
-        foreach (var lowWord in DenWalk.Tour)
+        foreach (var lowWord in DenGround.SpawnLowWords)
         {
             var cellId = 0x01050000u | lowWord;
             var goal = NavGoal.ToPoint(new NavPoint(0x01050000u, graph.RoomFrame(cellId)!.Value.Origin), cellId);
@@ -204,8 +206,8 @@ public sealed class NavRunnerDatTests(DatSetFixture fixture, ITestOutputHelper o
             Assert.Equal(cellId, walker.Position.CellId);
         }
 
-        Assert.Equal(DenWalk.Tour.Count, legs.Count);
-        Assert.Equal(DenWalk.Tour.Count, audit.Plans - audit.Replans);
+        Assert.Equal(DenGround.SpawnLowWords.Count, legs.Count);
+        Assert.Equal(DenGround.SpawnLowWords.Count, audit.Plans - audit.Replans);
         Assert.Equal(0, audit.LadderRungs);
     }
 
@@ -219,7 +221,7 @@ public sealed class NavRunnerDatTests(DatSetFixture fixture, ITestOutputHelper o
     public void The_walker_reaches_the_mages_corpse_in_the_den_from_the_den_fights_end_in_a_short_confirmed_run()
     {
         var coord = new LandblockCoord(1, 5);
-        var graph = DenRooms.GraphOf(LandblockCellSet.Load(new CellStructureLibrary(Dats), coord));
+        var graph = GroundRooms.GraphOf(LandblockCellSet.Load(new CellStructureLibrary(Dats), coord), DenGround.Profile);
         var world = new PhysicsWorld();
         world.Attach(new LandblockCollisionBuilder(Dats).Build(coord));
         var start = new CellFrame(0x0105036Fu, new AcFrame(new Vector3(100.08f, -140.87f, 0f), Quaternion.Identity));

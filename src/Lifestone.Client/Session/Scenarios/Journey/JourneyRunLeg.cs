@@ -55,6 +55,12 @@ public interface IJourneyLegBody
     /// <summary>Feeds the streamer the landblocks ahead on the runner's route.</summary>
     /// <param name="runner">The runner.</param>
     void FollowRoute(NavRunner runner);
+
+    /// <summary>
+    /// A door Setup's extent by its id (<see cref="DoorCrossings.SetupExtents"/> over the host's dats), the size of a door the leg's runner maps to its doorway; null for a host that gives none
+    /// (every door then assumes <see cref="DoorCrossings.UnknownRadiusMetres"/>, logged once). The two hosts return <c>DoorCrossings.SetupExtents(dats)</c> here (<c>TODO(door-extent-host)</c> is closed).
+    /// </summary>
+    Func<uint, float?>? SetupExtent => null;
 }
 
 /// <summary>
@@ -146,7 +152,9 @@ public sealed class JourneyRunLeg(JourneyLegPlanner planner, IJourneyLegBody bod
             INavPathSource source;
             try
             {
-                source = planner.SourceFor(from.CellId, JourneyLegPlanner.GoalCellOf(goal), body.Map);
+                source = planner.SourceFor(from.CellId, JourneyLegPlanner.GoalCellOf(goal), body.Map, out var why);
+                log.Info(body.LogCategory, "the leg's path source", new LogField("leg", name), new LogField("from", $"0x{from.CellId:X8}"),
+                    new LogField("to", $"0x{JourneyLegPlanner.GoalCellOf(goal):X8}"), new LogField("rooms", source is INavRoomSource r ? $"0x{r.Rooms.LandblockId >> 16:X4}" : null), new LogField("why", why));
             }
             catch (Exception e) when (e is InvalidOperationException or AggregateException)
             {
@@ -164,6 +172,7 @@ public sealed class JourneyRunLeg(JourneyLegPlanner planner, IJourneyLegBody bod
             }
 
             _runner = body.NewRunner(session, source, "journey-" + name);
+            _runner.Doors = new SessionDoorFeed(session, log, body.SetupExtent); // M5 item 5, d1: a closed door on the route is opened (purpose=door), not walked through
             _moves = body.Moves;
             _runner.Start(goal, now);
             log.Info(body.LogCategory, "a leg on foot begins", JourneyLegPlanner.BeginFields(name, request, goal, from.CellId));

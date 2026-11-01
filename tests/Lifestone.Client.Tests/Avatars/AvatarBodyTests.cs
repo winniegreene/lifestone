@@ -129,7 +129,8 @@ public sealed class AvatarBodyTests
     {
         // Retail UpdateObjectInternal: with CPartArray::GetNumSphere 0 the old origin goes back into the new frame, so the
         // interpolation's steps never move the lamp. The first progress check passes against BIG_DISTANCE, the second
-        // finds no progress: the node fails, and the position manager blips the lamp to it in the same update.
+        // finds no progress: the node fails, and the position manager blips the lamp to it in the same update. The checks count update steps at retail's
+        // 30 Hz (D74, M5 item 5 F7), two of these 60 Hz frames each.
         var sources = AvatarRig.Sources();
         var set = new AvatarSet(sources);
         var start = AvatarRig.At(new Vector3(50, 50, 0));
@@ -152,7 +153,7 @@ public sealed class AvatarBodyTests
             Step(set, seconds: 1.0 / 60.0);
         }
 
-        Assert.Equal(2 * InterpolationManager.ProgressCheckFrames, frames);
+        Assert.Equal(2 * InterpolationManager.ProgressCheckFrames * 2, frames);
         Assert.True(PositionFrames.Distance(target, body.Position) < 1e-4f, $"at {body.Position}");
     }
 

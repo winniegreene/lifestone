@@ -64,6 +64,12 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
     /// <summary>The Hide panel button.</summary>
     public const uint HideButtonId = 0x7F000127;
 
+    /// <summary>
+    /// The Autopilot button (M5 item 4 h3, DoD 9): <see cref="ToggleAutopilot"/>, since M5 7 D145 the same as typing <c>/stop</c> while the autopilot runs and <c>/auto</c> otherwise (the play host wires it so; Num Lock no longer
+    /// is the autopilot's key). The word "Autopilot" is Lifestone's own literal and the button a <b>placeholder</b>: retail never had one.
+    /// </summary>
+    public const uint AutopilotButtonId = 0x7F000128;
+
     /// <summary>The message the panel shows against a server that is not on loopback (a Lifestone literal on the retail message dialog).</summary>
     public const string NotLoopbackText = "The Lifestone tools work only against the bundled server on this computer. This server is not on loopback, so the tools are switched off.";
 
@@ -86,6 +92,71 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
     private bool _focusPending;
     private bool _disposed;
     private readonly Action<string> _chat;
+
+    /// <summary>What the Autopilot button does: the play host wires /stop while the autopilot runs and /auto otherwise (M5 7 D145). Null until it is wired; a press then says so in the status line and the chat.</summary>
+    public Action? ToggleAutopilot { get; set; }
+
+    /// <summary>How many times the Autopilot button was pressed.</summary>
+    public int AutopilotPresses { get; private set; }
+
+    /// <summary>The button's text when the dial is off or done (Lifestone's own literal; a placeholder button, retail never had one).</summary>
+    public const string AutopilotStartText = "Autopilot";
+
+    /// <summary>The button's text while the dial runs: a press asks it to stop.</summary>
+    public const string AutopilotStopText = "Stop";
+
+    /// <summary>The button's text while a stop is asked and the loop ends at its next safe point.</summary>
+    public const string AutopilotStoppingText = "Stopping";
+
+    /// <summary>The button's text while a person or the kill switch paused the dial: a press hands the controls back.</summary>
+    public const string AutopilotResumeText = "Resume";
+
+    /// <summary>
+    /// What a press of the Autopilot button will do, as the button's text (M5 item 7 s1, 4-R17): Off and Done "Autopilot" (a press starts), Running "Stop", Stopping "Stopping", Interrupted and Halted "Resume".
+    /// Lifestone's own literals on a placeholder button.
+    /// </summary>
+    /// <param name="mode">The dial's mode.</param>
+    public static string AutopilotButtonText(AutopilotMode mode) => mode switch
+    {
+        AutopilotMode.Running => AutopilotStopText,
+        AutopilotMode.Stopping => AutopilotStoppingText,
+        AutopilotMode.Interrupted or AutopilotMode.Halted => AutopilotResumeText,
+        _ => AutopilotStartText,
+    };
+
+    /// <summary>The text the Autopilot button shows now (the dial's mode through <see cref="Autopilot"/>; "Autopilot" with none wired).</summary>
+    public string AutopilotText => AutopilotButtonText(_autopilot?.Status.Mode ?? AutopilotMode.Off);
+
+    /// <summary>
+    /// The autopilot whose mode the button's text follows: the play host sets the dial (it reads <see cref="IAutopilotStatusSource.Status"/> only, never the host). Its <see cref="IAutopilotStatusSource.Changed"/> rewrites the text.
+    /// </summary>
+    public IAutopilotStatusSource? Autopilot
+    {
+        get => _autopilot;
+        set
+        {
+            if (ReferenceEquals(_autopilot, value))
+            {
+                return;
+            }
+
+            if (_autopilot is not null)
+            {
+                _autopilot.Changed -= RefreshAutopilotText;
+            }
+
+            _autopilot = value;
+            if (value is not null && !_disposed)
+            {
+                value.Changed += RefreshAutopilotText;
+            }
+
+            RefreshAutopilotText();
+        }
+    }
+
+    private IAutopilotStatusSource? _autopilot;
+    private UiButton? _autopilotButton;
 
     /// <summary>The panel over <paramref name="parent"/> (the shell's root). The window is made when the panel is first opened (see <see cref="EnsureWindow"/>).</summary>
     /// <param name="context">The shell's context (the session and the element manager).</param>
@@ -137,6 +208,8 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
         _statusText = Find<UiTextElement>(StatusId);
         _up = Find<UiButton>(UpId);
         _down = Find<UiButton>(DownId);
+        _autopilotButton = Find<UiButton>(AutopilotButtonId);
+        RefreshAutopilotText();
         Window.SetVisible(false);
         Window.RegisterForElementMessages(this);
         return Window;
@@ -292,6 +365,9 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
             case AddXpButtonId:
                 Model.AddXp(_amount?.Text);
                 return UiListenResult.Handled;
+            case AutopilotButtonId:
+                PressAutopilot();
+                return UiListenResult.Handled;
             case HideButtonId:
                 Close();
                 return UiListenResult.Handled;
@@ -309,6 +385,11 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
         }
 
         _disposed = true;
+        if (_autopilot is not null)
+        {
+            _autopilot.Changed -= RefreshAutopilotText;
+        }
+
         Model.Detach();
         _unavailable.Dispose();
         Model.Changed -= Refresh;
@@ -325,6 +406,24 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
         _context.Manager.LogOnce($"tools:{elementId:X8}", LogSeverity.Error, $"the tools panel: element 0x{elementId:X8} is missing from tools.json or is not a {typeof(T).Name}; that part of the panel does nothing (TODO(g7-tools-layout))");
         return null;
     }
+
+    /// <summary>The Autopilot button's press (the checks and tests press it by this too): the toggle the host wired, or a plain line when none is.</summary>
+    public void PressAutopilot()
+    {
+        AutopilotPresses++;
+        if (ToggleAutopilot is { } toggle)
+        {
+            toggle();
+            return;
+        }
+
+        const string unwired = "The autopilot is not available in this host.";
+        Model.SetStatus(unwired);
+        _chat("Lifestone: " + unwired);
+        _context.Manager.Services.Log.Warn(UiElementManager.Category, "the Autopilot button was pressed but nothing is wired to it (TODO(m5-autopilot-key-unwired): the play host wires ToggleAutopilot when it starts)");
+    }
+
+    private void RefreshAutopilotText() => _autopilotButton?.SetText(AutopilotText);
 
     private void Refresh()
     {

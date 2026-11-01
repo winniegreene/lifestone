@@ -6,8 +6,11 @@ namespace Lifestone.Client.RetailUi.Options;
 /// <param name="Name">Retail's name; its label is the string <c>ID_PlayerOption_&lt;Name&gt;</c> and its tooltip <c>..._Help</c> (table enum 0x10000003).</param>
 /// <param name="Word">1 for the first option word of the PlayerDescription, 2 for the second.</param>
 /// <param name="Mask">The option's bit in that word (the wire values, ACE's <c>CharacterOptions1</c> and <c>CharacterOptions2</c> enums).</param>
-/// <param name="Honoured">True when Lifestone M2 acts on the option for the session; the others are shown and ghosted.</param>
-/// <param name="Effect">What an honoured option does, or why a ghosted one is ghosted (the named TODO).</param>
+/// <param name="Honoured">
+/// True when Lifestone builds a client-side effect for the option (the vitals window, the vivid indicator). Every option is settable and goes to the server on Apply
+/// (M5 6 u1, D32); a false here only means the client does nothing more with it, and the panel logs <c>TODO(g6-option-effects)</c> once when the player changes it.
+/// </param>
+/// <param name="Effect">What the client-side effect is, or the named TODO when there is none.</param>
 public sealed record PlayerOptionDef(string Name, int Word, uint Mask, bool Honoured, string Effect)
 {
     /// <summary>The retail default (<c>PlayerModule::GetDefaultOptionValue</c>): the bit in the default words ACE and the PlayerDescription codec document (0x50C4A54A and 0x00948700).</summary>
@@ -38,7 +41,7 @@ public static class PlayerOptionTable
     /// <summary>The second default option word (retail's default when the flags omit it: 0x948700).</summary>
     public const uint DefaultWord2 = 0x00948700;
 
-    private const string NotM2 = "ghosted: nothing in Lifestone M2 reads it (TODO(g6-option-effects))";
+    private const string NotM2 = "sent to the server (ACE keeps it and returns it with the next description; it acts on those it reads itself); no client-side effect in Lifestone yet (TODO(g6-option-effects))";
 
     private static PlayerOptionDef Off(string name, int word, uint mask) => new(name, word, mask, false, NotM2);
 
@@ -88,6 +91,6 @@ public static class PlayerOptionTable
     /// <summary>Every option, in page order.</summary>
     public static IEnumerable<PlayerOptionDef> All => Sections.SelectMany(static s => s.Options);
 
-    /// <summary>The options Lifestone M2 honours.</summary>
+    /// <summary>The options with a client-side effect in Lifestone (the others are still settable and sent).</summary>
     public static IEnumerable<PlayerOptionDef> Honoured => All.Where(static o => o.Honoured);
 }

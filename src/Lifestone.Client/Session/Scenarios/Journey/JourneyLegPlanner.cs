@@ -2,6 +2,7 @@ using System.Numerics;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Terrain;
 using Lifestone.Data.World;
@@ -12,7 +13,7 @@ namespace Lifestone.Client.Session.Scenarios.Journey;
 /// <summary>
 /// The journey's leg planning, one for both hosts (M4 P5b J5b): the goal a <see cref="TravelRequest"/> names (<see cref="GoalOf"/>: a point with the
 /// terrain's height when the request has none, an object's own position, the indoor room an object indoors is reached in), the path source the two ends
-/// need (<see cref="SourceFor"/>: the den's room graph, the indoor-outdoor source with its exit route when either end is indoors, else the outdoor planner),
+/// need (<see cref="SourceFor(uint, uint, NavMap?)"/>: a dungeon ground's room graph (<see cref="GroundRooms"/>), the indoor-outdoor source with its exit route when either end is indoors, else the outdoor planner),
 /// what counts as an arrival (<see cref="Arrived"/>) and the named failures (<see cref="FailureOf"/>). The headless host (<see cref="HeadlessJourneyRunnerHost"/>)
 /// and the Godot host differ only in the body that walks (an <see cref="Movement.OfflineWalker"/> of their own or the player's controller) and in where the
 /// collision and the nav tiles come from (<see cref="IJourneyLegBody"/>); the leg itself is <see cref="JourneyRunLeg"/>.
@@ -20,25 +21,39 @@ namespace Lifestone.Client.Session.Scenarios.Journey;
 public sealed class JourneyLegPlanner
 {
     private readonly DatSet? _dats;
-    private readonly Func<RoomGraph>? _denSource;
+    private readonly Func<HuntingGround, RoomGraph?>? _graphSource;
+    private readonly HuntingGround? _ground;
     private readonly Dictionary<uint, LandblockCellSet> _cells = [];
     private CellStructureLibrary? _structures;
-    private RoomGraph? _den;
+    private readonly Dictionary<string, RoomGraph> _graphs = [];
 
     /// <summary>A planner over the dats.</summary>
-    /// <param name="dats">The dats (the terrain's heights, the landblocks' cells), or null for a planner that plans only point goals with a height and the host's den (tests).</param>
+    /// <param name="dats">The dats (the terrain's heights, the landblocks' cells), or null for a planner that plans only point goals with a height and the host's ground graph (tests).</param>
     /// <param name="structures">The cell structure library to share (null: made here at the first indoor leg).</param>
-    /// <param name="den">Where the den's room graph comes from (the Godot host builds it on a worker), or null to build it here from the dats at the first den leg.</param>
-    public JourneyLegPlanner(DatSet? dats, CellStructureLibrary? structures = null, Func<RoomGraph>? den = null)
+    /// <param name="graphSource">Where a ground's room graph comes from (the Godot host builds its fight ground's on a worker), or null (or a null answer) to build it here from the dats at the first leg in that ground.</param>
+    /// <param name="ground">The journey's dungeon ground (<see cref="JourneyContext.Dungeon"/>): the room graph a leg in its landblocks plans over; null finds the ground by the cell in the catalog (<see cref="JourneyGrounds.DungeonOf(uint)"/>; M5 3 p1, 2-R12).</param>
+    public JourneyLegPlanner(DatSet? dats, CellStructureLibrary? structures = null, Func<HuntingGround, RoomGraph?>? graphSource = null, HuntingGround? ground = null)
     {
+        _ground = ground;
         _dats = dats;
         _structures = structures;
-        _denSource = den;
+        _graphSource = graphSource;
     }
 
-    /// <summary>The den's floor graph (landblock 0x0105, lean <see cref="DenRooms.MaxLean"/>), loaded once.</summary>
-    /// <exception cref="InvalidOperationException">The host's den source has no graph (it was not built).</exception>
-    public RoomGraph DenGraph() => _den ??= _denSource is { } source ? source() : DenRooms.GraphOf(CellsOf(JourneyGrounds.DenLandblock << 16));
+    /// <summary>The ground's room graph (its walkable cells at its doorway lean, <see cref="GroundRooms"/>), loaded once per ground.</summary>
+    /// <param name="ground">The ground.</param>
+    /// <exception cref="InvalidOperationException">The host's graph source has no graph (it was not built), or the planner has no dats.</exception>
+    public RoomGraph GroundGraph(HuntingGround ground)
+    {
+        ArgumentNullException.ThrowIfNull(ground);
+        if (!_graphs.TryGetValue(ground.Key, out var graph))
+        {
+            graph = _graphSource?.Invoke(ground) ?? GroundRooms.GraphOf(CellsOf(GroundRooms.CoordOf(ground).LandBlockId), ground);
+            _graphs[ground.Key] = graph;
+        }
+
+        return graph;
+    }
 
     /// <summary>The cells of <paramref name="cellId"/>'s landblock, loaded once.</summary>
     /// <param name="cellId">A cell of the landblock.</param>
@@ -100,26 +115,60 @@ public sealed class JourneyLegPlanner
     public static uint GoalCellOf(in NavGoal goal) => goal.CellId ?? goal.Point.LandblockId;
 
     /// <summary>
-    /// The path source for a leg from <paramref name="fromCell"/> to <paramref name="toCell"/>: the den's room graph when either end is in the den; the indoor-outdoor
+    /// The path source for a leg from <paramref name="fromCell"/> to <paramref name="toCell"/>: the ground's room graph when either end is in a dungeon ground; the indoor-outdoor
     /// source (its exit route out of a room, M4 P5b F1-2) when either end is indoors; else the outdoor planner over <paramref name="map"/>.
     /// </summary>
     /// <param name="fromCell">The body's cell.</param>
     /// <param name="toCell">The goal's cell (<see cref="GoalCellOf"/>).</param>
     /// <param name="map">The nav map the outdoor planner reads (not read for the den).</param>
-    public INavPathSource SourceFor(uint fromCell, uint toCell, NavMap? map)
+    public INavPathSource SourceFor(uint fromCell, uint toCell, NavMap? map) => SourceFor(fromCell, toCell, map, out _);
+
+    /// <summary>
+    /// <see cref="SourceFor(uint, uint, NavMap?)"/> with the choice named for the leg's log line (<paramref name="why"/>). The indoor-outdoor source's rooms are the goal's landblock's when
+    /// the goal is a room, else the start's when the start is a room: an outdoor goal is planned to its landblock id (<see cref="GoalCellOf"/>, low word 0, neither an outdoor cell nor a room),
+    /// and before M5 7 P7k that id took the rooms, so a start in a room of another landblock was "not one of the rooms" (live check 2, 2026-10-30: Cindrue's entry hall 0xA9B40117 to the
+    /// Scrivener of Item Magic outdoors in 0xA9B3; <c>indoor-start-unreachable</c>). A room start and a room goal in two landblocks have no source that joins them (TODO(cross-landblock-rooms):
+    /// the goal's rooms are taken, and the plan fails by its own name, <see cref="IndoorOutdoorPathSource.IndoorStartOtherLandblock"/>).
+    /// </summary>
+    /// <param name="fromCell">The body's cell.</param>
+    /// <param name="toCell">The goal's cell (<see cref="GoalCellOf"/>).</param>
+    /// <param name="map">The nav map the outdoor planner reads (not read for the den).</param>
+    /// <param name="why">The source chosen and why, for the leg's log line.</param>
+    public INavPathSource SourceFor(uint fromCell, uint toCell, NavMap? map, out string why)
     {
-        if (toCell >> 16 == JourneyGrounds.DenLandblock || fromCell >> 16 == JourneyGrounds.DenLandblock)
+        if ((JourneyGrounds.DungeonOf(toCell, _ground) ?? JourneyGrounds.DungeonOf(fromCell, _ground)) is { } dungeon)
         {
-            return new RoomPathSource(DenGraph());
+            why = $"rooms of the ground '{dungeon.Key}': an end is in it";
+            return new RoomPathSource(GroundGraph(dungeon));
         }
 
         var planner = new PathPlanner(map ?? throw new InvalidOperationException("the leg has no nav map to plan on"));
         if (!LandDefs.IsOutdoorCell(toCell) || !LandDefs.IsOutdoorCell(fromCell))
         {
-            var indoor = LandDefs.IsOutdoorCell(toCell) ? fromCell : toCell;
+            uint indoor;
+            if (LandDefs.IsEnvCell(toCell))
+            {
+                indoor = toCell;
+                why = !LandDefs.IsEnvCell(fromCell) ? "indoor-outdoor over the goal room's landblock: the goal is a room"
+                    : fromCell >> 16 == toCell >> 16 ? "indoor-outdoor over the landblock of both rooms"
+                    : $"indoor-outdoor over the goal room's landblock; the start's room 0x{fromCell:X8} is in another landblock (TODO(cross-landblock-rooms))";
+            }
+            else if (LandDefs.IsEnvCell(fromCell))
+            {
+                indoor = fromCell;
+                why = fromCell >> 16 == toCell >> 16 ? "indoor-outdoor over the start room's landblock: the goal is outdoors in it"
+                    : $"indoor-outdoor over the start room's landblock: the goal is outdoors in landblock 0x{toCell >> 16:X4}, out through a door, then outdoors";
+            }
+            else
+            {
+                indoor = toCell; // an outdoor start and a goal planned to its landblock id: the rooms hand a goal with no room to the outdoor planner (J5b, kept)
+                why = "indoor-outdoor over the goal's landblock: an outdoor goal (its landblock id) from outdoors, planned outdoors";
+            }
+
             return new IndoorOutdoorPathSource(planner, CellsOf(indoor));
         }
 
+        why = "outdoor: both ends are outdoor cells";
         return new OutdoorPathSource(planner);
     }
 

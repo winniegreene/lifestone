@@ -13,10 +13,14 @@ public sealed class BuffStatModsTests
     public void Every_buff_spell_of_the_profile_has_a_row_and_every_row_is_a_profile_buff_spell()
     {
         var buffIds = ArenaProfile.Lines.Where(l => l.IsBuff).SelectMany(l => l.Spells).Select(s => s.Id).Order().ToArray();
-        Assert.Equal(192, buffIds.Length); // 24 lines of eight levels
+        Assert.Equal(198, buffIds.Length); // 24 lines of eight levels and Spirit Drinker's six (M5 7 P7j, D143)
         Assert.Equal(buffIds, BuffStatMods.BySpell.Keys.Order());
         Assert.All(BuffStatMods.BySpell, kv => Assert.Equal(kv.Key, kv.Value.Id));
         Assert.All(BuffStatMods.BySpell.Values, m => Assert.True(m.IsAdditive != m.IsMultiplicative, $"spell {m.Id} is neither additive nor multiplicative"));
+
+        // M5 7 P7j (D143): Spirit Drinker I-VI adds 0.01 a level to the caster's elemental bonus (stat key 170 WeaponAuraElemental), additive.
+        Assert.Equal([0.01, 0.02, 0.03, 0.04, 0.05, 0.06], ArenaProfile.LineNamed("Spirit Drinker")!.Spells.Select(sp => BuffStatMods.BySpell[sp.Id].Value));
+        Assert.All(ArenaProfile.LineNamed("Spirit Drinker")!.Spells, sp => Assert.True(BuffStatMods.BySpell[sp.Id].IsAdditive && BuffStatMods.BySpell[sp.Id].Key == 170));
 
         // No war or mana spell is in the table.
         Assert.DoesNotContain(ArenaProfile.Lines.Where(l => !l.IsBuff).SelectMany(l => l.Spells), s => BuffStatMods.BySpell.ContainsKey(s.Id));

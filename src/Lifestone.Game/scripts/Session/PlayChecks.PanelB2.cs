@@ -4,6 +4,7 @@ using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Game.Core;
 using Lifestone.Game.RetailUi;
 
 namespace Lifestone.Game.Sessions;
@@ -89,6 +90,21 @@ public sealed partial class PlayChecks
 
         FigureCheck(shell, doll, frameMs);
 
+        // --- the review frames `doll-worn-figure` and `doll-worn-slots` (M5 7 D122, with --play-frames): the kit worn, on the figure view (the wand in the weapon slot, the
+        // armour on the body) and on the slots view (the cap and the coat in the armour slots they cover). Review only, never judged. ---
+        if (_framesDirectory is not null)
+        {
+            HideLightsHud();
+            await Frames(4);
+            SaveExtraFrame("doll-worn-figure");
+            doll.ShowSlotsView(true);
+            await Frames(4);
+            SaveExtraFrame("doll-worn-slots");
+            doll.ShowSlotsView(false);
+            await Frames(2);
+            RestoreLightsHud();
+        }
+
         // Taken off through the Action API: the slots empty as the model's equipped list does.
         for (var i = 0; i < kit.Length; i++)
         {
@@ -105,6 +121,90 @@ public sealed partial class PlayChecks
         await Frames(6);
         var open = shell.PanelHost?.IsOpen ?? false;
         Check(takenOffName, off && emptied && !open && doll.Refreshes == refreshes, $"off={off} slots_emptied={emptied} open={open} refreshes={refreshes}->{doll.Refreshes}");
+
+        await LiveWornSetFramesAsync(shell, doll);
+        await StackCountFrameAsync(shell);
+    }
+
+    /// <summary>
+    /// The review frame <c>pack-stack-25000</c> (M5 7 D132, with --play-frames; review only, never judged): two pyreal stacks of 25,000 in the main pack beside the stand-in's
+    /// 10,000, so the fitted five-digit count shows in the grid (<c>--retail-stack-count</c> restores retail's clipped one).
+    /// </summary>
+    private async Task StackCountFrameAsync(GamePlayScreen shell)
+    {
+        var session = _host.Session;
+        if (_framesDirectory is null || session is null)
+        {
+            return;
+        }
+
+        var spawns = new[] { session.Tools.SpawnItem(Lifestone.Client.Session.StandIn.StandInItemKind.PyrealWcid, 25000, ActionSource.Host), session.Tools.SpawnItem(Lifestone.Client.Session.StandIn.StandInItemKind.PyrealWcid, 25000, ActionSource.Host) };
+        await WaitFor(() => spawns.All(static s => s.IsCompleted), 20.0);
+        await OpenPanelAsync(shell, GamePaperDoll.Panel, 6);
+        HideLightsHud();
+        await Frames(20);
+        SaveExtraFrame("pack-stack-25000");
+        RestoreLightsHud();
+        await ClosePanelAsync(shell, GamePaperDoll.Panel);
+        Log.Info(LogCategory, "pack stack count frame", ("stacks", string.Join(" ", spawns.Select(static s => $"0x{s.Result?.Guid ?? 0:X8}"))));
+    }
+
+    /// <summary>
+    /// The review frames <c>doll-live-figure</c> and <c>doll-live-slots</c> (M5 7 D122, with --play-frames; review only, never judged): BSD Mage's worn set as the live doll
+    /// logged it on 2026-10-29 (the stand-in's own Shirt and Wide Breeches, with the Faran Robe with Hood 5851 at 0x7F01, Leather Gauntlets 56 at 0x20 and the Wand 2472 held;
+    /// the stand-in's boots come off first, as the robe covers the feet), on the figure view retail opens on and on the slots view. Everything is put back afterwards.
+    /// </summary>
+    private async Task LiveWornSetFramesAsync(GamePlayScreen shell, GamePaperDoll doll)
+    {
+        var session = _host.Session;
+        if (_framesDirectory is null || session is null)
+        {
+            return;
+        }
+
+        var inventory = session.State.Self.Inventory;
+        var boots = inventory.Equipped.FirstOrDefault(static e => (e.Location & 0x100) != 0);
+        if (boots.Guid != 0)
+        {
+            session.Actions.MoveToPack(boots.Guid, 0, 0, ActionSource.Host);
+            await WaitFor(() => !inventory.TryGetEquipped(boots.Guid, out _), 10.0);
+        }
+
+        (uint Wcid, EquipMask Location)[] set = [(5851, (EquipMask)0x7F01), (56, EquipMask.HandWear), (2472, EquipMask.Held)];
+        var spawns = set.Select(s => session.Tools.SpawnItem(s.Wcid, null, ActionSource.Host)).ToArray();
+        await WaitFor(() => spawns.All(static s => s.IsCompleted), 20.0);
+        var guids = spawns.Select(static s => s.Result?.Guid ?? 0u).ToArray();
+        await WaitFor(() => guids.All(g => g != 0 && session.State.Objects.Contains(g)), 10.0);
+        for (var i = 0; i < set.Length; i++)
+        {
+            session.Actions.Wield(guids[i], set[i].Location, ActionSource.Host);
+        }
+
+        var worn = await WaitFor(() => guids.All(g => inventory.TryGetEquipped(g, out _)), 20.0);
+        await OpenPanelAsync(shell, GamePaperDoll.Panel, 6);
+        doll.ShowSlotsView(false);
+        HideLightsHud();
+        await Frames(30); // the figure re-dresses from the ObjDescEvent the wields send
+        SaveExtraFrame("doll-live-figure");
+        doll.ShowSlotsView(true);
+        await Frames(4);
+        SaveExtraFrame("doll-live-slots");
+        doll.ShowSlotsView(false);
+        RestoreLightsHud();
+        await ClosePanelAsync(shell, GamePaperDoll.Panel);
+        Log.Info(LogCategory, "doll live set frames", ("worn", worn), ("guids", string.Join(" ", guids.Select(static g => $"0x{g:X8}"))), ("boots", $"0x{boots.Guid:X8}"));
+
+        foreach (var guid in guids.Where(static g => g != 0))
+        {
+            session.Actions.MoveToPack(guid, 0, 0, ActionSource.Host);
+        }
+
+        await WaitFor(() => guids.All(g => !inventory.TryGetEquipped(g, out _)), 20.0);
+        if (boots.Guid != 0)
+        {
+            session.Actions.Wield(boots.Guid, (EquipMask)boots.Location, ActionSource.Host);
+            await WaitFor(() => inventory.TryGetEquipped(boots.Guid, out _), 10.0);
+        }
     }
 
     /// <summary>

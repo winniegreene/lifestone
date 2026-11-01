@@ -62,7 +62,7 @@ public enum TravelStatus
 
 /// <summary>
 /// A travel request at one of the scenarios' teleport choke points (M4 P5b 3.4: <c>HuntScenario.BeginPlace</c>,
-/// <c>DeathScenario</c>'s places, <c>FightScenario</c>'s place, <c>DenExit</c>).
+/// <c>DeathScenario</c>'s places, <c>FightScenario</c>'s place, <c>GroundExit</c>).
 /// </summary>
 /// <param name="Destination">Where to: the same destination the scenario places at today.</param>
 /// <param name="Purpose">Why (the seam picks the means from it).</param>

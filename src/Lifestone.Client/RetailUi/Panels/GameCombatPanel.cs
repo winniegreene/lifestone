@@ -306,8 +306,8 @@ public sealed class UiFloatyCombatPanel : UiElement
 /// hides the field, and a move of the power slider re-reads the same rule, so it cannot bring the field back in missile mode (M3 3.2 review finding 14). The floaty that holds it (<see cref="UiFloatyCombatPanel"/>) follows. The toolbar's four combat buttons follow the same mode (<see cref="GameToolbar.SetCombatModeButtons"/>, <c>gmToolbarUI::RecvNotice_SetCombatMode</c> 0x004BE2A0): their
 /// notice rides this subscription because the toolbar has no end of life of its own.</para>
 /// <para><b>Its controls</b> (<c>PostInit</c> 0x004CCD90, <c>ListenToElementMessage</c> 0x004CD020). The three check boxes (0x10000053 auto-repeat attack, 0x10000054 auto-target, 0x10000055 view combat target) show the
-/// player options of those names with the <c>ID_CombatPanelOption_*</c> labels; Lifestone ghosts a box whose option nothing honours (<see cref="PlayerOptionTable"/>), as the options page does, and a click on one does
-/// nothing (<c>TODO(m3-combat-options)</c>). A mouse down on an attack height button (0x10000057 high, 0x10000058 medium, 0x10000059 low) requests that height; the click is the attack
+/// player options of those names with the <c>ID_CombatPanelOption_*</c> labels; a click sets the option and sends it (M5 6 u1, D32; the boxes are no longer ghosted and
+/// <c>TODO(m3-combat-options)</c> is closed). A mouse down on an attack height button (0x10000057 high, 0x10000058 medium, 0x10000059 low) requests that height; the click is the attack
 /// (<c>ClientCombatSystem::EndAttackRequest</c>, 0x0056CE30): <b>it sends the attack through the Action API, with the power <see cref="AttackPowerDriver"/> works out</b> (M4 1.2; the M3 stand-in that answered NotInM3 is gone). The power slider (0x1000004F) sets the requested power
 /// (its position as thousandths, clamped to 0..1, <c>m_rUIRequestedPower</c>). Notices the attack code will send: <see cref="SetPowerbarLevel"/> (the meter 0x10000050, power bar mode 1),
 /// <see cref="DesiredAttackPowerChanged"/> (the slider's goal) and <see cref="AttackHeightChanged"/> (the group box 0x10000056's selection).</para>
@@ -373,7 +373,6 @@ public sealed class GameCombatPanel : UiElement
     private UiElement? _heights;
     private IDisposable? _modeSubscription;
     private IDisposable? _qualitySubscription;
-    private bool _optionsTodoLogged;
     private PowerBarNotices? _notices;
     private AttackTick? _tick;
 
@@ -625,7 +624,7 @@ public sealed class GameCombatPanel : UiElement
         RefreshOptions();
     }
 
-    // Each box shows the option's value; one nothing honours is ghosted (its state is lost whenever the window takes a mode state, so this runs after it).
+    // Each box shows the option's value (M5 6 u1: none is ghosted any more).
     private void RefreshOptions()
     {
         for (var i = 0; i < _boxes.Count; i++)
@@ -643,11 +642,6 @@ public sealed class GameCombatPanel : UiElement
 
             box.Option = def;
             var value = def is not null && _options is not null && _options.Get(def);
-            if (def is { Honoured: false })
-            {
-                box.SetState(UiStateIds.Ghosted); // before the value: a state change re-applies the state's own attributes, which would clear the highlight
-            }
-
             box.Saved = value;
             box.Current = value;
         }
@@ -697,19 +691,20 @@ public sealed class GameCombatPanel : UiElement
         public void Tick(double now) => panel.Attacks?.Tick();
     }
 
+    // M5 6 u1 (D32): the combat window's option boxes are settable like the options panel's: a click sets the option and sends both words (GameOptions.Apply); a refused send puts the box back.
     private void OptionBoxClicked(UiOptionCheckbox box)
     {
-        if (box.Option is { Honoured: true } option && _options is not null && _options.TrySet(option, box.Current))
+        if (!box.TogglesItself)
+        {
+            box.Current = !box.Current;
+        }
+
+        if (box.Option is { } option && _options is not null && _options.TrySet(option, box.Current))
         {
             box.Saved = box.Current;
             return;
         }
 
-        box.Current = box.Saved; // a box nothing honours does not change
-        if (!_optionsTodoLogged && _context is { } context)
-        {
-            _optionsTodoLogged = true;
-            context.Manager.Services.Log.Warn("retailui", $"TODO(m3-combat-options): the combat option {box.Option?.Name} has no effect in M3 (no melee or missile attack, no target to view); the box does not change");
-        }
+        box.Current = box.Saved;
     }
 }

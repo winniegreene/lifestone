@@ -173,6 +173,27 @@ public enum ActionKind
 
     /// <summary><see cref="PlayerTools.RotCorpses"/> (M4 hero step; appended).</summary>
     ToolCorpsesRot,
+
+    /// <summary><see cref="IActionApi.RespondToConfirmation"/> (M5 6 w2; appended).</summary>
+    RespondToConfirmation,
+
+    /// <summary><see cref="IActionApi.SetCharacterOptions"/> (M5 6 w2, D32; appended).</summary>
+    SetCharacterOptions,
+
+    /// <summary><see cref="IActionApi.RecallLifestone"/> (M5 6 w2; appended).</summary>
+    RecallLifestone,
+
+    /// <summary><see cref="IActionApi.RecallMarketplace"/> (M5 6 w2; appended).</summary>
+    RecallMarketplace,
+
+    /// <summary><see cref="IActionApi.Emote"/> (M5 6 w2; appended).</summary>
+    Emote,
+
+    /// <summary><see cref="IActionApi.SetAfk"/> (M5 6 w2; appended).</summary>
+    SetAfk,
+
+    /// <summary><see cref="IActionApi.SetInscription"/> (M5 7 D137; appended).</summary>
+    SetInscription,
 }
 
 /// <summary>The height of an attack (ACE's <c>AttackHeight</c>, the value on the wire; retail's group box 0x10000056 selects it).</summary>

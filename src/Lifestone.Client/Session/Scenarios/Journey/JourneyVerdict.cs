@@ -105,8 +105,8 @@ public sealed class JourneyVerdict
     }
 
     /// <summary>
-    /// The done line: <c>journey done ok= name= stations=n/m failed=&lt;names|none&gt; teleports= recalls= budget= route_m= run_s= rungs= blocked= sightless= vitals_passes= recovery_places= granted=</c>,
-    /// then <c>recovery_place= recovery=</c>. <c>n</c> counts the stations that passed; <c>failed=</c> names the stations that ran and failed (skips are not failures). <c>rungs=</c>, <c>blocked=</c>
+    /// The done line: <c>journey done ok= name= stations=n/m failed=&lt;names|none&gt; teleports= recalls= budget= route_m= run_s= rungs= blocked= sightless= vitals_passes= recovery_places= granted= places=</c>,
+    /// then <c>recovery_place= recovery=</c>. <c>granted=</c> is every <c>item</c> and <c>xp</c> the session sent since the end of the build-verify station and <c>places=</c> every <c>place</c> that was not a recovery (M5 item 3 c1, <see cref="Lifestone.Client.Session.Contracts.ModVerbCounter"/>; report-only until item 4's gate). <c>n</c> counts the stations that passed; <c>failed=</c> names the stations that ran and failed (skips are not failures). <c>rungs=</c>, <c>blocked=</c>
     /// and <c>sightless=</c> (the runs' ladder rungs, Blocked ends and sightless arrivals, summed by the travel seam) are report-only: <see cref="Ok"/> never reads them (M4 P5b fix FA, P5b-R6).
     /// </summary>
     /// <param name="name">The plan's name.</param>
@@ -122,7 +122,7 @@ public sealed class JourneyVerdict
         var failed = _stations.Where(r => r.Skipped is null && !r.Ok).Select(r => r.Name).ToList();
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"journey done ok={Bool(Ok(facts))} name={name} stations={_stations.Count(r => r.Ok)}/{Planned} failed={(failed.Count == 0 ? "none" : string.Join(',', failed))} teleports={facts.Teleports} recalls={facts.Recalls} budget={facts.TeleportBudget} route_m={routeMetres:0.0} run_s={runSeconds:0.0} rungs={rungs} blocked={blocked} sightless={sightless} vitals_passes={VitalsPasses} recovery_places={RecoveryPlaces} granted={facts.Granted} recovery_place={RecoveryPlace} recovery={Recovery}");
+            $"journey done ok={Bool(Ok(facts))} name={name} stations={_stations.Count(r => r.Ok)}/{Planned} failed={(failed.Count == 0 ? "none" : string.Join(',', failed))} teleports={facts.Teleports} recalls={facts.Recalls} budget={facts.TeleportBudget} route_m={routeMetres:0.0} run_s={runSeconds:0.0} rungs={rungs} blocked={blocked} sightless={sightless} vitals_passes={VitalsPasses} recovery_places={RecoveryPlaces} granted={facts.Verbs.Granted} places={facts.Verbs.Place} recovery_place={RecoveryPlace} recovery={Recovery}");
     }
 
     /// <summary>A sentence as one line token: whitespace to underscores, at most <see cref="MaxWhyLength"/> characters.</summary>

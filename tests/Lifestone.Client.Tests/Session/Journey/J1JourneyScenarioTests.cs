@@ -14,7 +14,7 @@ public sealed class J1JourneyScenarioTests
     private const string StationLine = @"^journey station=[a-z0-9-]+ ok=(true|false) s=\d+\.\d( \S+=\S+)*$";
 
     private const string DoneLine =
-        @"^journey done ok=(true|false) name=\S+ stations=\d+/\d+ failed=\S+ teleports=\d+ recalls=\d+ budget=\d+ route_m=\d+\.\d run_s=\d+\.\d rungs=\d+ blocked=\d+ sightless=\d+ vitals_passes=\d+ recovery_places=\d+ granted=\d+ recovery_place=[01] recovery=(none|suicide)$";
+        @"^journey done ok=(true|false) name=\S+ stations=\d+/\d+ failed=\S+ teleports=\d+ recalls=\d+ budget=\d+ route_m=\d+\.\d run_s=\d+\.\d rungs=\d+ blocked=\d+ sightless=\d+ vitals_passes=\d+ recovery_places=\d+ granted=\d+ places=\d+ recovery_place=[01] recovery=(none|suicide)$";
 
     private static JourneyPlan J1Plan(string name, params StationSpec[] stations) => new(name, "BSD Mage", "test", StationWhere.Belt, 1, stations);
 
@@ -132,7 +132,7 @@ public sealed class J1JourneyScenarioTests
         Assert.Equal(0xA9B4u, t.Landblock);
         Assert.Equal(["den-fight", "vendor"], factory.Started);
         Assert.Matches(@"^journey station=vendor ok=true ", journey.Lines[1]);
-        Assert.EndsWith(" recovery_places=0 granted=0 recovery_place=0 recovery=suicide", journey.Lines[^1], StringComparison.Ordinal);
+        Assert.EndsWith(" recovery_places=0 granted=0 places=0 recovery_place=0 recovery=suicide", journey.Lines[^1], StringComparison.Ordinal);
         Assert.False(t.Facts.LifestoneTied);
         Assert.Empty(t.PlacesTo);
     }
@@ -149,7 +149,8 @@ public sealed class J1JourneyScenarioTests
         Assert.Equal(["Holtburg"], t.PlacesTo);
         Assert.Equal(["hunt", "vendor"], factory.Started);
         Assert.Contains(" teleports=0 recalls=0 budget=1 ", journey.Lines[^1], StringComparison.Ordinal);
-        Assert.EndsWith(" recovery_places=1 granted=0 recovery_place=0 recovery=none", journey.Lines[^1], StringComparison.Ordinal);
+        Assert.EndsWith(" recovery_places=1 granted=0 places=0 recovery_place=0 recovery=none", journey.Lines[^1], StringComparison.Ordinal); // the recovery place is not a place of the budget's count
+        Assert.Equal((0, 1), (t.R.Api.Tools.Verbs.Counts.Place, t.R.Api.Tools.Verbs.Counts.RecoveryPlace)); // M5 item 3 c1: counted apart by the counter
         Assert.Empty(t.R.H.Net.Of(FakeSendKind.Suicide));
     }
 
@@ -158,7 +159,7 @@ public sealed class J1JourneyScenarioTests
     {
         var t = new J1JourneyRig();
         var observer = new J1Observer();
-        var factory = new J1Factory(new() { ["s3"] = new(Succeed: false), ["s1"] = new(Granted: 2) });
+        var factory = new J1Factory(new() { ["s3"] = new(Succeed: false), ["s1"] = new(OnEnd: s => { s.Tools.SpawnItem(628, null, ActionSource.Host); s.Tools.SpawnItem(377, 1, ActionSource.Host); }) }); // two item requests: the done line counts what the session sent (M5 item 3 c1)
         var journey = t.Journey(J1Plan("j1", J1Spec("s1"), J1Spec("s2", new(MinManaPercent: 101)), J1Spec("s3")), factory, t.Context(observer: observer));
 
         t.Run(journey);
@@ -228,7 +229,7 @@ public sealed class J1JourneyScenarioTests
         Assert.Same(NoJourneyObserver.Instance, context.Observer);
 
         _ = new JourneyScenario(JourneyPlans.Mage, new J1Factory(), context, endSession: false);
-        Assert.Equal(1, context.Facts.TeleportBudget);
+        Assert.Equal(JourneyPlans.Mage.TeleportBudget, context.Facts.TeleportBudget); // the mage plan's budget (M5 3 p1, D50: 0)
         Assert.False(travel.Busy);
     }
 }

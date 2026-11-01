@@ -1,5 +1,6 @@
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Vitals;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Magic;
@@ -52,6 +53,19 @@ public sealed class NoJourneyObserver : IJourneyObserver
     }
 }
 
+/// <summary>A ground's portal tie as a journey knows it (M5 3 p1): <see cref="Unknown"/> (the default), <see cref="Tied"/> or <see cref="Untied"/>.</summary>
+public enum PortalTie
+{
+    /// <summary>Not known: a recall to the ground is tried, and ACE's answer decides.</summary>
+    Unknown = 0,
+
+    /// <summary>The character is tied to the ground's portal (a Primary Portal Tie succeeded, or a Primary Portal Recall to it arrived).</summary>
+    Tied = 1,
+
+    /// <summary>ACE said the character is not tied (WeenieError 0x04A3).</summary>
+    Untied = 2,
+}
+
 /// <summary>
 /// What a journey has learned about its character that the server does not send back (M4 P5b W0: the portal tie and the
 /// lifestone tie are not in the player description; ACE's <c>GameEventPlayerDescription</c> sends neither), and its
@@ -59,6 +73,8 @@ public sealed class NoJourneyObserver : IJourneyObserver
 /// </summary>
 public sealed class JourneyFacts
 {
+    private readonly Dictionary<string, PortalTie> _portalTies = new(StringComparer.Ordinal);
+
     /// <summary>The mod teleports (<c>place</c>) made this journey (the verdict's <c>teleports=</c>), the pre-journey recovery excluded.</summary>
     public int Teleports { get; set; }
 
@@ -68,14 +84,53 @@ public sealed class JourneyFacts
     /// <summary>The recalls cast to completion (Lifestone Recall, Primary Portal Recall; the verdict's <c>recalls=</c>).</summary>
     public int Recalls { get; set; }
 
-    /// <summary>The items the stations granted with the mod's item verb (the verdict's <c>granted=</c>).</summary>
+    /// <summary>The items the scripted stations granted and saw land (<see cref="ScriptLeg.Granted"/>, summed); the done line's <c>granted=</c> is <see cref="Verbs"/>' instead, every grant the session sent.</summary>
     public int Granted { get; set; }
 
-    /// <summary>True once the den portal's Primary Portal Tie succeeded or a Primary Portal Recall arrived; false after a 0x04A3; null when unknown.</summary>
-    public bool? PortalTied { get; set; }
+    /// <summary>The mod-verb counts at the end of the build-verify station (M5 item 3 c1): the build's verbs are build time (spec 5.6); the journey sets it (<see cref="PlayerTools.Verbs"/>).</summary>
+    public ModVerbCounts VerbMark { get; set; }
+
+    /// <summary>The mod verbs the session sent since <see cref="VerbMark"/>, set when the journey ends: <c>granted=</c> is <see cref="ModVerbCounts.Granted"/> and <c>places=</c> is <see cref="ModVerbCounts.Place"/> (a recovery place is apart).</summary>
+    public ModVerbCounts Verbs { get; set; }
+
+    /// <summary>
+    /// What the journey knows of the portal tie of ground <paramref name="ground"/> (<see cref="HuntingGround.Key"/>; M5 3 p1, closes 2-R12 <c>journey-portal-per-ground</c>): <see cref="PortalTie.Tied"/> once its Primary Portal Tie succeeded or a Primary Portal Recall to it arrived,
+    /// <see cref="PortalTie.Untied"/> after ACE's 0x04A3 (YouMustLinkToPortalToRecall), else <see cref="PortalTie.Unknown"/>. A tie to ground A says nothing of ground B. A fresh character after the build is tied (D50), but no journey can read the link from the player description,
+    /// so unknown is the usual start and the recall is tried.
+    /// </summary>
+    /// <param name="ground">The ground's key.</param>
+    public PortalTie PortalTieOf(string ground)
+    {
+        ArgumentNullException.ThrowIfNull(ground);
+        return _portalTies.GetValueOrDefault(ground);
+    }
+
+    /// <summary>Sets what the journey knows of ground <paramref name="ground"/>'s portal tie (<see cref="PortalTie.Unknown"/> forgets it).</summary>
+    /// <param name="ground">The ground's key.</param>
+    /// <param name="tie">The tie.</param>
+    public void SetPortalTie(string ground, PortalTie tie)
+    {
+        ArgumentNullException.ThrowIfNull(ground);
+        if (tie == PortalTie.Unknown)
+        {
+            _portalTies.Remove(ground);
+            return;
+        }
+
+        _portalTies[ground] = tie;
+    }
+
+    /// <summary>The ground keys whose tie is known (tied or untied), with the tie: the verdict lines and the tests read it.</summary>
+    public IReadOnlyDictionary<string, PortalTie> PortalTies => _portalTies;
 
     /// <summary>True once Lifestone Tie on Holtburg's lifestone succeeded or a Lifestone Recall arrived; false after a 0x049E; null when unknown.</summary>
     public bool? LifestoneTied { get; set; }
+
+    /// <summary>
+    /// M5 4 a3 (<c>m5-autopilot-death-unscripted</c>): the death tally the autopilot has kept running since its start, offered to the death station when a death the autopilot did not script has been seen. The death station takes it (and sets this back to null),
+    /// enters at the respawn instead of at the lie-down, and the handler reads the corpse's facts from it. Null for every other death.
+    /// </summary>
+    public DeathTally? ObservedDeath { get; set; }
 
     /// <summary>True once the character bound (used) Holtburg's lifestone this journey (its respawn point, ACE's Sanctuary).</summary>
     public bool Bound { get; set; }
@@ -117,6 +172,12 @@ public sealed class JourneyContext
 
     /// <summary>The facts and counters the stations share.</summary>
     public JourneyFacts Facts { get; init; } = new();
+
+    /// <summary>
+    /// The dungeon ground the journey's den stations run in (<c>--fight-ground</c>, the host passes <see cref="FightOptions.GroundProfile"/>; the default is the option's default ground): <see cref="StationWhere.Den"/> is this ground, its arrival is the budgeted place,
+    /// its landblocks are where the player must stand, and the den-travel station reads its portal (M5 item 2 k2, D46: no den fact lives in the journey's code).
+    /// </summary>
+    public HuntingGround Dungeon { get; init; } = GroundCatalog.Get(FightOptions.DefaultGround);
 
     /// <summary>The window frame times of the running station (M4 4.2 J1: the Godot host's <see cref="JourneyWindowSamplers"/>), or null when the host has no frame clock (headless: the station lines print <c>n/a</c>).</summary>
     public IJourneyWindowFrames? WindowFrames { get; init; }

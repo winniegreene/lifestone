@@ -29,7 +29,8 @@ namespace Lifestone.Client.RetailUi.Chat;
 /// </para>
 /// <para>
 /// <b>Not built.</b> The idle/active opacity fade (defaults 0.5 and 1.0, read from the exe; the runtime has no element opacity: <c>TODO(g4-chat-opacity)</c>), the
-/// history keys, the reply keys, the font setting and the saved text-type masks of the options panel.
+/// history keys, the reply keys, the font setting and the Chat options tab that would change a mask (<c>TODO(g6-chat-options)</c>). The mask itself is kept: it starts as retail's default for the window
+/// (<see cref="ChatTextTypes.DefaultMask"/>) and the shell saves it with the window layout (<c>LS-CHATMASK</c> lines, <see cref="ScreenLayoutFile"/>) and restores it at the next world entry (M5 6 u1, D33).
 /// </para>
 /// </remarks>
 public sealed class GameChatWindow : IUiNoticeSink, IUiElementListener, IDisposable
@@ -108,7 +109,7 @@ public sealed class GameChatWindow : IUiNoticeSink, IUiElementListener, IDisposa
     /// <summary>Which chat window this is (<see cref="WindowIdProperty"/>).</summary>
     public uint WindowId { get; }
 
-    /// <summary>The text types the window shows (<c>m_llTextTypeFilter</c>).</summary>
+    /// <summary>The text types the window shows (<c>m_llTextTypeFilter</c>); the window layout restores it at the world entry (<see cref="ScreenLayoutFile"/>).</summary>
     public ulong TextTypeMask { get; set; }
 
     /// <summary>The log text element.</summary>

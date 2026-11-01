@@ -68,9 +68,10 @@ public readonly record struct LootContext(int Burden, int Capacity, PlayerInvent
 /// <para><b>Sources.</b> The vendor's accept rule is ACE's <c>Vendor.cs</c> (<c>W/Vendor.cs</c>: an item whose type bit is in <c>MerchandiseItemTypes</c> and whose value is within <c>MerchandiseMinValue</c> to
 /// <c>MerchandiseMaxValue</c> is bought); retail's own <c>ITEM_TYPE</c> bits are the same values (the spec's item-type table), and the address of retail's client-side accept test is unknown here. <c>TODO(m4-loot-rules-shop-mask)</c>:
 /// the mask comes from the shard's weenie 718, not from the wire (<see cref="LootOptions.ShopMask"/>).</para>
+/// <para><b>Unsealed (M5 3 m2):</b> <see cref="Lifestone.Client.Session.Mage.MageLootPlan"/> overrides <see cref="Decide"/> and <see cref="Describe"/> so the shared <see cref="CorpseLooter"/> takes what the mage's value-per-burden rule chose; no other behaviour changed.</para>
 /// <para><b>Stacks.</b> A stack's <c>Value</c> and burden are the whole stack's (ACE's <c>Value</c> and <c>EncumbranceVal</c> of the stack), so the rule judges the stack as a unit.</para>
 /// </remarks>
-public sealed class LootRules
+public class LootRules
 {
     /// <summary>The vendor's greatest item value (<c>MerchandiseMaxValue</c> of weenie 718: 1,000,000).</summary>
     public const long ShopMaxValue = 1_000_000;
@@ -129,7 +130,7 @@ public sealed class LootRules
     public uint EffectiveMask(in LootContext context) => _typeMask == LootOptions.ShopMask && context.VendorMask is { } wire ? wire : _typeMask;
 
     /// <summary>The rule in one phrase, for the log.</summary>
-    public string Describe() =>
+    public virtual string Describe() =>
         _maxValue == long.MaxValue && _minValue == 0 && _typeMask == LootOptions.AllTypes && _maxBurdenPercent == 0
             ? "take all"
             : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"types 0x{_typeMask:X8}, value {_minValue} to {_maxValue}, burden at most {(_maxBurdenPercent == 0 ? "unlimited" : _maxBurdenPercent + "% of the capacity")}");
@@ -146,10 +147,18 @@ public sealed class LootRules
         _ => "unknown",
     };
 
+    /// <summary>
+    /// M5 7 D121: the container a taken item goes into: 0 for the main pack (the player), the default; the mage's plan names a side pack of its job (<see cref="Lifestone.Client.Session.Mage.PackLayout"/>). A side pack that is not held when the
+    /// pick-up is sent falls back to the main pack.
+    /// </summary>
+    /// <param name="item">The item taken.</param>
+    /// <param name="state">The session's read model.</param>
+    public virtual uint DestinationOf(WorldObject item, GameState state) => 0;
+
     /// <summary>Decides one item.</summary>
     /// <param name="item">The item's world object, or null when its CreateObject has not arrived.</param>
     /// <param name="context">The player's load and inventory (<see cref="LootContext.Of"/>).</param>
-    public LootDecision Decide(WorldObject? item, in LootContext context)
+    public virtual LootDecision Decide(WorldObject? item, in LootContext context)
     {
         if (item is null)
         {

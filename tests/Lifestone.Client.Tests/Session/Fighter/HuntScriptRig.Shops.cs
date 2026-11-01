@@ -47,6 +47,15 @@ internal sealed partial class HuntScriptRig
     /// <summary>True: the two vendors are created and the hunter holds the pyreals and the Bracers once it is present (set before the run).</summary>
     public bool Shops { get; set; }
 
+    /// <summary>
+    /// M5 7 P7p: the next opens of Renald the Elder answered as ACE's chain answers a walk-to-use the client's stuck rule ended (the item-end gate: UseDone 0 and no 0062, "vendor did not open"); <see cref="OnStuckOpen"/> runs first
+    /// (the test raises the bound body's stuck count, as the controller's rule does).
+    /// </summary>
+    public int StuckOpens { get; set; }
+
+    /// <summary>Called for each open of <see cref="StuckOpens"/>, before its UseDone.</summary>
+    public Action? OnStuckOpen { get; set; }
+
     /// <summary>The refusals the script gave because the hunter was busy (a Use of a vendor, a Buy or a Sell).</summary>
     public int BusyRefusals { get; private set; }
 
@@ -257,6 +266,14 @@ internal sealed partial class HuntScriptRig
         {
             BusyRefusals++;
             UseDone(YoureTooBusy);
+            return;
+        }
+
+        if (StuckOpens > 0 && shop.Guid == RenaldGuid)
+        {
+            StuckOpens--;
+            OnStuckOpen?.Invoke();
+            At(shop.OpenDone, () => UseDone()); // no 0062: the open is refused 3 s later
             return;
         }
 

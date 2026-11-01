@@ -103,8 +103,8 @@ public sealed class HuntGroundDatTests(DatSetFixture fixture, ITestOutputHelper 
         Assert.True(disagree.Count == 0, "forest cells that the dats do not read as the table says: " + string.Join("; ", disagree));
         var usable = row.UsableCells.ToArray();
         Assert.True(usable.Length >= 10, "the forest row needs ten dry and walkable cells; the dats leave " + usable.Length + ", the others read: " + string.Join("; ", row.Cells.Where(c => !c.Usable)));
-        Assert.Equal(row.Cells.OrderBy(c => c.MapUnits).Select(c => c.CellId), row.Cells.Select(c => c.CellId)); // nearest first
-        // The ten nearest usable cells are the ten nearest cells: none of them was skipped for water or a slope, and each is pinned Dry.
+        Assert.Equal(row.Cells.MinBy(c => c.MapUnits)!.CellId, row.Cells[0].CellId); // the loop (M5 D42) starts at the cell nearest Holtburg
+        // The first ten usable cells are the first ten cells: none of them was skipped for water or a slope, and each is pinned Dry.
         Assert.Equal(row.Cells.Take(10).Select(c => c.CellId), usable.Take(10).Select(c => c.CellId));
         Assert.All(usable.Take(10), c => Assert.Equal(HuntTerrain.Dry, c.Terrain));
         Assert.All(row.Cells, c => Assert.Equal(0x9FBu, (c.CellId >> 16) >> 4)); // the 0x9FB* landblocks

@@ -6,7 +6,7 @@ namespace Lifestone.Client.Tests.Session;
 
 /// <summary>
 /// What the game's death leg passes to <see cref="DeathScenario"/> from the command line (M4 3.1 d2, D20; <see cref="DeathLegOptions"/>, the one place <c>DeathLegRunner</c> reads them): the five new options of the death loop
-/// (<c>--death-decoys</c>, <c>--death-rebuff</c>, <c>--death-fight</c>, <c>--death-fight-kills</c>, <c>--death-fight-seconds</c>) reach <see cref="DeathOptions"/>, the fight's options carry the kills and seconds of the death options (and nothing of the fight leg's own
+/// (<c>--death-rebuff</c>, <c>--death-fight</c>, <c>--death-fight-kills</c>, <c>--death-fight-seconds</c>) reach <see cref="DeathOptions"/>, the fight's options carry the kills and seconds of the death options (and nothing of the fight leg's own
 /// <c>--fight-*</c>), the buff cycle's come from the <c>--buff-*</c> options, and a bad value in any of them is the leg's option error (it fails the leg at its first frame, as every other leg's does). The runner's wiring is pinned in <see cref="DeathLegRunnerTests"/>.
 /// </summary>
 public sealed class DeathLegOptionsTests
@@ -14,13 +14,12 @@ public sealed class DeathLegOptionsTests
     private static DeathLegOptions Parse(params string[] args) => DeathLegOptions.FromArguments(CommandLineArgument.ParseAll(args));
 
     [Fact]
-    public void Without_options_the_leg_runs_the_new_loop_with_the_decoys_the_rebuff_and_a_fight_of_four_kills_in_180_seconds()
+    public void Without_options_the_leg_runs_the_new_loop_with_the_rebuff_and_a_fight_of_four_kills_in_180_seconds()
     {
         var o = Parse();
 
         Assert.Null(o.Error);
         Assert.Empty(o.Errors);
-        Assert.True(o.Death.Decoys);
         Assert.True(o.Death.Rebuff);
         Assert.True(o.Death.Fight);
         Assert.Equal(DeathOptions.DefaultFightKills, o.Fight.Kills);
@@ -32,12 +31,11 @@ public sealed class DeathLegOptionsTests
     }
 
     [Fact]
-    public void The_five_new_options_reach_the_death_options_and_the_fights_kills_and_seconds_follow_the_death_options()
+    public void The_four_new_options_reach_the_death_options_and_the_fights_kills_and_seconds_follow_the_death_options()
     {
-        var o = Parse("--death-decoys=off", "--death-rebuff=off", "--death-fight=off", "--death-fight-kills=7", "--death-fight-seconds=45");
+        var o = Parse("--death-rebuff=off", "--death-fight=off", "--death-fight-kills=7", "--death-fight-seconds=45");
 
         Assert.Null(o.Error);
-        Assert.False(o.Death.Decoys);
         Assert.False(o.Death.Rebuff);
         Assert.False(o.Death.Fight);
         Assert.Equal(7, o.Death.FightKills);
@@ -60,7 +58,7 @@ public sealed class DeathLegOptionsTests
     }
 
     [Theory]
-    [InlineData("--death-decoys=maybe", "--death-decoys")]
+    [InlineData("--death-decoys=on", "--death-decoys")] // the retired option: refused by name, so the game's leg fails at its first frame (M5 3 d3, D51)
     [InlineData("--death-fight-kills=0", "--death-fight-kills")]
     [InlineData("--death-fight-seconds=0", "--death-fight-seconds")]
     [InlineData("--buff-cast-chance=0", "--buff-cast-chance")]
@@ -75,7 +73,6 @@ public sealed class DeathLegOptionsTests
         Assert.Single(o.Errors);
         Assert.Equal(4, o.Fight.Kills);
         Assert.Equal(180.0, o.Fight.Seconds);
-        Assert.True(o.Death.Decoys);
         Assert.True(o.Death.Rebuff);
         Assert.True(o.Death.Fight);
     }
@@ -94,7 +91,7 @@ public sealed class DeathLegOptionsTests
     [Fact]
     public void The_options_are_registered_for_the_game_so_the_leg_never_warns_about_them()
     {
-        var args = CommandLineArgument.ParseAll(["--login-check=bsd-death", "--death-decoys=off", "--death-rebuff=on", "--death-fight=on", "--death-fight-kills=2", "--death-fight-seconds=90", "--buff-cast-chance=0.9"]);
+        var args = CommandLineArgument.ParseAll(["--login-check=bsd-death", "--death-rebuff=on", "--death-fight=on", "--death-fight-kills=2", "--death-fight-seconds=90", "--buff-cast-chance=0.9"]);
 
         Assert.Empty(OptionCatalog.Registry.Problems(args, OptionScenes.Main));
     }

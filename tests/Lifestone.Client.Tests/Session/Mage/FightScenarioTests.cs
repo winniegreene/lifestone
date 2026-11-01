@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Tests.Session.Grounds;
 using System.Globalization;
 using System.Numerics;
 using DatReaderWriter.Enums;
@@ -9,6 +11,7 @@ using Lifestone.Client.Session;
 using Lifestone.Client.Session.Bus;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Tests.Session.Fighter;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Tools;
 using Lifestone.Data.Magic;
@@ -33,11 +36,22 @@ namespace Lifestone.Client.Tests.Session.Mage;
 /// nothing while it waits. Nothing here needs the dats or a server.
 /// </summary>
 [Collection(AllocationMeasurementCollection.Name)]
-public sealed class FightScenarioTests
+public sealed partial class FightScenarioTests
 {
     private const uint Den = 0x01050375;
+
+    /// <summary>F5's report-only fields after the tour's (a walk with the ground's tour).</summary>
+    private const string Purpose = @" walks_by_purpose=seen:\d+,presumed:\d+,due:\d+,return:\d+ holds=\d+ hold_s=\d+ slots_seen_empty=\d+ walk_loops=\d+";
+
+    /// <summary>F5's fields for a walk without the ground's tour.</summary>
+    private const string NoPurpose = " walks_by_purpose=n/a holds=n/a hold_s=n/a slots_seen_empty=n/a walk_loops=n/a";
+
+    /// <summary>M5 3 m2: the last fields of the verdict with looting off (the default).</summary>
+    private const string LootOff = " loot=off looted=0 kept=0 loot_value=0";
     private const uint HoltburgCell = 0xA9B40019;
     private const uint TuskerSlave = 1628;
+
+    private const uint TuskerGuard = 1629;
     private const uint DeadChestCorner = 0x010502D6;
     private const float PlayerX = 100;
     private const float PlayerY = 20;
@@ -79,16 +93,59 @@ public sealed class FightScenarioTests
 
         public string? Failure { get; private set; }
 
+        /// <summary>The walk's tour (g6), or null.</summary>
+        public IGroundTour? Tour { get; set; }
+
+        /// <summary>The failed legs the walk reports it recovered from (2-R4), or null for a walk that does not count them.</summary>
+        public int? Recovered { get; set; }
+
+        int? IFightWalk.LegsRecovered => Recovered;
+
         /// <summary>When set, <see cref="HasClearLine"/> is false for a target in this cell until a leg has arrived (the wall between the arrival and that plaza).</summary>
         public uint BlockedCell { get; set; }
 
         public int LineQueries { get; private set; }
 
+        /// <summary>M5 7 F27: when set, no line is clear (a corpse behind a wall).</summary>
+        public bool BlockAll { get; set; }
+
         public bool HasClearLine(in CellFrame from, in CellFrame to)
         {
             LineQueries++;
-            return BlockedCell == 0 || to.CellId != BlockedCell;
+            return !BlockAll && (BlockedCell == 0 || to.CellId != BlockedCell || ClearFromCells.Contains(from.CellId));
         }
+
+        /// <summary>M5 7 P7s (D148): a line from a spot in one of these cells is clear whatever <see cref="BlockedCell"/> says (the spot round the corner).</summary>
+        public HashSet<uint> ClearFromCells { get; } = [];
+
+        /// <summary>M5 7 P7s (D148): when set, <see cref="BlockedCell"/> stays after a leg arrives (the step did not help).</summary>
+        public bool KeepBlockedCell { get; set; }
+
+        /// <summary>M5 7 P7s (D148): the cells <see cref="CellsOnLine"/> answers (null: the walk cannot trace, as the interface's default).</summary>
+        public List<uint>? TraceCells { get; set; }
+
+        /// <summary>M5 7 P7s (D148): when set, a spot leg's arrival makes these the traced cells (the mage walked round the no-go cell).</summary>
+        public List<uint>? TraceCellsAfterSpotLeg { get; set; }
+
+        public int Traces { get; private set; }
+
+        public LineTrace CellsOnLine(in CellFrame from, in CellFrame to, List<uint> cells)
+        {
+            cells.Clear();
+            if (TraceCells is null)
+            {
+                return LineTrace.NotTraced;
+            }
+
+            Traces++;
+            cells.AddRange(TraceCells);
+            return LineTrace.Traced;
+        }
+
+        /// <summary>M5 7 P7s (D148): the floor's room middles the walk offers for a step.</summary>
+        public List<CellFrame> Floor { get; } = [];
+
+        public IReadOnlyList<CellFrame> FloorSpots => Floor;
 
         public void Prepare(IGameSessionView session, double now) => Prepared++;
 
@@ -104,6 +161,57 @@ public sealed class FightScenarioTests
             Legs++;
             _walking = true;
             _ticks = 0;
+            _stuckLeg = StuckLegs > 0;
+            if (_stuckLeg)
+            {
+                StuckLegs--;
+            }
+
+            return true;
+        }
+
+        /// <summary>M5 7 P7b (D139 g): the stuck rungs a stuck leg reports once it has walked <see cref="StuckAfterTicks"/> ticks.</summary>
+        public int StuckRungs { get; set; } = FightScenario.WalkStuckRungsGiveUp;
+
+        /// <summary>M5 7 P7b (D139 g): how many of the next tour legs stick (they report <see cref="StuckRungs"/>).</summary>
+        public int StuckLegs { get; set; }
+
+        public int StuckAfterTicks { get; set; } = 2;
+
+        /// <summary>The goal cell a leg reports.</summary>
+        public uint GoalCell { get; set; } = 0x01050320;
+
+        /// <summary>M5 7 P7b (D139 j): the spots legs were begun to, in order.</summary>
+        public List<CellFrame> Spots { get; } = [];
+
+        public int Abandons { get; private set; }
+
+        /// <summary>M5 7 P7i: the stuck spots the fight patched, in order.</summary>
+        public List<(CellFrame At, double Until)> Patches { get; } = [];
+
+        public bool AvoidSpot(in CellFrame at, double until, out string description)
+        {
+            Patches.Add((at, until));
+            description = "the fake walk's patch";
+            return true;
+        }
+
+        private bool _stuckLeg;
+        private bool _spotLeg;
+
+        public int LegStuckRungs => _walking && _stuckLeg && _ticks >= StuckAfterTicks ? StuckRungs : 0;
+
+        public uint LegGoalCell => _walking ? (_spotLeg ? Spots[^1].CellId : GoalCell) : 0;
+
+        public bool BeginLegTo(IGameSessionView session, double now, in CellFrame goal, out string description)
+        {
+            Spots.Add(goal);
+            Legs++;
+            _walking = true;
+            _ticks = 0;
+            _stuckLeg = false;
+            _spotLeg = true;
+            description = "fake spot leg " + Legs;
             return true;
         }
 
@@ -126,14 +234,72 @@ public sealed class FightScenarioTests
             }
 
             _walking = false;
-            BlockedCell = 0;
+            if (_spotLeg && TraceCellsAfterSpotLeg is { } after)
+            {
+                TraceCells = after;
+            }
+
+            _spotLeg = false;
+            if (!KeepBlockedCell)
+            {
+                BlockedCell = 0;
+            }
+
             return FightWalkStatus.Arrived;
         }
 
-        public void Abandon() => _walking = false;
+        public void Abandon()
+        {
+            _walking = false;
+            _spotLeg = false;
+            Abandons++;
+        }
 
         public void Dispose()
         {
+        }
+    }
+
+    /// <summary>A tour that records what the fight feeds it (g6) and offers nothing.</summary>
+    private sealed class RecordingTour : IGroundTour
+    {
+        public List<(uint Wcid, uint Cell)> Kills { get; } = [];
+
+        public List<(uint Wcid, uint Cell)> Creates { get; } = [];
+
+        public List<uint> KillGuids { get; } = [];
+
+        public List<uint> CreateGuids { get; } = [];
+
+        /// <summary>M5 7 P7b (D139 g): the cells a give-up rested and the creatures it avoided.</summary>
+        public List<uint> Failed { get; } = [];
+
+        public List<uint> Avoided { get; } = [];
+
+        public TourPurpose Purpose { get; set; }
+
+        public uint PurposeGuid { get; set; }
+
+        public string PurposeNote => PurposeGuid != 0 ? $"a living Tusker Slave 0x{PurposeGuid:X8}" : string.Empty;
+
+        public void LegFailed(uint cell, double now) => Failed.Add(cell);
+
+        public void Avoid(uint guid, double now) => Avoided.Add(guid);
+
+        public int Waypoints => 1;
+
+        public uint? Next(uint from, double now) => null;
+
+        public void Killed(uint wcid, uint cell, double now, uint guid = 0)
+        {
+            Kills.Add((wcid, cell));
+            KillGuids.Add(guid);
+        }
+
+        public void Created(uint wcid, uint cell, double now, uint guid = 0)
+        {
+            Creates.Add((wcid, cell));
+            CreateGuids.Add(guid);
         }
     }
 
@@ -165,6 +331,15 @@ public sealed class FightScenarioTests
 
         /// <summary>The creature dies (its object is deleted) with no 0x01AD.</summary>
         SilentKill,
+
+        /// <summary>M5 7 F28: the target died during the wind-up (its object is deleted) and the release is answered UseDone 0x042C (TargetNotAcquired).</summary>
+        TargetDied,
+
+        /// <summary>M5 7 F28: UseDone 0x042C for a target that is alive.</summary>
+        NotAcquired,
+
+        /// <summary>M5 7 D124: the target died during the wind-up (its object is deleted) and the release is answered WeenieError 0x042C, then UseDone 0 (ACE's DoCastSpell and FinishCast).</summary>
+        TargetDiedAtRelease,
     }
 
     private sealed class Creature(uint guid, uint wcid, string name, int hitsToKill)
@@ -180,6 +355,10 @@ public sealed class FightScenarioTests
         public int Hits { get; set; }
 
         public bool Dead { get; set; }
+
+        public uint Cell { get; set; }
+
+        public float Y { get; set; }
     }
 
     /// <summary>The scripted ACE and the session over it.</summary>
@@ -197,17 +376,18 @@ public sealed class FightScenarioTests
         private readonly Queue<(uint Guid, double Due)> _stops = new();
         private readonly Queue<(uint Spell, uint Target, Shot Shot, double Due)> _lateHits = new();
         private ushort _teleports = 2;
+        private readonly Dictionary<uint, Creature> _corpses = [];
 
-        public Rig(uint mana = 400, uint warRanks = 330, IReadOnlyCollection<uint>? known = null, FightOptions? fight = null, BuffOptions? buff = null, float range = 30f)
+        public Rig(uint mana = 400, uint warRanks = 330, IReadOnlyCollection<uint>? known = null, FightOptions? fight = null, BuffOptions? buff = null, float range = 30f, int characterLevel = 0, bool openers = false)
         {
             R = new WorldActionRig();
             Mana = mana;
-            Table = BuildTable(range);
+            Table = BuildTable(range, openers);
             R.Spells([.. Table.Values]);
             Fight = fight ?? new FightOptions();
             Buff = buff ?? new BuffOptions();
             View = new View(R);
-            Describe(warRanks, known ?? Table.Keys.ToArray());
+            Describe(warRanks, known ?? Table.Keys.ToArray(), characterLevel);
             R.CombatModeIs(CombatModes.NonCombat);
             var h = R.H.R;
             h.Reducer.OnPlayerTeleport(h.Context, new PlayerTeleportMsg(2));
@@ -232,6 +412,9 @@ public sealed class FightScenarioTests
         /// <summary>When above zero, the projectile's hit (the damage line, or the kill) comes this many seconds after its CreateObject: the flight (ACE sends the UseDone at the launch, the hit when the bolt lands).</summary>
         public double HitDelay { get; set; }
 
+        /// <summary>M5 7 D124 (S1b): with <see cref="HitDelay"/>, the next bolt's answer is followed by a damage line of an earlier projectile on another creature (once).</summary>
+        public bool StaleDamageLineOnce { get; set; }
+
         /// <summary>When set, the 0x01AD text is this instead of "You have killed &lt;name&gt;!" (a kill that does not name the target).</summary>
         public string? KillText { get; set; }
 
@@ -242,6 +425,53 @@ public sealed class FightScenarioTests
         public List<string> Places { get; } = [];
 
         public double ManaRegenPerSecond { get; set; } = 5;
+
+        /// <summary>M5 3 m2: a kill leaves a corpse named for the creature where it lay (its guid is the creature's plus <see cref="CorpseOffset"/>).</summary>
+        public bool Corpses { get; set; }
+
+        /// <summary>M5 7 P7b (D139 i): when a target dies, the creature named here for it dies too (the ring's or a stray bolt's splash): its corpse, its own 0x01AD and its deletion follow the target's.</summary>
+        public Dictionary<uint, Creature> Splash { get; } = [];
+
+        /// <summary>M5 7 P7b (D139 j): the kill's 0x01AD comes with the target's health at 0 (ACE pushes the selected target's health), so the fight settles the kill before the body is gone.</summary>
+        public bool HealthZeroAtKill { get; set; }
+
+        /// <summary>M5 7 P7b (D139 j): with <see cref="DeathDelay"/>, the corpse appears with the deletion, as ACE creates it after the death animation (round 13: about 1.3 s after the notice).</summary>
+        public bool CorpseAtDeletion { get; set; }
+
+        /// <summary>The corpse's guid is its creature's plus this.</summary>
+        public const uint CorpseOffset = 0x100;
+
+        /// <summary>When set, the server answers the open of a corpse with a UseDone error and no contents.</summary>
+        public bool RefuseOpen { get; set; }
+
+        /// <summary>M5 7 F27: ACE's MoveTo brings the player to a corpse this many seconds after the Use (0: at once; the open answers then).</summary>
+        public double MoveToSeconds { get; set; }
+
+        /// <summary>M5 7 D123: the next this-many corpse opens are answered "You're too busy!" (UseDone 0x001D, no ViewContents), as ACE answers a Use while the last pick-up's animation runs (Player_Use.cs:199-203 @95ef426d).</summary>
+        public int BusyOpens { get; set; }
+
+        /// <summary>M5 7 F27: when set, ACE's MoveTo fails this many seconds after the Use (its 15 s timeout, Player_Move.cs:16 @95ef426d): a UseDone error and no contents.</summary>
+        public double? MoveToFailsAfter { get; set; }
+
+        private readonly Queue<(uint Corpse, double Due, bool Fail)> _opens = new();
+
+        /// <summary>What a corpse holds: the item's guid, wcid, item type, Value in its description (null: none sent), burden and name.</summary>
+        public List<(uint Guid, uint Wcid, uint Type, uint? Value, ushort Burden, string Name)> CorpseItems { get; } = [];
+
+        /// <summary>What the corpse of one creature holds instead of <see cref="CorpseItems"/>, by the creature's guid.</summary>
+        public Dictionary<uint, List<(uint Guid, uint Wcid, uint Type, uint? Value, ushort Burden, string Name)>> ItemsOfCreature { get; } = [];
+
+        /// <summary>The Value an Identify of an item answers with (PropertyInt 19), by guid.</summary>
+        public Dictionary<uint, int> AppraisedValues { get; } = [];
+
+        /// <summary>The corpse opens, pick-ups, closes and identifies the player sent, in order.</summary>
+        public List<uint> Opened { get; } = [];
+
+        public List<uint> Picked { get; } = [];
+
+        public List<uint> Closed { get; } = [];
+
+        public List<uint> Identified { get; } = [];
 
         public double CastSeconds { get; set; } = 0.5;
 
@@ -271,12 +501,16 @@ public sealed class FightScenarioTests
 
         public Creature Add(uint guid, uint wcid, uint cell, float y, string name = "Tusker Slave", int hitsToKill = 2, float x = PlayerX)
         {
-            var creature = new Creature(guid, wcid, name, hitsToKill);
+            var creature = new Creature(guid, wcid, name, hitsToKill) { Cell = cell, Y = y };
             _creatures[guid] = creature;
             var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), ReducerHarness.Position(cell, x, y, 30), name: name);
             R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { ItemType = 0x10, WeenieClassId = wcid } }, isUpdate: false);
             return creature;
         }
+
+        /// <summary>The server moves creature <paramref name="guid"/> to <paramref name="y"/> in <paramref name="cell"/> (once per creature: the position stamp is fixed).</summary>
+        public void Move(uint guid, uint cell, float y) =>
+            R.H.R.Reducer.OnUpdatePosition(R.H.R.Context, new UpdatePositionMsg(guid, PositionFlags.Grounded, ReducerHarness.Position(cell, PlayerX, y, 30), null, null, 1, 50, 1, 1));
 
         public FightScenario Scenario(IFightWalk? walk, FightStages stages = FightStages.Mode) =>
             new(Kit, Table, Buff, Fight, walk, R.H.Log, endSession: false, stages: stages);
@@ -333,11 +567,58 @@ public sealed class FightScenarioTests
                         }
 
                         break;
+                    case FakeSendKind.Use when _corpses.ContainsKey(send.Guid):
+                        Opened.Add(send.Guid);
+                        if (BusyOpens > 0)
+                        {
+                            BusyOpens--;
+                            R.UseDone(0x001D);
+                        }
+                        else if (MoveToFailsAfter is { } failAfter)
+                        {
+                            _opens.Enqueue((send.Guid, now + failAfter, true));
+                        }
+                        else if (MoveToSeconds > 0)
+                        {
+                            _opens.Enqueue((send.Guid, now + MoveToSeconds, false));
+                        }
+                        else
+                        {
+                            OpenCorpse(send.Guid);
+                        }
+
+                        break;
+                    case FakeSendKind.PutItemInContainer:
+                        Picked.Add(send.Guid);
+                        R.Server((p, s) => AceM3Writers.PutObjInContainer(p, s, send.Guid, WorldActionRig.Player, 0, 0));
+                        break;
+                    case FakeSendKind.NoLongerViewingContents:
+                        Closed.Add(send.Guid);
+                        R.H.R.Reducer.OnCloseGroundContainer(R.H.R.Context, new GameEventHeader(WorldActionRig.Player, 900 + (uint)Closed.Count, GameEventTypes.CloseGroundContainer), new CloseGroundContainerEvent(send.Guid));
+                        break;
+                    case FakeSendKind.Identify:
+                        Identified.Add(send.Guid);
+                        var answered = new Dictionary<uint, int> { [AppraisalIds.Value] = AppraisedValues.GetValueOrDefault(send.Guid), [AppraisalIds.Burden] = 5 };
+                        R.Server((p, s) => AceVendorWriters.IdentifyResponse(p, s, send.Guid, new AceAppraisal { Success = true, Ints = answered }));
+                        break;
                     case FakeSendKind.QueryHealth:
                         HealthQueries.Add(send.Guid);
                         var c = _creatures[send.Guid];
                         R.Server((p, s) => AceWireWriters.UpdateHealth(p, s, send.Guid, Math.Max(0f, 1f - ((float)c.Hits / c.HitsToKill))));
                         break;
+                }
+            }
+
+            while (_opens.Count > 0 && _opens.Peek().Due <= now)
+            {
+                var open = _opens.Dequeue();
+                if (open.Fail)
+                {
+                    R.UseDone(0x0036);
+                }
+                else
+                {
+                    OpenCorpse(open.Corpse);
                 }
             }
 
@@ -363,8 +644,42 @@ public sealed class FightScenarioTests
                 var gone = _late.Dequeue().Guid;
                 R.Raw(AceWireWriters.UpdateMotion(gone, 1, 2, 2, false, new AceMovementData { Forward = 0x0011 })); // MotionCommand.Dead
                 Assert.Equal((ushort?)0x0011, R.H.State.Objects.TryGet(gone, out var body) ? body.Motion?.Forward : null);
+                if (Corpses && CorpseAtDeletion)
+                {
+                    LeaveCorpse(_creatures[gone]);
+                }
+
                 R.Raw(AceWireWriters.ObjectDelete(gone, 1));
             }
+        }
+
+        /// <summary>The creature's corpse appears where it lay (a corpse description flag, the creature's name); M5 7 P7b: also the server sending a corpse again once the player is back in view of it.</summary>
+        public void LeaveCorpse(Creature creature)
+        {
+            var guid = creature.Guid + CorpseOffset;
+            _corpses[guid] = creature;
+            var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), ReducerHarness.Position(creature.Cell, PlayerX, creature.Y, 30), name: "Corpse of " + creature.Name);
+            R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { ObjectDescriptionFlags = WorldObjectTable.CorpseFlag } }, isUpdate: false);
+        }
+
+        /// <summary>The open of a corpse: ViewContents naming its items, their CreateObjects and the UseDone; or, when refused, a UseDone error alone.</summary>
+        private void OpenCorpse(uint corpse)
+        {
+            if (RefuseOpen)
+            {
+                R.UseDone(0x0036);
+                return;
+            }
+
+            var held = ItemsOfCreature.TryGetValue(_corpses[corpse].Guid, out var own) ? own : CorpseItems;
+            R.Server((p, s) => AceM3Writers.ViewContents(p, s, corpse, [.. held.Select(i => (i.Guid, 0u))]));
+            foreach (var i in held)
+            {
+                var item = LootRulesTests.Item(i.Type, i.Value, i.Burden, i.Guid, i.Name, i.Wcid);
+                R.H.R.Reducer.OnCreateObject(R.H.R.Context, item.Created with { Weenie = item.Created.Weenie with { Header = item.Created.Weenie.Header | WeenieHeaderFlags.Container, ContainerId = corpse } }, isUpdate: false);
+            }
+
+            R.UseDone();
         }
 
         /// <summary>The server answers the place tool: the reply, then the teleport and the position in <paramref name="cell"/>.</summary>
@@ -385,9 +700,18 @@ public sealed class FightScenarioTests
         private static GearItem GearItemOf(uint wcid, string name, GearKind kind, GearWeenie w) =>
             new(wcid, name, kind, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.Burden);
 
-        private static Dictionary<uint, SpellInfo> BuildTable(float range)
+        private static Dictionary<uint, SpellInfo> BuildTable(float range, bool openers)
         {
             var table = new Dictionary<uint, SpellInfo>();
+            if (openers)
+            {
+                // M5 7 F8: the opener line (Fire Vulnerability Other I-VIII, Life Magic enchantments) is in the table and the book only when a test asks for it, so the other tests' Slaves keep their bolts alone.
+                foreach (var spell in ArenaProfile.ExtraNamed("Fire Vulnerability Other")!.Spells)
+                {
+                    table[spell.Id] = WorldActionRig.Spell(spell.Id, SpellType.Enchantment, SpellFlags.None) with { Name = spell.Name, School = MagicSchool.LifeMagic, Power = spell.Power, BaseMana = 40 };
+                }
+            }
+
             foreach (var line in ArenaProfile.Lines.Where(l => l.Role == ProfileRole.WarBolt))
             {
                 foreach (var spell in line.Spells)
@@ -407,7 +731,7 @@ public sealed class FightScenarioTests
             return table;
         }
 
-        private void Describe(uint warRanks, IReadOnlyCollection<uint> known)
+        private void Describe(uint warRanks, IReadOnlyCollection<uint> known, int characterLevel)
         {
             var attributes = ImmutableArray.CreateBuilder<AttributeDesc>();
             foreach (var id in new[] { MageTemplate.Strength, MageTemplate.Endurance, MageTemplate.Quickness, MageTemplate.Coordination, MageTemplate.Focus, MageTemplate.Self })
@@ -431,6 +755,7 @@ public sealed class FightScenarioTests
             {
                 Attributes = attributes.ToImmutable(),
                 Skills = skills.ToImmutable(),
+                IntProperties = characterLevel > 0 ? ImmutableDictionary<uint, int>.Empty.Add(25, characterLevel) : ImmutableDictionary<uint, int>.Empty, // PropertyInt.Level (g6's plan cap); 0: unknown
                 Vitals = vitals.ToImmutable(),
                 Spells = known.ToImmutableDictionary(id => id, _ => 2f),
                 Equipped = [new EquippedDesc(WieldedSetups.Wand.Guid, (uint)EquipMask.Held, 0)], // M4 3.1 g: the mage holds its wand, as the combat-mode guard needs for the magic mode
@@ -473,6 +798,20 @@ public sealed class FightScenarioTests
                 case Shot.OutOfRange:
                     R.UseDone(0x0550);
                     return;
+                case Shot.NotAcquired:
+                    R.UseDone(0x042C);
+                    return;
+                case Shot.TargetDied:
+                    _creatures[target].Dead = true;
+                    R.Raw(AceWireWriters.ObjectDelete(target, 1));
+                    R.UseDone(0x042C);
+                    return;
+                case Shot.TargetDiedAtRelease:
+                    _creatures[target].Dead = true;
+                    R.Raw(AceWireWriters.ObjectDelete(target, 1));
+                    R.WeenieError(0x042C);
+                    R.UseDone();
+                    return;
                 case Shot.Fizzle:
                     Mana = Mana >= 5 ? Mana - 5 : 0;
                     SendMana();
@@ -488,6 +827,14 @@ public sealed class FightScenarioTests
             SendMana();
             var boltId = Projectile();
             var creature = _creatures[target];
+            if (ArenaProfile.ExtraNamed("Fire Vulnerability Other")!.Spells.Any(o => o.Id == spellId))
+            {
+                // The opener is no projectile: a resist is ACE's line alone, a landing is "You cast <spell> on <name>" (WorldObject_Magic.cs 192 and 409-421), and the UseDone is code 0 either way.
+                R.Raw(AceWireWriters.ServerMessage(shot == Shot.Resist ? $"{creature.Name} resists your spell" : $"You cast {Table[spellId].Name} on {creature.Name}", 7));
+                R.UseDone();
+                return;
+            }
+
             if (shot is Shot.Resist or Shot.RanIn)
             {
                 // The bolt flew 0.2 s at 20 m/s (4 m) and met the target, which had run to 6 m from the bolt's origin.
@@ -518,6 +865,13 @@ public sealed class FightScenarioTests
 
             if (HitDelay > 0)
             {
+                if (StaleDamageLineOnce)
+                {
+                    // M5 7 D124 (S1b): an earlier projectile's damage line arrives while this bolt flies; round 12's hit wait took such a line for its own and picked again at once.
+                    StaleDamageLineOnce = false;
+                    R.Raw(AceWireWriters.ServerMessage("You burn Drudge Ravener for 10 points with Flame Bolt VI.", 7));
+                }
+
                 _lateHits.Enqueue((spellId, target, shot, Now + HitDelay)); // the bolt is in flight: the UseDone ends the cast now, the hit lands later
             }
             else
@@ -536,9 +890,31 @@ public sealed class FightScenarioTests
             if (shot == Shot.SilentKill || creature.Hits >= creature.HitsToKill)
             {
                 creature.Dead = true;
+                if (Corpses && !(CorpseAtDeletion && DeathDelay > 0))
+                {
+                    LeaveCorpse(creature);
+                }
+
                 if (shot != Shot.SilentKill)
                 {
                     R.Server((p, s) => AceM3Writers.KillerNotification(p, s, KillText ?? "You have killed " + creature.Name + "!"));
+                    if (HealthZeroAtKill)
+                    {
+                        R.Server((p, s) => AceWireWriters.UpdateHealth(p, s, target, 0f));
+                    }
+                }
+
+                if (Splash.Remove(target, out var neighbour) && !neighbour.Dead)
+                {
+                    // M5 7 P7b (D139 i): the ring's splash: the neighbour's corpse, its own 0x01AD (ACE sends it to the killer alone, Creature_Death.cs:58-77) and its deletion.
+                    neighbour.Dead = true;
+                    if (Corpses)
+                    {
+                        LeaveCorpse(neighbour);
+                    }
+
+                    R.Server((p, s) => AceM3Writers.KillerNotification(p, s, "You bring " + neighbour.Name + " to a fiery end!"));
+                    R.Raw(AceWireWriters.ObjectDelete(neighbour.Guid, 1));
                 }
 
                 if (DeathDelay > 0 && shot != Shot.SilentKill)
@@ -594,7 +970,7 @@ public sealed class FightScenarioTests
         Assert.Equal(0, scenario.Walks);
         Assert.Equal(2, scenario.Projectiles);
         Assert.Equal([0x80001001u, 0x80001001u], r.CastTargets);
-        Assert.Equal([0x80001001u], r.HealthQueries); // after the hit that did not kill
+        Assert.Equal([0x80001001u, 0x80001001u], r.HealthQueries); // M5 7 F20: one when the target is picked (selected, so ACE pushes its health), one after the hit that did not kill
         Assert.Equal([CombatModes.Magic, CombatModes.NonCombat], r.ModesSent);
         Assert.Equal(CombatModes.NonCombat, r.R.H.State.Self.Qualities.CombatMode);
 
@@ -706,7 +1082,7 @@ public sealed class FightScenarioTests
 
         Assert.Equal(ScenarioStatus.Failed, status);
         Assert.Contains("20 s passed with kills=0 of 1", scenario.Failure, StringComparison.Ordinal);
-        Assert.InRange(r.Now - failedAt, DenExit.SettleSeconds, DenExit.SettleSeconds + 1); // the rig lands the player at once; then the settle
+        Assert.InRange(r.Now - failedAt, GroundExit.SettleSeconds, GroundExit.SettleSeconds + 1); // the rig lands the player at once; then the settle
         var place = Assert.Single(r.Places);
         Assert.Contains("poi", place, StringComparison.Ordinal);
         Assert.NotEqual(0x0105u, r.R.H.State.Self.Position!.Value.CellId >> 16);
@@ -906,6 +1282,73 @@ public sealed class FightScenarioTests
     }
 
     [Fact]
+    public void A_target_that_died_during_the_wind_up_is_not_a_miss_and_the_next_tusker_is_picked_at_once()
+    {
+        var r = new Rig();
+        var dying = r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var next = r.Add(0x80001002, TuskerSlave, 0x01050303, 48);
+        r.Script(Shot.TargetDied);
+        var walk = new FakeWalk();
+        var scenario = r.Scenario(walk);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.True(dying.Dead);
+        Assert.True(next.Dead);
+        Assert.Equal(1, scenario.Tally.TargetDiedMidCast); // M5 7 F28
+        Assert.Equal(0, scenario.Tally.Misses);
+        Assert.Equal(0, walk.Legs);
+        Assert.Equal(0, scenario.Walks);
+        Assert.Equal([0x80001001u, 0x80001002u, 0x80001002u], r.CastTargets); // no retry at the dead guid
+        Assert.Contains("target_died_mid_cast=1 ", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(r.Log.Lines, l => l.Contains("died during the wind-up", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_0x042C_for_a_target_still_shown_here_is_a_target_died_not_a_miss_and_not_out_of_range()
+    {
+        // M5 7 D124 (was F28's "a miss as before"): ACE sends 0x042C only for a target gone from its landblock (Player_Magic.cs:137-140, 173-179, 197-203, 751-757 @95ef426d), so the server's word stands over the table's lag.
+        var r = new Rig();
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        r.Add(0x80001002, TuskerSlave, 0x01050303, 48);
+        r.Script(Shot.NotAcquired);
+        var walk = new FakeWalk();
+        var scenario = r.Scenario(walk);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal(1, scenario.Tally.TargetDiedMidCast);
+        Assert.Equal(0, scenario.Tally.Misses);
+        Assert.Equal(0, walk.Legs);
+        Assert.Equal([0x80001001u, 0x80001002u, 0x80001002u], r.CastTargets); // the next tusker at once, no walk, no recast at the unacquired guid
+        Assert.Contains("target_died_mid_cast=1 ", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(r.Log.Lines, l => l.Contains("not acquired at the release", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_releases_0x042C_WeenieError_then_UseDone_0_is_a_target_died_not_a_cast_without_a_projectile()
+    {
+        // M5 7 D124: round 12's 31 casts: the bolt's kill landed during the next wind-up, ACE's DoCastSpell sent WeenieError 0x042C (Player_Magic.cs:751-757 @95ef426d) and FinishCast's UseDone 0 (935-985).
+        var r = new Rig();
+        var dying = r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var next = r.Add(0x80001002, TuskerSlave, 0x01050303, 48);
+        r.Script(Shot.TargetDiedAtRelease);
+        var walk = new FakeWalk();
+        var scenario = r.Scenario(walk);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.True(dying.Dead);
+        Assert.True(next.Dead);
+        Assert.Equal(1, scenario.Tally.TargetDiedMidCast);
+        Assert.Equal(0, scenario.Tally.Misses);
+        Assert.Equal(0, walk.Legs);
+        Assert.Equal([0x80001001u, 0x80001002u, 0x80001002u], r.CastTargets);
+        Assert.DoesNotContain(r.Log.Lines, l => l.Contains("without a projectile", StringComparison.Ordinal));
+        Assert.Contains(r.Log.Lines, l => l.Contains("died during the wind-up", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void No_target_in_range_walks_and_a_creature_beyond_the_range_is_not_cast_at()
     {
         var r = new Rig();
@@ -936,7 +1379,7 @@ public sealed class FightScenarioTests
         r.Add(0x80001002, 1610, 0x01050303, 26, "Drudge Ravener");
         r.Add(0x80001003, 237, 0x01050303, 27, "Virindi Master");
         r.Add(0x80001004, TuskerSlave, DeadChestCorner, 28); // a tusker off the floor (the chest corner is excluded)
-        r.Add(0x80001005, 1629, 0x01050154, 29, "Tusker Guard"); // the north wing's cell
+        r.Add(0x80001005, 1629, 0x0105010D, 29, "Tusker Guard"); // the north wing's cell (no-go in the profile)
         var good = r.Add(0x80001006, 1629, 0x010502E1, 45, "Tusker Guard"); // 25 m, the only legal target
         var scenario = r.Scenario(new FakeWalk());
 
@@ -988,8 +1431,29 @@ public sealed class FightScenarioTests
     }
 
     [Fact]
-    public void A_fizzle_drops_one_level_once()
+    public void A_fizzle_is_retried_at_the_same_level_twice_then_drops_one_level_once()
     {
+        // M5 1 K3 (D14): was "a fizzle drops one level once". Now the first try and two more are at the chosen level, the fourth is one level down, and a fizzle there is a miss with no further drop.
+        var r = new Rig();
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40, hitsToKill: 3);
+        r.Script(Shot.Fizzle, Shot.Fizzle, Shot.Fizzle, Shot.Fizzle);
+        var scenario = r.Scenario(new FakeWalk());
+        var first = FlameBoltIndexFor(r);
+        var spells = ArenaProfile.LineNamed("Flame Bolt")!.Spells;
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal([spells[first].Id, spells[first].Id, spells[first].Id], r.CastSpells.Take(3));
+        Assert.Equal(spells[first - 1].Id, r.CastSpells[3]); // one level down after three fizzles at the level
+        Assert.All(r.CastSpells.Skip(3), id => Assert.Equal(spells[first - 1].Id, id)); // and no further drop for the fourth fizzle
+        Assert.Equal(4, scenario.Tally.Misses);
+        Assert.Equal(1, r.Log.Lines.Count(l => l.Contains("one level down", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void Two_fizzles_are_retried_at_the_same_level_and_the_third_try_lands_with_no_drop()
+    {
+        // M5 1 K3 (D14): the sequence's first half, with the casts counted (a try sent is a cast) and each fizzle a miss.
         var r = new Rig();
         r.Add(0x80001001, TuskerSlave, 0x01050303, 40, hitsToKill: 3);
         r.Script(Shot.Fizzle, Shot.Fizzle);
@@ -999,11 +1463,10 @@ public sealed class FightScenarioTests
 
         Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
 
-        Assert.Equal(spells[first].Id, r.CastSpells[0]);
-        Assert.Equal(spells[first - 1].Id, r.CastSpells[1]); // one level down after the fizzle
-        Assert.All(r.CastSpells.Skip(1), id => Assert.Equal(spells[first - 1].Id, id)); // and no further drop for the second fizzle
+        Assert.All(r.CastSpells, id => Assert.Equal(spells[first].Id, id));
         Assert.Equal(2, scenario.Tally.Misses);
-        Assert.Equal(1, r.Log.Lines.Count(l => l.Contains("one level down", StringComparison.Ordinal)));
+        Assert.Equal(r.CastSpells.Count, scenario.Tally.Casts);
+        Assert.Equal(0, r.Log.Lines.Count(l => l.Contains("one level down", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -1017,14 +1480,14 @@ public sealed class FightScenarioTests
         var r = new Rig(known: [.. all.Table.Keys.Where(id => id != spells[first - 1].Id)]);
         r.Table[spells[first - 2].Id] = r.Table[spells[first - 2].Id] with { BaseRangeConstant = 20f }; // the lower level reaches less far
         r.Add(0x80001001, TuskerSlave, 0x01050303, PlayerY + 15, hitsToKill: 2);
-        r.Script(Shot.Fizzle);
+        r.Script(Shot.Fizzle, Shot.Fizzle, Shot.Fizzle); // D14: three tries at the chosen level before the drop
         var scenario = r.Scenario(new FakeWalk());
 
         Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
 
-        Assert.Equal(spells[first].Id, r.CastSpells[0]);
-        Assert.Equal(spells[first - 2].Id, r.CastSpells[1]); // not the unknown level between
-        Assert.All(r.CastSpells.Skip(1), id => Assert.Equal(spells[first - 2].Id, id));
+        Assert.Equal([spells[first].Id, spells[first].Id, spells[first].Id], r.CastSpells.Take(3));
+        Assert.Equal(spells[first - 2].Id, r.CastSpells[3]); // not the unknown level between
+        Assert.All(r.CastSpells.Skip(3), id => Assert.Equal(spells[first - 2].Id, id));
         Assert.Equal(20f, scenario.RangeMetres);
         Assert.Contains(r.Log.Lines, l => l.Contains("one level down, to " + spells[first - 2].Name + " (" + spells[first - 2].Id.ToString(CultureInfo.InvariantCulture) + "), the next lower level the spellbook knows; range 20 m", StringComparison.Ordinal));
         Assert.Contains(" level=" + new[] { "I", "II", "III", "IV", "V", "VI", "VII" }[first - 2] + " range_m=20 ", scenario.VerdictFields(), StringComparison.Ordinal);
@@ -1143,11 +1606,11 @@ public sealed class FightScenarioTests
         r.Add(0x80001002, TuskerSlave, 0x01050303, 45);
         var self = r.R.H.State.Self.Position!.Value;
 
-        Assert.True(table.NearestCreature(ArenaProfile.TargetWcids, in self, 30f, null, [0x80001001u], out var guid));
+        Assert.True(table.NearestCreature(DenGround.Profile.TargetWcids(), in self, 30f, null, [0x80001001u], out var guid));
         Assert.Equal(0x80001002u, guid);
 
         r.R.Raw(AceWireWriters.UpdateMotion(0x80001001, 1, 2, 2, false, new AceMovementData { Forward = 0x0011 }));
-        Assert.True(table.NearestCreature(ArenaProfile.TargetWcids, in self, 30f, null, out guid));
+        Assert.True(table.NearestCreature(DenGround.Profile.TargetWcids(), in self, 30f, null, out guid));
         Assert.Equal(0x80001002u, guid);
     }
 
@@ -1165,7 +1628,7 @@ public sealed class FightScenarioTests
         Assert.Equal(0, scenario.Tally.TargetKills);
         Assert.False(scenario.Tally.LastKillNamedTarget);
         Assert.Contains(" kills=1 ", scenario.VerdictFields(), StringComparison.Ordinal);
-        Assert.EndsWith(" target_kills=0", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(" target_kills=0 ", scenario.VerdictFields(), StringComparison.Ordinal); // M5 1 F1: the mana and rate fields now end the line
     }
 
     [Fact]
@@ -1207,6 +1670,19 @@ public sealed class FightScenarioTests
         var onScenario = on.Scenario(new FakeWalk(), FightStages.Place | FightStages.Mode);
         Assert.Equal(ScenarioStatus.Succeeded, on.Run(onScenario, 120));
         Assert.Contains(on.Log.Lines, l => l.Contains("settled in cell 0x01050375; floor cell yes", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_fights_teleport_goes_to_the_grounds_arrival_M5_2_g2b()
+    {
+        // The place is a location request built from the profile's arrival (GroundRules.ArrivalDestination), not the Places row: the first place of the run names the arrival's cell.
+        var r = new Rig { ArrivalCell = 0x01050375 };
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var scenario = r.Scenario(new FakeWalk(), FightStages.Place | FightStages.Mode);
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario, 120));
+        var place = r.Places[0];
+        Assert.Contains("place loc", place, StringComparison.Ordinal);
+        Assert.Contains(DenGround.Profile.Arrival.Cell.ToString("X8", CultureInfo.InvariantCulture), place, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1314,12 +1790,44 @@ public sealed class FightScenarioTests
     [Fact]
     public void The_target_rule_the_loop_filters_by_keeps_the_three_named_creatures_out()
     {
-        // The rule the filter applies is BlackSpawnDen's: pinned here at the three cells the brief names, so a change to the set cannot silently let them in.
-        Assert.False(BlackSpawnDen.IsTarget(23, 0x01050303));
-        Assert.False(BlackSpawnDen.IsTarget(1610, 0x01050303));
-        Assert.False(BlackSpawnDen.IsTarget(TuskerSlave, DeadChestCorner));
-        Assert.True(BlackSpawnDen.IsTarget(TuskerSlave, 0x01050303));
-        Assert.True(BlackSpawnDen.IsTarget(1629, 0x010502E1));
+        // The rule the filter applies is the ground's (GroundRules.IsTarget over the profile's roles and walkable cells): pinned here at the three cells the brief names, so a change to the profile cannot silently let them in.
+        var den = DenGround.Profile;
+        Assert.False(den.IsTarget(23, 0x01050303));
+        Assert.False(den.IsTarget(1610, 0x01050303));
+        Assert.False(den.IsTarget(TuskerSlave, DeadChestCorner));
+        Assert.True(den.IsTarget(TuskerSlave, 0x01050303));
+        Assert.True(den.IsTarget(1629, 0x010502E1));
+    }
+
+    [Fact]
+    public void A_creature_in_a_no_go_cell_is_never_a_target_even_when_its_wcid_is_one_M5_2_g2b()
+    {
+        // The profile's role for a wcid decides the creature, its cell decides where it counts: a tusker (role target) standing in each no-go cell is no target, in a walkable cell it is. An unlisted wcid is none anywhere.
+        var den = DenGround.Profile;
+        Assert.NotEmpty(den.NoGo.Cells);
+        Assert.All(den.NoGo.Cells, cell => Assert.False(den.IsTarget(TuskerSlave, cell), $"0x{cell:X8}"));
+        Assert.All(den.Walkable.Cells.Take(40), cell => Assert.True(den.IsTarget(TuskerSlave, cell), $"0x{cell:X8}"));
+        Assert.False(den.IsTarget(3955, 0x01050303));
+        Assert.Equal([1628u, 1629u], den.TargetWcids());
+    }
+
+    [Fact]
+    public void An_unknown_fight_ground_fails_the_parse_naming_the_known_keys_and_keeps_the_default_M5_2_g2b()
+    {
+        var bad = FightOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(["--fight-ground=no-such-ground"]));
+        var error = Assert.Single(bad.Errors);
+        Assert.Contains("--fight-ground", error, StringComparison.Ordinal);
+        Assert.Contains("'no-such-ground'", error, StringComparison.Ordinal);
+        Assert.Contains(FightOptions.DefaultGround, error, StringComparison.Ordinal);
+        Assert.Equal(FightOptions.DefaultGround, bad.Ground);
+
+        var outdoor = FightOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(["--fight-ground=low-b-belt"]));
+        Assert.Contains("is not a dungeon", Assert.Single(outdoor.Errors), StringComparison.Ordinal);
+
+        var good = FightOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(["--fight-ground=" + FightOptions.DefaultGround]));
+        Assert.Empty(good.Errors);
+        Assert.Same(GroundCatalog.Get(FightOptions.DefaultGround), good.GroundProfile);
+        Assert.Throws<KeyNotFoundException>(() => new FightOptions { Ground = "no-such-ground" }.GroundProfile);
     }
 
     [Fact]
@@ -1329,29 +1837,573 @@ public sealed class FightScenarioTests
         var parsed = FightOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(["--fight-kills=4", "--fight-seconds=90"]));
         Assert.Empty(parsed.Errors);
         Assert.Equal((4, 90.0), (parsed.Kills, parsed.Seconds));
-        var bad = FightOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(["--fight-kills=0", "--fight-seconds=abc"]));
+        var bad = FightOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(["--fight-kills=-1", "--fight-seconds=abc"])); // M5 1 F1: 0 is now no kill limit
         Assert.Equal(2, bad.Errors.Count);
         Assert.Equal((1, 300.0), (bad.Kills, bad.Seconds));
     }
 
+    [Fact]
+    public void The_fight_feeds_the_tour_each_kill_with_the_targets_wcid_and_cell_and_each_creature_created_during_the_fight()
+    {
+        // g6 item 3: the pick is unchanged (the nearest target with a clear line); the tour hears the kill and the creates.
+        var r = new Rig();
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40); // 20 m: the nearest
+        var tour = new RecordingTour();
+        var scenario = r.Scenario(new FakeWalk { Tour = tour });
+        for (var i = 0; i < 400 && scenario.Stage != "fight"; i++)
+        {
+            r.Frame(scenario);
+        }
+
+        Assert.Equal("fight", scenario.Stage);
+        r.Add(0x80001002, TuskerGuard, 0x01050320, 45); // created during the fight, 25 m away
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal([(TuskerSlave, 0x01050303u)], tour.Kills);
+        Assert.Equal([0x80001001u], tour.KillGuids); // 2-R1: the guid goes with the kill, so the schedule pairs it by its spawn
+        Assert.Contains((TuskerGuard, 0x01050320u), tour.Creates);
+        Assert.Contains(0x80001002u, tour.CreateGuids);
+        Assert.Equal([0x80001001u, 0x80001001u], r.CastTargets);
+    }
+
+    [Fact]
+    public void The_tour_fields_follow_the_mana_fields_on_the_verdict_line_and_the_bsd_fight_line()
+    {
+        // g6 item 5 (D44, report-only): storeys_visited= basement_entries= returns= slots_standing=, after the mana fields' last, dances_landed=.
+        var r = new Rig(fight: new FightOptions { StoreysMin = 2 });
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var tour = new GroundTour(DenGround.Profile, (_, _) => double.PositiveInfinity, r.Log); // M5 7 P7o: no other storey is reachable, so the one kill ends the fight as before (named: storeys unmet)
+        var scenario = r.Scenario(new FakeWalk { Tour = tour, Recovered = 2 });
+        Assert.Equal(2, tour.StoreysMin); // --fight-storeys-min reaches the walk's tour
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal(1, tour.Schedule.Paired); // the Slave in 0x0303 paired with one of that cell's two slots
+        var standing = tour.Schedule.HuntedCount - 1;
+        Assert.Matches(@" dances_landed=\d+ storeys_visited=1 basement_entries=0 returns=0 slots_standing=" + standing + " legs_recovered=2 kills_unpaired=0 slots_expired=0" + Purpose + LootOff + "$", scenario.VerdictFields());
+        Assert.Matches($"^storeys_visited=1 basement_entries=0 returns=0 slots_standing={standing} legs_recovered=2 kills_unpaired=0 slots_expired=0" + Purpose + "$", scenario.TourFields());
+        Assert.Equal((1, 0), (scenario.StoreysVisited, scenario.BasementEntries));
+        var t = scenario.Tally;
+        var line = FightLegVerdict.Compose(scenario.Failure, new FightLegMeasures(t.Kills, t.DamageDealt, t.Casts, t.Misses, t.XpGained, t.DamageTaken, t.HitsTaken, t.Evades, null, null, null, null, scenario.FightSeconds, ManaFields: scenario.ManaFields(), TourFields: scenario.TourFields())).Line;
+        Assert.Matches(@" dances_landed=\d+ storeys_visited=1 basement_entries=0 returns=0 slots_standing=\d+ legs_recovered=2 kills_unpaired=0 slots_expired=0" + Purpose + "$", line); // the leg line is the leg runner's: the loot fields end the scenario's verdict only (For the lead: FightLegVerdict)
+
+        var bare = new Rig();
+        bare.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var plain = bare.Scenario(new FakeWalk());
+        Assert.Equal(ScenarioStatus.Succeeded, bare.Run(plain));
+        Assert.EndsWith(" storeys_visited=1 basement_entries=0 returns=n/a slots_standing=n/a legs_recovered=n/a kills_unpaired=n/a slots_expired=n/a" + NoPurpose + LootOff, plain.VerdictFields(), StringComparison.Ordinal); // a walk without the ground's tour
+    }
+
+    [Fact]
+    public void Recovered_legs_unpaired_kills_and_slots_expired_unseen_appear_on_the_verdict_line_and_the_bsd_fight_line()
+    {
+        // 2-R4 (report-only): a Slave dying in a cell that holds no slot pairs with none (kills_unpaired=1); the walk reports 3 legs recovered; a slot long dead with no create seen is taken as standing (slots_expired=1).
+        var r = new Rig();
+        r.Add(0x80001001, TuskerSlave, Den, 40); // the arrival's own cell: the den's profile has no slot there
+        var tour = new GroundTour(DenGround.Profile, (_, _) => 0, r.Log);
+        Assert.True(tour.Schedule.Killed(TuskerSlave, 0x01050303, 0) >= 0); // a slot dead from the start of the run, never seen again
+        var scenario = r.Scenario(new FakeWalk { Tour = tour, Recovered = 3 });
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+        Assert.Equal(1, tour.Schedule.Expire(5000)); // as the tour does before a choice, long past due (TODO(ground-respawn-unseen))
+
+        const string tail = @" storeys_visited=1 basement_entries=0 returns=0 slots_standing=\d+ legs_recovered=3 kills_unpaired=1 slots_expired=1" + Purpose + "$";
+        Assert.Matches(@" dances_landed=\d+" + tail[..^1] + LootOff + "$", scenario.VerdictFields());
+        var t = scenario.Tally;
+        var line = FightLegVerdict.Compose(scenario.Failure, new FightLegMeasures(t.Kills, t.DamageDealt, t.Casts, t.Misses, t.XpGained, t.DamageTaken, t.HitsTaken, t.Evades, null, null, null, null, scenario.FightSeconds, ManaFields: scenario.ManaFields(), TourFields: scenario.TourFields())).Line;
+        Assert.Matches(@"^bsd-fight done .* dances_landed=\d+" + tail, line);
+    }
+
+    [Fact]
+    public void While_the_tour_wants_to_leave_the_storey_the_pick_takes_a_target_off_it_so_the_second_kill_is_taken_below()
+    {
+        // 2-R2 on the den's profile: --fight-storeys-min 2 and two kills; two Slaves stand on the arrival floor (20 m and 22 m) and a Guard on z -6 (28 m). After the floor's first kill the pick must not take the floor's second Slave.
+        var r = new Rig(fight: new FightOptions { StoreysMin = 2, Kills = 2 });
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        r.Add(0x80001002, TuskerSlave, 0x01050303, 42);
+        r.Add(0x80001003, TuskerGuard, 0x01050280, 48);
+        var tour = new GroundTour(DenGround.Profile, (_, _) => 0, r.Log);
+        var scenario = r.Scenario(new FakeWalk { Tour = tour });
+
+        for (var i = 0; i < 4000 && scenario.Tally.Kills < 2 && r.Frame(scenario) == ScenarioStatus.Running; i++)
+        {
+        }
+
+        Assert.Equal([0x80001001u, 0x80001001u, 0x80001003u, 0x80001003u], r.CastTargets); // the floor's nearest, then the Guard on z -6, never the floor's other Slave
+        Assert.Equal(2, tour.StoreysVisited);
+        Assert.Equal(2, tour.Schedule.Paired);
+
+        // M5 7 P7o: the Guard died on z -6 to a bolt cast from the arrival's floor; the body stood on one storey (storeys_visited=1, the judged field), so the quota does not win
+        for (var i = 0; i < 40; i++)
+        {
+            Assert.Equal(ScenarioStatus.Running, r.Frame(scenario));
+        }
+
+        Assert.Equal(1, scenario.StoreysVisited);
+        Assert.Contains(r.Log.Lines, l => l.Contains(FightScenario.StoreysHoldLine + ": kills=2 of 2 with 1 of 2 storeys visited by the body (tour 2)", StringComparison.Ordinal));
+        Assert.Equal(1, tour.BodyStoreysVisited);
+    }
+
+    [Fact]
+    public void With_no_target_off_the_storey_in_range_the_tour_that_wants_to_leave_walks_instead_of_taking_the_floors_next_target()
+    {
+        // 2-R2: the pick prefers targets off the storey and, with none in range, the fight walks (the tour offers the next storey) rather than kill the floor's second Slave and never leave.
+        var r = new Rig(fight: new FightOptions { StoreysMin = 2, Kills = 2 });
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        r.Add(0x80001002, TuskerSlave, 0x01050303, 42);
+        var tour = new GroundTour(DenGround.Profile, (_, _) => 0, r.Log);
+        var walk = new FakeWalk { Tour = tour };
+        var scenario = r.Scenario(walk);
+
+        for (var i = 0; i < 4000 && walk.Legs == 0 && r.Frame(scenario) == ScenarioStatus.Running; i++)
+        {
+        }
+
+        Assert.Equal(1, walk.Legs);
+        Assert.Equal([0x80001001u, 0x80001001u], r.CastTargets); // one kill, then the walk
+        Assert.Contains(r.Log.Lines, l => l.Contains("walking: the tour leaves this storey", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_fight_that_starts_with_creatures_already_in_their_slot_cells_pairs_every_kill_of_them_by_its_spawn_wherever_they_die()
+    {
+        // F4 (the live finding: kills=3, kills_unpaired=2): the creatures stand in the den before the fight exists, so no create of the fight's reaches the schedule; the fight's start seeds it. Two Slaves in the cell of
+        // the den's two Slave slots and a Guard in a Guard slot's cell; the second Slave runs to the arrival's room, which holds no slot, and dies there.
+        var r = new Rig(fight: new FightOptions { Kills = 3 });
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        r.Add(0x80001002, TuskerSlave, 0x01050303, 42);
+        r.Add(0x80001003, TuskerGuard, 0x01050280, 48);
+        var tour = new GroundTour(DenGround.Profile, (_, _) => 0, r.Log);
+        var scenario = r.Scenario(new FakeWalk { Tour = tour });
+        Assert.Equal(0, tour.Schedule.Seeded); // the tour was made before any session: the fight's start seeds it
+
+        for (var i = 0; i < 400 && scenario.Stage != "fight"; i++)
+        {
+            r.Frame(scenario);
+        }
+
+        Assert.Equal("fight", scenario.Stage);
+        Assert.Equal(3, tour.Schedule.Seeded);
+        r.Move(0x80001002, Den, 42);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal(3, scenario.Tally.TargetKills);
+        Assert.Equal((3, 3, 0, 0), (tour.Schedule.Paired, tour.Schedule.PairedBySpawn, tour.Schedule.PairedByCell, tour.Schedule.Unpaired));
+        Assert.Matches(@" legs_recovered=n/a kills_unpaired=0 slots_expired=0" + Purpose + LootOff + "$", scenario.VerdictFields());
+        Assert.Contains(r.Log.Lines, l => l.Contains("paired by its spawn in 0x01050303; it died away from the slot's cell", StringComparison.Ordinal));
+        Assert.DoesNotContain(r.Log.Lines, l => l.Contains("pairs with no standing slot", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_creature_standing_away_from_every_slot_cell_when_the_fight_starts_falls_back_to_the_cell_it_died_in_named_and_is_unpaired_where_that_holds_no_slot()
+    {
+        // F4: two Slaves stand in the arrival's room, which holds no slot, so the seed remembers neither. One dies there (unpaired, named: no slot of that cell); the other runs into the cell of the den's Slave slots and dies there
+        // (paired by the cell it died in, named: its guid was not seen created in a slot's cell). The behaviour before the seed, kept for what the seed cannot know.
+        var r = new Rig(fight: new FightOptions { Kills = 2 });
+        r.Add(0x80001001, TuskerSlave, Den, 40);
+        r.Add(0x80001002, TuskerSlave, Den, 42);
+        var tour = new GroundTour(DenGround.Profile, (_, _) => 0, r.Log);
+        var scenario = r.Scenario(new FakeWalk { Tour = tour });
+        for (var i = 0; i < 400 && scenario.Stage != "fight"; i++)
+        {
+            r.Frame(scenario);
+        }
+
+        Assert.Equal("fight", scenario.Stage);
+        Assert.Equal(0, tour.Schedule.Seeded);
+        r.Move(0x80001002, 0x01050303, 42);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal((1, 0, 1, 1), (tour.Schedule.Paired, tour.Schedule.PairedBySpawn, tour.Schedule.PairedByCell, tour.Schedule.Unpaired));
+        Assert.Contains(r.Log.Lines, l => l.Contains("paired by the cell it died in: its guid was not seen created in a slot's cell", StringComparison.Ordinal));
+        Assert.Contains(r.Log.Lines, l => l.Contains("pairs with no standing slot", StringComparison.Ordinal));
+        Assert.Matches(@" kills_unpaired=1 slots_expired=0" + Purpose + LootOff + "$", scenario.VerdictFields());
+    }
+
+    [Fact]
+    public void A_tour_made_with_the_object_table_seeds_the_living_creatures_standing_in_a_slots_cell_and_no_others()
+    {
+        // F4: the tour (or schedule) made with a session. 1001 stands in a Slave slot's cell: remembered. 1002 is a Slave in the arrival's room (no slot), 1003 a Slave in a slot's cell that is already dead (the Dead motion),
+        // 1004 a Guard in a Slave slot's cell (no Guard slot there): none is remembered.
+        var r = new Rig();
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        r.Add(0x80001002, TuskerSlave, Den, 42);
+        r.Add(0x80001003, TuskerSlave, 0x01050303, 44);
+        r.R.Raw(AceWireWriters.UpdateMotion(0x80001003, 1, 2, 2, false, new AceMovementData { Forward = 0x0011 })); // MotionCommand.Dead
+        r.Add(0x80001004, TuskerGuard, 0x01050303, 46);
+
+        var tour = new GroundTour(DenGround.Profile, (_, _) => 0, r.Log, r.R.H.State.Objects, r.Now);
+
+        Assert.Equal(1, tour.Schedule.Seeded);
+        Assert.True(tour.Schedule.SlotOfGuid(0x80001001) >= 0);
+        Assert.Equal((-1, -1, -1), (tour.Schedule.SlotOfGuid(0x80001002), tour.Schedule.SlotOfGuid(0x80001003), tour.Schedule.SlotOfGuid(0x80001004)));
+        Assert.Contains(r.Log.Lines, l => l.Contains("seeded from the creatures already known: 3 of a slot's wcid, 1 standing in a slot's cell", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_review_frames_wait_for_another_storey_only_with_storeys_min_two_and_the_scenario_knows_when_the_body_is_off_the_arrivals_storey()
+    {
+        // F3: the fight leg's plan is told to wait (FightShotPlan.WaitsForOtherStorey) when --fight-storeys-min is 2 or more and a tour knows the arrival's storey; OffArrivalStorey follows the body's cell.
+        var r = new Rig(fight: new FightOptions { StoreysMin = 2, Kills = 2 });
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var tour = new GroundTour(DenGround.Profile, (_, _) => 0, r.Log);
+        var scenario = r.Scenario(new FakeWalk { Tour = tour });
+        Assert.True(scenario.ReviewFramesWaitForOtherStorey);
+        Assert.False(scenario.OffArrivalStorey); // not seen on a storey yet
+
+        for (var i = 0; i < 40; i++)
+        {
+            r.Frame(scenario);
+        }
+
+        Assert.False(scenario.OffArrivalStorey); // on the arrival floor
+        var h = r.R.H.R;
+        h.Reducer.OnUpdatePosition(h.Context, ReducerHarness.Move(ActionHarness.Amy, 1, 3, 2, 1, cell: 0x01050280, x: PlayerX));
+        for (var i = 0; i < 40; i++)
+        {
+            r.Frame(scenario);
+        }
+
+        Assert.True(scenario.OffArrivalStorey); // on the z -6 storey
+
+        Assert.False(new Rig(fight: new FightOptions { Kills = 2 }).Scenario(new FakeWalk { Tour = tour }).ReviewFramesWaitForOtherStorey); // the default 1: nothing changes
+        Assert.False(r.Scenario(new FakeWalk()).ReviewFramesWaitForOtherStorey); // no tour, no arrival storey: the frames are not starved
+    }
+
+    [Theory]
+    [InlineData(80, 7, 6, "the ground's plan caps Flame Bolt at VI for level 80")]
+    [InlineData(99, 7, 6, "the ground's plan caps Flame Bolt at VI for level 99")]
+    [InlineData(100, 7, 7, "the ground's plan caps Flame Bolt at VII for level 100")]
+    [InlineData(127, 7, 7, "the ground's plan caps Flame Bolt at VII for level 127")]
+    [InlineData(127, 5, 5, "--fight-max-level caps Flame Bolt at V (the ground's plan allows VII for level 127)")]
+    [InlineData(80, 4, 4, "--fight-max-level caps Flame Bolt at IV (the ground's plan allows VI for level 80)")]
+    public void The_grounds_spell_plan_caps_the_level_and_the_max_level_caps_it_lower(int characterLevel, int maxLevel, int cap, string note)
+    {
+        // g6 item 4 (D41, m5-level80-vi): the den's plan is Flame Bolt VI below level 100, VII from 100.
+        Assert.Equal(cap, FightScenario.PlanCap(DenGround.Profile, characterLevel, maxLevel, out var why));
+        Assert.Equal(note, why);
+    }
+
+    [Fact]
+    public void A_level_80_mage_casts_VI_and_BSD_Mage_at_127_keeps_VII_logged_when_chosen()
+    {
+        var uncapped = FlameBoltIndexFor(new Rig());
+        Assert.True(uncapped >= 6); // the rig's War Magic reaches VII
+
+        var r80 = new Rig(characterLevel: 80);
+        r80.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var at80 = r80.Scenario(new FakeWalk());
+        Assert.Equal(ScenarioStatus.Succeeded, r80.Run(at80));
+        Assert.Equal("VI", at80.Level);
+        Assert.Contains(r80.Log.Lines, l => l.Contains("the ground's plan caps Flame Bolt at VI for level 80", StringComparison.Ordinal));
+        Assert.All(r80.CastSpells, id => Assert.Equal(ArenaProfile.LineNamed("Flame Bolt")!.Spells[5].Id, id));
+
+        var r127 = new Rig(characterLevel: 127);
+        r127.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var at127 = r127.Scenario(new FakeWalk());
+        Assert.Equal(ScenarioStatus.Succeeded, r127.Run(at127));
+        Assert.Equal("VII", at127.Level);
+
+        var capped = new Rig(characterLevel: 127, fight: new FightOptions { MaxLevel = 5 });
+        capped.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var at5 = capped.Scenario(new FakeWalk());
+        Assert.Equal(ScenarioStatus.Succeeded, capped.Run(at5));
+        Assert.Equal("V", at5.Level);
+        Assert.Contains(capped.Log.Lines, l => l.Contains("--fight-max-level caps Flame Bolt at V", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_fight_storeys_min_option_parses_one_to_sixteen()
+    {
+        Assert.Equal(1, new FightOptions().StoreysMin);
+        var two = FightOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(["--fight-storeys-min=2"]));
+        Assert.Empty(two.Errors);
+        Assert.Equal(2, two.StoreysMin);
+        Assert.Contains(" storeys_min=2", two.ToString(), StringComparison.Ordinal);
+        foreach (var bad in new[] { "0", "17", "two" })
+        {
+            var parsed = FightOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(["--fight-storeys-min=" + bad]));
+            Assert.Single(parsed.Errors);
+            Assert.Equal(1, parsed.StoreysMin);
+        }
+    }
+
     private static GearItem GearItemOf(uint wcid, string name, GearKind kind, GearWeenie w) =>
         new(wcid, name, kind, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.Burden);
+
+    // ------------------------------------------------------------------------------------------------ M5 item 3 m2: the loot step (--fight-loot, D38)
+
+    private const uint Pyreal = 0x80007001;
+    private const uint Gem = 0x80007002;
+    private const uint Sword = 0x80007003;
+    private const uint Orb = 0x80007004;
+
+    /// <summary>The corpse's items: pyreals, a gem (60 pyreals per burden), a heavy sword (under the floor) and an orb whose description sent no Value (an appraisal says 800).</summary>
+    private static void StockCorpse(Rig r)
+    {
+        r.CorpseItems.Add((Pyreal, 273, 0x40, 30, 0, "Pyreal"));
+        r.CorpseItems.Add((Gem, 2001, 0x800, 600, 10, "Gem"));
+        r.CorpseItems.Add((Sword, 2002, 0x1, 20, 200, "Rusty Sword"));
+        r.CorpseItems.Add((Orb, 2003, 0x80, null, 4, "Mystery Orb"));
+        r.AppraisedValues[Orb] = 800;
+    }
+
+    [Fact]
+    public void With_looting_off_the_loot_step_never_runs_and_the_fields_read_loot_off()
+    {
+        var r = new Rig { Corpses = true };
+        StockCorpse(r);
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var scenario = r.Scenario(new FakeWalk());
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal(1, scenario.Tally.Kills);
+        Assert.Equal("loot=off looted=0 kept=0 loot_value=0", scenario.LootFields());
+        Assert.EndsWith(LootOff, scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.False(scenario.LootBusy);
+        Assert.Equal(0, scenario.LootCorpsesLeft);
+        Assert.Empty(r.Opened);
+        Assert.Empty(r.Picked);
+        Assert.Empty(r.Closed);
+        Assert.Empty(r.Identified);
+        Assert.Empty(r.R.H.Net.Of(FakeSendKind.Use));
+        Assert.DoesNotContain(r.Log.Lines, l => l.Contains("loot:", StringComparison.Ordinal) || l.Contains("purpose=loot", StringComparison.Ordinal));
+    }
+
+    /// <summary>The loot rule of F28's rig numbers (a floor of 10, the profile's later payout floor and weight cap off): the stand-in corpses hold small things, which the F29 den values (60, 4,000, 150) would leave.</summary>
+    private static readonly MageLootThresholds RigLoot = new() { MinValuePerBurden = 10, MinPayout = 1, MaxItemBurden = 100_000 };
+
+    [Fact]
+    public void With_looting_on_a_corpse_ten_metres_off_is_opened_through_aces_move_to_keeps_by_the_rule_and_goes_on()
+    {
+        var r = new Rig(fight: new FightOptions { Kills = 2, Loot = true, LootThresholds = RigLoot, LootAggroMetres = 0 }) { Corpses = true, MoveToSeconds = 3 }; // the second tusker stands beside the first corpse: the hostile rule is tested alone below
+        StockCorpse(r);
+        var first = r.Add(0x80001001, TuskerSlave, Den, 30); // 10 m from the player at y 20
+        var second = r.Add(0x80001002, TuskerSlave, Den, 34);
+        r.ItemsOfCreature[second.Guid] = [(0x80007011, 2011, 0x800, 300, 5, "Opal")];
+        var scenario = r.Scenario(new FakeWalk());
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Null(scenario.Failure);
+        Assert.True(first.Dead && second.Dead);
+        Assert.Equal(2, scenario.Tally.Kills); // the last kill ended nothing until its corpse was looted: both corpses are done
+        var firstCorpse = first.Guid + Rig.CorpseOffset;
+        var secondCorpse = second.Guid + Rig.CorpseOffset;
+        Assert.Equal([firstCorpse, secondCorpse], r.Opened); // the Use alone: ACE's MoveTo brought the mage (the rig answers the open 3 s after it)
+        Assert.Equal([firstCorpse, secondCorpse], r.Closed);
+        Assert.Equal([Orb], r.Identified); // only the item with no Value in its description is appraised
+        Assert.Equal([Pyreal, Gem, Orb, 0x80007011u], r.Picked); // the corpse's order; the sword is under the value-per-burden floor
+        Assert.Equal(2, r.Log.Lines.Count(l => l.Contains("ACE's own MoveTo walks the mage", StringComparison.Ordinal) && l.Contains("los=yes", StringComparison.Ordinal)));
+        Assert.All(r.Places, p => Assert.Contains("poi", p, StringComparison.Ordinal)); // never a place for a corpse: a cheat-free mage walks
+        Assert.Contains(r.Log.Lines, l => l.Contains("plan for 0x80001101", StringComparison.Ordinal) && l.Contains("keep 3 of 4", StringComparison.Ordinal));
+        Assert.Equal(0, scenario.LootCorpsesLeft);
+        Assert.False(scenario.LootBusy);
+        Assert.Matches(@"^loot=on looted=2 kept=4 loot_value=1730 loot_opened=2 loot_skipped_unreached=0 loot_skipped_hostile=0 loot_walk_s=[3-9]", scenario.LootFields()); // 30 + 600 + 800, then 300; 3 s of walking each
+        Assert.Contains(" loot=on looted=2 kept=4 loot_value=1730 loot_opened=2 ", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(r.CastTargets, t => t == second.Guid); // the fight went back to the tour: the second tusker was hunted after the first corpse
+    }
+
+    [Fact]
+    public void A_corpse_with_a_living_tusker_beside_it_is_left_by_name_and_counted_and_the_fight_goes_first()
+    {
+        var r = new Rig(fight: new FightOptions { Kills = 1, Loot = true }) { Corpses = true };
+        StockCorpse(r);
+        r.Add(0x80001001, TuskerSlave, Den, 30);
+        r.Add(0x80001002, TuskerSlave, Den, 34, "Tusker Slave", 2, 103); // 5 m from the corpse, never cast at in this run (one kill)
+        var scenario = r.Scenario(new FakeWalk());
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Empty(r.Opened);
+        Assert.Equal(1, scenario.LootCorpsesLeft);
+        Assert.Contains(r.Log.Lines, l => l.Contains("is put off: Tusker Slave 0x80001002 stands", StringComparison.Ordinal) && l.Contains("--fight-loot-aggro-m", StringComparison.Ordinal) && l.Contains("the fight goes first", StringComparison.Ordinal));
+        Assert.Equal("loot=on looted=0 kept=0 loot_value=0 loot_opened=0 loot_skipped_unreached=0 loot_skipped_hostile=1 loot_walk_s=0 loot_plan_kept=0 loot_plan_left=0 loot_plan_value=0 corpses_opened=0 loot_left_aggro=1 loot_left_decayed=0 worth_a_look=0 stack_merges=0 loot_busy_waits=0 loot_left_busy=0", scenario.LootFields());
+    }
+
+    [Fact]
+    public void A_move_to_that_ends_without_the_open_skips_the_corpse_named_once_and_the_fight_resumes()
+    {
+        var r = new Rig(fight: new FightOptions { Kills = 2, Loot = true, LootAggroMetres = 0 }) { Corpses = true, MoveToFailsAfter = 15 }; // ACE's own 15 s MoveTo timeout fails the chain (Player_Move.cs:16)
+        StockCorpse(r);
+        r.Add(0x80001001, TuskerSlave, Den, 30);
+        var second = r.Add(0x80001002, TuskerSlave, Den, 34);
+        var scenario = r.Scenario(new FakeWalk());
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.True(second.Dead); // the fight resumed after the first corpse
+        Assert.Equal(2, scenario.LootCorpsesLeft);
+        Assert.Equal(1, r.Log.Lines.Count(l => l.Contains("loot: 'Corpse of Tusker Slave' 0x80001101 not reached:", StringComparison.Ordinal)));
+        Assert.Empty(r.Picked);
+        Assert.Matches(@"^loot=on looted=0 kept=0 loot_value=0 loot_opened=0 loot_skipped_unreached=2 loot_skipped_hostile=0 loot_walk_s=\d", scenario.LootFields());
+    }
+
+    [Fact]
+    public void A_move_to_that_runs_past_the_wait_skips_the_corpse_named_with_the_seconds()
+    {
+        var r = new Rig(fight: new FightOptions { Kills = 1, Loot = true, LootWalkSeconds = 6 }) { Corpses = true, MoveToSeconds = 30 };
+        StockCorpse(r);
+        r.Add(0x80001001, TuskerSlave, Den, 30);
+        var scenario = r.Scenario(new FakeWalk());
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal(1, scenario.LootCorpsesLeft);
+        Assert.Contains(r.Log.Lines, l => l.Contains("not reached: ACE's move-to brought no open within 6 s", StringComparison.Ordinal));
+        Assert.Empty(r.Picked);
+    }
+
+    [Fact]
+    public void A_corpse_beyond_the_loot_radius_is_left_and_never_walked_to()
+    {
+        var r = new Rig(fight: new FightOptions { Kills = 1, Loot = true }) { Corpses = true };
+        StockCorpse(r);
+        r.Add(0x80001001, TuskerSlave, Den, 38); // 18 m: in cast range (30 m), beyond the 15 m loot radius
+        var scenario = r.Scenario(new FakeWalk());
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Empty(r.Opened);
+        Assert.Equal(1, scenario.LootCorpsesLeft);
+        Assert.Contains(r.Log.Lines, l => l.Contains("beyond the loot radius (15 m, --fight-loot-radius-m)", StringComparison.Ordinal));
+        Assert.Matches(@"loot_skipped_unreached=1 loot_skipped_hostile=0", scenario.LootFields());
+    }
+
+    [Fact]
+    public void A_corpse_out_of_sight_is_left_by_name_and_not_walked_to()
+    {
+        var r = new Rig(fight: new FightOptions { Kills = 1, Loot = true }) { Corpses = true };
+        StockCorpse(r);
+        var first = r.Add(0x80001001, TuskerSlave, Den, 30);
+        var walk = new FakeWalk();
+        var scenario = r.Scenario(walk);
+        for (var i = 0; i < 4000 && !first.Dead; i++)
+        {
+            Assert.Equal(ScenarioStatus.Running, r.Frame(scenario));
+        }
+
+        walk.BlockAll = true; // the corpse lies behind a wall
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Empty(r.Opened);
+        Assert.Contains(r.Log.Lines, l => l.Contains("no clear line of sight", StringComparison.Ordinal) && l.Contains("los=no", StringComparison.Ordinal));
+        Assert.Matches(@"loot_skipped_unreached=1 loot_skipped_hostile=0", scenario.LootFields());
+    }
+
+    /// <summary>M5 4 fix F2 (4-R3): the loot step's corpse open is an Automation send, so the kill switch withdraws it when queued: the corpse is never opened and nothing is taken.</summary>
+    [Fact]
+    public void M5_4_f2_the_kill_switch_withdraws_a_queued_corpse_open_and_the_loot_step_takes_nothing()
+    {
+        var r = new Rig(fight: new FightOptions { Kills = 1, Loot = true }) { Corpses = true };
+        StockCorpse(r);
+        r.Add(0x80001001, TuskerSlave, Den, 30);
+        var scenario = r.Scenario(new FakeWalk());
+        var api = r.R.Api;
+        var status = ScenarioStatus.Running;
+        for (var i = 0; i < 4000 && status == ScenarioStatus.Running && !(scenario.LootBusy && api.QueuedCount > 0); i++)
+        {
+            status = r.Frame(scenario, 0.25);
+        }
+
+        Assert.Equal(ScenarioStatus.Running, status);
+        Assert.Empty(r.Opened); // queued, not sent
+        var log = r.View.ActionLog;
+        Assert.DoesNotContain(Enumerable.Range(0, log.Count).Select(i => log[i]), e => e.Kind == ActionKind.OpenContainer);
+
+        api.KillSwitch = true; // the person throws it
+        Assert.Equal(0, api.QueuedCount);
+        var withdrawn = Assert.Single(Enumerable.Range(0, log.Count).Select(i => log[i]), e => e.Kind == ActionKind.OpenContainer);
+        Assert.Equal((ActionSource.Automation, ActionOutcomeKind.Cancelled), (withdrawn.Source, withdrawn.Outcome.Kind));
+
+        for (var i = 0; i < 4000 && status == ScenarioStatus.Running; i++)
+        {
+            status = r.Frame(scenario, 0.25);
+        }
+
+        Assert.Empty(r.Opened);
+        Assert.Empty(r.Picked);
+        Assert.Empty(r.Identified);
+        Assert.Equal(ScenarioStatus.Failed, status); // the fight winds down naming the switch and abandons the loot step where it stood
+        Assert.Contains(r.Log.Lines, l => l.Contains("Blocked why=kill-switch", StringComparison.Ordinal));
+        Assert.Contains(r.Log.Lines, l => l.Contains("loot: abandoned at the fight", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_corpse_within_reach_is_opened_with_no_walk()
+    {
+        var r = new Rig(fight: new FightOptions { Loot = true, LootThresholds = RigLoot }) { Corpses = true };
+        StockCorpse(r);
+        r.Add(0x80001001, TuskerSlave, Den, 21); // 1 m from the player at y 20
+
+        var scenario = r.Scenario(new FakeWalk());
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.DoesNotContain(r.Log.Lines, l => l.Contains("purpose=loot", StringComparison.Ordinal));
+        Assert.Contains(r.Log.Lines, l => l.Contains("within reach", StringComparison.Ordinal) && l.Contains("no walk", StringComparison.Ordinal));
+        Assert.Equal([0x80001101u], r.Opened);
+        Assert.StartsWith("loot=on looted=1 kept=3 loot_value=1430 loot_opened=1 ", scenario.LootFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_refused_open_is_named_and_the_fight_goes_on()
+    {
+        var r = new Rig(fight: new FightOptions { Kills = 2, Loot = true, LootAggroMetres = 0 }) { Corpses = true, RefuseOpen = true };
+        StockCorpse(r);
+        r.Add(0x80001001, TuskerSlave, Den, 30);
+        var second = r.Add(0x80001002, TuskerSlave, Den, 34);
+        var scenario = r.Scenario(new FakeWalk());
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal(2, scenario.Tally.Kills);
+        Assert.True(second.Dead); // the fight went on to the next tusker after the refused corpse
+        Assert.Equal(2, r.Opened.Count);
+        Assert.Empty(r.Picked);
+        Assert.Empty(r.Closed);
+        Assert.Equal(2, scenario.LootCorpsesLeft);
+        Assert.Contains(r.Log.Lines, l => l.Contains("0x80001101 not reached: the open was not confirmed", StringComparison.Ordinal)); // out of reach, so ACE's walk was asked for: the refusal reads as not reached
+        Assert.StartsWith("loot=on looted=0 kept=0 loot_value=0 loot_opened=0 loot_skipped_unreached=2 ", scenario.LootFields(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_corpse_that_never_appears_is_named_and_the_fight_goes_on()
+    {
+        var r = new Rig(fight: new FightOptions { Kills = 1, Loot = true });
+        r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
+        var scenario = r.Scenario(new FakeWalk()); // no corpses in the world
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal(1, scenario.Tally.Kills);
+        Assert.Equal(1, scenario.LootCorpsesLeft);
+        Assert.Contains(r.Log.Lines, l => l.Contains("appeared within 5 s", StringComparison.Ordinal));
+        Assert.Empty(r.Opened);
+        Assert.Equal("loot=on looted=0 kept=0 loot_value=0 loot_opened=0 loot_skipped_unreached=0 loot_skipped_hostile=0 loot_walk_s=0 loot_plan_kept=0 loot_plan_left=0 loot_plan_value=0 corpses_opened=0 loot_left_aggro=0 loot_left_decayed=0 worth_a_look=0 stack_merges=0 loot_busy_waits=0 loot_left_busy=0", scenario.LootFields());
+    }
+
 }
 
 /// <summary>
-/// The den's floor from the dats (M3 3.1 lane fa): <see cref="BlackSpawnDen.FloorLowWords"/> is the arrival's connected floor (cells at z -1 to 0.5 a standing human walks to from the arrival through the doorways
-/// <see cref="RoomGraph.IsPassable"/> accepts, less the exit portal's room and the north wing), never a cell below z -1 nor an excluded one; every waypoint of the walk's tour is on it and reachable from the
-/// arrival; and why the den needs a lean (<see cref="DenRooms.MaxLean"/>) (the stock planner reaches one spawn cell of twelve). Skipped without the dats.
+/// The den's z 0 storey from the dats (M3 3.1 lane fa; since M5 item 2 g2b read through the den's profile): the profile's z 0 walkable cells are the arrival's connected floor (cells at z -1 to 0.5 a standing human walks to from the arrival through the doorways
+/// <see cref="RoomGraph.IsPassable"/> accepts, less the exit portal's room and the north wing), never a cell below z -1 nor a no-go one; every spawn cell of the old tour is on it and reachable from the
+/// arrival; and why the den needs a lean (the profile's doorway lean) (the stock planner reaches one spawn cell of twelve). Skipped without the dats.
 /// </summary>
-public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
+public sealed class DenGroundFloorDatTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
+    /// <summary>The z 0 storey's walkable cells: today's 158-cell floor (HuntingGroundTests pins them as literals).</summary>
+    private static ushort[] FloorLowWords() => DenGround.Profile.Storeys[0].Cells.Cells.Where(c => !DenGround.Profile.IsNoGo(c)).Select(c => (ushort)(c & 0xFFFF)).Order().ToArray();
+
     private LandblockCellSet All() => LandblockCellSet.Load(new CellStructureLibrary(fixture.Dats), new LandblockCoord(1, 5));
 
     [RequiresDatsFact]
     public void The_floor_set_is_the_arrivals_connected_floor_read_from_the_cell_graph()
     {
         var cells = All();
-        var planner = new RoomGraph(cells, DenRooms.MaxLean);
+        var planner = new RoomGraph(cells, DenGround.Profile.Walk.DoorwayLean);
         var seen = new HashSet<uint> { Den() };
         var queue = new Queue<uint>([Den()]);
         while (queue.Count > 0)
@@ -1360,7 +2412,7 @@ public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutpu
             foreach (var portal in cell.Portals)
             {
                 var other = cells.GetCell(portal.OtherCellId);
-                if (portal.LeadsOutside || other is null || seen.Contains(other.Id) || BlackSpawnDen.IsExcluded(other.Id & 0xFFFF)
+                if (portal.LeadsOutside || other is null || seen.Contains(other.Id) || DenGround.Profile.IsNoGo(other.Id)
                     || other.Frame.Origin.Z < -1f || other.Frame.Origin.Z > 0.5f || !planner.IsPassable(cell, portal))
                 {
                     continue;
@@ -1372,7 +2424,7 @@ public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutpu
         }
 
         var expected = seen.Select(c => (ushort)(c & 0xFFFF)).Order().ToArray();
-        var pinned = BlackSpawnDen.FloorLowWords.Order().ToArray();
+        var pinned = FloorLowWords();
         output.WriteLine($"the floor: {pinned.Length} cells; recomputed {expected.Length}");
         Assert.Equal(expected, pinned);
         Assert.Equal(158, pinned.Length);
@@ -1382,39 +2434,39 @@ public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutpu
     public void No_floor_cell_is_below_z_minus_1_or_excluded_and_the_exit_portals_room_is_out()
     {
         var cells = All();
-        foreach (var low in BlackSpawnDen.FloorLowWords)
+        foreach (var low in FloorLowWords())
         {
             var cell = cells.GetCell(0x01050000u | low);
             Assert.NotNull(cell);
             Assert.InRange(cell.Frame.Origin.Z, -1f, 0.5f);
-            Assert.False(BlackSpawnDen.IsExcluded(low), $"0x{low:X4}");
-            Assert.True(BlackSpawnDen.IsFloorCell(0x01050000u | low), $"0x{low:X4}");
+            Assert.False(DenGround.Profile.IsNoGo(0x01050000u | low), $"0x{low:X4}");
+            Assert.True(DenGround.Profile.IsWalkable(0x01050000u | low), $"0x{low:X4}");
         }
 
         foreach (var out_ in new uint[] { 0x0341, 0x0342, 0x0343, 0x035C })
         {
-            Assert.DoesNotContain((ushort)out_, BlackSpawnDen.FloorLowWords);
-            Assert.False(BlackSpawnDen.IsFloorCell(0x01050000u | out_));
+            Assert.DoesNotContain((ushort)out_, FloorLowWords());
+            Assert.False(DenGround.Profile.IsWalkable(0x01050000u | out_));
         }
     }
 
     [RequiresDatsFact]
     public void Every_tour_waypoint_is_a_floor_cell_and_reachable_from_the_arrival_over_the_floor()
     {
-        var floor = DenRooms.FloorOf(All());
-        Assert.Equal(BlackSpawnDen.FloorLowWords.Count, floor.Count);
-        var planner = new RoomGraph(floor, DenRooms.MaxLean);
-        Assert.Equal(12, DenWalk.Tour.Count);
-        Assert.Equal(DenWalk.Tour.Order(), BlackSpawnDen.FloorLowWords.Skip(1).Take(12).Order()); // the tour is the twelve spawn cells
-        foreach (var low in DenWalk.Tour)
+        var floor = GroundRooms.FloorOf(All(), DenGround.Profile);
+        Assert.Equal(DenGround.Profile.Walkable.Count, floor.Count);
+        var planner = new RoomGraph(floor, DenGround.Profile.Walk.DoorwayLean);
+        Assert.Equal(12, DenGround.SpawnLowWords.Count);
+        Assert.All(DenGround.SpawnLowWords, low => Assert.Contains(low, FloorLowWords())); // the old tour is twelve cells of the z 0 floor
+        foreach (var low in DenGround.SpawnLowWords)
         {
             var cellId = 0x01050000u | low;
-            var route = planner.PlanScripted("test", BlackSpawnDen.Arrival, cellId, DenWalk.StopWithinMetres, DenWalk.StopDwellSeconds);
+            var route = planner.PlanScripted("test", DenGround.Arrival, cellId, DenGround.Profile.Walk.StopWithinMetres, DenGround.Profile.Walk.StopDwellSeconds);
             Assert.NotNull(route);
             Assert.True(route.Goals.Count >= 1);
             Assert.Equal(cellId, route.Goals[^1].Target.CellId);
-            var path = planner.FindPath(BlackSpawnDen.Arrival.CellId, cellId)!;
-            Assert.All(path, c => Assert.True(BlackSpawnDen.IsFloorCell(c), $"0x{c:X8} on the way to 0x{cellId:X8}"));
+            var path = planner.FindPath(DenGround.Arrival.CellId, cellId)!;
+            Assert.All(path, c => Assert.True(DenGround.Profile.IsWalkable(c), $"0x{c:X8} on the way to 0x{cellId:X8}"));
             output.WriteLine($"0x{low:X4}: {path.Count - 1} doorways, {route.Goals.Count} goals");
         }
     }
@@ -1422,9 +2474,9 @@ public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutpu
     [RequiresDatsFact]
     public void The_stock_planner_reaches_one_spawn_cell_of_twelve_because_the_dens_doorways_lean()
     {
-        var floor = DenRooms.FloorOf(All());
+        var floor = GroundRooms.FloorOf(All(), DenGround.Profile);
         var stock = new CellRoutePlanner(floor);
-        var reached = DenWalk.Tour.Count(low => stock.FindPath(BlackSpawnDen.Arrival.CellId, 0x01050000u | low) is not null);
+        var reached = DenGround.SpawnLowWords.Count(low => stock.FindPath(DenGround.Arrival.CellId, 0x01050000u | low) is not null);
         output.WriteLine($"CellRoutePlanner reaches {reached} of 12 spawn cells; the lean-0.3 RoomGraph reaches 12 (the doorways' normals have a vertical part of 0.196, the stock rule wants under 0.1)");
         Assert.Equal(1, reached); // 0x0383 only: m3-fight-planner-lean: closed, the lean is the planner's parameter
     }
@@ -1448,5 +2500,5 @@ public sealed class BlackSpawnDenFloorDatTests(DatSetFixture fixture, ITestOutpu
         }
     }
 
-    private static uint Den() => ArenaProfile.ArenaCell;
+    private static uint Den() => DenGround.Profile.Arrival.Cell;
 }

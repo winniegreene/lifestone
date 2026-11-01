@@ -1,14 +1,17 @@
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Data.Magic;
+using Lifestone.Data.Tests;
+using Lifestone.Client.Session.Contracts;
 
 namespace Lifestone.Client.Tests.Session.Mage;
 
 /// <summary>
 /// M4 3.1 d0 (D20), ACE's death-drop rule as <see cref="DeathDropModel"/> re-expresses it (ACE 95ef426d <c>Entity/DeathItem.cs</c>, <c>Player_Death.cs</c> 481-603 and 629-673): hand-worked cases of each part of the rule (the category by ItemType, the candidates, the per-unit
-/// value of a stack, the sort, the halving once per item after the first of its category, the variance as bounds, the count of items by level), then the REAL numbers of BSD Mage's kit (the lead's read-only SELECTs, <c>cache/m4/3-1/facts.md</c>): the eight decoys protect the wand at
+/// value of a stack, the sort, the halving once per item after the first of its category, the variance as bounds, the count of items by level), then the REAL numbers of BSD Mage's kit (the lead's read-only SELECTs, <c>cache/m4/3-1/facts.md</c>): the eight valuables protect the wand at
 /// level 126 in every corner of the variance and the same kit without them does not; an independent simulation of ACE's draw agrees.
 /// </summary>
-public sealed class DeathDropModelTests
+public sealed class DeathDropModelTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
 {
     private const uint Armor = 0x2;
     private const uint Clothing = 0x4;
@@ -17,6 +20,15 @@ public sealed class DeathDropModelTests
     private const uint Caster = 0x8000;
     private const uint Melee = 0x1;
     private const uint SpellComponents = 0x1000;
+
+    /// <summary>The Mana Scarab (component 193): the M4 fixture's carried, valuable item that the retired loot kit did not need.</summary>
+    private const uint ManaScarab = 37155;
+
+    /// <summary>
+    /// The needed set of the retired M4 loot kit (the Healer's Heart 8552, three armour pieces and every component of the pinned map but the Mana Scarab), kept here as the fixture of the model's worked cases, which are BSD Mage's M4 numbers.
+    /// The production set is the mage's own kit (<see cref="DeathDropModel.NeededOf"/>, M5 3 d4).
+    /// </summary>
+    private static readonly IReadOnlySet<uint> LootKitNeeded = new HashSet<uint>([8552u, 3715u, 57u, 107u, .. ComponentWeenies.All.Where(c => c.Wcid != ManaScarab).Select(c => c.Wcid)]);
 
     private static CarriedItem I(uint wcid, uint type, int value, int stack = 1, bool wielded = false, bool bonded = false) => new(wcid, type, value, stack, wielded, bonded);
 
@@ -289,19 +301,72 @@ public sealed class DeathDropModelTests
     }
 
     [Fact]
-    public void The_death_loops_needed_set_is_the_wand_the_three_worn_unbonded_pieces_and_every_component_but_the_Mana_Scarab()
+    public void M5_3_d4_the_needed_set_is_the_lines_of_the_mages_own_kit_and_the_retired_loot_gear_is_not_in_it()
     {
-        Assert.Equal([8552u, 3715u, 57u, 107u], DeathDropModel.NeededGear);
-        Assert.All(DeathDropModel.NeededGear, w => Assert.True(DeathDropModel.IsNeeded(w)));
-        Assert.All(ComponentWeenies.All.Where(c => c.Wcid != DeathDropModel.ManaScarabWcid), c => Assert.True(DeathDropModel.IsNeeded(c.Wcid), c.Name));
-        Assert.False(DeathDropModel.IsNeeded(DeathDropModel.ManaScarabWcid)); // level VIII spells only: no loop casts one
-        Assert.Equal(37155u, DeathDropModel.ManaScarabWcid);
-        Assert.Contains(ComponentWeenies.All, c => c.Wcid == DeathDropModel.ManaScarabWcid && c.Name == "Mana Scarab");
-        Assert.False(DeathDropModel.IsNeeded(81)); // the leather leggings the pack keeps
-        Assert.False(DeathDropModel.IsNeeded(6600)); // bonded: never a candidate
-        Assert.False(DeathDropModel.IsNeeded(6606));
-        Assert.Equal([6600u, 6606u, 8897u], DeathDropModel.BondedKitWcids.Order());
+        var kit = GearKit.Of([
+            new GearItem(2472, "Wand", GearKind.Wand, GearKit.WeenieTypeCaster, GearKit.ItemTypeCaster, EquipMask.Held, 1, null, 50),
+            new GearItem(6071, "Faran Robe", GearKind.Armour, 2, GearKit.ItemTypeClothing, EquipMask.ChestArmor, 1, null, 100),
+            new GearItem(15268, "Focus of Enchantment", GearKind.Focus, 0, 0x1000, EquipMask.None, 1, null, 10),
+            new GearItem(690, "Pyreal Scarab", GearKind.Component, 32, GearKit.ItemTypeSpellComponents, EquipMask.None, 100, 100, 5),
+            new GearItem(8897, "Platinum Scarab", GearKind.Component, 32, GearKit.ItemTypeSpellComponents, EquipMask.None, 50, 50, 5),
+        ]);
+
+        Assert.Equal([690u, 2472u, 6071u, 8897u, 15268u], DeathDropModel.NeededOf(kit).Order());
+        Assert.All(kit.Items, i => Assert.True(DeathDropModel.IsNeeded(kit, i.Wcid), i.Name));
+        Assert.False(DeathDropModel.IsNeeded(kit, 8552)); // the Healer's Heart, the retired loot wand
+        Assert.False(DeathDropModel.IsNeeded(kit, 3715)); // the Olthoi Helm, retired with it
+        Assert.False(DeathDropModel.IsNeeded(kit, 81)); // the leather leggings a pack may keep
+        Assert.False(DeathDropModel.IsNeeded(kit, 6600)); // bonded: never a candidate
+        Assert.Throws<ArgumentNullException>(() => DeathDropModel.NeededOf(null!));
     }
+
+    [RequiresDatsFact]
+    public void M5_3_d4_the_needed_set_of_each_dungeons_real_kit_is_its_wand_robe_foci_and_stock_lines()
+    {
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        foreach (var key in new[] { "black-spawn-den-aluvian", "tusker-temple-fort-tethana" })
+        {
+            var ground = GroundCatalog.Get(key);
+            var kit = GearKit.Build(spells, "test", ground: ground);
+            var needed = DeathDropModel.NeededOf(kit);
+
+            Assert.Equal(kit.Items.Select(i => i.Wcid).Order(), needed.Order());
+            Assert.Contains(kit.WandItem.Wcid, needed); // the vendor wand, not weenie 8552
+            Assert.All(kit.ArmourItems, a => Assert.Contains(a.Wcid, needed));
+            Assert.All(GearKit.MageFociWcids, f => Assert.Contains(f, needed));
+            Assert.All(ground.Supplies.Stock, line => Assert.Contains(line.Wcid, needed));
+            Assert.DoesNotContain(GearKit.Wand.Wcid, needed); // The Healer's Heart is retired
+        }
+
+        // The two kits differ (their robes), so the same listing counts differently under each.
+        var den = GearKit.Build(spells, "test", ground: GroundCatalog.Get("black-spawn-den-aluvian"));
+        var tethana = GearKit.Build(spells, "test", ground: GroundCatalog.Get("tusker-temple-fort-tethana"));
+        Assert.True(DeathDropModel.IsNeeded(den, 5851) && DeathDropModel.IsNeeded(den, 56) && !DeathDropModel.IsNeeded(tethana, 5851) && !DeathDropModel.IsNeeded(den, 6071)); // M5 7 F13 (D87): the den's hooded robe and gauntlets
+        Assert.True(DeathDropModel.IsNeeded(tethana, 5910) && !DeathDropModel.IsNeeded(den, 5910));
+    }
+
+    /// <summary>
+    /// One ordinary, light, expensive carried item of the model's cases (M5 3 d3: the fixture of what M4 3.1 called its decoys, kept here because the model's cases need a set of eight valuables, each the first of its death category; 
+    /// the decoys themselves are retired, D51). Values are the pinned world database's (read-only SELECTs, 2026-10-21).
+    /// </summary>
+    /// <param name="Wcid">The weenie class id.</param>
+    /// <param name="Name">The weenie's name.</param>
+    /// <param name="ItemType">ACE's <c>ItemType</c> bits.</param>
+    /// <param name="UnitValue">The Value of one item.</param>
+    internal sealed record Valuable(uint Wcid, string Name, uint ItemType, int UnitValue);
+
+    /// <summary>Eight valuables, one in each of eight death categories, each worth 8,000 or more.</summary>
+    internal static readonly IReadOnlyList<Valuable> Valuables =
+    [
+        new(27329, "Massive Mana Charge", 0x80000, 65_000),
+        new(9295, "Intricate Carving Tool", 0x80, 10_000),
+        new(41396, "Handle Mold", 0x4000000, 10_000),
+        new(22565, "Tusker Island Shirt", 0x4, 9_000),
+        new(25522, "Skull Cap", 0x2, 8_500),
+        new(11007, "Virindi Scalpel", 0x1, 8_420),
+        new(11129, "Healing Chocolate Olthoi Cake", 0x20, 8_000),
+        new(27771, "Entrancing Adjanite Gem", 0x800, 15_000),
+    ];
 
     // ---------------------------------------------------------------- the real numbers (cache/m4/3-1/facts.md)
 
@@ -309,7 +374,7 @@ public sealed class DeathDropModelTests
     /// BSD Mage's carried items by the lead's SELECTs (facts.md, "Death drops"): the wand The Healer's Heart 5,400 (Caster, wielded), the Olthoi Helm 2,200, the Platemail Gauntlets 1,600 and the Sollerets 653 (Armor, worn), the Pyreal Scarab 1,000 (18 in a stack, a
     /// component), the Leather Leggings 2,400 (Armor, in the pack, not needed), the Mana Scarab 15,000 (5 in a stack; not needed); BONDED, so never candidates: the Greater Amuli Shadow Coat 6600 (2,610) and Leggings 6606 (3,040) and the Platinum Scarab 8897 (10,000, 5 in a stack).
     /// </summary>
-    internal static List<CarriedItem> MageItems(IEnumerable<DecoyItem> decoys, bool manaScarab = true)
+    internal static List<CarriedItem> MageItems(IEnumerable<Valuable> valuables, bool manaScarab = true)
     {
         var list = new List<CarriedItem>
         {
@@ -325,10 +390,10 @@ public sealed class DeathDropModelTests
         };
         if (manaScarab)
         {
-            list.Add(I(DeathDropModel.ManaScarabWcid, SpellComponents, 75_000, stack: 5)); // 15,000 each
+            list.Add(I(ManaScarab, SpellComponents, 75_000, stack: 5)); // 15,000 each
         }
 
-        foreach (var d in decoys)
+        foreach (var d in valuables)
         {
             list.Add(I(d.Wcid, d.ItemType, d.UnitValue));
         }
@@ -337,30 +402,30 @@ public sealed class DeathDropModelTests
     }
 
     [Fact]
-    public void The_eight_decoys_protect_the_wand_at_level_126_in_every_corner_of_the_variance_and_the_same_kit_without_them_does_not()
+    public void The_eight_valuables_protect_the_wand_at_level_126_in_every_corner_of_the_variance_and_the_same_kit_without_them_does_not()
     {
-        var with = DeathDropModel.Survives(MageItems(DecoyKit.All), 126);
+        var with = DeathDropModel.Survives(MageItems(Valuables), LootKitNeeded, 126);
         Assert.True(with.Survives, with.Describe());
         Assert.Equal(8, with.MaxDrops);
         Assert.Equal(6, with.MinDrops);
-        Assert.Equal(9, with.Above); // the eight decoys and the unneeded Mana Scarab: nine above the wand against at most eight drops
+        Assert.Equal(9, with.Above); // the eight valuables and the unneeded Mana Scarab: nine above the wand against at most eight drops
         Assert.Equal(8552u, with.BestNeededWcid);
         Assert.Equal(5940, with.BestNeededMax); // the wand, 5,400 at +10%
         Assert.Equal(7200, with.WeakestAboveMin); // the 8,000 cake at -10%
-        Assert.Equal(15, with.Candidates); // wand, helm, gauntlets, sollerets, leather leggings, Pyreal Scarab, Mana Scarab and the eight decoys (the coat, the leggings and the Platinum Scarab are bonded)
+        Assert.Equal(15, with.Candidates); // wand, helm, gauntlets, sollerets, leather leggings, Pyreal Scarab, Mana Scarab and the eight valuables (the coat, the leggings and the Platinum Scarab are bonded)
 
-        var without = DeathDropModel.Survives(MageItems([]), 126);
+        var without = DeathDropModel.Survives(MageItems([]), LootKitNeeded, 126);
         Assert.False(without.Survives, without.Describe());
         Assert.Equal(1, without.Above); // the Mana Scarab alone
         Assert.Equal(7, without.Candidates);
 
-        // Eight decoys alone cover the most a death drops at level 126 and the Mana Scarab is the spare (the manaScarab:false corner, folded in by the M4 polish fold).
-        var eightAlone = DeathDropModel.Survives(MageItems(DecoyKit.All, manaScarab: false), 126);
+        // Eight valuables alone cover the most a death drops at level 126 and the Mana Scarab is the spare (the manaScarab:false corner, folded in by the M4 polish fold).
+        var eightAlone = DeathDropModel.Survives(MageItems(Valuables, manaScarab: false), LootKitNeeded, 126);
         Assert.True(eightAlone.Survives, eightAlone.Describe());
         Assert.Equal(8, eightAlone.Above);
-        Assert.Equal(DeathDropModel.MaxDrops(126), DecoyKit.CountFor(126));
+        Assert.Equal(DeathDropModel.MaxDrops(126), Math.Min(Valuables.Count, DeathDropModel.MaxDrops(126)));
 
-        var neither = DeathDropModel.Survives(MageItems([], manaScarab: false), 126);
+        var neither = DeathDropModel.Survives(MageItems([], manaScarab: false), LootKitNeeded, 126);
         Assert.False(neither.Survives);
         Assert.Equal(0, neither.Above);
         Assert.Equal(0, neither.WeakestAboveMin);
@@ -369,27 +434,27 @@ public sealed class DeathDropModelTests
     [Fact]
     public void The_bonded_gear_is_never_a_candidate_and_the_Platinum_Scarab_being_bonded_is_what_keeps_the_wand_the_bar()
     {
-        var items = MageItems(DecoyKit.All);
-        var ranked = DeathDropModel.Rank(items, DeathDropModel.Needed, 126);
+        var items = MageItems(Valuables);
+        var ranked = DeathDropModel.Rank(items, LootKitNeeded, 126);
         Assert.DoesNotContain(ranked, r => r.Wcid is 6600 or 6606 or 8897);
 
-        // Read as not bonded (what the live check would see without BondedKitWcids: TODO(m4-decoy-bonded-flag)), the Platinum Scarab is a needed 10,000 (best case 11,000) and every decoy is below it: the answer is no,
+        // Read as not bonded (what a check would see if the weenie description carried no bonded flag: TODO(m4-valuable-bonded-flag)), the Platinum Scarab is a needed 10,000 (best case 11,000) and every valuable is below it: the answer is no,
         // so the lead's SELECT that it is bonded carries the whole design (the owner's point, D22).
         var unbonded = items.Select(i => i with { Bonded = false }).ToList();
-        var v = DeathDropModel.Survives(unbonded, 126);
+        var v = DeathDropModel.Survives(unbonded, LootKitNeeded, 126);
         Assert.False(v.Survives, v.Describe());
         Assert.Equal(8897u, v.BestNeededWcid);
         Assert.Equal(11_000, v.BestNeededMax);
     }
 
     [Fact]
-    public void Seven_decoys_plus_the_Mana_Scarab_survive_and_six_do_not_at_N_max_8()
+    public void Seven_valuables_plus_the_Mana_Scarab_survive_and_six_do_not_at_N_max_8()
     {
-        var all = DecoyKit.All;
+        var all = Valuables;
         for (var skip = 0; skip < all.Count; skip++)
         {
             var seven = all.Where((_, i) => i != skip).ToList();
-            var v = DeathDropModel.Survives(MageItems(seven), 126);
+            var v = DeathDropModel.Survives(MageItems(seven), LootKitNeeded, 126);
             Assert.True(v.Survives, $"without {all[skip].Name}: {v.Describe()}");
             Assert.Equal(8, v.Above);
         }
@@ -399,7 +464,7 @@ public sealed class DeathDropModelTests
             for (var b = a + 1; b < all.Count; b++)
             {
                 var six = all.Where((_, i) => i != a && i != b).ToList();
-                var v = DeathDropModel.Survives(MageItems(six), 126);
+                var v = DeathDropModel.Survives(MageItems(six), LootKitNeeded, 126);
                 Assert.False(v.Survives, $"without {all[a].Name} and {all[b].Name}: {v.Describe()}");
                 Assert.Equal(7, v.Above);
             }
@@ -410,13 +475,13 @@ public sealed class DeathDropModelTests
     public void The_other_components_of_the_kit_change_nothing_they_are_needed_and_far_below_the_wand()
     {
         // facts.md says only "the rest lower": every component but the Mana Scarab at a stand-in 100 each (needed; halved to 50 behind the Mana Scarab).
-        var items = MageItems(DecoyKit.All);
+        var items = MageItems(Valuables);
         foreach (var c in ComponentWeenies.All.Where(c => c.Wcid is not (690 or 8897 or 37155)))
         {
             items.Add(I(c.Wcid, SpellComponents, 100));
         }
 
-        var v = DeathDropModel.Survives(items, 126);
+        var v = DeathDropModel.Survives(items, LootKitNeeded, 126);
 
         Assert.True(v.Survives, v.Describe());
         Assert.Equal(9, v.Above);
@@ -425,22 +490,22 @@ public sealed class DeathDropModelTests
     }
 
     [Fact]
-    public void An_independent_simulation_of_ACEs_draw_agrees_the_wand_never_drops_with_the_decoys_and_drops_without_them()
+    public void An_independent_simulation_of_ACEs_draw_agrees_the_wand_never_drops_with_the_valuables_and_drops_without_them()
     {
         // ACE's DeathItems and GetNumItemsDropped drawn 20,000 times at level 126 (a seeded Random; the sort, the halving, a variance in -10% to +10%, the top N with N = 6 + 0 to 2).
-        Assert.Equal(0, WandDrops(MageItems(DecoyKit.All), 126, 20_000, 1));
+        Assert.Equal(0, WandDrops(MageItems(Valuables), 126, 20_000, 1));
         Assert.Equal(20_000, WandDrops(MageItems([]), 126, 20_000, 2)); // with the Mana Scarab alone above it the wand is the second of the list: every draw takes it (N is at least 6)
-        Assert.Equal(0, WandDrops(MageItems(DecoyKit.All.Take(7).ToList()), 126, 20_000, 3)); // seven decoys and the Mana Scarab: eight above, N_max 8
+        Assert.Equal(0, WandDrops(MageItems(Valuables.Take(7).ToList()), 126, 20_000, 3)); // seven valuables and the Mana Scarab: eight above, N_max 8
     }
 
     [Fact]
-    public void With_six_decoys_and_the_Mana_Scarab_the_wand_drops_in_the_draws_that_roll_the_most_items()
+    public void With_six_valuables_and_the_Mana_Scarab_the_wand_drops_in_the_draws_that_roll_the_most_items()
     {
         // Seven items above the wand and N_max 8: the wand is the eighth when N rolls 8 (one draw in three), never otherwise.
-        var drops = WandDrops(MageItems(DecoyKit.All.Take(6).ToList()), 126, 30_000, 5);
+        var drops = WandDrops(MageItems(Valuables.Take(6).ToList()), 126, 30_000, 5);
 
         Assert.InRange(drops, 8_000, 12_000);
-        Assert.False(DeathDropModel.Survives(MageItems(DecoyKit.All.Take(6).ToList()), 126).Survives);
+        Assert.False(DeathDropModel.Survives(MageItems(Valuables.Take(6).ToList()), LootKitNeeded, 126).Survives);
     }
 
     /// <summary>The draws in which the wand (8552) is among the dropped items: ACE's algorithm, written out again from the rule, over <paramref name="draws"/> seeded draws.</summary>

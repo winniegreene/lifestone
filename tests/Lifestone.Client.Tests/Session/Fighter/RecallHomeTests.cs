@@ -1,5 +1,7 @@
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Tests.Session.Grounds;
 using Lifestone.Net.Messages;
 
 namespace Lifestone.Client.Tests.Session.Fighter;
@@ -59,6 +61,43 @@ public sealed class RecallHomeTests
         Assert.Empty(t.Caster.ModesSent); // already in the magic mode: nothing sent
         Assert.Equal(1, t.Recall.Recalls);
         Assert.Equal(CombatModes.Magic, t.R.H.State.Self.Qualities.CombatMode);
+    }
+
+    [Fact]
+    public void M5_7_D139_l_a_mage_with_no_caster_held_wields_one_from_its_pack_before_the_magic_mode_and_recalls()
+    {
+        // Round 13 (03:07:24 UTC): the hands were empty after ACE's fallback (the Wand in the main pack, peace), and the recall's magic mode waited 5 s three times.
+        var t = new C1cRecallRig(null);
+        t.Caster.AnswerWields = true;
+        var wand = t.Caster.WandToPack();
+        t.R.CombatModeIs(CombatModes.NonCombat);
+        Assert.Null(t.R.H.State.Self.Inventory.EquippedAt(0x01000000));
+
+        Assert.Equal(RecallStatus.Done, t.RunRecall());
+
+        var wield = Assert.Single(t.R.H.Net.Of(FakeSendKind.GetAndWieldItem));
+        Assert.Equal(wand, wield.Guid);
+        Assert.Equal(wand, t.R.H.State.Self.Inventory.EquippedAt(0x01000000));
+        Assert.Equal([CombatModes.Magic], t.Caster.ModesSent); // the mode after the wield
+        Assert.Contains(t.R.H.Log.Entries, e => e.Message.StartsWith("recall: no caster held: wield 'Test Wand' 0x80000200", StringComparison.Ordinal));
+        Assert.Contains(t.R.H.Log.Entries, e => e.Message.StartsWith("recall: rearm: Confirmed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void M5_7_D139_l_a_mage_with_no_caster_anywhere_fails_at_the_mode_at_once_with_the_plain_reason()
+    {
+        var t = new C1cRecallRig(null);
+        t.Caster.WandToPack();
+        t.R.Raw(Lifestone.Tests.Shared.Net.AceM3Writers.InventoryRemoveObject(0x80000200));
+        t.R.CombatModeIs(CombatModes.NonCombat);
+        var start = t.Now;
+
+        Assert.Equal(RecallStatus.Failed, t.RunRecall());
+
+        Assert.Equal("recall:mode", t.Recall.Failure);
+        Assert.StartsWith("no caster held: the packs hold no caster", t.Recall.Detail, StringComparison.Ordinal);
+        Assert.True(t.Now - start < 1.0); // no 5 s wait
+        Assert.Empty(t.Caster.ModesSent);
     }
 
     [Fact]
@@ -212,7 +251,7 @@ public sealed class RecallHomeTests
     [Fact]
     public void Primary_Portal_Recall_48_reuses_the_steps_and_arrives_in_the_den_landblock_M4_P5b_J1()
     {
-        var t = new C1cRecallRig(null, spell: RecallHome.PrimaryPortalRecallSpell, homeLandblock: RecallHome.DenLandblock) { DestinationCell = 0x01050375 };
+        var t = new C1cRecallRig(null, spell: RecallHome.PrimaryPortalRecallSpell, homeLandblock: DenGround.Profile.ArrivalLandblock()) { DestinationCell = 0x01050375 };
         Assert.Equal(48u, t.Recall.SpellId);
         Assert.Equal(0x0105u, t.Recall.HomeLandblock);
         Assert.Equal(RecallStatus.Done, t.RunRecall());
@@ -224,7 +263,7 @@ public sealed class RecallHomeTests
         Assert.Contains(t.R.H.Log.Entries, e => e.Message.Contains("casting Primary Portal Recall (48)", StringComparison.Ordinal));
 
         // ForCharacter passes the spell and the landblock on (the journey's den travel).
-        var viaName = RecallHome.ForCharacter(t.View, "BSD Mage", t.R.H.Log, RecallHome.DenLandblock, RecallHome.PrimaryPortalRecallSpell)!;
+        var viaName = RecallHome.ForCharacter(t.View, "BSD Mage", t.R.H.Log, DenGround.Profile.ArrivalLandblock(), RecallHome.PrimaryPortalRecallSpell)!;
         Assert.Equal((48u, 0x0105u), (viaName.SpellId, viaName.HomeLandblock));
         Assert.Equal((1635u, 0xA9B4u), (RecallHome.ForCharacter(t.View, "BSD Mage", t.R.H.Log)!.SpellId, RecallHome.ForCharacter(t.View, "BSD Mage", t.R.H.Log)!.HomeLandblock));
     }
@@ -232,7 +271,7 @@ public sealed class RecallHomeTests
     [Fact]
     public void Primary_Portal_Recall_with_no_portal_tied_is_recall_cast_naming_0x04A3_and_the_refusal_is_readable_M4_P5b_J1()
     {
-        var t = new C1cRecallRig(null, spell: RecallHome.PrimaryPortalRecallSpell, homeLandblock: RecallHome.DenLandblock) { Bound = false, UnboundRefusal = 0x04A3 };
+        var t = new C1cRecallRig(null, spell: RecallHome.PrimaryPortalRecallSpell, homeLandblock: DenGround.Profile.ArrivalLandblock()) { Bound = false, UnboundRefusal = 0x04A3 };
         Assert.Equal(RecallStatus.Failed, t.RunRecall());
 
         Assert.Equal("recall:cast", t.Recall.Failure);

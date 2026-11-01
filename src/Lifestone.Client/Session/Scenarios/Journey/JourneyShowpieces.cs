@@ -143,7 +143,7 @@ public static class HeroPanels
     /// <param name="containerViewed">True while the player views a container (a corpse being looted).</param>
     public static uint Want(string? station, string? deathStage, bool containerViewed) => station switch
     {
-        StationKinds.Death when string.Equals(deathStage, "rebuff", StringComparison.Ordinal) => CharacterInfo,
+        StationKinds.Death when string.Equals(deathStage, DeathScenario.HandlerStagePrefix + "rebuff", StringComparison.Ordinal) => CharacterInfo, // the handler's rebuff step (M5 3 d1 renamed the death's stages)
         JourneyStationNames.Hunt when containerViewed => Inventory,
         _ => 0,
     };

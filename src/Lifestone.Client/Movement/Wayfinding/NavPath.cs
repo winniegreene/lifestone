@@ -78,8 +78,22 @@ public interface INavPathSource
 }
 
 /// <summary>
+/// A path source over a landblock's room graph (<see cref="RoomPathSource"/>, <see cref="IndoorOutdoorPathSource"/>): the runner gives the graph the run's
+/// creature layer (<see cref="RoomGraph.Creatures"/>, nav-creatures-indoor) and runs straight through its rooms (nav-indoor-steering).
+/// </summary>
+public interface INavRoomSource
+{
+    /// <summary>The room graph the source plans the rooms with (rebuilt when a cell is left out, so read it at each plan).</summary>
+    RoomGraph Rooms { get; }
+}
+
+/// <summary>
 /// A path source over a room graph that can leave a cell out (the indoor analogue of a scar): the runner asks it when the physics refused
-/// the crossing into that cell (<see cref="RouteConfirmer"/>), and the next plan goes round it. Kept for the source's life.
+/// the crossing into that cell (<see cref="RouteConfirmer"/>), and the next plan goes round it. Kept for the source's life, which is one leg: the
+/// journey makes a source per leg (<c>JourneyLegPlanner.SourceFor</c> from <c>JourneyRunLeg</c>, the wayfind check per leg too), and a room graph shared
+/// across legs (a ground's, <c>RoomPathSource(RoomGraph)</c>) leaves nothing out. Since M5 item 5 fix F3 the confirmer judges the fixed world only, so a
+/// refusal is never a server object's (a closed door, an NPC, a creature) and a cell is never left out because something stood in it for a while.
+/// TODO(room-steps) stays: the refusals left are the static sills the graph knows no steps for.
 /// </summary>
 public interface INavCellAvoider
 {
@@ -161,7 +175,7 @@ public sealed class OutdoorPathSource(PathPlanner planner) : INavPathSource
 /// inside the rooms plans over the room graph alone; a goal without a cell of the rooms is an outdoor goal.
 /// </summary>
 /// <remarks>Made from the landblock's cell set, it can leave cells out (<see cref="INavCellAvoider"/>); made from a room graph, it cannot.</remarks>
-public sealed class IndoorOutdoorPathSource : INavPathSource, INavCellAvoider
+public sealed class IndoorOutdoorPathSource : INavPathSource, INavCellAvoider, INavRoomSource
 {
     private readonly OutdoorPathSource _outdoor;
     private readonly AvoidableRooms _rooms;
@@ -207,6 +221,12 @@ public sealed class IndoorOutdoorPathSource : INavPathSource, INavCellAvoider
     /// <c>:0x&lt;cell&gt;</c>.
     /// </summary>
     public const string IndoorStartUnreachable = "indoor-start-unreachable";
+
+    /// <summary>
+    /// The failure name of a start in a room of another landblock than the source's rooms (M5 7 P7k): the journey's leg planner takes the goal room's landblock when both ends are rooms in two
+    /// landblocks, and no source joins two landblocks' rooms yet (TODO(cross-landblock-rooms)). Followed by <c>:0x&lt;cell&gt;</c>.
+    /// </summary>
+    public const string IndoorStartOtherLandblock = "indoor-start-other-landblock";
 
     /// <inheritdoc/>
     public NavPath Plan(in CellFrame from, NavGoal goal, NavScars scars)
@@ -269,7 +289,11 @@ public sealed class IndoorOutdoorPathSource : INavPathSource, INavCellAvoider
         var unreachable = string.Create(CultureInfo.InvariantCulture, $"{IndoorStartUnreachable}:0x{from.CellId:X8}");
         if (Rooms.RoomFrame(from.CellId) is null)
         {
-            return NavPath.Fail(unreachable + ": the start is not one of the rooms");
+            // M5 7 P7k: a start in a room of another landblock than the rooms' (a room goal there) is a gap the source cannot join, named on its own (TODO(cross-landblock-rooms)),
+            // not the unreachable room the journey recovers from at the lifestone.
+            return NavPath.Fail(from.CellId >> 16 != Rooms.LandblockId >> 16
+                ? string.Create(CultureInfo.InvariantCulture, $"{IndoorStartOtherLandblock}:0x{from.CellId:X8}: the start's room is not in landblock 0x{Rooms.LandblockId >> 16:X4}, the rooms planned (TODO(cross-landblock-rooms))")
+                : unreachable + ": the start is not one of the rooms");
         }
 
         if (!planner.Map.TryGetTile(Rooms.LandblockId, out var tile))
@@ -364,7 +388,7 @@ public sealed class IndoorOutdoorPathSource : INavPathSource, INavCellAvoider
 
 /// <summary>The room graph alone as a path source (the den, a shop from inside): the start, the doorway pairs, the goal.</summary>
 /// <remarks>Made from the landblock's cell set, it can leave cells out (<see cref="INavCellAvoider"/>); made from a room graph, it cannot.</remarks>
-public sealed class RoomPathSource : INavPathSource, INavCellAvoider
+public sealed class RoomPathSource : INavPathSource, INavCellAvoider, INavRoomSource
 {
     private readonly AvoidableRooms _rooms;
 
@@ -398,7 +422,7 @@ public sealed class RoomPathSource : INavPathSource, INavCellAvoider
     /// <inheritdoc/>
     public NavPath Plan(in CellFrame from, NavGoal goal, NavScars scars) => PlanRooms(Rooms, from, goal);
 
-    /// <summary>The rooms' path from <paramref name="from"/> to <paramref name="goal"/>'s cell.</summary>
+    /// <summary>The rooms' path from <paramref name="from"/> to <paramref name="goal"/>'s cell (the goal's own creature left out of the graph's creature layer).</summary>
     internal static NavPath PlanRooms(RoomGraph rooms, in CellFrame from, NavGoal goal)
     {
         ArgumentNullException.ThrowIfNull(goal);
@@ -407,7 +431,7 @@ public sealed class RoomPathSource : INavPathSource, INavCellAvoider
             return NavPath.Fail("rooms-goal-has-no-cell");
         }
 
-        if (rooms.Plan(from.CellId, from.Origin, toCell, goal.Point.Local) is not { } route)
+        if (rooms.Plan(from.CellId, from.Origin, toCell, goal.Point.Local, goal.Guid ?? 0) is not { } route)
         {
             return NavPath.Fail("rooms-no-path");
         }

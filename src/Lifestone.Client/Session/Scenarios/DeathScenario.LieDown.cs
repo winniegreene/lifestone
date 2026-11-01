@@ -37,6 +37,9 @@ public sealed partial class DeathScenario
     private int? _undressed;
     private int _undressFailed;
     private ActionHandle? _liePress;
+    private ActionHandle? _stancePress;
+    private int _stanceSyncs;
+    private ushort? _lieEchoStyle;
     private bool _lying;
     private bool _lieBlocked;
     private int _lieSends;
@@ -45,12 +48,28 @@ public sealed partial class DeathScenario
     private bool _lieEchoed;
     private string? _lieEchoLast;
     private IDisposable? _motionSubscription;
+    private bool _sleepShown; // M5 7 P7o: the server's motion showed Sleeping since the last lie-down was sent
+    private string? _sleepLost; // M5 7 P7o: a later motion of the player that is neither Sleeping nor Dead (the player stands), described; null while none came
+    private ActionHandle? _modeResync;
+    private int _lieRestores;
+
+    /// <summary>M5 7 P7o (D141, check, act, check): the restores of a lost lie-down the wait makes at most; after them the mage waits as it stands, named.</summary>
+    public const int MaxLieRestores = 5;
+
+    /// <summary>M5 7 P7o: the lie-downs the wait restored after they were lost (the player stood up, or the combat mode left non-combat).</summary>
+    public int LieRestores => _lieRestores;
 
     /// <summary><c>undressed=</c>: the pieces the undress moved to the pack, or null when it did not run.</summary>
     public int? Undressed => _undressed;
 
     /// <summary><c>lie_down=</c>: <c>sent</c> (the controller took the Sleeping command), <c>refused:&lt;why&gt;</c>, or <c>n/a</c> (the wait never got that far).</summary>
     public string LieDown => _lieDown;
+
+    /// <summary>The wire value of the non-combat stance in the server's motion (the low word of <see cref="CombatStances.NonCombat"/>).</summary>
+    public const ushort NonCombatWire = 0x003D;
+
+    /// <summary>The walker's stance syncs sent before a lie-down (M5 3 d4, <c>m4-lie-down-controller</c>): one per lie-down press.</summary>
+    public int StanceSyncs => _stanceSyncs;
 
     /// <summary><c>lie_echo=</c>: <c>yes</c> when the server's motion for the player showed Sleeping after a lie-down was sent, <c>no</c> when one was sent and none did, <c>n/a</c> when none was sent.</summary>
     public string LieEcho => _lieSends == 0 ? DeathLegVerdict.NotApplicable : _lieEchoed ? "yes" : "no";
@@ -158,9 +177,66 @@ public sealed partial class DeathScenario
             return;
         }
 
+        if (_stancePress is { } sync)
+        {
+            if (sync.Outcome is not { } synced)
+            {
+                return;
+            }
+
+            _stancePress = null;
+            if (synced.Kind is not (ActionOutcomeKind.Local or ActionOutcomeKind.Confirmed or ActionOutcomeKind.Sent))
+            {
+                _lieBlocked = true;
+                _lieDown = "refused:stance-" + synced.Kind.ToString().ToLowerInvariant();
+                _log.Warn(LogCategory, "death: the walker's stance could not be synced to non-combat (" + Describe(synced) + "), so the lie-down is not sent (retail's motion refuses Sleeping outside it, CantLieDownInCombat); the mage waits standing, undressed");
+                return;
+            }
+
+            _stanceSyncs++;
+            _lieSends++;
+            _lieAt = clock;
+            (_sleepShown, _sleepLost) = (false, null); // M5 7 P7o: the check after: this lie-down's own echo is waited for
+            _liePress = session.Actions.Move.Command(LieDownCommand, true, ActionSource.Host); // the stance first, then Sleeping
+            return;
+        }
+
+        if (_modeResync is { } resync)
+        {
+            if (resync.Outcome is not { } resynced)
+            {
+                return;
+            }
+
+            _modeResync = null;
+            var mode = session.State.Self.Qualities.CombatMode;
+            if (resynced.Succeeded && mode == CombatModes.NonCombat)
+            {
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: check: non-combat again (restore {_lieRestores} of {MaxLieRestores}); the lie-down follows"));
+            }
+            else
+            {
+                _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: check: the non-combat re-sync did not take ({Describe(resynced)}, the mode is {ModeName(mode)}) (restore {_lieRestores} of {MaxLieRestores}); the next frame checks again"));
+            }
+
+            return;
+        }
+
+        if (_lying && !_lieBlocked && walkStatus != FightWalkStatus.Walking && LieLost(session) is { } lost)
+        {
+            RestoreLie(session, lost);
+            return;
+        }
+
         if (_lying || _lieBlocked || walkStatus == FightWalkStatus.Walking)
         {
             return;
+        }
+
+        if (_lieRestores > 0 && session.State.Self.Qualities.CombatMode != CombatModes.NonCombat)
+        {
+            RestoreLie(session, $"the combat mode is {ModeName(session.State.Self.Qualities.CombatMode)}, not non-combat");
+            return; // M5 7 P7o: a restore whose re-sync did not take: the mode again, within the bound
         }
 
         if (session.State.Self.Qualities.CombatMode != CombatModes.NonCombat)
@@ -179,25 +255,92 @@ public sealed partial class DeathScenario
             return;
         }
 
-        _lieSends++;
-        _lieAt = clock;
-        _liePress = session.Actions.Move.Command(LieDownCommand, true, ActionSource.Host);
+        // M5 3 d4 (m4-lie-down-controller): the walker's own stance is made non-combat first. A cast's TurnTo had left it in the Magic stance (the scenario walkers apply only the server's MoveTo and TurnTo, never its peace motion), and retail's
+        // CMotionInterp::DoMotion (11.6096 0x00529930) refuses Sleeping outside it (CantLieDownInCombat). The style command goes through the controller's own path; Sleeping follows in the next frame, once it was taken.
+        _stancePress = session.Actions.Move.Command(CombatStances.NonCombat, true, ActionSource.Host);
+        _log.Info(LogCategory, $"death: the walker's stance is synced to non-combat (0x{CombatStances.NonCombat:X8}) before the lie-down");
     }
 
     /// <summary>A walk leg begins: the player stands up with it (the controller's forward command replaces Sleeping), so the next stop lies down again.</summary>
-    private void StoodUp() => _lying = false;
+    private void StoodUp() => (_lying, _sleepShown, _sleepLost) = (false, false, null);
+
+    /// <summary>
+    /// M5 7 P7o (D141, the check before the wait goes on): why the lie-down the wait made is lost, or null while it holds. Lost: the combat mode left non-combat (the item-end gate: the vitals guard's heal took the magic mode, ACE's
+    /// non-combat defence factor stopped and the mage evaded 691 of 718 swings), or a motion of the player after its Sleeping echo shows it standing. A dead player is never restored.
+    /// </summary>
+    private string? LieLost(IGameSessionView session)
+    {
+        var q = session.State.Self.Qualities;
+        if (q.TryGetVitalLevels(1, out var health, out _) && health == 0)
+        {
+            return null; // dying: the death is the wait's end, not a lie-down to restore
+        }
+
+        if (q.CombatMode != CombatModes.NonCombat)
+        {
+            return $"the combat mode is {ModeName(q.CombatMode)}, not non-combat";
+        }
+
+        return _sleepLost is { } motion ? "the server's motion for the player no longer shows Sleeping (" + motion + ")" : null;
+    }
+
+    /// <summary>M5 7 P7o (D141, the act): a lost lie-down is restored: non-combat re-synced when the mode left it, then the stance sync and Sleeping again (the next frames), at most <see cref="MaxLieRestores"/> times, each logged.</summary>
+    private void RestoreLie(IGameSessionView session, string why)
+    {
+        if (_lieRestores >= MaxLieRestores)
+        {
+            _lieBlocked = true;
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: check: the lie-down was lost again ({why}) after {MaxLieRestores} restores: no more restores; the mage waits as it stands (the wait's own limit still ends it by name)"));
+            return;
+        }
+
+        _lieRestores++;
+        (_lying, _sleepShown, _sleepLost) = (false, false, null);
+        var resync = session.State.Self.Qualities.CombatMode != CombatModes.NonCombat;
+        _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{LieLostLine} ({why}): {(resync ? "non-combat is re-synced, then " : string.Empty)}the mage lies down again (restore {_lieRestores} of {MaxLieRestores})"));
+        if (resync)
+        {
+            _modeResync = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation);
+        }
+    }
+
+    /// <summary>The combat mode's name for the log (<see cref="CombatMode"/>), or its number when it is none of them.</summary>
+    private static string ModeName(int mode) => Enum.IsDefined((CombatMode)(uint)mode) ? ((CombatMode)(uint)mode).ToString() : mode.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>The line a lost lie-down logs before it is restored (M5 7 P7o): the lead greps it in the gate.</summary>
+    public const string LieLostLine = "death: check: the lie-down was lost";
 
     private void SubscribeMotion(IGameSessionView session) =>
         _motionSubscription ??= session.Events.Subscribe<ObjectMotionChanged>(OnMotion);
 
     private void OnMotion(in ObjectMotionChanged e)
     {
-        if (!e.IsSelf || _lieSends == 0 || _lieEchoed)
+        if (!e.IsSelf || _lieSends == 0)
         {
             return;
         }
 
         var m = e.Motion;
+        if (m.Forward == LieDownWire)
+        {
+            if (!_sleepShown && _lieRestores > 0)
+            {
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: check: the lie-down is restored: the server's motion shows Sleeping again (restore {_lieRestores} of {MaxLieRestores})"));
+            }
+
+            (_sleepShown, _sleepLost) = (true, null);
+        }
+        else if (_sleepShown && _lying && m.Forward != WorldObjectTable.DeadMotionLowWord)
+        {
+            _sleepLost = string.Create(CultureInfo.InvariantCulture, $"fwd={(m.Forward is { } lostForward ? "0x" + lostForward.ToString("X4", CultureInfo.InvariantCulture) : "default")} style={(m.Style is { } lostStyle ? "0x" + lostStyle.ToString("X4", CultureInfo.InvariantCulture) : "default")}");
+        }
+
+        if (_lieEchoed)
+        {
+            return;
+        }
+
+        _lieEchoStyle = m.Style ?? _lieEchoStyle;
         if (m.Forward == LieDownWire)
         {
             _lieEchoed = true;
@@ -211,7 +354,12 @@ public sealed partial class DeathScenario
     /// <summary>The wait's end: a lie-down sent with no Sleeping echo is named with the last echo (its style is the client's own raw style, ACE <c>MovementData.cs</c> 94-95: anything but NonCombat 0x003D names a controller that refused).</summary>
     private void ReportLieEcho()
     {
-        if (_lieSends > 0 && !_lieEchoed)
+        if (_lieSends > 0 && !_lieEchoed && _lieEchoStyle is { } style && style != NonCombatWire)
+        {
+            _lieDown = "refused:cant-lie-down-in-combat";
+            _log.Warn(LogCategory, $"death: the lie-down was refused: retail refuses Sleeping outside the non-combat stance (WeenieError CantLieDownInCombat, CMotionInterp::DoMotion 11.6096 0x00529930) and the server's last motion for the player carried style 0x{style:X4}, so the walker's stance sync did not take; lie_down=refused:cant-lie-down-in-combat");
+        }
+        else if (_lieSends > 0 && !_lieEchoed)
         {
             _log.Warn(LogCategory, $"death: lie_echo=no: no server motion of the player showed Sleeping after {_lieSends} lie-down(s); the last echo read {_lieEchoLast ?? "nothing"} (style 0x0049 is the Magic stance: the client's controller refused, research section 4)");
         }

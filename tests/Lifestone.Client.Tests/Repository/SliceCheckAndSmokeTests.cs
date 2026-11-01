@@ -21,7 +21,7 @@ public sealed class SliceCheckAndSmokeTests
 
     private static string HeroVideo => File.ReadAllText(RepositoryFiles.PathOf("tools", "hero-video.ps1"));
 
-    private const string DefaultFilter = "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure";
+    private const string DefaultFilter = "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Tier!=Tool&Status!=KnownFailure";
 
     // ------------------------------------------------------------------------------------------ C1: the default filter and the Exhaustive stage
 
@@ -44,6 +44,24 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("the lead runs it alone", shared, StringComparison.Ordinal);
         Assert.Contains("TODO(...)", shared, StringComparison.Ordinal);
         Assert.Contains("`[Trait(\"Status\", \"KnownFailure\")]`", shared, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_ground_draft_command_has_a_tier_of_its_own_that_both_default_filters_leave_out_and_the_timing_run_never_picks_up_M5_item_2_k1()
+    {
+        // The draft command (GroundDraftRunTests) writes files under the cache folder and is run by the lead on purpose: Tier=Tool. It was Tier=Timing, which the lead's quiet-machine timing run (--filter "Tier=Timing") picked up.
+        Assert.Contains("&Tier!=Tool&", DefaultFilter, StringComparison.Ordinal);
+        Assert.Contains("Tier=Tool (a lead-run command written as a test", SliceCheck, StringComparison.Ordinal); // slice-check's header text names the tier
+        Assert.Contains("Tier!=Tool", Smoke, StringComparison.Ordinal);
+
+        var draft = typeof(Lifestone.Client.Tests.Session.Grounds.GroundDraftRunTests);
+        var method = Assert.Single(draft.GetMethods(), m => m.Name == "Draft_the_profile_of_the_named_dungeon_into_cache");
+        static IEnumerable<(string Name, string Value)> Traits(System.Reflection.MemberInfo member) => member.GetCustomAttributesData()
+            .Where(a => a.AttributeType.Name == "TraitAttribute" && a.ConstructorArguments.Count == 2)
+            .Select(a => ((string)a.ConstructorArguments[0].Value!, (string)a.ConstructorArguments[1].Value!));
+        var traits = Traits(method).Concat(Traits(draft)).ToList();
+        Assert.Contains(("Tier", "Tool"), traits);
+        Assert.DoesNotContain(traits, t => t.Name == "Tier" && t.Value != "Tool"); // not Timing (the timing run), not Exhaustive (slice-check -Exhaustive), not Soak
     }
 
     [Fact]
@@ -230,10 +248,8 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("-Skipped", script[skip..gate], StringComparison.Ordinal);
         Assert.Contains("continue", script[skip..gate], StringComparison.Ordinal);
 
-        // The table: journey name and Godot timeout (J5: the runner's own limits are 2,010 / 1,710 / 1,860 s).
-        Assert.Contains("'journey-mage'   = @{ Journey = 'mage'; Seconds = 2200 }", script, StringComparison.Ordinal);
-        Assert.Contains("'journey-melee'  = @{ Journey = 'melee'; Seconds = 1900 }", script, StringComparison.Ordinal);
-        Assert.Contains("'journey-archer' = @{ Journey = 'archer'; Seconds = 2000 }", script, StringComparison.Ordinal);
+        // The table: the three journeys and a Godot timeout each (its relation to the runner's own limit: The_smoke_journeys_godot_timeouts_are_above_the_runners_own_limits, M5 2 fix F2, 2-R5).
+        Assert.Equal(["archer", "mage", "melee"], SmokeJourneySeconds(script).Keys.Order(StringComparer.Ordinal).ToArray());
 
         // The body: the account from the table, the journey option, the frames into <OutDir>/frames, the journey's own verdict, the frame fields report-only.
         var body = script[script.IndexOf("{ $journeySteps.ContainsKey($_) } {", StringComparison.Ordinal)..];
@@ -248,6 +264,59 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("-FrameOver50 $over50 -FrameJudge $judge", body, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// M5 2 fix F2 (review 2-R5): the relation, not a number. k2 raised the archer's whole-run limit by its 1,200 s hunt (<see cref="Lifestone.Client.Session.Scenarios.Journey.JourneyLimits.HuntExtraSeconds"/>) to 2,780 s while smoke
+    /// still killed Godot at 2,000 s, so a hunt that found nothing ended as a smoke timeout instead of the hunt's own named reason. Each journey's Godot timeout in smoke.ps1 is at least the runner's whole limit
+    /// (<c>JourneyLegRunner.WholeSecondsFor</c>, read from the host's source so its login, margin and factor are not copied here; the plan's seconds and the hunt's extra come from the plans and <c>JourneyLimits</c>) plus
+    /// <see cref="LeastMarginSeconds"/>, and live-gate.ps1's copy of the table (which sizes the gate's lane budget) is the same table.
+    /// </summary>
+    [Fact]
+    public void The_smoke_journeys_godot_timeouts_are_above_the_runners_own_limits()
+    {
+        var smoke = SmokeJourneySeconds(Smoke);
+        var gateTable = Regex.Match(File.ReadAllText(RepositoryFiles.PathOf("tools", "live-gate.ps1")), @"\$script:SmokeJourneyTimeouts = @\{ mage = (?<mage>\d+); melee = (?<melee>\d+); archer = (?<archer>\d+) \}");
+        Assert.True(gateTable.Success, "live-gate.ps1 has no SmokeJourneyTimeouts table for the three journeys");
+
+        var plans = new (string Name, Lifestone.Client.Session.Scenarios.Journey.JourneyPlan Plan)[]
+        {
+            ("mage", Lifestone.Client.Session.Scenarios.Journey.JourneyPlans.Mage),
+            ("melee", Lifestone.Client.Session.Scenarios.Journey.JourneyPlans.Melee),
+            ("archer", Lifestone.Client.Session.Scenarios.Journey.JourneyPlans.Archer),
+        };
+        foreach (var (name, plan) in plans)
+        {
+            var runner = RunnerWholeSeconds(plan);
+            Assert.True(smoke.ContainsKey(name), "smoke.ps1 has no journey step for " + name);
+            Assert.True(smoke[name] >= runner + LeastMarginSeconds, $"smoke gives the {name} journey {smoke[name]} s but the runner's own limit is {runner} s (+ {LeastMarginSeconds} s of margin): smoke would kill Godot before the runner's verdict");
+            Assert.Equal(smoke[name], double.Parse(gateTable.Groups[name].Value, System.Globalization.CultureInfo.InvariantCulture)); // the gate's lane budget is sized from the same numbers
+        }
+    }
+
+    /// <summary>The least the other two journeys keep over the runner's limit when k2 left them (the melee's 55 s): Godot's start before the runner's clock and the verdict's flush after its limit.</summary>
+    private const double LeastMarginSeconds = 50;
+
+    /// <summary>smoke.ps1's journey table: the journey name and the Godot timeout of each.</summary>
+    private static Dictionary<string, double> SmokeJourneySeconds(string script) =>
+        Regex.Matches(script, @"'journey-\w+'\s*=\s*@\{ Journey = '(?<j>\w+)'; Seconds = (?<s>\d+) \}")
+            .ToDictionary(m => m.Groups["j"].Value, m => double.Parse(m.Groups["s"].Value, System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>The host's whole-run limit for <paramref name="plan"/> with the default fight options: <c>JourneyLegRunner.WholeSecondsFor</c>, its constants and factor read from the source (the Godot project is not referenced here).</summary>
+    private static double RunnerWholeSeconds(Lifestone.Client.Session.Scenarios.Journey.JourneyPlan plan)
+    {
+        var source = File.ReadAllText(RepositoryFiles.PathOf("src", "Lifestone.Game", "scripts", "Session", "JourneyLegRunner.cs"));
+        double Constant(string name)
+        {
+            var match = Regex.Match(source, @"const double " + name + @" = (?<v>\d+(\.\d+)?);");
+            Assert.True(match.Success, "JourneyLegRunner has no const double " + name);
+            return double.Parse(match.Groups["v"].Value, System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        var formula = Regex.Match(source, @"WholeSecondsFor\(JourneyPlan plan, FightOptions\? fight = null\) => LoginSeconds \+ \((?<k>\d+(\.\d+)?) \* plan\.ExpectedSeconds\) \+ MarginSeconds \+ JourneyLimits\.WholeExtraSeconds\(plan, fight \?\? new FightOptions\(\)\);");
+        Assert.True(formula.Success, "JourneyLegRunner.WholeSecondsFor changed shape: update this test's reading of it, then the smoke table");
+        return Constant("LoginSeconds") + (double.Parse(formula.Groups["k"].Value, System.Globalization.CultureInfo.InvariantCulture) * plan.ExpectedSeconds) + Constant("MarginSeconds")
+            + Lifestone.Client.Session.Scenarios.Journey.JourneyLimits.WholeExtraSeconds(plan, new Lifestone.Client.Session.Scenarios.FightOptions());
+    }
+
     [Fact]
     public void The_journey_verdict_reads_the_done_line_every_station_line_and_the_teleport_budget()
     {
@@ -255,9 +324,12 @@ public sealed class SliceCheckAndSmokeTests
         string[] lines0 =
         [
             "[logincheck] journey station=buff ok=true s=60.0",
+            "[logincheck] journey station=den-fight ok=true s=60.0 kills=9 mana_wait_max_s=1.5 storeys_visited=2 basement_entries=0",
             "[logincheck] journey station=vendor ok=false s=0.0 skipped=precondition:no_vendor",
+            MageLogistics,
+            MageDeath,
             "[logincheck] journey frames station=buff frame_max_ms=31.5 frames=900",
-            "[logincheck] journey done ok=true name=mage stations=5/6 failed=none teleports=1 recalls=2 budget=3 route_m=900.0 run_s=1000.0 recovery_places=0 granted=0",
+            "[logincheck] journey done ok=true name=mage stations=5/6 failed=none teleports=1 recalls=2 budget=3 route_m=900.0 run_s=1000.0 recovery_places=0 granted=0 places=0",
         ];
         var run = RunPowerShell(Function(script, "Get-JourneyVerdict")
             + "$ok = @(" + string.Join(",", lines0.Select(l => "'" + l + "'")) + ") -join \"`n\"\n"
@@ -271,23 +343,58 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Equal(["A=True buff:31.5 31.5", "B=False", "C=False", "D=False no journey done line", "E=False"], lines);
     }
 
+    // M5 item 4 c1 (D55): the mage's done line carries places=0 (judged on the mage only); a helper line without it gets it, so the older cases keep testing the field they name.
     private static string JourneyDone(string name, string fields, int budget = 1) =>
-        $"[logincheck] journey done ok=true name={name} stations=9/9 failed=none budget={budget} route_m=500.0 run_s=900.0 rungs=1 blocked=0 sightless=2 vitals_passes=3 {fields}";
+        $"[logincheck] journey done ok=true name={name} stations=9/9 failed=none budget={budget} route_m=500.0 run_s=900.0 rungs=1 blocked=0 sightless=2 vitals_passes=3 {fields}"
+        + (name == "mage" && !(" " + fields).Contains(" places=", StringComparison.Ordinal) ? " places=0" : string.Empty);
 
-    // Runs Get-JourneyVerdict over each (name, text, contended) and prints "<name>=<Ok>|<WindowOver50>|<WindowsSeen>|<Windows>|<Detail>".
+    // The mage's logistics and death station lines as the gate wants them (DoD 6: bought>=1 spent_xp>0, sold report-only; DoD 7: deaths=1 corpse_recovered=yes vitae_grants=0 rebuffed=yes; D55: granted=0 places=0).
+    private const string MageLogistics = "[logincheck] journey station=logistics ok=true s=141.0 trigger=forced granted=0 places=0 loot=off sold=0 bought=3 spent=1200 notes_sold=0 spent_xp=5000 raises=2 vitals_passes=1";
+
+    private const string MageDeath = "[logincheck] journey station=death ok=true s=118.0 bars=ok deaths=1 corpse_recovered=yes route=portal items_back=9 vitae_grants=0 rebuffed=yes rebuffed_pretrip=no relines=3 trip_abort=none";
+
+    // The mage's den-fight station line (M5 item 2 k1: mana_wait_max_s<=10 is judged on it; M5 item 3 c2b: storeys_visited>=2 and basement_entries=0 too, the rest of the tour and the loot fields ride on it) in front of its done line.
+    private const string Tour = "storeys_visited=2 basement_entries=0 returns=1 slots_standing=33 legs_recovered=2 kills_unpaired=1 slots_expired=3";
+
+    private const string LootOff = "loot=off looted=0 kept=0 loot_value=0";
+
+    /// <summary>What the report-only den-fight bracket shows for <see cref="Tour"/> and <see cref="LootOff"/>: the two judged counts have left it.</summary>
+    private const string ShownTour = "returns=1 slots_standing=33 legs_recovered=2 kills_unpaired=1 slots_expired=3 loot=off looted=0 kept=0 loot_value=0";
+
+    private const string AllTourNa = "returns=n/a slots_standing=n/a legs_recovered=n/a kills_unpaired=n/a slots_expired=n/a loot=n/a looted=n/a kept=n/a loot_value=n/a";
+
+    private const string LogisticsNa = "trigger=n/a granted=n/a places=n/a loot=n/a sold=n/a bought=n/a spent=n/a notes_sold=n/a spent_xp=n/a raises=n/a";
+
+    private const string DeathNa = "deaths=n/a corpse_recovered=n/a route=n/a items_back=n/a vitae_grants=n/a rebuffed=n/a rebuffed_pretrip=n/a relines=n/a trip_abort=n/a";
+
+    // A mage's done line comes with the mage's logistics and death stations (the judged DoD 6 and 7 lines) unless the case asks for none (mageStations: false); the other journeys never get them.
+    private static string WithFight(string done, string fields = "mana_wait_max_s=1.5 mana_wait_s=4.0 " + Tour + " " + LootOff, bool mageStations = true) =>
+        "[logincheck] journey station=den-fight ok=true s=49.4 kills=9 target_kills=9 " + fields + "\n"
+        + (mageStations && done.Contains(" name=mage ", StringComparison.Ordinal) ? MageLogistics + "\n" + MageDeath + "\n" : string.Empty) + done;
+
+    // Runs Get-JourneyVerdict over each (name, text, contended) and prints "<name>=<Ok>|<WindowOver50>|<WindowsSeen>|<Windows>|<Detail>|<TourFields>|<LogisticsFields>|<DeathFields>|<Places>|<PhysicsFields>|<DoorFields>|<RecallFields>".
     private static Dictionary<string, string> JudgeJourneys(params (string Name, string Text, bool Contended)[] cases)
     {
-        var script = Function(Smoke, "Get-JourneyVerdict");
-        foreach (var (name, text, contended) in cases)
+        // In batches of six: one command line has a limit (about 32,000 characters on Windows), and the mage's cases carry three station lines each.
+        var result = new Dictionary<string, string>();
+        foreach (var batch in cases.Chunk(6))
         {
-            var literal = "@(" + string.Join(",", text.Split('\n').Select(l => "'" + l + "'")) + ") -join \"`n\"";
-            script += $"$v = Get-JourneyVerdict ({literal}) ${(contended ? "true" : "false")}\n"
-                + $"Write-Output ('{name}=' + $v.Ok + '|' + $v.WindowOver50 + '|' + $v.WindowsSeen + '|' + $v.Windows + '|' + $v.Detail)\n";
+            var script = Function(Smoke, "Get-JourneyVerdict");
+            foreach (var (name, text, contended) in batch)
+            {
+                var literal = "@(" + string.Join(",", text.Split('\n').Select(l => "'" + l + "'")) + ") -join \"`n\"";
+                script += $"$v = Get-JourneyVerdict ({literal}) ${(contended ? "true" : "false")}\n"
+                    + $"Write-Output ('{name}=' + $v.Ok + '|' + $v.WindowOver50 + '|' + $v.WindowsSeen + '|' + $v.Windows + '|' + $v.Detail + '|' + $v.TourFields + '|' + $v.LogisticsFields + '|' + $v.DeathFields + '|' + $v.Places + '|' + $v.PhysicsFields + '|' + $v.DoorFields + '|' + $v.RecallFields)\n";
+            }
+
+            var output = RunPowerShell(script);
+            foreach (var line in output.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Contains('=', StringComparison.Ordinal) && l.Contains('|', StringComparison.Ordinal)))
+            {
+                result[line[..line.IndexOf('=', StringComparison.Ordinal)]] = line[(line.IndexOf('=', StringComparison.Ordinal) + 1)..];
+            }
         }
 
-        var output = RunPowerShell(script);
-        return output.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Contains('=', StringComparison.Ordinal) && l.Contains('|', StringComparison.Ordinal))
-            .ToDictionary(l => l[..l.IndexOf('=', StringComparison.Ordinal)], l => l[(l.IndexOf('=', StringComparison.Ordinal) + 1)..]);
+        return result;
     }
 
     [Fact]
@@ -295,12 +402,12 @@ public sealed class SliceCheckAndSmokeTests
     {
         // teleports<=1 on every journey, recalls>=2 on the mage, recovery_places=0 on every journey, granted=0 on the mage and the archer; the melee's granted and the other fields stay report-only.
         var got = JudgeJourneys(
-            ("magepass", JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0"), false),
-            ("magerecalls", JourneyDone("mage", "teleports=1 recalls=1 recovery_places=0 granted=0"), false),
-            ("magerecallsgone", JourneyDone("mage", "teleports=1 recovery_places=0 granted=0"), false),
-            ("mageteleports", JourneyDone("mage", "teleports=2 recalls=3 recovery_places=0 granted=0", budget: 2), false),
-            ("mageplaces", JourneyDone("mage", "teleports=1 recalls=3 recovery_places=1 granted=0"), false),
-            ("magegranted", JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=2"), false),
+            ("magepass", WithFight(JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0")), false),
+            ("magerecalls", WithFight(JourneyDone("mage", "teleports=1 recalls=1 recovery_places=0 granted=0")), false),
+            ("magerecallsgone", WithFight(JourneyDone("mage", "teleports=1 recovery_places=0 granted=0")), false),
+            ("mageteleports", WithFight(JourneyDone("mage", "teleports=2 recalls=3 recovery_places=0 granted=0", budget: 2)), false),
+            ("mageplaces", WithFight(JourneyDone("mage", "teleports=1 recalls=3 recovery_places=1 granted=0")), false),
+            ("magegranted", WithFight(JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=2")), false),
             ("archerpass", JourneyDone("archer", "teleports=1 recalls=1 recovery_places=0 granted=0"), false),
             ("archergranted", JourneyDone("archer", "teleports=1 recalls=1 recovery_places=0 granted=1"), false),
             ("archernorecalls", JourneyDone("archer", "teleports=0 recalls=0 recovery_places=0 granted=0"), false),
@@ -328,12 +435,304 @@ public sealed class SliceCheckAndSmokeTests
     }
 
     [Fact]
+    public void The_journey_verdict_judges_the_mage_dens_mana_wait_at_10_seconds_from_M5_item_2_k1()
+    {
+        // m5-plan.md section 5 item 3: mana_wait_max_s<=10 judged from item 2's gate, on the mage journey's den-fight station line. Over 10, the field missing or n/a, and no den-fight line at all fail it by name.
+        var done = JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0");
+        var got = JudgeJourneys(
+            ("pass", WithFight(done, "mana_wait_max_s=3.4 " + Tour), false),
+            ("zero", WithFight(done, "mana_wait_max_s=0 " + Tour), false),
+            ("exactly10", WithFight(done, "mana_wait_max_s=10 " + Tour), false),
+            ("exactly10point0", WithFight(done, "mana_wait_max_s=10.0 " + Tour), false),
+            ("over", WithFight(done, "mana_wait_max_s=10.1 " + Tour), false),
+            ("farover", WithFight(done, "mana_wait_max_s=87.5 mana_wait_s=140.2 " + Tour), false),
+            ("overcontended", WithFight(done, "mana_wait_max_s=10.1 " + Tour), true),
+            ("missing", WithFight(done, "mana_wait_s=4.0 " + Tour), false),
+            ("na", WithFight(done, "mana_wait_max_s=n/a " + Tour), false),
+            ("stationless", done, false),
+            ("skipped", "[logincheck] journey station=den-fight ok=false s=0.0 skipped=precondition:no_target\n" + done, false),
+            ("lookalike", WithFight(done, "x_mana_wait_max_s=1.0 " + Tour), false));
+
+        const string Named = "; mana_wait_max_s n/a on the den-fight station, not 10 or less (mage)";
+        Assert.StartsWith("True|", got["pass"], StringComparison.Ordinal);
+        Assert.DoesNotContain("; mana_wait_max_s", got["pass"], StringComparison.Ordinal); // no reason in the detail of a pass
+        Assert.StartsWith("True|", got["zero"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["exactly10"], StringComparison.Ordinal); // the rule is "10 or less"
+        Assert.StartsWith("True|", got["exactly10point0"], StringComparison.Ordinal);
+        Assert.StartsWith("False|", got["over"], StringComparison.Ordinal);
+        Assert.Contains("; mana_wait_max_s 10.1 over 10 (mage den-fight)", got["over"], StringComparison.Ordinal);
+        Assert.Contains("; mana_wait_max_s 87.5 over 10 (mage den-fight)", got["farover"], StringComparison.Ordinal);
+        Assert.StartsWith("False|", got["overcontended"], StringComparison.Ordinal); // a mana wait is not a frame time: contention does not excuse it
+        Assert.Contains(Named, got["missing"], StringComparison.Ordinal);
+        Assert.Contains(Named, got["na"], StringComparison.Ordinal);
+        Assert.Contains(Named, got["stationless"], StringComparison.Ordinal);
+        Assert.Contains(Named, got["skipped"], StringComparison.Ordinal);
+        Assert.Contains(Named, got["lookalike"], StringComparison.Ordinal); // only the field itself counts, not a longer name ending in it
+        Assert.All(new[] { "missing", "na", "stationless", "skipped", "lookalike" }, k => Assert.StartsWith("False|", got[k], StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_journey_verdict_judges_the_mana_wait_on_the_mage_only_and_keeps_the_tour_fields_report_only_M5_item_2_k1()
+    {
+        var mage = JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0");
+        var melee = JourneyDone("melee", "teleports=1 recalls=1 recovery_places=0 granted=1");
+        var archer = JourneyDone("archer", "teleports=1 recalls=1 recovery_places=0 granted=0");
+        var got = JudgeJourneys(
+            // the melee's and the archer's den-fight (or none) are not judged on the mana wait
+            ("meleeslow", WithFight(melee, "mana_wait_max_s=55.0 " + Tour), false),
+            ("meleebare", WithFight(melee, "kills=3"), false),
+            ("archernone", archer, false),
+            // the tour's fields that stay report-only (c2b: storeys_visited and basement_entries left them for the judge): any value passes and is shown
+            ("tourbad", WithFight(mage, "mana_wait_max_s=2.0 storeys_visited=2 basement_entries=0 returns=0 slots_standing=0 legs_recovered=0 kills_unpaired=0 slots_expired=0 loot=on looted=0 kept=0 loot_value=0"), false),
+            ("tourna", WithFight(mage, "mana_wait_max_s=2.0 storeys_visited=2 basement_entries=0 returns=n/a slots_standing=n/a legs_recovered=n/a kills_unpaired=n/a slots_expired=n/a"), false),
+            ("tourabsent", WithFight(mage, "mana_wait_max_s=2.0 storeys_visited=2 basement_entries=0"), false),
+            ("tourshown", WithFight(mage), false),
+            ("tourmelee", WithFight(melee, "mana_wait_max_s=55.0 " + Tour + " " + LootOff), false),
+            ("tourfailed", WithFight(mage, "mana_wait_max_s=40.0 " + Tour + " " + LootOff), false),
+            ("tournone", melee, false));
+
+        Assert.StartsWith("True|", got["meleeslow"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["meleebare"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["archernone"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["tourbad"], StringComparison.Ordinal); // no returns, no slots standing and no legs recovered fail nothing in this gate
+        Assert.Equal("returns=0 slots_standing=0 legs_recovered=0 kills_unpaired=0 slots_expired=0 loot=on looted=0 kept=0 loot_value=0", Field(got["tourbad"], 5));
+        Assert.StartsWith("True|", got["tourna"], StringComparison.Ordinal);
+        Assert.Equal("returns=n/a slots_standing=n/a legs_recovered=n/a kills_unpaired=n/a slots_expired=n/a loot=n/a looted=n/a kept=n/a loot_value=n/a", Field(got["tourna"], 5));
+        Assert.Equal(AllTourNa, Field(got["tourabsent"], 5));
+        Assert.Equal(ShownTour, Field(got["tourshown"], 5));
+        Assert.Equal(ShownTour, Field(got["tourmelee"], 5)); // shown for any journey that runs the station
+        Assert.StartsWith("False|", got["tourfailed"], StringComparison.Ordinal); // the mana wait fails it, the tour fields are still shown
+        Assert.Equal(ShownTour, Field(got["tourfailed"], 5));
+        Assert.Equal(AllTourNa, Field(got["tournone"], 5)); // no den-fight station: n/a, not a failure for the melee
+    }
+
+    [Theory]
+    [InlineData("melee", " door_opened=yes", " door_opened=yes", true)]       // the stations in the other order do not matter
+    [InlineData("melee", " door_opened=yes", " stale_door_opened=yes", false)] // the key is read whole, never as the tail of another field
+    [InlineData("archer", " door_opened=no", " door_opened=n/a", true)]        // only the melee journey is judged
+    public void The_melee_door_judge_reads_the_key_whole_in_either_station_order_and_judges_no_other_journey_M5_7_s4(string journey, string vendorDoor, string factsDoor, bool ok)
+    {
+        var done = JourneyDone(journey, "teleports=1 recalls=1 recovery_places=0 granted=" + (journey == "melee" ? "1" : "0"));
+        var got = JudgeJourneys(("order", Facts(factsDoor) + Vendor(vendorDoor) + done, false));
+
+        Assert.StartsWith(ok ? "True|" : "False|", got["order"], StringComparison.Ordinal);
+        if (!ok)
+        {
+            Assert.Contains("door_opened n/a on the vendor-facts station, not yes (melee)", got["order"], StringComparison.Ordinal);
+        }
+    }
+
+    private const string PhysicsShown ="creature_jumps=0 creature_flips=2 transit_ms_max=1.25 place_ms_max=0.40 transits_max=7";
+
+    private const string PhysicsNa = "creature_jumps=n/a creature_flips=n/a transit_ms_max=n/a place_ms_max=n/a transits_max=n/a";
+
+    private const string RecallLine = "[logincheck] journey station=recall-home ok=true s=6.0 recalls=1 recall_s=4.0 recall_fizzles=0 stepped_off=no\n";
+
+    private static string Vendor(string door) => "[logincheck] journey station=vendor ok=true s=20.0 buy=yes problems=0 granted=0 vendor_frame_max_ms=20.5" + door + "\n";
+
+    private static string Facts(string door) => "[logincheck] journey station=vendor-facts ok=true s=9.0 buy=no problems=0 granted=0 vendor_frame_max_ms=n/a" + door + "\n";
+
+    [Fact]
+    public void The_journey_verdict_shows_the_physics_and_stepped_off_fields_report_only_and_judges_door_opened_on_the_melee_stations_that_ran_M5_5_c1_M5_7_s4()
+    {
+        var mage = JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0");
+        var melee = JourneyDone("melee", "teleports=1 recalls=1 recovery_places=0 granted=1");
+        var got = JudgeJourneys(
+            ("magephys", RecallLine + WithFight(mage, "mana_wait_max_s=2.0 " + Tour + " " + LootOff + " " + PhysicsShown), false),
+            ("magephysloud", WithFight(mage, "mana_wait_max_s=2.0 " + Tour + " " + LootOff + " creature_jumps=4000 creature_flips=99 transit_ms_max=950.00 place_ms_max=800.00 transits_max=512"), false),
+            ("magephysna", WithFight(mage, "mana_wait_max_s=2.0 " + Tour + " " + LootOff + " " + PhysicsNa), false),
+            ("magephysabsent", WithFight(mage), false),
+            ("meleedoors", Vendor(" door_opened=yes") + Facts(" door_opened=no") + melee, false),
+            ("meleedoorsnot", Vendor(" door_opened=no") + Facts(" door_opened=yes") + melee, false),
+            ("meleedoorsna", Vendor(" door_opened=n/a") + Facts(" door_opened=n/a") + melee, false),
+            ("meleedoorsabsent", Vendor(string.Empty) + Facts(string.Empty) + melee, false),
+            ("meleenostations", melee, false),
+            ("meleedoorsyes", Vendor(" door_opened=yes") + Facts(" door_opened=yes") + melee, false),
+            ("meleevendoronly", Vendor(" door_opened=yes") + melee, false),
+            ("meleefactsskipped", Vendor(" door_opened=yes") + "[logincheck] journey station=vendor-facts ok=false skipped=no-vendor door_opened=n/a\n" + melee, false),
+            ("mageignored", Vendor(" door_opened=no") + WithFight(mage), false));
+
+        const string DoorsNa = "vendor:door_opened=n/a vendor-facts:door_opened=n/a";
+        Assert.StartsWith("True|", got["magephys"], StringComparison.Ordinal);
+        Assert.Equal(PhysicsShown, Field(got["magephys"], 9));
+        Assert.Equal("stepped_off=no", Field(got["magephys"], 11));
+        Assert.Equal(DoorsNa, Field(got["magephys"], 10)); // the mage runs no vendor
+        Assert.StartsWith("True|", got["magephysloud"], StringComparison.Ordinal); // report-only: any value passes
+        Assert.Equal("creature_jumps=4000 creature_flips=99 transit_ms_max=950.00 place_ms_max=800.00 transits_max=512", Field(got["magephysloud"], 9));
+        Assert.Equal("stepped_off=n/a", Field(got["magephysloud"], 11));
+        Assert.StartsWith("True|", got["magephysna"], StringComparison.Ordinal); // the headless host prints n/a
+        Assert.Equal(PhysicsNa, Field(got["magephysna"], 9));
+        Assert.StartsWith("True|", got["magephysabsent"], StringComparison.Ordinal); // a log from before c1
+        Assert.Equal(PhysicsNa, Field(got["magephysabsent"], 9));
+        // door_opened=yes is JUDGED from M5 item 7's gate, on the melee journey's vendor and vendor-facts stations that ran (m5-plan.md section 5 item 3); the fields are still shown beside the other report-only ones.
+        Assert.StartsWith("False|", got["meleedoors"], StringComparison.Ordinal);
+        Assert.Contains("door_opened no not yes (melee vendor-facts station)", got["meleedoors"], StringComparison.Ordinal);
+        Assert.DoesNotContain("(melee vendor station)", got["meleedoors"], StringComparison.Ordinal);
+        Assert.Equal("vendor:door_opened=yes vendor-facts:door_opened=no", Field(got["meleedoors"], 10));
+        Assert.StartsWith("False|", got["meleedoorsnot"], StringComparison.Ordinal);
+        Assert.Contains("door_opened no not yes (melee vendor station)", got["meleedoorsnot"], StringComparison.Ordinal);
+        Assert.Equal("vendor:door_opened=no vendor-facts:door_opened=yes", Field(got["meleedoorsnot"], 10));
+        Assert.StartsWith("False|", got["meleedoorsna"], StringComparison.Ordinal); // a station that ran and printed n/a is not yes
+        Assert.Contains("door_opened n/a not yes (melee vendor station)", got["meleedoorsna"], StringComparison.Ordinal);
+        Assert.Equal(DoorsNa, Field(got["meleedoorsna"], 10));
+        Assert.StartsWith("False|", got["meleedoorsabsent"], StringComparison.Ordinal); // a station that ran without the field fails, named
+        Assert.Contains("door_opened n/a on the vendor station, not yes (melee)", got["meleedoorsabsent"], StringComparison.Ordinal);
+        Assert.Contains("door_opened n/a on the vendor-facts station, not yes (melee)", got["meleedoorsabsent"], StringComparison.Ordinal);
+        Assert.Equal(DoorsNa, Field(got["meleedoorsabsent"], 10));
+        Assert.StartsWith("True|", got["meleedoorsyes"], StringComparison.Ordinal);
+        Assert.Equal("vendor:door_opened=yes vendor-facts:door_opened=yes", Field(got["meleedoorsyes"], 10));
+        Assert.StartsWith("True|", got["meleevendoronly"], StringComparison.Ordinal); // a station that did not run (no line) is n/a, not a failure
+        Assert.Equal("vendor:door_opened=yes vendor-facts:door_opened=n/a", Field(got["meleevendoronly"], 10));
+        Assert.StartsWith("True|", got["meleefactsskipped"], StringComparison.Ordinal); // a station skipped by a precondition did not run
+        Assert.StartsWith("True|", got["mageignored"], StringComparison.Ordinal); // only the melee journey is judged
+        Assert.StartsWith("True|", got["meleenostations"], StringComparison.Ordinal);
+        Assert.Equal(DoorsNa, Field(got["meleenostations"], 10));
+        Assert.DoesNotContain("door_opened", got["meleenostations"].Split('|')[4], StringComparison.Ordinal);
+        // the step's summary line carries them
+        Assert.Contains("report-only den-fight physics: $($judged.PhysicsFields); report-only door: $($judged.DoorFields); report-only recall-home: $($judged.RecallFields)", Smoke, StringComparison.Ordinal);
+    }
+
+    /// <summary>The <paramref name="index"/>th '|'-separated part of a <see cref="JudgeJourneys"/> row (0 Ok, 1 WindowOver50, 2 WindowsSeen, 3 Windows, 4 Detail, 5 TourFields, 6 LogisticsFields, 7 DeathFields, 8 Places, 9 PhysicsFields, 10 DoorFields, 11 RecallFields).</summary>
+    private static string Field(string row, int index) => row.Split('|')[index];
+
+    [Fact]
+    public void The_journey_verdict_judges_the_mage_dens_storeys_and_basement_entries_from_M5_item_3_c2b()
+    {
+        // m5-plan.md section 5 item 3 and D44: storeys_visited>=2 basement_entries=0 judged from item 3's gate, on the mage journey's den-fight station line beside mana_wait_max_s<=10.
+        var mage = JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0");
+        var melee = JourneyDone("melee", "teleports=1 recalls=1 recovery_places=0 granted=1");
+        var archer = JourneyDone("archer", "teleports=1 recalls=1 recovery_places=0 granted=0");
+        const string Wait = "mana_wait_max_s=2.0 ";
+        const string Rest = " returns=1 slots_standing=33 legs_recovered=2 kills_unpaired=1 slots_expired=3";
+        var got = JudgeJourneys(
+            ("pass", WithFight(mage, Wait + "storeys_visited=2 basement_entries=0" + Rest), false),
+            ("six", WithFight(mage, Wait + "storeys_visited=6 basement_entries=0" + Rest), false),
+            ("one", WithFight(mage, Wait + "storeys_visited=1 basement_entries=0" + Rest), false),
+            ("zero", WithFight(mage, Wait + "storeys_visited=0 basement_entries=0" + Rest), false),
+            ("entered", WithFight(mage, Wait + "storeys_visited=3 basement_entries=2" + Rest), false),
+            ("both", WithFight(mage, Wait + "storeys_visited=1 basement_entries=4" + Rest), false),
+            ("contended", WithFight(mage, Wait + "storeys_visited=1 basement_entries=4" + Rest), true),
+            ("storeysna", WithFight(mage, Wait + "storeys_visited=n/a basement_entries=0" + Rest), false),
+            ("storeysmissing", WithFight(mage, Wait + "basement_entries=0" + Rest), false),
+            ("basementna", WithFight(mage, Wait + "storeys_visited=2 basement_entries=n/a" + Rest), false),
+            ("basementmissing", WithFight(mage, Wait + "storeys_visited=2" + Rest), false),
+            ("lookalike", WithFight(mage, Wait + "x_storeys_visited=3 x_basement_entries=0" + Rest), false),
+            ("stationless", mage, false),
+            ("skipped", "[logincheck] journey station=den-fight ok=false s=0.0 skipped=precondition:no_target\n" + mage, false),
+            ("twostations", "[logincheck] journey station=den-fight ok=true s=40.0 mana_wait_max_s=1.0 storeys_visited=2 basement_entries=0\n" + WithFight(mage, Wait + "storeys_visited=1 basement_entries=1" + Rest), false),
+            ("meleeone", WithFight(melee, "mana_wait_max_s=2.0 storeys_visited=1 basement_entries=4" + Rest), false),
+            ("archerone", WithFight(archer, "mana_wait_max_s=2.0 storeys_visited=1 basement_entries=4" + Rest), false));
+
+        const string UnderTwo = "storeys_visited n/a on the den-fight station, not 2 or more (mage)";
+        const string NoEntries = "basement_entries n/a on the den-fight station, not 0 (mage)";
+        Assert.StartsWith("True|", got["pass"], StringComparison.Ordinal);
+        Assert.DoesNotContain("; storeys_visited", got["pass"], StringComparison.Ordinal); // no reason in the detail of a pass
+        Assert.DoesNotContain("; basement_entries", got["pass"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["six"], StringComparison.Ordinal); // the rule is "2 or more"
+        Assert.StartsWith("False|", got["one"], StringComparison.Ordinal);
+        Assert.Contains("; storeys_visited 1 under 2 (mage den-fight)", got["one"], StringComparison.Ordinal);
+        Assert.DoesNotContain("; basement_entries", got["one"], StringComparison.Ordinal);
+        Assert.Contains("; storeys_visited 0 under 2 (mage den-fight)", got["zero"], StringComparison.Ordinal);
+        Assert.StartsWith("False|", got["entered"], StringComparison.Ordinal);
+        Assert.Contains("; basement_entries 2 over 0 (mage den-fight)", got["entered"], StringComparison.Ordinal);
+        Assert.DoesNotContain("; storeys_visited", got["entered"], StringComparison.Ordinal);
+        Assert.Contains("; storeys_visited 1 under 2 (mage den-fight)", got["both"], StringComparison.Ordinal);
+        Assert.Contains("; basement_entries 4 over 0 (mage den-fight)", got["both"], StringComparison.Ordinal);
+        Assert.StartsWith("False|", got["contended"], StringComparison.Ordinal); // a count is not a frame time: contention does not excuse it
+        Assert.Contains("; storeys_visited 1 under 2 (mage den-fight)", got["contended"], StringComparison.Ordinal);
+        Assert.Contains(UnderTwo, got["storeysna"], StringComparison.Ordinal);
+        Assert.DoesNotContain(NoEntries, got["storeysna"], StringComparison.Ordinal);
+        Assert.Contains(UnderTwo, got["storeysmissing"], StringComparison.Ordinal);
+        Assert.Contains(NoEntries, got["basementna"], StringComparison.Ordinal);
+        Assert.DoesNotContain(UnderTwo, got["basementna"], StringComparison.Ordinal);
+        Assert.Contains(NoEntries, got["basementmissing"], StringComparison.Ordinal);
+        Assert.Contains(UnderTwo, got["lookalike"], StringComparison.Ordinal); // only the field itself counts, not a longer name ending in it
+        Assert.Contains(NoEntries, got["lookalike"], StringComparison.Ordinal);
+        Assert.Contains(UnderTwo, got["stationless"], StringComparison.Ordinal);
+        Assert.Contains(NoEntries, got["stationless"], StringComparison.Ordinal);
+        Assert.Contains(UnderTwo, got["skipped"], StringComparison.Ordinal);
+        Assert.Contains("; storeys_visited 1 under 2 (mage den-fight)", got["twostations"], StringComparison.Ordinal); // the worst den-fight line counts
+        Assert.Contains("; basement_entries 1 over 0 (mage den-fight)", got["twostations"], StringComparison.Ordinal);
+        Assert.All(new[] { "one", "zero", "entered", "both", "contended", "storeysna", "storeysmissing", "basementna", "basementmissing", "lookalike", "stationless", "skipped", "twostations" }, k => Assert.StartsWith("False|", got[k], StringComparison.Ordinal));
+        Assert.StartsWith("True|", got["meleeone"], StringComparison.Ordinal); // only the mage journey is judged
+        Assert.StartsWith("True|", got["archerone"], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_journey_verdict_carries_the_logistics_death_and_places_fields_report_only_with_n_a_when_absent_M5_item_3_c2b()
+    {
+        const string Logistics = MageLogistics + "\n";
+        const string Death = MageDeath + "\n";
+        var withPlaces = JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0 places=0");
+        var got = JudgeJourneys(
+            ("all", Logistics + Death + WithFight(withPlaces, mageStations: false), false),
+            ("bare", WithFight(JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0").Replace(" places=0", string.Empty, StringComparison.Ordinal), mageStations: false), false),
+            ("failing", Logistics + Death + WithFight(JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0 places=2"), "mana_wait_max_s=40.0", mageStations: false), false),
+            ("lookalike", "[logincheck] journey station=logistics ok=true x_bought=7\n" + WithFight(JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0 xplaces=1").Replace(" places=0", string.Empty, StringComparison.Ordinal), mageStations: false), false),
+            ("melee", Logistics + JourneyDone("melee", "teleports=1 recalls=1 recovery_places=0 granted=1 places=5"), false));
+
+        const string LogisticsShown = "trigger=forced granted=0 places=0 loot=off sold=0 bought=3 spent=1200 notes_sold=0 spent_xp=5000 raises=2";
+        const string DeathShown = "deaths=1 corpse_recovered=yes route=portal items_back=9 vitae_grants=0 rebuffed=yes rebuffed_pretrip=no relines=3 trip_abort=none";
+        Assert.StartsWith("True|", got["all"], StringComparison.Ordinal);
+        Assert.Equal(LogisticsShown, Field(got["all"], 6));
+        Assert.Equal(DeathShown, Field(got["all"], 7));
+        Assert.Equal("0", Field(got["all"], 8));
+        Assert.StartsWith("False|", got["bare"], StringComparison.Ordinal); // M5 4 c1: the fields stay n/a in the report-only brackets, and the mage's judges now name them (the D55, DoD 6 and DoD 7 tests below)
+        Assert.Equal(LogisticsNa, Field(got["bare"], 6));
+        Assert.Equal(DeathNa, Field(got["bare"], 7));
+        Assert.Equal("n/a", Field(got["bare"], 8));
+        Assert.StartsWith("False|", got["failing"], StringComparison.Ordinal); // M5 4 c1: places=2 on the mage's done line is judged now (D55), besides the mana wait
+        Assert.Equal("2", Field(got["failing"], 8));
+        Assert.Contains("; places 2 not 0 (mage done line)", got["failing"], StringComparison.Ordinal);
+        Assert.Equal(LogisticsNa, Field(got["lookalike"], 6)); // a longer name ending in a field's is not the field
+        Assert.Equal("n/a", Field(got["lookalike"], 8));
+        Assert.StartsWith("True|", got["melee"], StringComparison.Ordinal);
+        Assert.Equal("5", Field(got["melee"], 8)); // every journey's done line
+    }
+
+    [Fact]
+    public void The_journey_step_shows_the_den_fight_tour_fields_in_its_summary_detail_M5_item_2_k1()
+    {
+        var script = Smoke;
+        var body = script[script.IndexOf("{ $journeySteps.ContainsKey($_) } {", StringComparison.Ordinal)..];
+        body = body[..body.IndexOf("'login' {", StringComparison.Ordinal)];
+        Assert.Contains("report-only den-fight: $($judged.TourFields)", body, StringComparison.Ordinal);
+        // M5 item 3 c2b: item 3's fields reach the summary report-only beside it, n/a when a line lacks them.
+        Assert.Contains("report-only logistics: $($judged.LogisticsFields)", body, StringComparison.Ordinal);
+        Assert.Contains("report-only death: $($judged.DeathFields)", body, StringComparison.Ordinal);
+        Assert.Contains("report-only done: places=$($judged.Places)", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// M5 item 3 c2b: the mage's Godot step and the gate's copy of it cover the logistics station (about 150 s expected: Lifestone Recall, the walk to two vendors and the buys, the experience, Primary Portal Recall) that the plan gains,
+    /// and the death station's longer order. smoke.ps1's table is a number, so the test follows the plan: the plan's whole-run limit (with the station: the plan's own once it has one, else plus 1.5 times its 150 s expected) and the 50 s
+    /// margin must be under the step's seconds, and the gate's expected seconds for the mage's journey must have grown by the same 150 s over item 2's 600.
+    /// </summary>
+    [Fact]
+    public void The_mage_journey_step_limit_and_expected_time_cover_the_logistics_station_M5_item_3_c2b()
+    {
+        var mage = Lifestone.Client.Session.Scenarios.Journey.JourneyPlans.Mage;
+        var hasStation = mage.Stations.Any(s => s.Name == "logistics");
+        var runner = RunnerWholeSeconds(mage) + (hasStation ? 0 : 1.5 * LogisticsExpectedSeconds);
+        var smoke = SmokeJourneySeconds(Smoke)["mage"];
+        Assert.True(smoke >= runner + LeastMarginSeconds, $"smoke gives the mage journey {smoke} s but the runner's limit with the logistics station is {runner} s (+ {LeastMarginSeconds} s of margin)");
+        Assert.True(smoke >= 2333 + LeastMarginSeconds, "the mage's step is under item 2's runner limit (2,108 s) plus the logistics station's 225 s"); // 60 + 1.5 x (1165 + 150) + 300, a floor that does not read the plan
+        var gate = File.ReadAllText(RepositoryFiles.PathOf("tools", "live-gate.ps1"));
+        var expected = Regex.Match(gate, @"'journey-mage'\s*=\s*(?<s>\d+)\s");
+        Assert.True(expected.Success, "live-gate.ps1 has no expected seconds for the mage's journey");
+        Assert.True(double.Parse(expected.Groups["s"].Value, System.Globalization.CultureInfo.InvariantCulture) >= 600 + LogisticsExpectedSeconds, "the gate's expected seconds for the mage journey do not cover the logistics station");
+    }
+
+    /// <summary>The logistics station's expected seconds (the c2a plan row; the brief's "about 150 s").</summary>
+    private const double LogisticsExpectedSeconds = 150;
+
+    [Fact]
     public void The_journey_verdict_judges_the_window_frames_over_75_ms_and_flags_over_50_unless_contended_M4_4_2_J2()
     {
         var done = JourneyDone("melee", "teleports=1 recalls=1 recovery_places=0 granted=0");
         string Log(string hunt, string vendor, string facts) =>
-            "[logincheck] journey station=hunt ok=true s=9.0 " + hunt + "\n[logincheck] journey station=vendor ok=true s=3.0 " + vendor
-            + "\n[logincheck] journey station=vendor-facts ok=true s=3.0 " + facts + "\n" + done;
+            "[logincheck] journey station=hunt ok=true s=9.0 " + hunt + "\n[logincheck] journey station=vendor ok=true s=3.0 " + vendor + " door_opened=yes" // the melee's door_opened=yes is judged from M5 item 7's gate
+            + "\n[logincheck] journey station=vendor-facts ok=true s=3.0 " + facts + " door_opened=yes\n" + done;
         var quiet = Log("attack_frame_max_ms=12.3 loot_frame_max_ms=9.0", "vendor_frame_max_ms=20.0", "vendor_frame_max_ms=21.5");
         var flagged = Log("attack_frame_max_ms=62.0 loot_frame_max_ms=9.0", "vendor_frame_max_ms=20.0", "vendor_frame_max_ms=21.5");
         var over = Log("attack_frame_max_ms=75.1 loot_frame_max_ms=9.0", "vendor_frame_max_ms=20.0", "vendor_frame_max_ms=21.5");
@@ -434,8 +833,11 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Equal(2, Regex.Matches(script, @"--play-checks --record-audio=\$rel").Count);
 
         // Each row keeps its judges.
-        Assert.Contains("all play checks hold", play, StringComparison.Ordinal);
-        Assert.Contains("max_frame_ms_after_arrival", play, StringComparison.Ordinal);
+        // M5 6 v1: the play-checks judges moved into Get-PlayChecksSizeVerdict, which the row calls for each size (WindowSizesScriptTests).
+        var sizeVerdict = Function(script, "Get-PlayChecksSizeVerdict");
+        Assert.Contains("Get-PlayChecksSizeVerdict $run $defaultSize", play, StringComparison.Ordinal);
+        Assert.Contains("all play checks hold", sizeVerdict, StringComparison.Ordinal);
+        Assert.Contains("max_frame_ms_after_arrival", sizeVerdict, StringComparison.Ordinal);
         Assert.Contains("Test-RecordedSources $levels.sources", record, StringComparison.Ordinal);
         Assert.Contains("-and $sourcesOk", record, StringComparison.Ordinal);
         Assert.Contains("-and $fileOk", record, StringComparison.Ordinal);
@@ -537,14 +939,20 @@ public sealed class SliceCheckAndSmokeTests
     }
 
     [Fact]
-    public void Solo_frames_waits_ten_minutes_for_a_quiet_machine_then_refuses()
+    public void Solo_frames_waits_a_bounded_time_for_a_foreign_godot_then_refuses_by_name_m5_gate_foreign_godot()
     {
         var wait = Function(Smoke, "Wait-SoloEngine");
 
-        Assert.Contains("-ge 600", wait, StringComparison.Ordinal);
+        Assert.DoesNotContain("-ge 600", wait, StringComparison.Ordinal); // no longer the 10-minute wait that outlived the gate's own step limit
         Assert.Contains("if (-not $SoloFrames) { return $true }", wait, StringComparison.Ordinal);
+        Assert.Contains("Wait-GateForeignGodot -Seconds $ForeignGodotSeconds", wait, StringComparison.Ordinal);
+        Assert.Contains("Get-ForeignGodot -OwnRoot $PID", wait, StringComparison.Ordinal);
+        Assert.Contains("refused to start: $($wait.Detail) (-SoloFrames)", wait, StringComparison.Ordinal); // the detail starts with foreign-godot: (GateHost.psm1)
+        Assert.Contains("[ValidateRange(0, 3600)]\n    [int] $ForeignGodotSeconds = 120,", Smoke, StringComparison.Ordinal);
+        Assert.Contains("Import-Module (Join-Path $PSScriptRoot 'lib\\GateHost.psm1') -Force", Smoke, StringComparison.Ordinal);
         Assert.Contains("$SoloFrames -and $frameJudgedSteps -contains $step", Smoke, StringComparison.Ordinal);
         Assert.Contains("'-SoloFrames', '-FullScan'", SliceCheck, StringComparison.Ordinal);
+        Assert.Contains("foreign-godot: another Godot run was up for $ForeignGodotSeconds s", Smoke, StringComparison.Ordinal); // the shared play-checks refusal names it too
     }
 
     [Fact]
@@ -917,6 +1325,174 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("STEPS=0 UNMATCHED=0 EVERYTHING=False", run, StringComparison.Ordinal);
     }
 
+    // ------------------------------------------------------------------------------------------ M5 item 4 c1: the mage's judged fields (D55, D38, D56) and the autopilot step
+
+    private const string MageFight = "[logincheck] journey station=den-fight ok=true s=49.4 kills=9 target_kills=9 mana_wait_max_s=1.5 " + Tour + " " + LootOff;
+
+    /// <summary>A mage journey's text: the den-fight, the logistics and death station lines given (null = none) and the done line.</summary>
+    private static string MageText(string? logistics = MageLogistics, string? death = MageDeath, string? done = null) =>
+        MageFight + "\n" + (logistics is null ? string.Empty : logistics + "\n") + (death is null ? string.Empty : death + "\n") + (done ?? JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0 places=0"));
+
+    [Fact]
+    public void The_journey_verdict_judges_places_bought_spent_xp_and_the_death_line_on_the_mage_only_D55_D38_D56_M5_item_4_c1()
+    {
+        var got = JudgeJourneys(
+            ("pass", MageText(), false),
+            ("appended", MageText(MageLogistics + " why=none newfield=9 granted_total=4", MageDeath + " newfield=7 why=x"), false), // fields appended after the known ones (item 5 appends to existing lines): by key, a longer name is not the field
+            ("soldseven", MageText(MageLogistics.Replace("sold=0", "sold=7", StringComparison.Ordinal)), false), // sold= stays report-only while looting is off (D38)
+            ("soldgone", MageText(MageLogistics.Replace(" sold=0", string.Empty, StringComparison.Ordinal)), false),
+            ("pretripyes", MageText(death: MageDeath.Replace("rebuffed_pretrip=no", "rebuffed_pretrip=yes", StringComparison.Ordinal)), false), // report-only (D56)
+            ("doneplaces", MageText(done: JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0 places=2")), false),
+            ("donemissing", MageText(done: JourneyDone("mage", "teleports=1 recalls=3 recovery_places=0 granted=0 places=0").Replace(" places=0", string.Empty, StringComparison.Ordinal)), false),
+            ("stationgranted", MageText(MageLogistics.Replace("granted=0", "granted=3", StringComparison.Ordinal)), false),
+            ("stationplaces", MageText(MageLogistics.Replace("places=0", "places=1", StringComparison.Ordinal)), false),
+            ("otherstation", MageText() .Replace("[logincheck] journey station=logistics", "[logincheck] journey station=heal ok=true problems=0 granted=2\n[logincheck] journey station=logistics", StringComparison.Ordinal), false),
+            ("recoveryonly", MageText().Replace("[logincheck] journey station=logistics", "[logincheck] journey station=heal ok=true recovery_places=3\n[logincheck] journey station=logistics", StringComparison.Ordinal), false),
+            ("bought0", MageText(MageLogistics.Replace("bought=3", "bought=0", StringComparison.Ordinal)), false),
+            ("spentxp0", MageText(MageLogistics.Replace("spent_xp=5000", "spent_xp=0", StringComparison.Ordinal)), false),
+            ("boughtgone", MageText(MageLogistics.Replace(" bought=3", string.Empty, StringComparison.Ordinal)), false),
+            ("spentxpgone", MageText(MageLogistics.Replace(" spent_xp=5000", string.Empty, StringComparison.Ordinal)), false),
+            ("skippedtrip", MageText("[logincheck] journey station=logistics ok=false s=0.0 skipped=no-trip-due"), false),
+            ("nologistics", MageText(null), false),
+            ("deaths2", MageText(death: MageDeath.Replace("deaths=1", "deaths=2", StringComparison.Ordinal)), false),
+            ("nocorpse", MageText(death: MageDeath.Replace("corpse_recovered=yes", "corpse_recovered=no", StringComparison.Ordinal)), false),
+            ("vitae", MageText(death: MageDeath.Replace("vitae_grants=0", "vitae_grants=1", StringComparison.Ordinal)), false),
+            ("notrebuffed", MageText(death: MageDeath.Replace("rebuffed=yes", "rebuffed=no", StringComparison.Ordinal)), false),
+            ("pretriponly", MageText(death: MageDeath.Replace(" rebuffed=yes", string.Empty, StringComparison.Ordinal)), false), // rebuffed_pretrip=no is not rebuffed=
+            ("nodeath", MageText(death: null), false));
+
+        Assert.StartsWith("True|", got["pass"], StringComparison.Ordinal);
+        Assert.DoesNotContain("(mage", got["pass"][got["pass"].IndexOf('|', StringComparison.Ordinal)..], StringComparison.Ordinal); // no reason in the detail of a pass
+        Assert.StartsWith("True|", got["appended"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["soldseven"], StringComparison.Ordinal);
+        Assert.Contains("sold=7", Field(got["soldseven"], 6), StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["soldgone"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["pretripyes"], StringComparison.Ordinal);
+        Assert.Contains("rebuffed_pretrip=yes", Field(got["pretripyes"], 7), StringComparison.Ordinal); // shown, not judged
+        Assert.StartsWith("True|", got["recoveryonly"], StringComparison.Ordinal); // recovery_places= is another field
+
+        Assert.Contains("; places 2 not 0 (mage done line)", got["doneplaces"], StringComparison.Ordinal);
+        Assert.Contains("; places n/a on the done line, not 0 (mage)", got["donemissing"], StringComparison.Ordinal);
+        Assert.Contains("; granted 3 not 0 (mage logistics station)", got["stationgranted"], StringComparison.Ordinal);
+        Assert.Contains("; places 1 not 0 (mage logistics station)", got["stationplaces"], StringComparison.Ordinal);
+        Assert.Contains("; granted 2 not 0 (mage heal station)", got["otherstation"], StringComparison.Ordinal);
+        Assert.Contains("; bought 0 under 1 (mage logistics station)", got["bought0"], StringComparison.Ordinal);
+        Assert.Contains("; spent_xp 0 under 1 (mage logistics station)", got["spentxp0"], StringComparison.Ordinal);
+        Assert.Contains("; bought n/a on the logistics station, not 1 or more (mage)", got["boughtgone"], StringComparison.Ordinal);
+        Assert.Contains("; spent_xp n/a on the logistics station, not 1 or more (mage)", got["spentxpgone"], StringComparison.Ordinal);
+        Assert.Contains("; bought n/a on the logistics station, not 1 or more (mage)", got["skippedtrip"], StringComparison.Ordinal);
+        Assert.Contains("; bought n/a, no logistics station line (mage), not 1 or more", got["nologistics"], StringComparison.Ordinal);
+        Assert.Contains("; spent_xp n/a, no logistics station line (mage), not 1 or more", got["nologistics"], StringComparison.Ordinal);
+        Assert.Contains("; deaths 2 not 1 (mage death station)", got["deaths2"], StringComparison.Ordinal);
+        Assert.Contains("; corpse_recovered no not yes (mage death station)", got["nocorpse"], StringComparison.Ordinal);
+        Assert.Contains("; vitae_grants 1 not 0 (mage death station)", got["vitae"], StringComparison.Ordinal);
+        Assert.Contains("; rebuffed no not yes (mage death station)", got["notrebuffed"], StringComparison.Ordinal);
+        Assert.Contains("; rebuffed n/a on the death station, not yes (mage)", got["pretriponly"], StringComparison.Ordinal);
+        Assert.Contains("; deaths n/a, no death station line (mage), not 1", got["nodeath"], StringComparison.Ordinal);
+        Assert.Contains("; rebuffed n/a, no death station line (mage), not yes", got["nodeath"], StringComparison.Ordinal);
+        Assert.All(new[] { "doneplaces", "donemissing", "stationgranted", "stationplaces", "otherstation", "bought0", "spentxp0", "boughtgone", "spentxpgone", "skippedtrip", "nologistics", "deaths2", "nocorpse", "vitae", "notrebuffed", "pretriponly", "nodeath" },
+            k => Assert.StartsWith("False|", got[k], StringComparison.Ordinal));
+        Assert.DoesNotContain("; bought", got["deaths2"], StringComparison.Ordinal); // a miss names only its own field
+        Assert.DoesNotContain("; deaths", got["bought0"], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_fighters_journeys_read_the_same_fields_report_only_D55_M5_item_4_c1()
+    {
+        const string Logistics = "[logincheck] journey station=logistics ok=true trigger=forced granted=5 places=3 loot=off sold=0 bought=0 spent=0 notes_sold=0 spent_xp=0 raises=0";
+        const string Death = "[logincheck] journey station=death ok=true deaths=0 corpse_recovered=no route=none items_back=0 vitae_grants=2 rebuffed=no rebuffed_pretrip=no relines=0 trip_abort=none";
+        var melee = Logistics + "\n" + Death + "\n" + JourneyDone("melee", "teleports=1 recalls=1 recovery_places=0 granted=4 places=5");
+        var archer = Logistics + "\n" + Death + "\n" + JourneyDone("archer", "teleports=1 recalls=1 recovery_places=0 granted=0 places=4");
+        var archerGranted = Logistics + "\n" + Death + "\n" + JourneyDone("archer", "teleports=1 recalls=1 recovery_places=0 granted=1 places=4");
+        var got = JudgeJourneys(("melee", melee, false), ("archer", archer, false), ("archergranted", archerGranted, false), ("meleebare", JourneyDone("melee", "teleports=1 recalls=1 recovery_places=0 granted=1"), false));
+
+        Assert.StartsWith("True|", got["melee"], StringComparison.Ordinal); // granted=5 places=3 bought=0 deaths=0 rebuffed=no and a done line with places=5 fail nothing for the melee
+        Assert.StartsWith("True|", got["archer"], StringComparison.Ordinal);
+        Assert.Contains("granted=5 places=3 loot=off sold=0 bought=0 spent=0 notes_sold=0 spent_xp=0", Field(got["melee"], 6), StringComparison.Ordinal); // shown, report-only
+        Assert.Contains("deaths=0 corpse_recovered=no route=none items_back=0 vitae_grants=2 rebuffed=no rebuffed_pretrip=no", Field(got["melee"], 7), StringComparison.Ordinal);
+        Assert.Equal("5", Field(got["melee"], 8));
+        Assert.Equal("4", Field(got["archer"], 8));
+        Assert.DoesNotContain("(mage", got["melee"], StringComparison.Ordinal);
+        Assert.StartsWith("False|", got["archergranted"], StringComparison.Ordinal); // M4 4.2 J2's judge on the archer's done line is not loosened
+        Assert.Contains("; granted 1 not 0 (archer)", got["archergranted"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["meleebare"], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_autopilot_step_is_one_smoke_step_on_the_mage_account_with_the_dials_arguments_M5_item_4_c1()
+    {
+        var script = Smoke;
+        var steps = Regex.Match(script, @"\$allSteps = @\(([^)]*)\)", RegexOptions.Singleline).Groups[1].Value;
+        var backend = Regex.Match(script, @"\$backendSteps = @\(([^)]*)\)").Groups[1].Value;
+        var audio = Regex.Match(script, @"\$audioSteps = @\(([^)]*)\)").Groups[1].Value;
+        var judged = Regex.Match(script, @"\$frameJudgedSteps = @\(([^)]*)\)").Groups[1].Value;
+        foreach (var list in new[] { steps, backend, audio })
+        {
+            Assert.True(list.IndexOf("'journey-archer'", StringComparison.Ordinal) < list.IndexOf("'autopilot-mage'", StringComparison.Ordinal), "autopilot-mage follows the journeys");
+        }
+
+        Assert.DoesNotContain("autopilot-mage", judged, StringComparison.Ordinal); // its frames are report-only (contended): not a frame-judged step
+        Assert.Matches(@"'autopilot-mage'\s+= 'test'", script);
+        Assert.Contains("Import-Module (Join-Path $PSScriptRoot 'lib\\GateJudge.psm1') -Force -Function Get-AutopilotVerdict", script, StringComparison.Ordinal);
+
+        // The step runs only with -Backend require, before the backend gate, as a SKIP.
+        var skip = script.IndexOf("if ($autopilotSteps.ContainsKey($step) -and $Backend -ne 'require')", StringComparison.Ordinal);
+        var gate = script.IndexOf("if ($backendSteps -contains $step -and -not (Test-BackendGate", StringComparison.Ordinal);
+        Assert.True(skip > 0 && skip < gate, "the autopilot skip rule must come before the backend gate");
+        Assert.Contains("-Skipped", script[skip..gate], StringComparison.Ordinal);
+
+        // The body: the dial's arguments from the table, every number in one place, the frames into <OutDir>/frames, the autopilot's own verdict, the report-only fields and frames.
+        var body = script[script.IndexOf("{ $autopilotSteps.ContainsKey($_) } {", StringComparison.Ordinal)..];
+        body = body[..body.IndexOf("{ $journeySteps.ContainsKey($_) } {", StringComparison.Ordinal)];
+        Assert.Contains(
+            "$autopilotArgs = \"--account=$($stepAccounts[$step]) --login-check=autopilot --autopilot-minutes=$($auto.Minutes) --autopilot-trip-after-kills=$($auto.TripAfterKills) --autopilot-test-death=on --autopilot-test-interrupt-at=$($auto.InterruptAt) --autopilot-test-handback-after=$($auto.HandbackAfter) --play-screenshot=$frameStem\"",
+            body, StringComparison.Ordinal);
+        Assert.Contains("Invoke-Godot $step $autopilotArgs $auto.Seconds '' $defaultSize", body, StringComparison.Ordinal);
+        Assert.Contains("(Join-Path $OutDir 'frames')", body, StringComparison.Ordinal);
+        Assert.Contains("Get-AutopilotVerdict $run.Text", body, StringComparison.Ordinal);
+        Assert.Contains("Resolve-LiveFrames ($run.Code -eq 0 -and $judged.Ok) $run", body, StringComparison.Ordinal);
+        Assert.Contains("report-only autopilot: $($judged.ReportOnly); report-only frames: $($judged.Frames)", body, StringComparison.Ordinal);
+        Assert.Contains("-FrameOver50 'n/a'", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("--max-fps", body, StringComparison.Ordinal); // the cap, when the gate sets one, is smoke's -MaxFps (Invoke-Godot appends it), as for the journeys
+        Assert.DoesNotContain("$journeySteps", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_step_paths_name_the_gate_host_and_the_autopilots_files_and_the_autopilot_step_is_a_live_advisory_M5_item_4_c1()
+    {
+        var map = StepPaths;
+        var noGodot = map[map.IndexOf("NoGodot = @(", StringComparison.Ordinal)..map.IndexOf("Live = @{", StringComparison.Ordinal)];
+        Assert.Contains("'tools/lib/GateHost.psm1'", noGodot, StringComparison.Ordinal); // c2's module: a gate-side file no Godot step can notice
+        Assert.Contains("'src/Lifestone.Client/Session/Autopilot/'", noGodot, StringComparison.Ordinal); // covered by the tests
+        Assert.Contains("'autopilot-mage' = @(", map, StringComparison.Ordinal); // slice-check's advisory names the lane when a Session folder changes
+
+        var path = RepositoryFiles.PathOf("tools", "lib", "StepPaths.psd1");
+        var run = RunPowerShell(Function(SliceCheck, "Resolve-ChangedSteps") + $"\n$map = Import-PowerShellDataFile '{path}'\n"
+            + "foreach ($f in @('tools/lib/GateHost.psm1', 'src/Lifestone.Client/Session/Autopilot/AutopilotScenario.cs', 'src/Lifestone.Game/scripts/Session/AutopilotHost.cs', 'src/Lifestone.Game/scripts/Session/AutopilotLegRunner.cs')) {\n"
+            + "  $r = Resolve-ChangedSteps @($f) $map\n  Write-Output ('R=' + $f + '|' + (($r.Steps | Sort-Object) -join ',') + '|unmatched=' + $r.Unmatched.Count + '|everything=' + $r.Everything + '|live=' + ($r.Live -join ','))\n}");
+
+        Assert.Contains("R=tools/lib/GateHost.psm1||unmatched=0|everything=False|live=", run, StringComparison.Ordinal); // no step, not an unmatched tools path
+        Assert.Contains("R=src/Lifestone.Client/Session/Autopilot/AutopilotScenario.cs|", run, StringComparison.Ordinal);
+        Assert.Contains("unmatched=0", run.Split("R=src/Lifestone.Client/Session/Autopilot/AutopilotScenario.cs|")[1].Split('\n')[0], StringComparison.Ordinal);
+        Assert.Contains("autopilot-mage", run.Split("R=src/Lifestone.Client/Session/Autopilot/AutopilotScenario.cs|")[1].Split('\n')[0], StringComparison.Ordinal); // the live advisory
+        foreach (var file in new[] { "AutopilotHost.cs", "AutopilotLegRunner.cs" })
+        {
+            var line = run.Split("R=src/Lifestone.Game/scripts/Session/" + file + "|")[1].Split('\n')[0];
+            Assert.Contains("cli-help", line, StringComparison.Ordinal); // the Main scene's --autopilot-* options
+            Assert.Contains("cli-bad-argument", line, StringComparison.Ordinal);
+            Assert.Contains("play-checks", line, StringComparison.Ordinal); // the dial's rows
+        }
+
+        // R12 (every non-soak loopback class is in an area): AutopilotLiveTests lost its Tier=Soak tag and is named in the mage area, with the autopilot's folders.
+        var areas = File.ReadAllText(RepositoryFiles.PathOf("tools", "lib", "GateAreas.psd1"));
+        var mage = areas[areas.IndexOf("'mage'      = @{", StringComparison.Ordinal)..areas.IndexOf("'servermod'", StringComparison.Ordinal)];
+        Assert.Contains("'AutopilotLiveTests'", mage, StringComparison.Ordinal);
+        Assert.Contains("'src/Lifestone.Client/Session/Autopilot/'", mage, StringComparison.Ordinal);
+        var live = File.ReadAllText(RepositoryFiles.PathOf("tests", "Lifestone.Loopback.Tests", "Session", "AutopilotLiveTests.cs"));
+        Assert.DoesNotContain("[Trait(\"Tier\", \"Soak\")]", live, StringComparison.Ordinal); // the soak phase (Category=Loopback&Tier=Soak) would run it: it is the lead's own run
+        Assert.Contains("[Trait(\"Lane\", \"solo\")]", live, StringComparison.Ordinal); // and the account lanes still leave it out
+    }
+
     // ------------------------------------------------------------------------------------------ helpers
 
     private static string Failed(string check) => $"2026-10-19T12:00:00Z ERROR [playcheck] FAIL {check} detail=x";
@@ -978,4 +1554,17 @@ public sealed class SliceCheckAndSmokeTests
         throw new InvalidOperationException("neither pwsh nor powershell is installed");
     }
 
+    /// <summary>
+    /// M5 4 live gate round 1: smoke imports GateHost after GateJudge, because GateJudge imports GateHost with -Force inside itself and that
+    /// removes a global GateHost imported before it, so the solo frame judge's Wait-GateForeignGodot was unknown and wrote no rows.
+    /// </summary>
+    [Fact]
+    public void Smoke_imports_gate_host_after_gate_judge_so_the_foreign_godot_wait_is_defined()
+    {
+        var smoke = Smoke;
+        var judge = smoke.IndexOf(@"Import-Module (Join-Path $PSScriptRoot 'lib\GateJudge.psm1')", StringComparison.Ordinal);
+        var host = smoke.IndexOf(@"Import-Module (Join-Path $PSScriptRoot 'lib\GateHost.psm1')", StringComparison.Ordinal);
+        Assert.True(judge >= 0 && host >= 0, "smoke.ps1 imports both modules");
+        Assert.True(host > judge, "GateHost must be imported after GateJudge");
+    }
 }

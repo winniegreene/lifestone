@@ -21,6 +21,7 @@ namespace Lifestone.Client.Tests.Interiors;
 /// viewer light (<c>SmartBox::set_viewer</c> 0x00452C80), the object sources in the avatar set, the merge ahead of the static lights (<c>Render::minimize_object_lighting</c>
 /// 0x0054E090) and the frame snapshot. No dats needed.
 /// </summary>
+[Collection(AllocationMeasurementCollection.Name)]
 public sealed class DynamicLightsTests
 {
     private const uint Cell = 0xA9B40019;

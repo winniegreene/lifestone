@@ -238,6 +238,67 @@ public sealed class FightLegRunnerTests
     }
 
     [Fact]
+    public void With_storeys_min_two_the_first_bolt_hit_and_kill_frames_wait_for_a_storey_other_than_the_arrivals_and_the_viewer_slot_is_unchanged()
+    {
+        // F3: the leg's frames fired on the first kill, which is on the arrival floor; with the plan told to wait, a cast, a hit and a kill on the arrival's storey trigger nothing.
+        var p = new FightShotPlan { WaitsForOtherStorey = true };
+        p.Begin(0, 0, 0, 0);
+        var t = 10.0;
+        for (var i = 0; i < 20; i++)
+        {
+            Assert.Equal(-1, p.Step(t += Frame, 1, 1, 1, 1, offArrivalStorey: false)); // a bolt, its Explode, its damage line and the kill: all on the arrival floor
+        }
+
+        Assert.False(p.Owed);
+        Assert.Equal(0, p.Taken);
+
+        // The player goes below: the next bolt, hit and kill (counters rising from the arrival's totals) trigger the frames there.
+        var due = new List<int>();
+        var created = 1L;
+        var damage = 1;
+        var kills = 1;
+        Assert.Equal(-1, p.Step(t += Frame, created, 1, damage, kills, offArrivalStorey: true)); // nothing new happened yet below
+        Assert.False(p.Owed);
+        p.Step(t += Frame, ++created, 1, damage, kills, offArrivalStorey: true); // the first bolt below: "first" is pending
+        Assert.True(p.Owed);
+        p.Step(t += Frame, created, 2, ++damage, kills, offArrivalStorey: true); // its Explode and damage line: "bolt" (created after the first damage below needs another) and "hit"
+        p.Step(t += Frame, created, 2, damage, ++kills, offArrivalStorey: true); // the kill
+        for (var i = 0; i < 400 && p.Owed; i++)
+        {
+            var slot = p.Step(t += Frame, created, 2, damage, kills, offArrivalStorey: true);
+            if (slot >= 0)
+            {
+                due.Add(slot);
+                p.MarkTaken(slot);
+            }
+        }
+
+        Assert.Contains(4, due); // first
+        Assert.Contains(1, due); // hit
+        Assert.Contains(2, due); // kill
+        Assert.DoesNotContain(3, due);
+
+        // A plan that was not told to wait ignores the argument: the default plan triggers on the arrival's storey, as before.
+        var plain = new FightShotPlan();
+        plain.Begin(0, 0, 0, 0);
+        plain.Step(1.0, 0, 0, 0, 1, offArrivalStorey: false);
+        Assert.True(plain.Owed);
+        Assert.DoesNotContain("storey", plain.Note(), StringComparison.Ordinal);
+
+        // The viewer slot (the player still in the den, no projectile alive) is unchanged by the wait: due on the arrival's storey.
+        var viewer = new FightShotPlan { WaitsForOtherStorey = true };
+        viewer.Begin(0, 0, 0, 0);
+        var seen = -1;
+        for (var i = 0; i < 400 && seen < 0; i++)
+        {
+            seen = viewer.Step(1.0 + (i * Frame), 0, 0, 0, 0, projectileAlive: false, inDen: true, walked: true, moving: false, offArrivalStorey: false);
+        }
+
+        Assert.Equal(3, seen);
+        Assert.Contains("kill=trigger never came (waited for a storey other than the arrival's)", new FightShotPlan { WaitsForOtherStorey = true }.Note(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_first_frame_is_due_at_the_first_projectile_created_whatever_it_hits()
     {
         var p = new FightShotPlan();

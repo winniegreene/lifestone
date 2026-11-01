@@ -302,6 +302,29 @@ internal sealed class ReplayAcSession : IAcSession
     public OutboundTicket SendRemoveSpellFavorite(uint spellId, uint bar) => Sent(MessageOpcodes.GameAction, GameActionTypes.RemoveSpellFavorite);
 
     /// <inheritdoc/>
+    public OutboundTicket SendConfirmationResponse(uint type, uint context, bool accepted) => Sent(MessageOpcodes.GameAction, GameActionTypes.ConfirmationResponse);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSetCharacterOptions(CharacterOptionsBlock block) => Sent(MessageOpcodes.GameAction, GameActionTypes.SetCharacterOptions);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTeleToLifestone() => Sent(MessageOpcodes.GameAction, GameActionTypes.TeleToLifestone);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTeleToMarketPlace() => Sent(MessageOpcodes.GameAction, GameActionTypes.TeleToMarketPlace);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendEmote(ReadOnlySpan<char> text) => Sent(MessageOpcodes.GameAction, GameActionTypes.Emote);
+
+    public OutboundTicket SendSetInscription(uint item, ReadOnlySpan<char> inscription) => Sent(MessageOpcodes.GameAction, GameActionTypes.SetInscription);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSetAfkMode(bool afk) => Sent(MessageOpcodes.GameAction, GameActionTypes.SetAfkMode);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendSetAfkMessage(ReadOnlySpan<char> message) => Sent(MessageOpcodes.GameAction, GameActionTypes.SetAfkMessage);
+
+    /// <inheritdoc/>
     public OutboundTicket SendGetAndWieldItem(uint item, uint equipMask) => Sent(MessageOpcodes.GameAction, GameActionTypes.GetAndWieldItem);
 
     /// <inheritdoc/>

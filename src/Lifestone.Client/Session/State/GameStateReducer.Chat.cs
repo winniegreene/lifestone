@@ -78,16 +78,25 @@ internal sealed partial class GameStateReducer
     /// <summary>
     /// GameEvent 0x028A WeenieError and 0x028B WeenieErrorWithString (the code in <see cref="ChatLine.ChatType"/>, the string as sent in <see cref="ChatLine.Text"/>): retail's
     /// <c>Handle_Communication__WeenieError</c> (11.6096 0x0057BBC0) looks the text up in the client, so the chat shows <see cref="WeenieErrorText"/>'s line for the code
-    /// (<c>ChatLineText</c>). A code the table lacks is logged once (<c>TODO(m3-weenie-error-text)</c>) and shows as <c>WeenieError 0x%04X</c>; a code whose retail text type is
-    /// not read is logged once (<c>TODO(m3-weenie-error-type)</c>).
+    /// (<c>ChatLineText</c>). M5 7 D124 (S1b): a code the client prints no line for (<see cref="WeenieErrorText.RetailShows"/>, <c>HandleFailureEvent</c> 0x00572760's shared exit) is still a chat event for the trackers and the
+    /// log, logged once here as such, and the chat window shows nothing. A code the client prints and the table lacks is logged once (<c>TODO(m3-weenie-error-text)</c>) and shows as <c>WeenieError 0x%04X</c>; a shown code whose
+    /// retail text type is not read is logged once (<c>TODO(m3-weenie-error-type)</c>).
     /// </summary>
     public void OnWeenieError(in InboundContext context, in GameEventHeader header, in WeenieErrorEvent message)
     {
-        if (!WeenieErrorText.Knows(message.Error))
+        var code = message.Error;
+        if (!WeenieErrorText.RetailShows(code))
         {
-            if (_weenieErrorsLogged.Add(message.Error))
+            if (_weenieErrorsLogged.Add(code))
             {
-                _log.Warn(SessionLog.Category, "TODO(m3-weenie-error-text): a WeenieError code with no known text is shown as its number", new LogField("code", "0x" + message.Error.ToString("X4", System.Globalization.CultureInfo.InvariantCulture)));
+                _log.Info(SessionLog.Category, "a WeenieError the 11.6096 client prints no line for (HandleFailureEvent 0x00572760 has no case for it): logged, not shown in the chat" + (WeenieErrorText.NameOf(code) is { } named ? " (ACE names it " + named + ")" : string.Empty), new LogField("code", "0x" + code.ToString("X4", System.Globalization.CultureInfo.InvariantCulture)));
+            }
+        }
+        else if (!WeenieErrorText.Knows(code))
+        {
+            if (_weenieErrorsLogged.Add(code))
+            {
+                _log.Warn(SessionLog.Category, "TODO(m3-weenie-error-text): a WeenieError code the client prints, with no known text, is shown as its number" + (WeenieErrorText.NameOf(code) is { } named ? " (ACE names it " + named + ")" : string.Empty), new LogField("code", "0x" + code.ToString("X4", System.Globalization.CultureInfo.InvariantCulture)));
             }
         }
         else if (!WeenieErrorText.HasKnownType(message.Error) && _weenieErrorsLogged.Add(message.Error))
@@ -95,7 +104,8 @@ internal sealed partial class GameStateReducer
             _log.Warn(SessionLog.Category, "TODO(m3-weenie-error-type): the retail text type of this WeenieError is not read; it is shown as type 0", new LogField("code", "0x" + message.Error.ToString("X4", System.Globalization.CultureInfo.InvariantCulture)));
         }
 
-        AddChat(new ChatLine(_clock.Now, ChatKind.WeenieError, message.Error, null, 0, message.Text ?? string.Empty));
+        // M5 7 D124: a channel's join or leave notice is retail's line, not a failure (WeenieErrorText.IsChannelNotice).
+        AddChat(new ChatLine(_clock.Now, WeenieErrorText.IsChannelNotice(message.Error) ? ChatKind.ChannelNotice : ChatKind.WeenieError, message.Error, null, 0, message.Text ?? string.Empty));
     }
 
     private readonly HashSet<uint> _weenieErrorsLogged = [];

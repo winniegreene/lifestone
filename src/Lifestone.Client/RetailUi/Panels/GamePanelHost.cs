@@ -31,7 +31,7 @@ public sealed record PanelPage(uint PanelId, uint ElementId, string Name);
 /// <para><b>How a page opens.</b> A toolbar button fires its input action (property 0x12). In retail the page registered for that action (property 0x57) toggles its own visibility and the host, which hears the page
 /// (<c>gmPanelUI::ListenToElementMessage</c>, 11.6096 0x004BD300), tells the shell which panel is shown (<c>RecvNotice_SetPanelVisibility</c>, 0x004BD380). Lifestone registers the host window for the pages' actions
 /// instead (a deliberate change: a tabbed page shows itself again whenever it is hidden, so hiding a page that must not open looped without end) and answers the action by the page's <see cref="PanelPageKind"/>: a
-/// page with no controller opens the NotInM3 message ("Not in Lifestone M3: &lt;panel&gt;"), a page with a controller calls its handler (<see cref="GamePanels"/> sets it for the slices' pages, g6 for the options and character
+/// page with no controller opens the NotInM3 message ("Not in Lifestone yet: &lt;panel&gt;"), a page with a controller calls its handler (<see cref="GamePanels"/> sets it for the slices' pages, g6 for the options and character
 /// information). A handler shows its page with <see cref="SetPanelVisibility"/>, which is
 /// retail's notice (one page at a time; a page that overlays another remembers it and brings it back when it closes); the same action closes the page shown.</para>
 /// </remarks>
@@ -73,6 +73,12 @@ public sealed class GamePanelHost : IUiElementListener
 
     /// <summary>Raised when a page's element becomes visible (true) or hidden (false), by whatever path: its toggle, another page replacing it, a page that overlays it closing. <see cref="GamePanels"/> hears it for the controllers' <c>OnShown</c> and <c>OnHidden</c>.</summary>
     public event Action<uint, bool>? PageVisibilityChanged;
+
+    /// <summary>
+    /// Raised after the host answered a page's toggle action (a toolbar button, a key, <see cref="Toggle"/>), whatever the answer was: the page opened or closed, or nothing opened (the NotInM3 message, a handler that
+    /// showed nothing). M5 7 P7r (D148, <c>m5-8-toolbar-radio</c>): the toolbar re-lights its panel buttons from the page shown, because a toggle button flips its own highlight on the click even when no page changes.
+    /// </summary>
+    public event Action? ToggleAnswered;
 
     /// <summary>The host of <paramref name="window"/> (null when the layout lacks it): finds the pages and hides them and the window (<c>PostInit</c>).</summary>
     public GamePanelHost(UiLoginContext context, UiElement? window)
@@ -235,6 +241,7 @@ public sealed class GamePanelHost : IUiElementListener
             Open(page);
         }
 
+        ToggleAnswered?.Invoke();
         return UiListenResult.Handled;
     }
 

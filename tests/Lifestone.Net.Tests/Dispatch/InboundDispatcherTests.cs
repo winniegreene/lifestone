@@ -218,15 +218,15 @@ public sealed class InboundDispatcherTests
     public void Every_undecoded_game_event_reaches_OnGameEvent_with_its_header_and_payload()
     {
         var handler = new RecordingHandler();
-        const uint characterTitle = 0x0029;  // ACE GameEventType.CharacterTitle, which Lifestone does not decode
-        var body = AceWireWriters.GameEvent(0x50000001, 9, characterTitle, [1, 2, 3, 4, 5]);
+        const uint contractTrackerTable = 0x0314;  // ACE GameEventType.ContractTrackerTable, which Lifestone does not decode
+        var body = AceWireWriters.GameEvent(0x50000001, 9, contractTrackerTable, [1, 2, 3, 4, 5]);
 
         var result = InboundDispatcher.Dispatch(Context, body, handler);
 
-        Assert.Equal(new DispatchResult(DispatchOutcome.Unknown, MessageOpcodes.GameEvent, characterTitle), result);
+        Assert.Equal(new DispatchResult(DispatchOutcome.Unknown, MessageOpcodes.GameEvent, contractTrackerTable), result);
         var call = Assert.Single(handler.Calls);
         Assert.Equal(nameof(IInboundMessageHandler.OnGameEvent), call.Name);
-        Assert.Equal(new GameEventHeader(0x50000001, 9, characterTitle), call.Header);
+        Assert.Equal(new GameEventHeader(0x50000001, 9, contractTrackerTable), call.Header);
         Assert.Equal(new byte[] { 1, 2, 3, 4, 5 }, call.Bytes);
     }
 

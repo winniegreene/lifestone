@@ -144,6 +144,9 @@ public sealed record StandInVisit
     /// <summary>What others say after the unhide (speech the chat windows show). None by default.</summary>
     public ImmutableArray<StandInSpeech> Speech { get; init; } = [];
 
+    /// <summary>Server questions (GameEvent 0x0274) asked <see cref="StandInConfirmation.After"/> seconds after the unhide (M5 6 k1); the client's answer is recorded and an unanswered one is closed by a 0x0276 after ACE's 30 s.</summary>
+    public ImmutableArray<StandInConfirmation> Confirmations { get; init; } = [];
+
     /// <summary>The teleports, in order.</summary>
     public ImmutableArray<StandInTeleport> Teleports { get; init; } = [];
 
@@ -484,6 +487,11 @@ public static partial class StandInSessions
             schedule.At(unhideAt + line.After, sink => sink.OnSpeech(new InboundContext(0, MessageQueue.SmartBox, sink is GameStateReducer r ? r.Clock.Time.GetTimestamp() : 0), new SpeechMsg(line.Text, line.Speaker, line.SpeakerGuid, 2, null)));
         }
 
+        foreach (var question in visit.Confirmations)
+        {
+            schedule.At(unhideAt + question.After, sink => (sink as GameStateReducer)?.LocalResponder?.World?.AskQuestionAt(sink, question.Type, question.Text));
+        }
+
         // M3 1.3 s0: the scripts first, then the sounds, at the same time as ACE queues them (steps due together run in the order scheduled); all on the Smartbox queue.
         foreach (var effect in visit.Scripts)
         {
@@ -701,7 +709,7 @@ public static partial class StandInSessions
 
     /// <summary>The description with the favourite-spell bars the stand-in holds since an <c>AddSpellFavorite</c> (M3 3.2 db; <see cref="StandInWorld.WithBars"/>), unchanged when none was added.</summary>
     private static PlayerDescriptionMsg WithBars(IAcSessionSink sink, PlayerDescriptionMsg description) =>
-        (sink as GameStateReducer)?.LocalResponder?.World is { } world ? world.WithVendorState(world.WithBars(description)) : description; // M4 3.2 s3: the shortcut list and the purse ride the same funnel
+        (sink as GameStateReducer)?.LocalResponder?.World is { } world ? world.WithVendorState(world.WithOptions(world.WithBars(description))) : description; // M4 3.2 s3: the shortcut list and the purse ride the same funnel
 
     /// <summary>
     /// The weenie ItemType the stand-in gives <paramref name="obj"/> (M4 4.1 t2, D23: no stand-in object but a person reads as a creature): a chest is a Container (0x200); a person is a Creature (0x10), that is an object whose description

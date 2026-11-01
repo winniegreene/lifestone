@@ -80,6 +80,57 @@ public sealed class GameState
 
     /// <summary>Remembers the mask a vendor of <paramref name="weenieClassId"/> sent.</summary>
     internal void RememberVendorMask(uint weenieClassId, uint mask) => _vendorMasks[weenieClassId] = mask;
+
+    private readonly List<PendingConfirmation> _confirmations = [];
+
+    /// <summary>
+    /// The server's open yes-or-no question (GameEvent 0x0274; M5 6 w2), the newest when more than one is open, or null. Closed by the server's
+    /// GameEvent 0x0276, by the player's answer (<see cref="IActionApi.RespondToConfirmation"/>) or by the world exit; <see cref="ConfirmationRequested"/>
+    /// and <see cref="ConfirmationClosed"/> follow each change.
+    /// </summary>
+    public PendingConfirmation? PendingConfirmation => _confirmations.Count == 0 ? null : _confirmations[^1];
+
+    /// <summary>
+    /// Every open question, oldest first. ACE keeps at most one per <see cref="Lifestone.Net.Messages.ConfirmationType"/> (its <c>ConfirmationManager</c> is
+    /// a dictionary keyed by the type and refuses a second of the same type before sending it: @95ef426d
+    /// <c>WorldObjects/Managers/ConfirmationManager.cs:16, 33-51</c>), so this holds at most one of each type.
+    /// </summary>
+    public IReadOnlyList<PendingConfirmation> PendingConfirmations => _confirmations;
+
+    /// <summary>The reducer's list (game thread only).</summary>
+    internal List<PendingConfirmation> MutableConfirmations => _confirmations;
+
+    private readonly List<(uint Type, uint Context)> _closedAwaitingReply = [];
+
+    /// <summary>
+    /// The questions the server closed with its GameEvent 0x0276 that ACE still holds until the client answers (M5 6 fix, 6-R1): for the types in <see cref="ServerKeepsSlotAfterDone"/> ACE sends the 0x0276
+    /// at its 30 s timeout and does not remove the question ("automatically trigger a response from client", <c>ConfirmationManager.cs:57-84</c> @95ef426d), so every later question of that type is refused
+    /// ("confirmation in progress") until a 0x0275 for it arrives. Each is dropped when the answer is sent or at the world exit.
+    /// </summary>
+    public IReadOnlyList<(uint Type, uint Context)> ClosedAwaitingReply => _closedAwaitingReply;
+
+    /// <summary>The reducer's list (game thread only).</summary>
+    internal List<(uint Type, uint Context)> MutableClosedAwaitingReply => _closedAwaitingReply;
+
+    /// <summary>
+    /// True for the confirmation types whose server-side slot survives a 0x0276 until the client's 0x0275: AlterSkill (2), AlterAttribute (3), CraftInteraction (5), Augmentation (6) and Yes_No (7)
+    /// (ACE <c>ConfirmationManager.EnqueueAbort</c>, @95ef426d <c>WorldObjects/Managers/ConfirmationManager.cs:57-84</c>); types 1 and 4 are removed by the timeout itself.
+    /// </summary>
+    public static bool ServerKeepsSlotAfterDone(uint type) => type is 2 or 3 or 5 or 6 or 7;
+}
+
+/// <summary>
+/// One open server question (<see cref="GameState.PendingConfirmation"/>; GameEvent 0x0274 CharacterConfirmationRequest, retail
+/// <c>CM_Character::DispatchUI_ConfirmationRequest</c>, 11.6096 0x006A3BB0).
+/// </summary>
+/// <param name="Type">The raw type word (ACE's <c>ConfirmationType</c>: 1 swear allegiance ... 7 yes or no).</param>
+/// <param name="Context">The server's context word, sent back unchanged in the answer.</param>
+/// <param name="Text">The question as the server sent it.</param>
+/// <param name="Time">When it arrived (session-clock seconds).</param>
+public sealed record PendingConfirmation(uint Type, uint Context, string Text, double Time)
+{
+    /// <summary>The type as ACE's enum (a value it does not name is cast as is).</summary>
+    public Lifestone.Net.Messages.ConfirmationType Kind => (Lifestone.Net.Messages.ConfirmationType)Type;
 }
 
 /// <summary>Where the DDD data check is (<see cref="GameState.DataCheck"/>; docs/protocol.md §4.2).</summary>

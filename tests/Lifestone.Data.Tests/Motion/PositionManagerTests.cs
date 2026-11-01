@@ -151,6 +151,79 @@ public sealed class PositionManagerTests
         Assert.Equal(0, im.NodeFailCounter);
     }
 
+    /// <summary>
+    /// M5 item 5 F7 (D74): the progress check counts update steps at retail's rate (<c>CPhysics::UseTime</c>'s 30 Hz gate,
+    /// 11.6096 0x0050A420), so a stalled object with five nodes queued blips after 25 update steps, 25/30 s, whether the
+    /// host steps it at 30, 60, 144 or 240 Hz. At 240 Hz a gate frame is 8 or 9 calls (the summed quanta reach 1/30 s), so
+    /// the blip may come up to one render frame per update step later.
+    /// </summary>
+    [Theory]
+    [InlineData(30)]
+    [InlineData(60)]
+    [InlineData(144)]
+    [InlineData(240)]
+    public void A_stalled_object_blips_after_25_update_steps_at_every_render_rate(int hz)
+    {
+        var blipAt = TimeToBlip(hz, PhysicsGlobalsMinQuantum, stallSeconds: 5.0);
+        Assert.NotNull(blipAt);
+        Assert.InRange(blipAt!.Value, (25.0 / 30.0) - 1e-9, 25.0 * ((1.0 / 30.0) + (1.0 / hz)));
+    }
+
+    /// <summary>
+    /// The render-rate count Lifestone had before D74 (<see cref="InterpolationManager.UpdateInterval"/> 0): at 240 Hz the
+    /// same stalled object blips after 25 calls, about 0.1 s, eight times sooner than retail.
+    /// </summary>
+    [Fact]
+    public void Counting_every_call_blips_at_the_render_rate()
+    {
+        var blipAt = TimeToBlip(240, interval: 0.0, stallSeconds: 5.0);
+        Assert.NotNull(blipAt);
+        Assert.Equal(25.0 / 240.0, blipAt!.Value, 6);
+    }
+
+    /// <summary>
+    /// Held for 0.3 s and then free, the object fails at most one node and never blips, at 30 Hz and at 240 Hz alike; held
+    /// for 2 s it blips at about 25/30 s at both. Counting every call, the 0.3 s hold blips at 240 Hz.
+    /// </summary>
+    [Theory]
+    [InlineData(30)]
+    [InlineData(240)]
+    public void A_short_hold_does_not_blip_and_a_long_one_blips_at_retails_time(int hz)
+    {
+        Assert.Null(TimeToBlip(hz, PhysicsGlobalsMinQuantum, stallSeconds: 0.3));
+        var held = TimeToBlip(hz, PhysicsGlobalsMinQuantum, stallSeconds: 2.0);
+        Assert.NotNull(held);
+        Assert.InRange(held!.Value, (25.0 / 30.0) - 1e-9, 25.0 * ((1.0 / 30.0) + (1.0 / hz)));
+        if (hz > 30)
+        {
+            Assert.NotNull(TimeToBlip(hz, interval: 0.0, stallSeconds: 0.3));
+        }
+    }
+
+    /// <summary>The gate's sum runs on every call, so a call of a whole update step counts every time and a node's completion does not restart the sum.</summary>
+    [Fact]
+    public void A_call_of_a_whole_update_step_counts_every_time()
+    {
+        var im = new InterpolationManager();
+        var position = At(Outdoor, 50, 50);
+        im.InterpolateTo(At(Outdoor, 50, 60), keepHeading: true, Ctx(position));
+        for (var i = 1; i <= 4; i++)
+        {
+            var offset = AcFrame.Identity;
+            im.AdjustOffset(ref offset, 0.05, Ctx(position));
+            Assert.Equal(i, im.FrameCounter);
+        }
+
+        var quarter = new InterpolationManager();
+        quarter.InterpolateTo(At(Outdoor, 50, 60), keepHeading: true, Ctx(position));
+        for (var i = 1; i <= 16; i++)
+        {
+            var offset = AcFrame.Identity;
+            quarter.AdjustOffset(ref offset, 1.0 / 120.0, Ctx(position));
+            Assert.Equal(i / 4, quarter.FrameCounter); // a frame per four 120 Hz calls (1/30 s), counted on the call that closes it
+        }
+    }
+
     [Fact]
     public void A_twenty_first_node_drops_the_oldest_and_close_nodes_merge()
     {
@@ -441,6 +514,46 @@ public sealed class PositionManagerTests
 
     private static PositionContext Ctx(in CellFrame position, bool isThePlayer = false) =>
         new(position, HasContact: true, IsThePlayer: isThePlayer, MaxSpeed: 4f, AdjustedMaxSpeed: 4f);
+
+    private const double PhysicsGlobalsMinQuantum = Lifestone.Data.Physics.PhysicsGlobals.MinQuantum;
+
+    /// <summary>
+    /// Five nodes 1 m apart ahead of an object stepped at <paramref name="hz"/>, held still for <paramref name="stallSeconds"/>
+    /// and then moved by its whole step each call: the object time of the first blip <see cref="InterpolationManager.UseTime"/>
+    /// asks for, or null when none is asked for in 5 s.
+    /// </summary>
+    private static double? TimeToBlip(int hz, double interval, double stallSeconds)
+    {
+        var im = new InterpolationManager { UpdateInterval = interval };
+        var position = At(Outdoor, 50, 50);
+        for (var i = 1; i <= 5; i++)
+        {
+            im.InterpolateTo(At(Outdoor, 50, 50 + i), keepHeading: true, Ctx(position));
+        }
+
+        var quantum = 1.0 / hz;
+        for (var call = 1; call <= 5 * hz; call++)
+        {
+            var offset = AcFrame.Identity;
+            im.AdjustOffset(ref offset, quantum, Ctx(position));
+            if (call * quantum > stallSeconds)
+            {
+                position = position with { Frame = AcFrame.Combine(position.Frame, offset) };
+            }
+
+            if (im.UseTime() is not null)
+            {
+                return call * quantum;
+            }
+
+            if (!im.IsInterpolating)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>Calls AdjustOffset for a number of frames without moving the object.</summary>
     private static void Stall(InterpolationManager im, in CellFrame position, int frames)

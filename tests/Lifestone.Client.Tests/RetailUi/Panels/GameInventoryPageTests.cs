@@ -13,13 +13,16 @@ using Lifestone.Client.RetailUi.Widgets;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Client.Tests.RetailUi.Screens;
+using Lifestone.Client.Tests.RetailUi.TestSupport;
 using Lifestone.Client.Tests.Session;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Tests;
+using Lifestone.Data.Ui;
 using Lifestone.Net.Dispatch;
 using Lifestone.Net.Messages;
 using Lifestone.Net.Types;
 using Lifestone.Tests.Shared.Net;
+using Xunit.Abstractions;
 
 namespace Lifestone.Client.Tests.RetailUi.Panels;
 
@@ -27,7 +30,7 @@ namespace Lifestone.Client.Tests.RetailUi.Panels;
 /// The item widgets and the inventory page (M3 2.2 slice b1): <see cref="UiItemList"/> and <see cref="UiItem"/> over the real layout (cells made when shown, filled in order, selection, a double click), an item's icon layers
 /// and stack count, and the page <see cref="GameInventoryPage"/> over a scripted inventory (the main pack in order, a side pack and its contents, the burden, live on item events, a double click that wields).
 /// </summary>
-public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
+public sealed class GameInventoryPageTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     private const uint InventoryButton = 0x100001B1;
     private const uint Player = 0x50000001;
@@ -116,7 +119,7 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixtur
         };
     }
 
-    private Game Enter(bool populate)
+    private Game Enter(bool populate, UiRetailGlitches glitches = UiRetailGlitches.None)
     {
         IInboundMessageHandler? handler = null;
         var rig = new LoginRig(fixture, h =>
@@ -124,7 +127,7 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixtur
             handler = h;
             StandInSessions.DataCheckThenCharacterSelect(h, TimeSpan.FromSeconds(2));
             StandInSessions.AnswerLocally(h, TimeSpan.FromSeconds(0.6));
-        }, liveGame: true);
+        }, liveGame: true, glitches: glitches);
         rig.Run(2.5);
         rig.Flow.QueueUIMode(UiModes.GamePlay);
         rig.Frame();
@@ -649,6 +652,171 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixtur
         Assert.Empty(Packed(page));
     }
 
+    // ------------------------------------------------------------------ M5 7 P7r (D148): the pack list's contents and the open marks
+
+    private const uint Sack = 0x80000120;
+    private const uint PackB = 0x80000121;
+    private const uint Breastplate = 0x80000122;
+
+    /// <summary>A side pack of <paramref name="capacity"/> slots (the weenie's ItemsCapacity, which the pack list's cell count follows).</summary>
+    private static CreateObjectMsg Container(uint guid, string name, byte capacity)
+    {
+        var basis = Item(guid, name, 0x06001BAF, 0x200); // the backpack's icon (the stand-in's art row for wcid 136)
+        return basis with { Weenie = basis.Weenie with { ItemsCapacity = capacity } };
+    }
+
+    /// <summary>Real icons and item types for the review frames (the stand-in's art rows: a wand, a mace, leather bracers, a shirt).</summary>
+    private static readonly (string Name, uint Icon, uint Type)[] Loot = [("Wand", 0x06001578, 0x8000), ("Mace", 0x0600161B, 0x1), ("Leather Bracers", 0x06000FE4, 0x2), ("Shirt", 0x06000FF0, 0x4)];
+
+    [RequiresLocalDatsFact]
+    public void A_near_full_sack_draws_its_23_items_in_order_and_one_empty_cell_for_its_free_slot_from_its_first_row()
+    {
+        // m5-8-pack-window-contents (the owner's second screenshot): "Contents of Sack" showed 11 items then 7 empty cells while the Sack held 23 of 24. The list kept the layout's 102 cells for a 24-slot sack and kept the
+        // backpack's scroll when the sack opened, so the first two rows (the newest loot, put at slot 0) were scrolled off. Retail sizes the list to the container (ItemList_UpdateContainerListSize) and shows its first row
+        // when it opens one (ItemList_OpenContainer's ScrollToShow(0)).
+        using var g = Enter(populate: false);
+        var main = Enumerable.Range(0, 40).Select(static i => 0x80000200u + (uint)i).ToArray();
+        var sacked = Enumerable.Range(0, 23).Select(static i => 0x80000300u + (uint)i).ToArray();
+        g.Describe([.. main.Select(static m => new ContentDesc(m, 0)), new ContentDesc(Sack, 1)]);
+        foreach (var m in main)
+        {
+            g.Create(Item(m, "Apple", 0x06001049, 0x20));
+        }
+
+        g.Create(Container(Sack, "Sack", 24));
+        g.View(Sack, [.. sacked.Select(static s => (s, 0u))]);
+        for (var i = 0; i < sacked.Length; i++)
+        {
+            var (name, icon, type) = Loot[i % Loot.Length];
+            g.Create(Item(sacked[i], name, icon, type, container: Sack));
+        }
+
+        g.Open();
+        var page = g.Page;
+        var list = page.PackList;
+        g.Frames(14);
+        Assert.Equal(Player, page.OpenContainer);
+        Assert.Equal(102, list.CellCount); // the backpack: the layout's 102 (the stand-in's player sends no ItemsCapacity)
+        Assert.Equal(main, Packed(page));
+
+        // The player scrolls the backpack down two rows, then opens the sack.
+        list.ScrollToShow(12);
+        Assert.True(list.ScrollY > 0);
+        Assert.True(g.Rig.Click(page.SidePackList.CellAt(0)!));
+        g.Frames(2);
+        Assert.Equal(Sack, page.OpenContainer);
+        Assert.Equal("Contents of Sack", page.ContentsTitle);
+        Assert.Equal(0, list.ScrollY); // its first row shows
+        Assert.Equal(24, list.FixedSlots);
+        Assert.Equal(24, list.CellCount); // one cell per slot of the sack
+        Assert.Equal(sacked, Packed(page)); // every item, in the sack's order
+        Assert.Equal(23, list.OccupiedCount);
+        Assert.Equal(1, list.EmptyCount); // the empty cells are the sack's free slots
+        Assert.True(list.CellAt(23)!.IsEmpty);
+        Assert.True(page.SidePackList.CellAt(0)!.CapacityBar!.TryGetFloatProperty(UiPropertyIds.MeterPosition, out var level));
+        Assert.Equal(23f / 24f, level, 0.001f); // the gauge beside the sack agrees with the list
+        Assert.Contains(g.Rig.Log.Lines, l => l.Contains("inventory page: the pack list shows 0x80000120 ('Contents of Sack'): 24 cells of 24, 23 drawn, 23 listed, 23 held, 1 empty", StringComparison.Ordinal));
+        SaveFrame(g, "pack-near-full-sack"); // the review frame: the sack's first three rows, the arrow on its cell
+        list.ScrollToShow(6);
+        g.Frames(1);
+        Assert.True(list.CellAt(23)!.IsShown);
+        SaveFrame(g, "pack-near-full-sack-last-rows"); // and its last three rows: the 23rd item, then the one free slot
+        list.SetScrollableXY(0, 0);
+
+        // The loot puts a breastplate at slot 0 while the sack shows: it is drawn first and the sack is full.
+        g.Create(Item(Breastplate, "Koujia Breastplate", 0x06000FE4, 0x2));
+        g.Put(Breastplate, Sack, 0);
+        g.Frames(2);
+        Assert.Equal([Breastplate, .. sacked], Packed(page));
+        Assert.Equal(24, list.CellCount);
+        Assert.Equal(0, list.EmptyCount);
+
+        // Back to the backpack: its 102 cells come back over the frames, from its first row.
+        list.ScrollToShow(6);
+        Assert.True(g.Rig.Click(page.TopContainerList.CellAt(0)!));
+        g.Frames(14);
+        Assert.Equal(Player, page.OpenContainer);
+        Assert.Equal(102, list.CellCount);
+        Assert.Equal(0, list.ScrollY);
+        Assert.Equal(main, Packed(page));
+    }
+
+    private void SaveFrame(Game g, string name)
+    {
+        if (UiReviewFrames.Save(g.Rig, fixture, name) is { } frame)
+        {
+            output.WriteLine($"wrote {frame}");
+        }
+    }
+
+    [RequiresLocalDatsFact]
+    public void The_open_arrow_follows_the_open_container_through_switches_moves_and_a_pack_that_leaves_and_the_green_frame_is_every_containers_background()
+    {
+        // m5-8-pack-open-state (the owner's first screenshot: the Sack open with the arrow, both Packs and the Sack in green frames). Retail marks the open container with the arrow alone (SetOpenContainerState shows the
+        // cell's open-container element; UpdateOpenContainerIndicator, one cell); the green frame is a container's item-type background, drawn on every pack, open or not.
+        using var g = Enter(populate: false);
+        g.Describe(new ContentDesc(Sword, 0), new ContentDesc(Pack, 1), new ContentDesc(PackB, 1), new ContentDesc(Sack, 1));
+        g.Create(Item(Sword, "Mace", 0x0600161B, 0x1));
+        g.Create(Container(Pack, "Pack", 24));
+        g.Create(Container(PackB, "Pack", 24));
+        g.Create(Container(Sack, "Sack", 24));
+        g.Open();
+        var page = g.Page;
+        g.Frames(2);
+        Assert.Equal([Player], page.OpenMarks);
+
+        // Switches by click.
+        Assert.True(g.Rig.Click(page.SidePackList.CellAt(1)!));
+        g.Frames(2);
+        Assert.Equal(PackB, page.OpenContainer);
+        Assert.Equal([PackB], page.OpenMarks);
+        Assert.True(g.Rig.Click(page.SidePackList.CellAt(2)!));
+        g.Frames(2);
+        Assert.Equal([Sack], page.OpenMarks);
+        Assert.Equal("Contents of Sack", page.ContentsTitle);
+
+        // The green frame: the open sack and the closed packs compose the same picture (the type background, the same icon); the arrow is the cell's own element.
+        var closed = page.SidePackList.CellAt(1)!;
+        var open = page.SidePackList.CellAt(2)!;
+        Assert.False(closed.OpenContainerShown);
+        Assert.True(open.OpenContainerShown);
+        Assert.Equal(closed.ComposedIcon!.Pixels, open.ComposedIcon!.Pixels);
+
+        // The bot's moves: into another pack, into the open sack, back to the main pack; the arrow stays on the sack and the list follows.
+        g.Put(Sword, Pack, 0);
+        g.Frames(2);
+        Assert.Equal([Sack], page.OpenMarks);
+        Assert.Empty(Packed(page));
+        g.Put(Sword, Sack, 0);
+        g.Frames(2);
+        Assert.Equal([Sack], page.OpenMarks);
+        Assert.Equal([Sword], Packed(page));
+        SaveFrame(g, "pack-list-after-switch"); // the review frame: three packs on their green type background, the arrow on the open sack only, its one item and 23 free slots
+        g.Put(Sword, Player, 0);
+        g.Frames(2);
+        Assert.Equal([Sack], page.OpenMarks);
+        Assert.Empty(Packed(page));
+
+        // A script's switch while the page is hidden (the hero panels, the panel shots): the arrow is on the right pack when it shows again.
+        Assert.True(g.Host.Toggle(GameInventoryPage.Panel));
+        g.Frames(2);
+        Assert.False(g.Host.IsOpen);
+        page.ShowContents(Pack);
+        g.Put(Sword, Pack, 0);
+        Assert.True(g.Host.Toggle(GameInventoryPage.Panel));
+        g.Frames(2);
+        Assert.Equal([Pack], page.OpenMarks);
+        Assert.Equal([Sword], Packed(page));
+
+        // The open pack leaves the player (the server takes it away): the backpack opens, its arrow on the player.
+        g.Handler.OnInventoryRemoveObject(g.Context, new InventoryRemoveObjectMsg(Pack));
+        g.Frames(2);
+        Assert.Equal(Player, page.OpenContainer);
+        Assert.Equal([Player], page.OpenMarks);
+        Assert.Equal("Contents of Backpack", page.ContentsTitle);
+        Assert.DoesNotContain(g.Rig.Log.Lines, l => l.Contains("TODO(m5-8-pack-open-state)", StringComparison.Ordinal));
+    }
+
     [RequiresLocalDatsFact]
     public void The_panel_shots_main_pack_shot_waits_for_the_main_pack_to_list_its_items_and_never_for_a_side_pack_M4_3_1_p()
     {
@@ -754,5 +922,69 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture) : IClassFixtur
         Assert.NotNull(page);
         page.Dispose();
         Assert.True(watch.Elapsed.TotalMilliseconds < 8.0, $"construction took {watch.Elapsed.TotalMilliseconds:0.00} ms");
+    }
+
+
+    // M5 7 (the live frame of 2026-10-29: a 25,000 pyreal stack reads "2500(" in the pack grid). Retail writes the count as plain "%d"
+    // (UIElement_UIItem::UpdateQuantityDisplay, 11.6096 0x004E2A30) into the cell's quantity text 0x100004F5: the cell's own 32x32 box, one line,
+    // right-justified (3) at the bottom (5), right margin 3, font 0x40000001 from the element's font list. A digit is 7 pixels wide, so four digits
+    // (28) fit the 29 the margin leaves, right-aligned; five (35) or six (42) widen the paper past the box, UIElement_Text::CalcJustification
+    // (0x004674F0) then starts the run at the left edge, and the 32-pixel box cuts the last digit: retail's own layout, which --retail-stack-count
+    // restores (D132).
+    [RequiresLocalDatsFact]
+    public void With_the_retail_flag_a_stack_count_is_plain_digits_right_aligned_and_five_or_six_digits_overflow_the_cell_from_its_left_edge()
+    {
+        using var g = Enter(populate: false, UiRetailGlitches.StackCountClip);
+        g.Rig.Click(g.Button);
+        g.Frames(2);
+        var cell = g.Page.PackList.CellAt(0)!;
+
+        (int X, int Paper, string Text) Laid(int count)
+        {
+            cell.ShowItem(1, new UiItemIcon(0x060011D1, 0, 0, 0x40, 1, StackSize: count, Name: "Pyreal", PluralName: "Pyreals"));
+            var text = cell.QuantityText!;
+            text.RecalculateGlyphList();
+            return (text.CalcJustification(text.Glyphs.Lines[0].Width, horizontal: true), text.PaperWidth, text.Text);
+        }
+
+        var quantity = cell.QuantityText!;
+        Assert.Equal((32, 32), (quantity.Box.Width, quantity.Box.Height));
+        Assert.True(quantity.OneLine);
+        Assert.Equal(7, quantity.CurrentFont!.GetCharWidth('0'));
+
+        Assert.Equal((1, 31, "9328"), Laid(9328)); // 28 pixels in the 29 left of the 3-pixel right margin: right-aligned
+        Assert.Equal((0, 38, "25000"), Laid(25000)); // 35 pixels: from the left edge, the last digit cut at 32
+        Assert.Equal((0, 45, "100000"), Laid(100000)); // 42 pixels: from the left edge, the last two digits cut
+    }
+
+    // M5 7 D132 (the glitch fix, the default): a count that fits keeps retail's layout (9,328); five digits drop the 3-pixel right margin and draw a pixel closer, so
+    // 25,000 fits right-aligned in retail's font; six digits still do not, so 100,000 shows as thousands, "100k", in retail's layout. The tooltip keeps the full number.
+    [RequiresLocalDatsFact]
+    public void A_stack_count_wider_than_the_cell_is_drawn_a_pixel_closer_without_the_right_margin_and_six_digits_show_as_thousands()
+    {
+        using var g = Enter(populate: false);
+        g.Rig.Click(g.Button);
+        g.Frames(2);
+        var cell = g.Page.PackList.CellAt(0)!;
+
+        (int X, int Width, string Text, int Tracking) Laid(int count)
+        {
+            cell.ShowItem(1, new UiItemIcon(0x060011D1, 0, 0, 0x40, 1, StackSize: count, Name: "Pyreal", PluralName: "Pyreals"));
+            var text = cell.QuantityText!;
+            text.RecalculateGlyphList();
+            var width = text.Glyphs.Lines[0].Width;
+            return (text.CalcJustification(width, horizontal: true), width, text.Text, text.Tracking);
+        }
+
+        Assert.Equal((1, 28, "9328", 0), Laid(9328)); // fits: retail's layout, unchanged
+        var squeezed = Laid(25000);
+        Assert.Equal(("25000", -1, 30), (squeezed.Text, squeezed.Tracking, squeezed.Width));
+        Assert.Equal(2, squeezed.X); // right-aligned to the cell's edge: 2 + 30 = 32, no digit cut
+        Assert.Equal("25000 Pyreals", cell.TooltipText?.Literal);
+        var thousands = Laid(100000);
+        Assert.Equal(("100k", 0), (thousands.Text, thousands.Tracking));
+        Assert.True(thousands.X + thousands.Width <= 32 - 3, $"100k ends at {thousands.X + thousands.Width}"); // inside retail's margin
+        Assert.Equal("100000 Pyreals", cell.TooltipText?.Literal);
+        Assert.Equal((1, 28, "9328", 0), Laid(9328)); // and back to retail's layout for a count that fits
     }
 }

@@ -124,13 +124,13 @@ public sealed class SoakSnapshot
     /// <summary>Reconnects of the session.</summary>
     public long? Reconnects { get; set; }
 
-    /// <summary>The driver's kills (<c>TODO(m5-soak-tallies)</c> until item 4's driver reports them).</summary>
+    /// <summary>The autopilot's kills (the run's, the cycle in progress included; n/a when no autopilot runs: <see cref="SoakTallies"/>).</summary>
     public long? Kills { get; set; }
 
-    /// <summary>The driver's deaths (<c>TODO(m5-soak-tallies)</c>).</summary>
+    /// <summary>The autopilot's deaths (n/a when no autopilot runs).</summary>
     public long? Deaths { get; set; }
 
-    /// <summary>The driver's cycles (<c>TODO(m5-soak-tallies)</c>).</summary>
+    /// <summary>The autopilot's ended cycles (n/a when no autopilot runs).</summary>
     public long? Cycles { get; set; }
 
     /// <summary>Errors Godot itself logged (error, script and shader errors), counted in process.</summary>
@@ -138,6 +138,111 @@ public sealed class SoakSnapshot
 
     /// <summary>Length of <c>lifestone.log</c>, bytes.</summary>
     public long? LogBytes { get; set; }
+
+    /// <summary>The mage's health as a share of its maximum, percent (M5 7 F16; n/a with no autopilot or before the vitals are known).</summary>
+    public double? HpPct { get; set; }
+
+    /// <summary>The mage's stamina as a share of its maximum, percent (M5 7 F16).</summary>
+    public double? SpPct { get; set; }
+
+    /// <summary>The mage's mana as a share of its maximum, percent (M5 7 F16).</summary>
+    public double? MpPct { get; set; }
+
+    /// <summary>The biggest single hit the mage took over the run so far (M5 7 F16; n/a with no autopilot).</summary>
+    public long? HitMax { get; set; }
+
+    /// <summary>The mage's combat-mode changes over the run so far (M5 7 F25, D93; report-only; n/a with no autopilot).</summary>
+    public long? StanceChanges { get; set; }
+
+    /// <summary>The casts whose target died or left during the wind-up over the run so far (M5 7 F28; report-only; n/a with no autopilot).</summary>
+    public long? TargetDiedMidCast { get; set; }
+
+    /// <summary>Items the loot rule's plans kept over the process (M5 7 F29, D96; report-only; pyreals count as kept).</summary>
+    public long? LootKept { get; set; }
+
+    /// <summary>Items the loot rule's plans left over the process (M5 7 F29; report-only).</summary>
+    public long? LootLeft { get; set; }
+
+    /// <summary>The main pack's free slots now (M5 7 F29; report-only; n/a with no autopilot or before the load is known).</summary>
+    public long? FreeSlots { get; set; }
+
+    /// <summary>The burden as a share of the capacity, percent (M5 7 F29; report-only).</summary>
+    public double? BurdenPct { get; set; }
+
+    /// <summary>The sell trips made over the run (M5 7 F29; report-only; n/a with no autopilot).</summary>
+    public long? Trips { get; set; }
+
+    /// <summary>The corpses the loot step opened over the process (M5 7 loot retry; report-only; n/a with no autopilot).</summary>
+    public long? CorpsesOpened { get; set; }
+
+    /// <summary>The times a corpse was put off by the loot aggro rule over the process (one corpse can count more than once; report-only).</summary>
+    public long? LootLeftAggro { get; set; }
+
+    /// <summary>The corpses the loot step gave up to decay over the process (rotted or gone; report-only).</summary>
+    public long? LootLeftDecayed { get; set; }
+
+    /// <summary>M5 7 D123: the corpse opens answered "You're too busy!" (0x001D) and sent again over the process (report-only).</summary>
+    public long? LootBusyWaits { get; set; }
+
+    /// <summary>M5 7 D123: the corpses left with every open answered busy over the process (report-only).</summary>
+    public long? LootLeftBusy { get; set; }
+
+    /// <summary>M5 7 D123: the corpses left beyond the loot radius, out of sight or not reached by ACE's walk over the process (report-only).</summary>
+    public long? LootLeftUnreached { get; set; }
+
+    /// <summary>The wands and cantrip pieces the keep-aside rule kept over the process (M5 7 F30; report-only; n/a with no autopilot).</summary>
+    public long? WorthALook { get; set; }
+
+    /// <summary>M5 7 D121: the components pack's free slots last read (report-only; n/a before a layout was read).</summary>
+    public long? FreeComponents { get; set; }
+
+    /// <summary>M5 7 D121: the kit pack's free slots last read.</summary>
+    public long? FreeKit { get; set; }
+
+    /// <summary>M5 7 D134: the walkers' turn reversals over the process (<see cref="Lifestone.Client.Movement.Wayfinding.SteeringTally"/>; report-only; n/a with no autopilot).</summary>
+    public long? TurnReversals { get; set; }
+
+    /// <summary>M5 7 D134: the walkers' turn flips (the other side pressed within 0.2 s: the aim jumping) over the process (report-only).</summary>
+    public long? TurnFlips { get; set; }
+
+    /// <summary>M5 7 D134: the walkers' next vertex stepping back on one route over the process (report-only).</summary>
+    public long? ProgressBacks { get; set; }
+
+    /// <summary>M5 7 D134: the walkers' swings (a turn in place, then two reversals within 3 s; each logged) over the process (report-only).</summary>
+    public long? Swings { get; set; }
+
+    /// <summary>M5 7 D121: the review pack's free slots last read.</summary>
+    public long? FreeReview { get; set; }
+
+    /// <summary>M5 7 D125: the pieces the self-equip put on over the process (report-only).</summary>
+    public long? SelfEquips { get; set; }
+
+    /// <summary>M5 7 D125: the charged mana stones used on the player over the process.</summary>
+    public long? StoneRefills { get; set; }
+
+    /// <summary>M5 7 D125: the empty mana stones used on a junk magic item over the process.</summary>
+    public long? StoneCaptures { get; set; }
+
+    /// <summary>M5 7 P7d (D139 row e): textures the render cache holds now, in use and idle (n/a without a render path).</summary>
+    public long? TexCacheCount { get; set; }
+
+    /// <summary>M5 7 P7d: the texture cache's bytes now, MiB.</summary>
+    public double? TexCacheMb { get; set; }
+
+    /// <summary>M5 7 P7d: the texture cache's idle bytes now (what a trim could free), MiB.</summary>
+    public double? TexIdleMb { get; set; }
+
+    /// <summary>M5 7 P7d: meshes the render cache holds now.</summary>
+    public long? MeshCacheCount { get; set; }
+
+    /// <summary>M5 7 P7d: the mesh cache's bytes now, MiB.</summary>
+    public double? MeshCacheMb { get; set; }
+
+    /// <summary>M5 7 P7d: the arrival trims run over the process (<see cref="Lifestone.Client.Rendering.ArrivalCacheTrim.Trims"/>).</summary>
+    public long? CacheTrims { get; set; }
+
+    /// <summary>M5 7 P7d (D139 row f): orphaned objects dropped over the session (<see cref="Lifestone.Client.Session.State.ObjectCull.OrphansDropped"/>).</summary>
+    public long? OrphansDropped { get; set; }
 }
 
 /// <summary>Formats a <see cref="SoakSnapshot"/> as the body of the <c>[soak]</c> line (the log adds the time, the level and the category).</summary>
@@ -153,17 +258,30 @@ public static class SoakLineFormat
         "static_mb", "video_mb", "tex_mb", "nodes", "orphans", "resources", "objects", "avatars", "in_cell", "light_rows", "cull_pending", "culled",
         "frame_max_ms", "frame_p99_ms", "over_50", "over_75", "tick_ms", "pump_msgs", "sent", "recv", "resends", "naks",
         "dup", "gaps", "loss_pct", "silence_max_s", "phase", "reconnects", "kills", "deaths", "cycles", "godot_errors", "log_bytes",
+        "hp_pct", "sp_pct", "mp_pct", "hit_max", // M5 7 F16: after log_bytes, so the 43 fields before stay in place
+        "stance_changes", // M5 7 F25: after hit_max, read by name
+        "target_died_mid_cast", // M5 7 F28: after stance_changes, read by name
+        "loot_kept", "loot_left", "free_slots", "burden_pct", "trips", // M5 7 F29 (D96): the tail, read by name
+        "corpses_opened", "loot_left_aggro", "loot_left_decayed", // M5 7 loot retry: after trips, read by name
+        "loot_busy_waits", "loot_left_busy", "loot_left_unreached", // M5 7 D123: the busy waits and the corpses left by reason, read by name
+        "worth_a_look", // M5 7 F30 (the owner): the wands and cantrip pieces kept aside, read by name
+        "free_components", "free_kit", "free_review", "self_equips", "stone_refills", "stone_captures", // M5 7 D121, D125: the side packs' free slots and the gear counters, read by name
+        "turn_reversals", "turn_flips", "progress_backs", "swings", // M5 7 D134: the walkers' steering totals, read by name
+        "tex_cache_n", "tex_cache_mb", "tex_idle_mb", "mesh_cache_n", "mesh_cache_mb", "cache_trims", "orphans_dropped", // M5 7 P7d (D139 rows e, f): the render caches and the orphans, read by name
     ];
+
+    /// <summary>Why a tally reads n/a: no autopilot runs in this process (the source is <see cref="SoakTallies"/>).</summary>
+    public const string NoAutopilot = "n/a unless an autopilot runs (m5-soak-tallies)";
 
     /// <summary>
     /// The fields that read <c>n/a</c> for want of a source, with the TODO that names why (loud stubs: the node logs this once, at its
-    /// start). The three tallies wait for item 4's driver; <c>godot_errors</c> would read n/a only if Godot's logger could not be registered.
+    /// start). The three tallies read n/a unless an autopilot runs (M5 4 h1, <c>m5-soak-tallies</c> closed: <see cref="SoakTallies"/> fills them); <c>godot_errors</c> would read n/a only if Godot's logger could not be registered.
     /// </summary>
     public static readonly IReadOnlyList<(string Field, string Todo)> Todo =
     [
-        ("kills", "TODO(m5-soak-tallies)"),
-        ("deaths", "TODO(m5-soak-tallies)"),
-        ("cycles", "TODO(m5-soak-tallies)"),
+        ("kills", NoAutopilot),
+        ("deaths", NoAutopilot),
+        ("cycles", NoAutopilot),
     ];
 
     /// <summary>Appends the line's body to <paramref name="sb"/>: <c>name=value</c> pairs separated by single spaces, <c>n/a</c> for a missing value.</summary>
@@ -217,6 +335,41 @@ public static class SoakLineFormat
         Whole(sb, ci, "cycles", s.Cycles);
         Whole(sb, ci, "godot_errors", s.GodotErrors);
         Whole(sb, ci, "log_bytes", s.LogBytes);
+        Real(sb, ci, "hp_pct", s.HpPct);
+        Real(sb, ci, "sp_pct", s.SpPct);
+        Real(sb, ci, "mp_pct", s.MpPct);
+        Whole(sb, ci, "hit_max", s.HitMax);
+        Whole(sb, ci, "stance_changes", s.StanceChanges);
+        Whole(sb, ci, "target_died_mid_cast", s.TargetDiedMidCast);
+        Whole(sb, ci, "loot_kept", s.LootKept);
+        Whole(sb, ci, "loot_left", s.LootLeft);
+        Whole(sb, ci, "free_slots", s.FreeSlots);
+        Real(sb, ci, "burden_pct", s.BurdenPct);
+        Whole(sb, ci, "trips", s.Trips);
+        Whole(sb, ci, "corpses_opened", s.CorpsesOpened);
+        Whole(sb, ci, "loot_left_aggro", s.LootLeftAggro);
+        Whole(sb, ci, "loot_left_decayed", s.LootLeftDecayed);
+        Whole(sb, ci, "loot_busy_waits", s.LootBusyWaits);
+        Whole(sb, ci, "loot_left_busy", s.LootLeftBusy);
+        Whole(sb, ci, "loot_left_unreached", s.LootLeftUnreached);
+        Whole(sb, ci, "worth_a_look", s.WorthALook);
+        Whole(sb, ci, "free_components", s.FreeComponents);
+        Whole(sb, ci, "free_kit", s.FreeKit);
+        Whole(sb, ci, "free_review", s.FreeReview);
+        Whole(sb, ci, "self_equips", s.SelfEquips);
+        Whole(sb, ci, "stone_refills", s.StoneRefills);
+        Whole(sb, ci, "stone_captures", s.StoneCaptures);
+        Whole(sb, ci, "turn_reversals", s.TurnReversals);
+        Whole(sb, ci, "turn_flips", s.TurnFlips);
+        Whole(sb, ci, "progress_backs", s.ProgressBacks);
+        Whole(sb, ci, "swings", s.Swings);
+        Whole(sb, ci, "tex_cache_n", s.TexCacheCount);
+        Real(sb, ci, "tex_cache_mb", s.TexCacheMb);
+        Real(sb, ci, "tex_idle_mb", s.TexIdleMb);
+        Whole(sb, ci, "mesh_cache_n", s.MeshCacheCount);
+        Real(sb, ci, "mesh_cache_mb", s.MeshCacheMb);
+        Whole(sb, ci, "cache_trims", s.CacheTrims);
+        Whole(sb, ci, "orphans_dropped", s.OrphansDropped);
     }
 
     private static void Real(StringBuilder sb, CultureInfo ci, string name, double? value, bool first = false)
@@ -247,6 +400,78 @@ public static class SoakLineFormat
         else
         {
             sb.Append("n/a");
+        }
+    }
+}
+
+/// <summary>
+/// The soak line's <c>kills= deaths= cycles=</c> from the autopilot (M5 item 4 h1, <c>m5-soak-tallies</c>, the source half): the run's totals over the ended cycles plus the cycle in progress,
+/// and the ended cycles. Reads three integers off the scenario, once per interval, so the sample allocates nothing; with no autopilot all three read <c>n/a</c>.
+/// </summary>
+public static class SoakTallies
+{
+    /// <summary>Fills the three tallies of <paramref name="snapshot"/> from <paramref name="autopilot"/>, or <c>n/a</c> (null) for each when it is null.</summary>
+    /// <param name="snapshot">The reading to fill.</param>
+    /// <param name="autopilot">The running autopilot, or null.</param>
+    public static void Read(SoakSnapshot snapshot, Lifestone.Client.Session.Autopilot.AutopilotScenario? autopilot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (autopilot is null)
+        {
+            snapshot.Kills = snapshot.Deaths = snapshot.Cycles = snapshot.HitMax = snapshot.StanceChanges = snapshot.TargetDiedMidCast = null;
+            snapshot.HpPct = snapshot.SpPct = snapshot.MpPct = null;
+            snapshot.LootKept = snapshot.LootLeft = snapshot.FreeSlots = snapshot.Trips = snapshot.WorthALook = null;
+            snapshot.CorpsesOpened = snapshot.LootLeftAggro = snapshot.LootLeftDecayed = null;
+            snapshot.LootBusyWaits = snapshot.LootLeftBusy = snapshot.LootLeftUnreached = null;
+            snapshot.BurdenPct = null;
+            snapshot.FreeComponents = snapshot.FreeKit = snapshot.FreeReview = snapshot.SelfEquips = snapshot.StoneRefills = snapshot.StoneCaptures = null;
+            snapshot.TurnReversals = snapshot.TurnFlips = snapshot.ProgressBacks = snapshot.Swings = null;
+            return;
+        }
+
+        var live = autopilot.State == Lifestone.Client.Session.Autopilot.AutopilotState.Fight && autopilot.CurrentRun is Lifestone.Client.Session.Scenarios.Journey.IStationInner { Scenario: Lifestone.Client.Session.Scenarios.IStoppableFight fight } ? fight.Kills : 0; // the fight in progress (its kills join the tally when it ends)
+        snapshot.Kills = autopilot.Totals.Kills + autopilot.CycleTally.Kills + live;
+        snapshot.Deaths = autopilot.Totals.Deaths + autopilot.CycleTally.Deaths;
+        snapshot.Cycles = autopilot.Cycles;
+        snapshot.HitMax = autopilot.HitMax; // M5 7 F16: the vitals and the biggest hit
+        snapshot.StanceChanges = autopilot.StanceChanges; // M5 7 F25
+        snapshot.TargetDiedMidCast = autopilot.TargetDiedMidCast; // M5 7 F28
+        snapshot.LootKept = Lifestone.Client.Session.Mage.LootTally.Kept; // M5 7 F29 (D96): the loot and the load, report-only
+        snapshot.LootLeft = Lifestone.Client.Session.Mage.LootTally.Left;
+        snapshot.CorpsesOpened = Lifestone.Client.Session.Mage.LootTally.Opened; // M5 7 loot retry: the corpses opened, put off and given up
+        snapshot.LootLeftAggro = Lifestone.Client.Session.Mage.LootTally.LeftAggro;
+        snapshot.LootLeftDecayed = Lifestone.Client.Session.Mage.LootTally.LeftDecayed;
+        snapshot.LootBusyWaits = Lifestone.Client.Session.Mage.LootTally.BusyWaits; // M5 7 D123
+        snapshot.LootLeftBusy = Lifestone.Client.Session.Mage.LootTally.LeftBusy;
+        snapshot.LootLeftUnreached = Lifestone.Client.Session.Mage.LootTally.LeftUnreached;
+        snapshot.WorthALook = Lifestone.Client.Session.Mage.KeepAsideTally.WorthALook; // M5 7 F30
+        snapshot.FreeComponents = Lifestone.Client.Session.Mage.PackTally.FreeComponents is var fc and >= 0 ? fc : null; // M5 7 D121: the side packs' free slots, n/a before a layout was read
+        snapshot.FreeKit = Lifestone.Client.Session.Mage.PackTally.FreeKit is var fk and >= 0 ? fk : null;
+        snapshot.FreeReview = Lifestone.Client.Session.Mage.PackTally.FreeReview is var fr and >= 0 ? fr : null;
+        snapshot.SelfEquips = Lifestone.Client.Session.Mage.PackTally.SelfEquips; // M5 7 D125
+        snapshot.StoneRefills = Lifestone.Client.Session.Mage.PackTally.StoneRefills;
+        snapshot.StoneCaptures = Lifestone.Client.Session.Mage.PackTally.StoneCaptures;
+        snapshot.TurnReversals = Lifestone.Client.Movement.Wayfinding.SteeringTally.TurnReversals; // M5 7 D134: the walkers' steering totals
+        snapshot.TurnFlips = Lifestone.Client.Movement.Wayfinding.SteeringTally.TurnFlips;
+        snapshot.ProgressBacks = Lifestone.Client.Movement.Wayfinding.SteeringTally.ProgressBacks;
+        snapshot.Swings = Lifestone.Client.Movement.Wayfinding.SteeringTally.Swings;
+        snapshot.Trips = autopilot.Totals.Trips + autopilot.CycleTally.Trips;
+        if (autopilot.TryLoadShares(out var free, out var burdenPercent))
+        {
+            (snapshot.FreeSlots, snapshot.BurdenPct) = (free, burdenPercent);
+        }
+        else
+        {
+            snapshot.FreeSlots = null;
+            snapshot.BurdenPct = null;
+        }
+        if (autopilot.TryVitalShares(out var hp, out var sp, out var mp))
+        {
+            (snapshot.HpPct, snapshot.SpPct, snapshot.MpPct) = (hp, sp, mp);
+        }
+        else
+        {
+            snapshot.HpPct = snapshot.SpPct = snapshot.MpPct = null;
         }
     }
 }

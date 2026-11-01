@@ -176,6 +176,12 @@ public sealed class RebuffHostLogic : IDisposable
     /// <summary>The notice when the switch is turned off.</summary>
     public const string OffNotice = "auto-buff off";
 
+    /// <summary>The log line when the autopilot's dial runs and the driver stands down (M5 4 F3, 4-R4).</summary>
+    public const string StandDownLine = "auto-buff: standing down: the autopilot owns the buffs";
+
+    /// <summary>The log line when the autopilot's dial no longer runs and the driver goes on.</summary>
+    public const string ResumeLine = "auto-buff: the autopilot no longer owns the buffs: the driver goes on";
+
     /// <summary>The notice for a character without a buff profile (the driver stays off).</summary>
     public const string NoProfileNotice = "no buff profile for this character";
 
@@ -196,6 +202,7 @@ public sealed class RebuffHostLogic : IDisposable
     private Action<string>? _notice;
     private ArmourBuffLedger? _ledger;
     private IArmourLedgerStore? _cycleStore;
+    private bool _standingDown;
 
     /// <summary>The logic for a play session.</summary>
     /// <param name="options">The buff options (<see cref="BuffOptions.Auto"/> is the switch's start, the margin and the check interval the driver's).</param>
@@ -213,6 +220,15 @@ public sealed class RebuffHostLogic : IDisposable
 
     /// <summary>True while the switch is on (the option, or the key).</summary>
     public bool On => _want;
+
+    /// <summary>
+    /// True while another owner of the character's buffs runs (M5 4 F3, 4-R4: the autopilot's dial is Running or Stopping): the driver starts no pass (a pass under way finishes), logs <see cref="StandDownLine"/> once, and goes on when this
+    /// returns false (<see cref="ResumeLine"/>). The switch (<see cref="On"/>) is not changed: the person's key still flips it. Null (the default): nobody else owns them.
+    /// </summary>
+    public Func<bool>? StandDownWhile { get; set; }
+
+    /// <summary>True while the driver stands down for another owner of the buffs (<see cref="StandDownWhile"/>).</summary>
+    public bool StandingDown => _standingDown;
 
     /// <summary>True while the character is in the world and has a buff profile (known once the character has been bound).</summary>
     public bool HasProfile => _bound && _hasProfile;
@@ -287,7 +303,7 @@ public sealed class RebuffHostLogic : IDisposable
         Say(_want ? OnNotice : OffNotice);
         if (_driver is not null)
         {
-            _driver.Enabled = _want;
+            _driver.Enabled = _want && !_standingDown;
         }
     }
 
@@ -331,7 +347,14 @@ public sealed class RebuffHostLogic : IDisposable
         }
 
         var driver = _driver!;
-        driver.Enabled = _want;
+        var standDown = StandDownWhile?.Invoke() ?? false;
+        if (standDown != _standingDown)
+        {
+            _standingDown = standDown;
+            _log.Info(BuffCycle.LogCategory, standDown ? StandDownLine : ResumeLine);
+        }
+
+        driver.Enabled = _want && !standDown;
         var now = session.Clock.Now;
         driver.Tick(now);
         _notices!.Observe(now);

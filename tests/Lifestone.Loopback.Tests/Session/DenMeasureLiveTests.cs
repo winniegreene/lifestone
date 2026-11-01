@@ -1,13 +1,16 @@
 using System.Globalization;
 using System.Numerics;
 using System.Text;
+using System.Text.RegularExpressions;
 using Lifestone.Client.Interiors;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
+using Lifestone.Client.Session.StandIn;
 using Lifestone.Client.Tests;
 using Lifestone.Client.World;
 using Lifestone.Data.Dat;
@@ -23,7 +26,7 @@ namespace Lifestone.Loopback.Tests.Session;
 /// M5 item 0 (c4), the den measuring class: ONE test per measure, run by the LEAD ONLY, one at a time, with the backend up and the Lifestone server mod ready:
 /// <c>dotnet test tests/Lifestone.Loopback.Tests --filter "FullyQualifiedName~DenMeasureLiveTests.&lt;Name&gt;"</c>. They run on BSD Mage on <c>test</c> (decision D5: the copy the last gate left, level 127; never re-created, reset or levelled here beyond the
 /// kills it makes), over the shared session, and send no mod verb except <c>place</c> (the Action API and the Place tool only; the kit's components are only read). Each prints one <c>[measure] &lt;name&gt; k=v ...</c> line (and some detail lines) and writes them to
-/// <c>cache/m5/0/measures/&lt;name&gt;.txt</c> of the running checkout. A test asserts only that it measured: a measure that could not be taken prints why and fails, named; no number is ever guessed.
+/// <c>cache/m5/0/measures/&lt;name&gt;.txt</c> of the running checkout (item 3's two measures write <c>cache/m5/3/measures/&lt;name&gt;.txt</c>). A test asserts only that it measured: a measure that could not be taken prints why and fails, named; no number is ever guessed.
 /// <para><b>Not in the gate:</b> the class carries <c>Lane=solo</c> (tools/live-gate.ps1 leaves a Solo class out of the account lanes unless GateAreas.psd1's InLane lists it, and it does not) and <c>Tier=Measure</c>; it is never Soak.</para>
 /// <list type="bullet">
 /// <item><c>RespawnAndBurn</c> (about 35 min): the buff top-up, then the existing fight loop (<see cref="FightScenario"/>, Flame Bolt at the chosen level) on the arrival floor for 1,800 s of fight time. It prints: the kills (0x01AD times) and kills per hour; the Tusker
@@ -41,6 +44,19 @@ namespace Lifestone.Loopback.Tests.Session;
 /// <item><c>WingProbe</c> (about 4 min, bounded): the mage is placed on the Virindi's spawn point in cell 0x0105016C at z -24 (a point a creature stands on; the den map names no stairs cell) and stands up to 120 s; it prints the spell damage taken per line, the first hit and the time to 50% health, and at 50%
 /// goes back to the arrival with <c>place</c>. A death is reported <c>died=yes</c> and not recovered. The kill switch is set at the end of the stand as a flag only: it refuses Automation actions and these measures send Host ones, so it guards nothing here.</item>
 /// <item><c>ManaDance</c> (about 25 min, Holtburg): the owner's stamina to mana dance. Per dance: wait up to 120 s for stamina of 60% or more; spend mana to 15 or less by refreshing self buffs (a refused spend cast is logged with its code and that spell dropped); then press Stamina to Mana Self (the highest level the book holds, power 300 or under) every 0.25 s after each failed try, up to 40 tries. 5 dances at mana 15 or less and 1 reference dance at mana 40-60. Per try: time, mana and stamina before and after and the outcome (landed, refused short of mana, fizzled, busy, or the exact kind and code); per dance and overall: landing chance per try, mana gained and stamina taken per landed cast, mana per second of dancing against the measured 0.44 regeneration.</item>
+/// <item><c>FightDance</c> (about 40 min, M5 1 F1) and <c>FightDanceVi</c> (about 25 min): the top-up, the mana spent to 15 or less, then the fight with no kill limit to <c>--fight-minutes</c> 30 (VII) or 15 (<c>--fight-max-level 6</c>) under the
+/// fight's mana order (D15, D27): the fight's line and the dances, presses, landings, refusals, mana gained and stamina spent per landing, the lowest stamina and the waits. Each asserts only that it measured.</item>
+/// <item><c>DenTour</c> (about 35 min, M5 item 2 k1): the top-up, then the fight on the den's profile (all six storeys, the default tour: the nearest standing slot, down and back, the timed return over the respawn schedule) with <c>--fight-kills 0</c> and
+/// <c>--fight-minutes 30</c> at the ground's spell plan. It prints the kills and <c>kills_per_hour</c> (item 0's floor-only figure to beat: 68) and <c>kills_per_hour_burst</c>, the storeys visited, the basement entries, the timed returns and the slots standing, the walks and the failed
+/// legs the walk recovered from, and the mana wait (the longest, judged at 10 s or less in the gate; the total), with the kills at every 5 minutes. It asserts only that the fight ended ok and ran to its 30 minutes.</item>
+/// <item><c>DenLoot</c> (about 35 min, M5 item 3 c2b, <c>m5-den-loot-value</c>): the top-up, then the fight on the den's profile with <c>--fight-loot on</c> (<c>Loot = true</c>) for 30 minutes under the default tour. It prints <c>kills= looted= kept= loot_value=</c> (the fight's
+/// own loot fields), <c>payout_est</c>, <c>per_kill</c> and <c>per_hour</c>. No sale is made (the measure sends no mod verb and does not leave the den), so the payout is estimated: the items that came into the pack during the fight (the ones that are not coin) are priced one by one
+/// by <c>VendorStock.PayoutFor</c>'s rule, <c>max(1, floor(BuyPrice x Value + 0.1))</c> in float arithmetic with promissory notes at their fixed rate, the Value read as the loot rule read it (<c>MageLootRules.ValueOf</c>), at the BuyPrice of the loot buyer the profile names
+/// (<c>ResupplyPlanner.LootBuyer</c>: the vendor whose buy mask takes the most of them), the items his mask refuses counted apart; the BuyPrice is the pinned world-database value (<c>StandInWorld.VendorBuyRate</c>, 0.9) and <c>TODO(m5-loot-buyprice-wire)</c> names that it is
+/// not the vendor's own 0062 (the first real sale of the resupply station reads it). The pyreals the corpses held are the coin gained (CoinValue before and after) and are reported beside the payout, not inside it. It asserts only that it measured.</item>
+/// <item><c>ComponentLossVi</c> (about 10 min, M5 item 3 c2b, <c>m5-component-loss-vi</c>): the top-up, the four foci checked in the pack, then the fight at <c>--fight-max-level 6</c> (Flame Bolt VI) until 60 casts of it reached the server (landed or fizzled, as <c>SpellTable</c> counts them), with the pack's
+/// Prismatic Tapers (20631) and Pyreal Scarabs counted before and after. It prints <c>casts= tapers_burned= tapers_per_cast= scarabs_burned=</c>, beside VII's measured 0.43 tapers a cast (<c>RespawnAndBurn</c>), and every other spell cast in the window (a dance's Stamina to Mana burns components too) marks the burn
+/// not clean. It asserts only that it measured: the 60 casts were reached with the foci in the pack.</item>
 /// <item><c>KitAndVitals</c> (short): the components by weenie id, the burden, the four foci (15268-15271), the vitals, War Magic buffed and base, Mana Conversion.</item>
 /// </list>
 /// The readers are <c>WorldSqlFactsRunTests</c> (offline) and the unit test <c>MageLevel80SkillTests</c> (Lifestone.Client.Tests).
@@ -74,7 +90,42 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
     [LoopbackFact]
     public void KitAndVitals() => Run(DenLeg.Which.Kit, "KitAndVitals", 120);
 
-    private void Run(DenLeg.Which which, string name, double seconds)
+    /// <summary>
+    /// M5 1 F1 (about 40 min: the lead's 30-minute live read): the buff top-up, the mana spent to 15 or less as <see cref="ManaDance"/> does (self buffs refreshed, a refused spend logged), then the fight on the arrival floor with
+    /// <c>--fight-minutes 30</c> and <c>--fight-kills 0</c> at Flame Bolt VII (BSD Mage's default) under the new mana order. It measures the fight's line (the waits, the kill rates, the cast tally, the dances) and its own: dances,
+    /// presses, landings, refusals, the mana gained and the stamina spent per landing, the lowest stamina, the level, the potions and rests. It asserts only that it measured: the fight ended ok at the minutes and at least one dance ran.
+    /// </summary>
+    [LoopbackFact]
+    public void FightDance() => Run(DenLeg.Which.FightDance, "FightDance", 3000);
+
+    /// <summary>M5 1 F1 (about 25 min; the lead decides whether to run it): <see cref="FightDance"/> at <c>--fight-max-level 6</c> (Flame Bolt VI, D26) for 15 minutes; the same line and the same assertion.</summary>
+    [LoopbackFact]
+    public void FightDanceVi() => Run(DenLeg.Which.FightDanceVi, "FightDanceVi", 1800);
+
+    /// <summary>
+    /// M5 item 2 k1 (about 35 min: the lead's 30-minute read of the whole den; run alone, with the backend up): BSD Mage's top-up, then the fight on the den's profile with <c>Kills=0 Minutes=30</c> and the default tour (<see cref="GroundWalk"/>'s
+    /// <see cref="GroundTour"/>), prints <c>[measure] DenTour</c> with the kills, <c>kills_per_hour</c> against item 0's 68 (the arrival floor alone: 34 kills in 1,800 s), <c>kills_per_hour_burst</c>, the storeys visited, the basement entries, the timed returns, the slots standing, the walks
+    /// and the failed legs, the mana wait, and F5's report-only purpose fields (<c>walks_by_purpose= holds= hold_s= slots_seen_empty= walk_loops=</c>, <see cref="GroundTour.PurposeFields"/>: every walk with a named purpose, the holds, the slots seen empty, the walk loops caught). It asserts only that it measured: the fight ended ok and ran to its minutes.
+    /// </summary>
+    [LoopbackFact]
+    public void DenTour() => Run(DenLeg.Which.Tour, "DenTour", 3000);
+
+    /// <summary>
+    /// M5 item 3 c2b (<c>m5-den-loot-value</c>; about 35 min: the lead's 30-minute read of what the den's corpses are worth; run alone, with the backend up): <see cref="DenTour"/> with <c>Loot = true</c> (<c>--fight-loot on</c>, D38: the one measure that runs with looting on).
+    /// Prints <c>[measure] DenLoot kills= looted= kept= loot_value= payout_est= per_kill= per_hour=</c> and writes <c>cache/m5/3/measures/DenLoot.txt</c>. The payout is an estimate by <c>VendorStock.PayoutFor</c>'s rule over the items that came into the pack, at the loot buyer's BuyPrice (see the class summary).
+    /// It asserts only that it measured: the fight ended ok at its minutes and the loot fields were read.
+    /// </summary>
+    [LoopbackFact]
+    public void DenLoot() => Run(DenLeg.Which.Loot, "DenLoot", 3300, "3");
+
+    /// <summary>
+    /// M5 item 3 c2b (<c>m5-component-loss-vi</c>; about 10 min, run alone with the backend up): Flame Bolt VI with the four foci for 60 casts, the Prismatic Tapers and Pyreal Scarabs counted before and after. Prints <c>[measure] ComponentLossVi casts= tapers_burned= tapers_per_cast= scarabs_burned=</c>
+    /// beside VII's measured 0.43 and writes <c>cache/m5/3/measures/ComponentLossVi.txt</c>. It asserts only that it measured: 60 casts reached the server with the foci in the pack.
+    /// </summary>
+    [LoopbackFact]
+    public void ComponentLossVi() => Run(DenLeg.Which.ComponentVi, "ComponentLossVi", 1500, "3");
+
+    private void Run(DenLeg.Which which, string name, double seconds, string item = "0")
     {
         using var dats = DatSet.Open();
         var spells = SpellTableData.Load(dats).Spells;
@@ -88,7 +139,14 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
 
         if (leg.Fields is { } fields)
         {
-            MeasureText.Emit(output, name, fields, leg.More);
+            if (item == "0")
+            {
+                MeasureText.Emit(output, name, fields, leg.More);
+            }
+            else
+            {
+                EmitFor(output, item, name, fields, leg.More);
+            }
         }
         else
         {
@@ -100,10 +158,30 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
         Assert.Empty(leg.Problems);
     }
 
+    /// <summary>
+    /// <see cref="MeasureText.Emit"/> for an item other than 0: the same line and detail lines, written to <c>cache/m5/&lt;item&gt;/measures/&lt;name&gt;.txt</c> of the running checkout (derived data, gitignored). MeasureText.Emit (DenMeasure.cs, item 0's) names item 0's directory
+    /// itself and was not edited in this slice (<c>TODO(m5-measure-dir)</c>: give it the item as a parameter and drop this copy).
+    /// </summary>
+    private static void EmitFor(ITestOutputHelper output, string item, string name, string fields, IEnumerable<string>? more)
+    {
+        var line = $"[measure] {name} {fields}";
+        output.WriteLine(line);
+        var lines = new List<string> { line };
+        foreach (var m in more ?? [])
+        {
+            output.WriteLine("[measure] " + name + " | " + m);
+            lines.Add(m);
+        }
+
+        var dir = Path.Combine(RepositoryFiles.Root, "cache", "m5", item, "measures");
+        Directory.CreateDirectory(dir);
+        File.WriteAllLines(Path.Combine(dir, name + ".txt"), lines);
+    }
+
     /// <summary>The measuring leg: it finds BSD Mage in the world (the shared session put it there) and runs one measure's script.</summary>
     internal sealed class DenLeg : LiveLeg
     {
-        internal enum Which { Respawn, Regen, Spells, Ring, Wing, Kit, Dance }
+        internal enum Which { Respawn, Regen, Spells, Ring, Wing, Kit, Dance, FightDance, FightDanceVi, Tour, Loot, ComponentVi }
 
         private const double FightSeconds = 1800;
         private static readonly uint[] Foci = [15268, 15269, 15270, 15271];
@@ -132,9 +210,9 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
             Stage = "running";
             Require(LiveMage.WrongCharacter(S, MageTemplate.CharacterName) is null, LiveMage.WrongCharacter(S, MageTemplate.CharacterName) ?? string.Empty);
             Require(AlreadyInWorld, "the shared session did not put BSD Mage in the world");
-            if (_which != Which.Respawn)
+            if (_which is not (Which.Respawn or Which.FightDance or Which.FightDanceVi or Which.Tour or Which.Loot or Which.ComponentVi))
             {
-                Follow ??= new HuntFollow(Dats, new RecordingLogSink()); // the fight scenario's DenWalk follows server moves itself
+                Follow ??= new HuntFollow(Dats, new RecordingLogSink()); // the fight scenario's GroundWalk follows server moves itself
             }
 
             _m.Start(S);
@@ -148,6 +226,11 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
                     Which.Ring => RingCluster(),
                     Which.Wing => WingProbe(),
                     Which.Dance => ManaDance(),
+                    Which.FightDance => FightDance(30, FightOptions.DefaultMaxLevel),
+                    Which.FightDanceVi => FightDance(15, 6),
+                    Which.Tour => DenTour(30),
+                    Which.Loot => DenLoot(30),
+                    Which.ComponentVi => ComponentLossVi(ViCasts),
                     _ => KitAndVitals(),
                 };
                 foreach (var h in body)
@@ -169,7 +252,7 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
 
         private static string F(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
 
-        private static bool InDen(uint cell) => cell >> 16 == BlackSpawnDen.Landblock;
+        private static bool InDen(uint cell) => LiveDen.Ground.InLandblocks(cell);
 
         private IEnumerable<ActionHandle?> GoTo(TeleportDestination where, string what)
         {
@@ -188,7 +271,7 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
 
         private IEnumerable<ActionHandle?> GoDen()
         {
-            if (BlackSpawnDen.IsFloorCell(S.State.Self.Position?.CellId ?? 0))
+            if (LiveDen.Ground.IsWalkable(S.State.Self.Position?.CellId ?? 0))
             {
                 yield break;
             }
@@ -253,7 +336,7 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
                 return 0;
             }
 
-            return S.State.Objects.NearestCreature(ArenaProfile.TargetWcids, in here, (float)metres, BlackSpawnDen.IsFloorCell, out var guid) ? guid : 0;
+            return S.State.Objects.NearestCreature(LiveDen.Ground.TargetWcids(), in here, (float)metres, LiveDen.Ground.IsWalkable, out var guid) ? guid : 0;
         }
 
         private int TuskersWithin(double metres)
@@ -279,7 +362,7 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
         private IEnumerable<ActionHandle?> RespawnAndBurn()
         {
             var fightOptions = new FightOptions { Kills = FightOptions.MaxKills, Seconds = FightSeconds, LeaveOnFailure = false, LeaveAtEnd = false };
-            var fight = new FightScenario(_spells, LiveMage.KitAccount(), new BuffOptions(), fightOptions, DenWalk.Create(Dats, _sink), _sink, endSession: false, stages: FightStages.Buffs | FightStages.Place | FightStages.Mode) { RequireCharacter = true };
+            var fight = new FightScenario(_spells, LiveMage.KitAccount(), new BuffOptions(), fightOptions, GroundWalk.Create(Dats, LiveDen.Ground, _sink), _sink, endSession: false, stages: FightStages.Buffs | FightStages.Place | FightStages.Mode) { RequireCharacter = true };
             SortedDictionary<uint, int>? before = null;
             double start = double.NaN;
             var manaStart = 0u;
@@ -316,7 +399,7 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
             var kills = _m.KillTexts.Count(t => t >= start);
             var deaths = _m.Deaths.Where(d => d.T >= start).ToList();
             var (inOrder, byCell, respawnCreates, unpairedDeaths) = _m.Respawns(start);
-            var floorCreates = _m.Creates.Where(c => c.T >= start && BlackSpawnDen.IsFloorCell(c.Cell)).ToList();
+            var floorCreates = _m.Creates.Where(c => c.T >= start && LiveDen.Ground.IsWalkable(c.Cell)).ToList();
             var bolts = _m.Magic.Where(l => l.T >= start && l.Kind == MagicLineKind.DamageDealt).Select(l => (double)l.Amount).ToList();
             // Flame Bolt VII only (2128): any other spell cast in the window is listed, and the burn is then not clean.
             var windowCasts = _m.Actions.Where(a => a.Kind == ActionKind.CastSpell && a.QueuedAt >= start).ToList();
@@ -494,7 +577,7 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
                 var options = new FightOptions { Kills = FightOptions.MaxKills, Seconds = 900, SpellId = id, LeaveOnFailure = false, LeaveAtEnd = false };
                 var stages = (firstFight ? FightStages.Buffs : FightStages.None) | FightStages.Place | FightStages.Mode;
                 firstFight = false;
-                var fight = new FightScenario(_spells, LiveMage.KitAccount(), new BuffOptions(), options, DenWalk.Create(Dats, _sink), _sink, endSession: false, stages: stages) { RequireCharacter = true };
+                var fight = new FightScenario(_spells, LiveMage.KitAccount(), new BuffOptions(), options, GroundWalk.Create(Dats, LiveDen.Ground, _sink), _sink, endSession: false, stages: stages) { RequireCharacter = true };
                 var actions0 = _m.Actions.Count;
                 var magic0 = _m.Magic.Count;
                 var refusals = new List<string>();
@@ -619,7 +702,7 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
                 var proven = new List<uint>();
                 while (proven.Count < 3 && tried.Count < 8 && S.State.Self.Position is { } here)
                 {
-                    if (!S.State.Objects.NearestCreature(ArenaProfile.TargetWcids, in here, 60f, BlackSpawnDen.IsFloorCell, tried, out var target))
+                    if (!S.State.Objects.NearestCreature(LiveDen.Ground.TargetWcids(), in here, 60f, LiveDen.Ground.IsWalkable, tried, out var target))
                     {
                         break;
                     }
@@ -986,6 +1069,302 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
             _more.InsertRange(0, danceLines);
         }
 
+        // ---------------------------------------------------------------------------------------------- 9 FightDance (M5 1 F1)
+
+        /// <summary>
+        /// The fight's mana order live: the top-up, the mana spent to 15 or less with self buffs (as <see cref="ManaDance"/>), then <paramref name="minutes"/> of the fight with no kill limit at levels up to <paramref name="maxLevel"/>.
+        /// Per dance it reads the vitals at its start and at its landing (the mana gained and the stamina spent per landing), and the lowest stamina of the fight.
+        /// </summary>
+        private IEnumerable<ActionHandle?> FightDance(double minutes, int maxLevel)
+        {
+            foreach (var h in TopUp()) { yield return h; }
+
+            foreach (var h in Mode(CombatMode.Magic)) { yield return h; }
+
+            var book = S.State.Self.Spellbook;
+            var spenders = new List<SpellInfo>();
+            foreach (var l in ArenaProfile.Lines.Where(l => l.IsBuff && l.Role is ProfileRole.CreatureBuff or ProfileRole.LifeBuff))
+            {
+                foreach (var sp in l.Spells.Where(sp => sp.Power <= 300 && book.Knows(sp.Id)))
+                {
+                    if (_spells.TryGetValue(sp.Id, out var inf) && GearCasts.FormOf(inf) == CastForm.Self)
+                    {
+                        spenders.Add(inf);
+                    }
+                }
+            }
+
+            Require(spenders.Count > 0, "no self buff in the book to spend mana with");
+            var used = new Dictionary<string, int>();
+            foreach (var h in SpendDown(15, spenders, used, 1)) { yield return h; }
+
+            var spentTo = Vital(MageTemplate.MaxMana);
+            _more.Add($"mana spent down to {spentTo.Cur}/{spentTo.Max} with self buffs: {string.Join(", ", used.Select(kv => $"{kv.Key} x{kv.Value}"))}");
+            Check(spentTo.Cur <= 15, $"the mana was not spent to 15 or less ({spentTo.Cur}/{spentTo.Max})");
+            var options = new FightOptions { Kills = FightOptions.UnlimitedKills, Minutes = minutes, MaxLevel = maxLevel, LeaveOnFailure = false, LeaveAtEnd = false };
+            var fight = new FightScenario(_spells, LiveMage.KitAccount(), new BuffOptions(), options, GroundWalk.Create(Dats, LiveDen.Ground, _sink), _sink, endSession: false, stages: FightStages.Place | FightStages.Mode) { RequireCharacter = true };
+            var status = ScenarioStatus.Running;
+            var dances = 0;
+            var landed = 0;
+            var manaAtDance = 0u;
+            var staminaAtDance = 0u;
+            var gains = new List<double>();
+            var drains = new List<double>();
+            var staminaMin = uint.MaxValue;
+            while (status == ScenarioStatus.Running)
+            {
+                status = fight.Step(S, S.Clock.Now);
+                var m = Vital(MageTemplate.MaxMana).Cur;
+                var st = Vital(MageTemplate.MaxStamina).Cur;
+                if (fight.Fighting)
+                {
+                    staminaMin = Math.Min(staminaMin, st);
+                }
+
+                if (fight.Dances > dances)
+                {
+                    dances = fight.Dances;
+                    manaAtDance = m;
+                    staminaAtDance = st;
+                }
+
+                if (fight.DancesLanded > landed)
+                {
+                    landed = fight.DancesLanded;
+                    gains.Add((double)m - manaAtDance);
+                    drains.Add((double)staminaAtDance - st);
+                }
+
+                yield return null;
+            }
+
+            fight.Dispose();
+            var t = fight.Tally;
+            Fields = string.Create(
+                CultureInfo.InvariantCulture,
+                $"fight_ok={(status == ScenarioStatus.Succeeded && fight.Failure is null ? "yes" : "no")} minutes={minutes} max_level={maxLevel} level={fight.Level} kills={t.Kills} fight_s={fight.FightSeconds:0} dances={fight.Dances} presses={fight.ManaPresses} landings={fight.DancesLanded} refusals={fight.Casts.ManaRefusals} mana_gained_per_landing[{MeasureText.Dist(gains)}] stamina_spent_per_landing[{MeasureText.Dist(drains)}] stamina_min={(staminaMin == uint.MaxValue ? "n/a" : staminaMin.ToString(CultureInfo.InvariantCulture))} potions={fight.PotionsDrunk} rests={fight.Rests} mana_wait_s={fight.ManaWaitSeconds:0.#} mana_wait_max_s={fight.ManaWaitMaxSeconds:0.#} | {fight.VerdictFields()}");
+            Check(status == ScenarioStatus.Succeeded && fight.Failure is null, "the fight did not end ok: " + (fight.Failure ?? status.ToString()));
+            Check(!double.IsNaN(fight.FightSeconds) && fight.FightSeconds >= (minutes * 60) - 1, $"the fight did not run to its {minutes} minutes (fight_s {fight.FightSeconds:0})");
+            Check(fight.Dances >= 1, "no dance ran");
+        }
+
+        // ---------------------------------------------------------------------------------------------- 10 DenTour (M5 item 2 k1)
+
+        /// <summary>Item 0's arrival-floor figure the tour is read against: 34 kills in 1,800 s, respawn-bound (m5-plan.md section 8).</summary>
+        private const double FloorOnlyKillsPerHour = 68;
+
+        /// <summary>
+        /// The whole den live: the top-up, the magic stance, then <paramref name="minutes"/> of the fight on the den's profile with no kill limit and the default tour. No mana is spent first (the fight starts as the top-up left it). It reads the fight's counters as it goes
+        /// (the kills and the storeys at every 5 minutes) and, at the end, its rates, its tour (<see cref="FightScenario.TourFields"/>'s numbers), its walks and the legs its walk recovered from, and its mana wait.
+        /// </summary>
+        private IEnumerable<ActionHandle?> DenTour(double minutes)
+        {
+            foreach (var h in TopUp()) { yield return h; }
+
+            foreach (var h in Mode(CombatMode.Magic)) { yield return h; }
+
+            var options = new FightOptions { Kills = FightOptions.UnlimitedKills, Minutes = minutes, LeaveOnFailure = false, LeaveAtEnd = false };
+            var walk = GroundWalk.Create(Dats, LiveDen.Ground, _sink);
+            var fight = new FightScenario(_spells, LiveMage.KitAccount(), new BuffOptions(), options, walk, _sink, endSession: false, stages: FightStages.Place | FightStages.Mode) { RequireCharacter = true };
+            var status = ScenarioStatus.Running;
+            var marks = new List<string>();
+            var nextMark = 300;
+            while (status == ScenarioStatus.Running)
+            {
+                status = fight.Step(S, S.Clock.Now);
+                if (!double.IsNaN(fight.FightSeconds) && fight.FightSeconds >= nextMark)
+                {
+                    marks.Add($"{nextMark / 60}min:{fight.Tally.Kills}kills/{fight.StoreysVisited}storeys");
+                    nextMark += 300;
+                }
+
+                yield return null;
+            }
+
+            fight.Dispose();
+            var tour = walk.Tour as GroundTour;
+            var kills = fight.Tally.Kills;
+            Fields = string.Create(
+                CultureInfo.InvariantCulture,
+                $"fight_ok={(status == ScenarioStatus.Succeeded && fight.Failure is null ? "yes" : "no")} minutes={minutes} level={fight.Level} fight_s={fight.FightSeconds:0} kills={kills} kills_per_hour={fight.KillsPerHour:0.#} kills_per_hour_burst={fight.KillsPerHourBurst:0.#} floor_only_kills_per_hour={FloorOnlyKillsPerHour} beats_floor_only={(fight.KillsPerHour > FloorOnlyKillsPerHour ? "yes" : "no")} idle_s={fight.IdleSeconds:0} "
+                + $"storeys_visited={fight.StoreysVisited} basement_entries={fight.BasementEntries} returns={(tour is null ? "n/a" : tour.Returns.ToString(CultureInfo.InvariantCulture))} slots_standing={(tour is null ? "n/a" : tour.Schedule.StandingHunted.ToString(CultureInfo.InvariantCulture))} walks={fight.Walks} failed_legs={walk.RecoveredLegs} legs_recovered={walk.RecoveredLegs} kills_unpaired={(tour is null ? "n/a" : tour.Schedule.Unpaired.ToString(CultureInfo.InvariantCulture))} slots_expired={(tour is null ? "n/a" : tour.Schedule.Expired.ToString(CultureInfo.InvariantCulture))} {(tour is null ? "walks_by_purpose=n/a holds=n/a hold_s=n/a slots_seen_empty=n/a walk_loops=n/a" : tour.PurposeFields(S.Clock.Now))} "
+                + $"mana_wait_max_s={fight.ManaWaitMaxSeconds:0.#} mana_wait_s={fight.ManaWaitSeconds:0.#} kills_by_5min=[{string.Join(' ', marks)}] | {fight.VerdictFields()}");
+            Check(status == ScenarioStatus.Succeeded && fight.Failure is null, "the fight did not end ok: " + (fight.Failure ?? status.ToString()));
+            Check(!double.IsNaN(fight.FightSeconds) && fight.FightSeconds >= (minutes * 60) - 1, $"the fight did not run to its {minutes} minutes (fight_s {fight.FightSeconds:0})");
+        }
+
+        // ---------------------------------------------------------------------------------------------- 11 DenLoot (M5 item 3 c2b, m5-den-loot-value)
+
+        /// <summary>The BuyPrice the estimate prices the kept items at: the world database's PropertyFloat 37 for the vendors of the den's ground, pinned by the stand-in's catalogue (capture C2 for Renald). <c>TODO(m5-loot-buyprice-wire)</c>: the vendor's own 0062 is not read here.</summary>
+        private const float LootBuyerBuyPrice = StandInWorld.VendorBuyRate;
+
+        /// <summary>ACE's <c>ItemType.Money</c> (0x40): coin is counted by the CoinValue before and after, not as a pack item.</summary>
+        private const uint MoneyItemType = 0x40;
+
+        private static readonly Regex LootFieldsPattern = new(@"^loot=on looted=(?<looted>\d+) kept=(?<kept>\d+) loot_value=(?<value>\d+)$", RegexOptions.CultureInvariant);
+
+        /// <summary><see cref="VendorStock.PayoutFor(uint, uint)"/>'s rule for an item of <paramref name="itemType"/> whose whole stack is worth <paramref name="value"/> at the vendor's <paramref name="buyPrice"/>: <c>max(1, floor(rate x value + 0.1))</c> in float arithmetic, a promissory note at its fixed rate.</summary>
+        private static long PayoutBy(float buyPrice, uint itemType, long value)
+        {
+            var rate = itemType == VendorStock.PromissoryNoteType ? VendorStock.PromissoryNoteBuyRate : buyPrice;
+            var payout = Math.Floor((double)(rate * value) + 0.1);
+            return payout < 1 ? 1 : (long)payout;
+        }
+
+        private HashSet<uint> HeldGuids() => [.. S.State.Objects.All.Where(o => S.State.Self.Inventory.Contains(o.Guid)).Select(o => o.Guid)];
+
+        /// <summary>
+        /// The whole den with looting on: the top-up, the magic stance, then <paramref name="minutes"/> of the fight on the den's profile with no kill limit, the default tour and <c>Loot = true</c>. At the end it reads the fight's loot fields (<see cref="FightScenario.LootFields"/>), prices the items that
+        /// came into the pack by the vendor rule at the loot buyer's BuyPrice (no sale is made), and reads the pyreals gained from the coin before and after.
+        /// </summary>
+        private IEnumerable<ActionHandle?> DenLoot(double minutes)
+        {
+            foreach (var h in TopUp()) { yield return h; }
+
+            foreach (var h in Mode(CombatMode.Magic)) { yield return h; }
+
+            var options = new FightOptions { Kills = FightOptions.UnlimitedKills, Minutes = minutes, Loot = true, LeaveOnFailure = false, LeaveAtEnd = false };
+            var walk = GroundWalk.Create(Dats, LiveDen.Ground, _sink);
+            var fight = new FightScenario(_spells, LiveMage.KitAccount(), new BuffOptions(), options, walk, _sink, endSession: false, stages: FightStages.Place | FightStages.Mode) { RequireCharacter = true };
+            var heldBefore = HeldGuids();
+            var coinBefore = S.State.Self.Qualities.CoinValue;
+            var status = ScenarioStatus.Running;
+            var marks = new List<string>();
+            var nextMark = 300;
+            while (status == ScenarioStatus.Running)
+            {
+                status = fight.Step(S, S.Clock.Now);
+                if (!double.IsNaN(fight.FightSeconds) && fight.FightSeconds >= nextMark)
+                {
+                    marks.Add($"{nextMark / 60}min:{fight.Tally.Kills}kills");
+                    nextMark += 300;
+                }
+
+                yield return null;
+            }
+
+            var lootFields = fight.LootFields();
+            fight.Dispose();
+            var parsed = LootFieldsPattern.Match(lootFields);
+            Check(parsed.Success, $"the fight's loot fields were not 'loot=on looted= kept= loot_value=' ({lootFields}): looting was not on");
+            var kills = fight.Tally.Kills;
+            var seconds = fight.FightSeconds;
+
+            // The items that came into the pack during the fight and are not coin (a stack of a held kind merges into its stack and is not counted here: the fight's kept= and loot_value= are the full count).
+            var kept = new List<(string Name, uint ItemType, long Value)>();
+            foreach (var o in S.State.Objects.All.Where(o => S.State.Self.Inventory.Contains(o.Guid) && !heldBefore.Contains(o.Guid) && (o.ItemType & MoneyItemType) == 0).ToList())
+            {
+                var value = MageLootRules.ValueOf(o, S.State.Appraisals.TryGet(o.Guid, out var appraisal) ? appraisal : null) ?? 0;
+                kept.Add((o.Name, o.ItemType, value));
+            }
+
+            var buyer = ResupplyPlanner.LootBuyer(LiveDen.Ground, [.. kept.Select(k => k.ItemType)]);
+            var sellable = kept.Where(k => buyer is not null && buyer.Buys(k.ItemType)).ToList();
+            var payout = sellable.Sum(k => PayoutBy(LootBuyerBuyPrice, k.ItemType, k.Value));
+            var coinGained = S.State.Self.Qualities.CoinValue - coinBefore;
+            var perKill = kills > 0 ? (double)payout / kills : double.NaN;
+            var perHour = seconds > 0 ? payout / seconds * 3600 : double.NaN;
+            var incomePerHour = seconds > 0 ? (payout + coinGained) / seconds * 3600 : double.NaN;
+            string N(double v) => double.IsNaN(v) ? "n/a" : v.ToString("0.#", CultureInfo.InvariantCulture);
+            Fields = string.Create(
+                CultureInfo.InvariantCulture,
+                $"kills={kills} looted={(parsed.Success ? parsed.Groups["looted"].Value : "n/a")} kept={(parsed.Success ? parsed.Groups["kept"].Value : "n/a")} loot_value={(parsed.Success ? parsed.Groups["value"].Value : "n/a")} payout_est={payout} per_kill={N(perKill)} per_hour={N(perHour)} "
+                + $"pyreals_found={coinGained} income_per_hour={N(incomePerHour)} buyer={(buyer is null ? "none" : buyer.Name.Replace(' ', '_'))} buy_price={LootBuyerBuyPrice} (pinned, TODO(m5-loot-buyprice-wire)) pack_new_items={kept.Count} sellable={sellable.Count} unsold={kept.Count - sellable.Count} "
+                + $"pack_new_value={kept.Sum(k => k.Value)} fight_ok={(status == ScenarioStatus.Succeeded && fight.Failure is null ? "yes" : "no")} minutes={minutes} fight_s={seconds:0} kills_per_hour={fight.KillsPerHour:0.#} kills_by_5min=[{string.Join(' ', marks)}] | {fight.VerdictFields()}");
+            foreach (var k in kept.OrderByDescending(k => k.Value))
+            {
+                _more.Add($"kept: '{k.Name}' type 0x{k.ItemType:X} value {k.Value}{(buyer is not null && buyer.Buys(k.ItemType) ? $" payout {PayoutBy(LootBuyerBuyPrice, k.ItemType, k.Value)}" : " not sold (the buyer's mask refuses it)")}");
+            }
+
+            _more.Add($"payout_est: the sum over the {sellable.Count} sellable of the {kept.Count} new pack items of max(1, floor({LootBuyerBuyPrice} x Value + 0.1)), VendorStock.PayoutFor's rule; no sale was made, the pyreals_found are the coin gained ({coinBefore} -> {coinBefore + coinGained}) and are not in payout_est");
+            Check(status == ScenarioStatus.Succeeded && fight.Failure is null, "the fight did not end ok: " + (fight.Failure ?? status.ToString()));
+            Check(!double.IsNaN(seconds) && seconds >= (minutes * 60) - 1, $"the fight did not run to its {minutes} minutes (fight_s {seconds:0})");
+        }
+
+        // ---------------------------------------------------------------------------------------------- 12 ComponentLossVi (M5 item 3 c2b, m5-component-loss-vi)
+
+        /// <summary>The casts the measure asks for (the brief's "about 60"), and VII's measured Prismatic Taper burn a cast (RespawnAndBurn, M5 item 0) it is read beside.</summary>
+        private const int ViCasts = 60;
+
+        private const double ViiTapersPerCast = 0.43;
+
+        /// <summary>
+        /// Flame Bolt VI with the four foci: the top-up, the foci checked in the pack, then the fight at <c>--fight-max-level 6</c> until <paramref name="castsWanted"/> casts of Flame Bolt VI have reached the server (landed or fizzled, as <c>SpellTable</c> counts them), with the pack's Prismatic Tapers and Pyreal
+        /// Scarabs counted at the fight's start and when the last cast is in. Any other spell cast in the window marks the burn not clean (<c>burn_clean=no</c>).
+        /// </summary>
+        private IEnumerable<ActionHandle?> ComponentLossVi(int castsWanted)
+        {
+            var bolt = ArenaProfile.LineNamed(ArenaProfile.WarLineName)!;
+            var viId = bolt.Spells[5].Id; // Flame Bolt VI (Numerals[5])
+            Require(Foci.All(id => S.State.Objects.All.Any(o => o.Weenie.WeenieClassId == id && S.State.Self.Inventory.Contains(o.Guid))), "the four foci (15268-15271) are not all in the pack: the build has not granted them");
+            Require(S.State.Self.Spellbook.Knows(viId), "the book does not hold Flame Bolt VI");
+            var scarabWcid = ComponentWeenies.All.Single(c => c.Name == "Pyreal Scarab").Wcid;
+            foreach (var h in TopUp()) { yield return h; }
+
+            foreach (var h in Mode(CombatMode.Magic)) { yield return h; }
+
+            var options = new FightOptions { Kills = FightOptions.UnlimitedKills, Minutes = 20, MaxLevel = 6, LeaveOnFailure = false, LeaveAtEnd = false };
+            var fight = new FightScenario(_spells, LiveMage.KitAccount(), new BuffOptions(), options, GroundWalk.Create(Dats, LiveDen.Ground, _sink), _sink, endSession: false, stages: FightStages.Place | FightStages.Mode) { RequireCharacter = true };
+            SortedDictionary<uint, int>? before = null;
+            var start = double.NaN;
+            var actions0 = 0;
+            var seen = 0;
+            var reached = 0;
+            var status = ScenarioStatus.Running;
+            while (status == ScenarioStatus.Running && reached < castsWanted)
+            {
+                status = fight.Step(S, S.Clock.Now);
+                if (double.IsNaN(start) && fight.Stage == "fight")
+                {
+                    start = S.Clock.Now;
+                    before = DenMeasure.Components(S);
+                    actions0 = seen = _m.Actions.Count;
+                    Log($"the fight begins; components before: {DenMeasure.Format(before)}");
+                }
+
+                yield return null;
+                for (; !double.IsNaN(start) && seen < _m.Actions.Count; seen++)
+                {
+                    var e = _m.Actions[seen];
+                    if (e.Kind == ActionKind.CastSpell && IsCastOf(e, viId) && (e.Outcome.Kind == ActionOutcomeKind.Confirmed || (e.Outcome.Kind == ActionOutcomeKind.ServerError && e.Outcome.Code == FightScenario.FizzleCode)))
+                    {
+                        reached++;
+                    }
+                }
+            }
+
+            var after = DenMeasure.Components(S);
+            var level = fight.Level;
+            var spell = fight.SpellId;
+            var failure = fight.Failure;
+            var fightSeconds = fight.FightSeconds;
+            fight.Dispose();
+            Require(before is not null, "the fight never began: " + failure);
+            var window = _m.Actions.Skip(actions0).Where(a => a.Kind == ActionKind.CastSpell).ToList();
+            var casts = window.Where(a => IsCastOf(a, viId)).ToList();
+            var landed = casts.Count(a => a.Outcome.Kind == ActionOutcomeKind.Confirmed);
+            var fizzled = casts.Count(a => a.Outcome.Kind == ActionOutcomeKind.ServerError && a.Outcome.Code == FightScenario.FizzleCode);
+            var reachedServer = landed + fizzled;
+            var otherCasts = window.Count - casts.Count;
+            var heldBefore = before!;
+            var tapersBefore = heldBefore.GetValueOrDefault(GearKit.PrismaticTaperWcid);
+            var tapersAfter = after.GetValueOrDefault(GearKit.PrismaticTaperWcid);
+            var scarabsBefore = heldBefore.GetValueOrDefault(scarabWcid);
+            var scarabsAfter = after.GetValueOrDefault(scarabWcid);
+            var tapersBurned = tapersBefore - tapersAfter;
+            var scarabsBurned = scarabsBefore - scarabsAfter;
+            string Per(int burned) => reachedServer > 0 ? ((double)burned / reachedServer).ToString("0.###", CultureInfo.InvariantCulture) : "n/a";
+            Fields = string.Create(
+                CultureInfo.InvariantCulture,
+                $"casts={reachedServer} tapers_burned={tapersBurned} tapers_per_cast={Per(tapersBurned)} scarabs_burned={scarabsBurned} (flame_bolt_vii_tapers_per_cast={ViiTapersPerCast}, RespawnAndBurn) scarabs_per_cast={Per(scarabsBurned)} "
+                + $"tapers_before={tapersBefore} tapers_after={tapersAfter} scarabs_before={scarabsBefore} scarabs_after={scarabsAfter} landed={landed} fizzled={fizzled} other_spell_casts={otherCasts} burn_clean={(otherCasts == 0 ? "yes" : "no")} spell={spell} level={level} wanted={castsWanted} fight_s={fightSeconds:0}");
+            _more.Add($"components before: {DenMeasure.Format(heldBefore)}; after: {DenMeasure.Format(after)}; casts of Flame Bolt VI in the window {casts.Count} (landed {landed}, fizzled {fizzled}), other casts {otherCasts}");
+            _more.Add("tapers_per_cast and scarabs_per_cast divide by the casts that reached the server (landed or fizzled), as RespawnAndBurn divided VII's drop by its casts");
+            Check(spell == viId, $"the fight cast spell {spell} (level {level}), not Flame Bolt VI ({viId}): the burn is not VI's");
+            Check(reachedServer >= castsWanted, $"only {reachedServer} of the {castsWanted} casts of Flame Bolt VI reached the server (the fight ended {failure ?? status.ToString()})");
+            Check(tapersBurned >= 0 && scarabsBurned >= 0, $"a component count grew during the casts (tapers {tapersBefore}->{tapersAfter}, scarabs {scarabsBefore}->{scarabsAfter}): the burn is not clean");
+        }
+
         // ---------------------------------------------------------------------------------------------- 7 KitAndVitals
 
         private IEnumerable<ActionHandle?> KitAndVitals()
@@ -1010,4 +1389,10 @@ public sealed class DenMeasureLiveTests(ITestOutputHelper output)
             yield break;
         }
     }
+}
+
+/// <summary>The den as a ground for the live measures (M5 item 2 g2b): the profile of the default <c>--fight-ground</c>.</summary>
+internal static class LiveDen
+{
+    public static HuntingGround Ground => GroundCatalog.Get(FightOptions.DefaultGround);
 }

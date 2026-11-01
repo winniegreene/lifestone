@@ -55,7 +55,9 @@ public static partial class OptionCatalog
         Hunt(), // the hunt loop's three options (M4 1.2 s4a; OptionCatalog.Hunt.cs)
         Lights(), // the viewer light (M3 4.1 s0; OptionCatalog.Lights.cs)
         Vitals(), // the vitals keeper's eight options (M4 P5a lane C2; OptionCatalog.Vitals.cs)
+        Casting(), // the mana order's four options (M5 1 K5; OptionCatalog.Casting.cs)
         Wayfind(), // the wayfind scenario's three options (M4 P5a S6; OptionCatalog.Wayfind.cs)
+        Autopilot(), // the autopilot's options (M5 4 a1, a2, h3; OptionCatalog.Autopilot.cs)
     ]);
 
     /// <summary>The first lines of <c>--help</c>.</summary>

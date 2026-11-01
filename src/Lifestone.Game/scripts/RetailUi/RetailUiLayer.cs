@@ -292,8 +292,10 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
             Clipboard = new DisplayServerClipboard(),
             Images = layer.Images,
             EnumMaps = dats.EnumMaps,
+            EnumNames = new Lifestone.Data.Dat.EnumMapperNames(dats),
             RetailGlitches = options.Glitches,
             ExamineIcon = options.ExamineIcon,
+            ExamineSetDetails = options.ExamineSetDetails,
             ViewportHost = layer.Viewports,
         };
         var scale = UiScalePolicy.Choose(Math.Max(1, windowSize.X), Math.Max(1, windowSize.Y), options.ScaleOverride);
@@ -317,6 +319,7 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
         // Play mode (--play): the screens run on the live session the session host ticks. Otherwise they run on the offline stand-in session, whose
         // clock follows the frames in a scripted run (made by SessionHost.CreateStandIn, the only place a session is created).
         var cursors = new UiCursors(dats);
+        layer.Manager.TargetMode.Cursors = e => cursors.TryGet(e, out var cursor) ? cursor : null; // the target mode's pointers (UICURSOR 10, 12, 39; M5 7 S6)
         GameSession session;
         if (host?.Session is { } live)
         {

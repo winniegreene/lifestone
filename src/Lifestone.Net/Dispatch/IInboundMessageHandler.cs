@@ -377,6 +377,78 @@ public interface IInboundMessageHandler
     {
     }
 
+    // M5 6 w1: the confirmation dialog, the login notices and the property updates.
+
+    /// <summary>GameEvent 0x0274 CharacterConfirmationRequest {u32 type, u32 context, String16L text} (M5 6 w1).</summary>
+    void OnConfirmationRequest(in InboundContext context, in GameEventHeader header, ConfirmationRequestEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0276 CharacterConfirmationDone {u32 type, u32 context} (M5 6 w1).</summary>
+    void OnConfirmationDone(in InboundContext context, in GameEventHeader header, in ConfirmationDoneEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0295 SetTurbineChatChannels, ten u32 (M5 6 w1; the login notice the reducer logs and ignores).</summary>
+    void OnTurbineChatChannels(in InboundContext context, in GameEventHeader header, TurbineChatChannelsEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0029 CharacterTitle (M5 6 w1; the login notice the reducer logs and ignores).</summary>
+    void OnCharacterTitle(in InboundContext context, in GameEventHeader header, CharacterTitleEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0021 FriendsListUpdate (M5 6 w1; the login notice the reducer logs and ignores).</summary>
+    void OnFriendsListUpdate(in InboundContext context, in GameEventHeader header, FriendsListUpdateEvent message)
+    {
+    }
+
+    /// <summary>GM 0x02D2 PublicUpdatePropertyBool (M5 6 w1).</summary>
+    void OnPublicPropertyBool(in InboundContext context, in PublicPropertyUpdate<bool> message)
+    {
+    }
+
+    /// <summary>GM 0x02D0 PublicUpdatePropertyInt64 (M5 6 w1).</summary>
+    void OnPublicPropertyInt64(in InboundContext context, in PublicPropertyUpdate<long> message)
+    {
+    }
+
+    /// <summary>GM 0x02D4 PublicUpdatePropertyFloat (M5 6 w1).</summary>
+    void OnPublicPropertyFloat(in InboundContext context, in PublicPropertyUpdate<double> message)
+    {
+    }
+
+    /// <summary>GM 0x02D6 PublicUpdatePropertyString (M5 6 w1).</summary>
+    void OnPublicPropertyString(in InboundContext context, in PublicPropertyUpdate<string> message)
+    {
+    }
+
+    /// <summary>GM 0x02D8 PublicUpdatePropertyDataId (M5 6 w1; ACE sends it for tailoring and core plating).</summary>
+    void OnPublicPropertyDataId(in InboundContext context, in PublicPropertyUpdate<uint> message)
+    {
+    }
+
+    /// <summary>GM 0x02D1 PrivateUpdatePropertyBool (M5 6 w1; the player's own, e.g. Afk after <c>/afk</c>).</summary>
+    void OnPrivatePropertyBool(in InboundContext context, in PrivatePropertyUpdate<bool> message)
+    {
+    }
+
+    /// <summary>GM 0x02D9 PrivateUpdatePropertyInstanceId (M5 6 w1; CurrentAttacker in a fight).</summary>
+    void OnPrivatePropertyInstanceId(in InboundContext context, in PrivatePropertyUpdate<uint> message)
+    {
+    }
+
+    /// <summary>GM 0x02D7 PrivateUpdatePropertyDataId (M5 6 w1; ACE sends the player's MotionTable this way).</summary>
+    void OnPrivatePropertyDataId(in InboundContext context, in PrivatePropertyUpdate<uint> message)
+    {
+    }
+
+    /// <summary>GM 0x02DB PrivateUpdatePosition (M5 6 w1; one of the player's stored positions, e.g. LastOutsideDeath).</summary>
+    void OnPrivatePosition(in InboundContext context, PrivatePositionUpdate message)
+    {
+    }
+
     // Everything else.
 
     /// <summary>A message the dispatcher does not decode; <paramref name="body"/> is the whole message, opcode included.</summary>

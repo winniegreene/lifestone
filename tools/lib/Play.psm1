@@ -197,4 +197,23 @@ function Get-PlayAudioVerdict {
     return @{ Ok = $true; Reason = '' }
 }
 
-Export-ModuleMember -Function Get-PlayAudioVerdict, Get-PlayServerEndpoint, Get-PlayBackendPlan, Get-PlayStopPlan, Get-PlayStartedByUs, Test-PlayAccountName, Test-PlayCharacterName, Get-PlayGameOptions, Assert-PlayLoopback
+function Get-PlayRunLogHead {
+    <#
+      M5 7 (D126 c; soak round 12's exit code 3): the start of a run's own log, where the game writes its `audio service installed ... muted=` line. A long run rolls lifestone.log (--log-max-mb), so the start-up lines are
+      in the oldest rolled file (lifestone.N.log, the highest N), not in the current one. The files are those of this run: written at or after -Since (the time the game was started, less a 5 s margin); the game's
+      own start copies the previous run's lifestone.log to lifestone.1.log with its old write time (Log.cs), so a file of an earlier run is left out. Returns the first -Lines lines of each such file, oldest first,
+      joined by newlines ('' when there is none).
+    #>
+    param([Parameter(Mandatory)][string] $LogsFolder, [Parameter(Mandatory)][datetime] $Since, [int] $Lines = 400)
+    if (-not (Test-Path -LiteralPath $LogsFolder)) { return '' }
+    $cutoff = $Since.AddSeconds(-5)
+    $files = @(Get-ChildItem -LiteralPath $LogsFolder -File | ForEach-Object {
+            if ($_.Name -match '^lifestone(?:\.(?<n>\d+))?\.log$' -and $_.LastWriteTime -ge $cutoff) {
+                [pscustomobject]@{ File = $_; Index = $(if ($Matches['n']) { [int]$Matches['n'] } else { 0 }) }
+            }
+        } | Sort-Object -Property Index -Descending)
+    $heads = foreach ($f in $files) { (Get-Content -LiteralPath $f.File.FullName -TotalCount $Lines) -join "`n" }
+    return ($heads -join "`n")
+}
+
+Export-ModuleMember -Function Get-PlayRunLogHead, Get-PlayAudioVerdict,Get-PlayServerEndpoint, Get-PlayBackendPlan, Get-PlayStopPlan, Get-PlayStartedByUs, Test-PlayAccountName, Test-PlayCharacterName, Get-PlayGameOptions, Assert-PlayLoopback

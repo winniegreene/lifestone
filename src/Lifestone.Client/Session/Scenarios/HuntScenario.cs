@@ -103,8 +103,11 @@ public sealed partial class HuntScenario : IScenario
     /// </summary>
     public const int OnFootMaxCells = 8;
 
-    /// <summary>The cells this hunt may stand in: <see cref="OnFootMaxCells"/> on foot, else <see cref="MaxCells"/>.</summary>
-    public int CellLimit => OnFoot ? OnFootMaxCells : MaxCells;
+    /// <summary>
+    /// The cells this hunt may stand in: on foot the ground's own cap (the profile's <c>cell_cap</c>, <see cref="HuntGroundRow.CellCap"/>: the belt's 8, the forest's every spot, M5 D42), or
+    /// <see cref="OnFootMaxCells"/> for a ground that gives none; else <see cref="MaxCells"/>.
+    /// </summary>
+    public int CellLimit => OnFoot ? _ground.CellCap ?? OnFootMaxCells : MaxCells;
 
     /// <summary>
     /// The environment misses in a row (no hit or evade between) after which a missile hunt cancels the attack and walks on (M4 P4 bow): ACE launches a real projectile and
@@ -328,7 +331,7 @@ public sealed partial class HuntScenario : IScenario
     /// <summary>The hunt.</summary>
     /// <param name="options">The kills, the time and the weapon.</param>
     /// <param name="log">Where the scenario logs.</param>
-    /// <param name="groundHeight">The terrain height at a cell's centre (<see cref="HuntGround.TerrainHeight"/> over the dats), or null when unknown: the hunt will not go to a cell it has no height for.</param>
+    /// <param name="groundHeight">The terrain height at the point the hunt goes to in a cell (its stop point: <see cref="HuntGround.TerrainHeight"/> over the dats), or null when unknown: the hunt will not go to a cell it has no height for.</param>
     /// <param name="ground">The ground to hunt (default <see cref="HuntGround.LowB"/>; <see cref="HuntOptions.GroundRow"/> is the <c>--hunt-ground</c> choice); a row that is not <see cref="HuntGroundRow.InUse"/> is refused.</param>
     /// <param name="template">The fighter being hunted with (default <see cref="FighterTemplate.Hunter"/>): its name is the character entered, its kit decides the weapon swap and the restore; a weapon its kit has none of is refused.</param>
     /// <param name="arrivalSeconds">The limit on the arrival after Enter.</param>
@@ -572,11 +575,18 @@ public sealed partial class HuntScenario : IScenario
             _subscriptions.Add(session.Events.Subscribe<ObjectMoved>(OnMoved));
             _subscriptions.Add(session.Events.Subscribe<AttackChanged>(OnAttackChanged));
             _subscriptions.Add(session.Events.Subscribe<ChatReceived>(OnChat));
+            StartAttackWatch(session); // M5 7 P7u (D148, D88): the attacks on the player, for the fight-back before the hunt ends (HuntScenario.SelfDefence.cs)
             if (ModeWatch is { } watch)
             {
                 watch.Start(session); // judges the state it finds, then every change (M4 4.2 J1)
                 _subscriptions.Add(watch);
             }
+        }
+
+        if (_acting && Failure is null && session.Actions.KillSwitch)
+        {
+            // M5 4 h2 (m5-hunt-host-sends): the hunt's sends are Automation now, so the switch refuses them; the hunt stops at once rather than ride out refusals. Its wind-down cancels the repeating swing as the host (CancelSource).
+            return Fail(session, "hunt: Blocked why=kill-switch: the kill switch is on, the hunt sends nothing more");
         }
 
         switch (Stage)
@@ -765,12 +775,31 @@ public sealed partial class HuntScenario : IScenario
             ? $"recovery: {_options.Recovery}; checked before the first fight and between kills, never during a fight: the retreat at {RetreatShareFor(_options.Weapon) * 100:0}% health ends a fight (TODO(m4-hunt-infight-heal))"
             : $"recovery: {_options.Recovery}; checked before the first fight and between kills; in a fight the keeper's in-fight potion (--vitals-infight-potion) drinks with the target out of reach and its MayAttack gates each attack; the retreat at {RetreatShareFor(_options.Weapon) * 100:0}% health ends a fight");
         LogStages();
+        LogExpectedYield();
         if (_cells.Count == 0)
         {
             return Fail(session, "the ground has no usable cell (TODO(m4-belt-cell-terrain): every cell reads water or steep)");
         }
 
         return Enter("bind");
+    }
+
+    /// <summary>
+    /// The expected yield before the walk (M5 item 2 g3, D42; report-only): the spots the hunt may visit, the usable creatures a spot is expected to hold for the hunter's band and avoided classes (the sum of the table's
+    /// spawn masses, a camp counted once) and the chance that none of those spots does. From the ground's profile; a table with no spawn mass says it is not known.
+    /// </summary>
+    private void LogExpectedYield()
+    {
+        var spots = Math.Min(CellLimit, _cells.Count);
+        if (_ground.Table.All(c => c.SpawnMass <= 0))
+        {
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"ground: expected yield: not known ({_ground.Name} has {spots} spot(s) to visit but its table has no spawn mass); report-only"));
+            return;
+        }
+
+        var perSpot = _ground.ExpectedYield();
+        var none = Math.Pow(1 - Math.Min(1, perSpot), spots);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"ground: expected yield before the walk: {spots} spot(s) of {_ground.Name} to visit, {perSpot:0.###} usable creature(s) a spot for the band {_ground.MinLevel}-{_ground.MaxLevel} ({_ground.InBandCount} of the {_ground.Table.Count} listed creatures; a camp counts once), {perSpot * spots:0.##} over the {spots} spot(s); the chance no spot holds one {none:0.####} (report-only)"));
     }
 
     // ------------------------------------------------------------------------------------------------ the bind (M3 D34)
@@ -941,7 +970,7 @@ public sealed partial class HuntScenario : IScenario
                     ? string.Create(CultureInfo.InvariantCulture, $"under the {recovery.Chance:0.##} wanted, but no potion can be drunk and the kit is the last resort before the regeneration wait (at least {recovery.FloorChance:0.##} needed, --heal-floor-chance)")
                     : string.Create(CultureInfo.InvariantCulture, $"at least {recovery.Chance:0.##} wanted");
                 _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"heal: kit 0x{kitGuid:X8} ({kitUses} use(s) left) at {PctOf(current, max)} ({missing} missing), estimated chance {chance:0.00} ({wanted}), healing {_healing}{(_healingRead ? string.Empty : " (the fallback)")}, {(input.CombatMode ? "combat mode" : "peace")}"));
-                _heal = session.Actions.UseWithTarget(kitGuid, session.State.Self.Guid, ActionSource.Host);
+                _heal = session.Actions.UseWithTarget(kitGuid, session.State.Self.Guid, ActionSource.Automation);
                 return Enter("heal-use");
             case RecoveryDecision.Potion:
                 _recoveryActive = true;
@@ -953,7 +982,7 @@ public sealed partial class HuntScenario : IScenario
 
                 var why = _kitOff ? "the kit is refused or Healing is untrained" : kitUses <= 0 || !kit ? "no kit with uses is held" : _lostRolls >= RecoveryRules.MaxLostRolls ? $"{_lostRolls} rolls lost in a row" : string.Create(CultureInfo.InvariantCulture, $"the kit's chance {chance:0.00} is under {recovery.Chance:0.##}");
                 _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"heal: potion 0x{potionGuid:X8} ({potions} held) at {PctOf(current, max)} ({missing} missing): {why}"));
-                _heal = session.Actions.Drink(potionGuid, ActionSource.Host);
+                _heal = session.Actions.Drink(potionGuid, ActionSource.Automation);
                 return Enter("heal-use");
             case RecoveryDecision.Wait:
                 _recoveryActive = true;
@@ -1206,7 +1235,7 @@ public sealed partial class HuntScenario : IScenario
         var mode = session.State.Self.Qualities.CombatMode;
         if (mode is not (0 or (int)CombatMode.NonCombat))
         {
-            return Send(session, "peace for the weapon swap", session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host), "swap", fatal: true);
+            return Send(session, "peace for the weapon swap", session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation), "swap", fatal: true);
         }
 
         // M4 3.1 fix2: the lookup lets an equipped instance win over a pack copy of its class (the loot adds duplicates; the gate's first hunter test waited for ever on a second Shortbow in the pack).
@@ -1216,7 +1245,7 @@ public sealed partial class HuntScenario : IScenario
         {
             _swapped = true;
             _maceAside = mace;
-            return Send(session, $"the Mace to the pack (ACE refuses the bow while it is wielded) 0x{mace:X8}", session.Actions.MoveToPack(mace, source: ActionSource.Host), "swap", fatal: true);
+            return Send(session, $"the Mace to the pack (ACE refuses the bow while it is wielded) 0x{mace:X8}", session.Actions.MoveToPack(mace, source: ActionSource.Automation), "swap", fatal: true);
         }
 
         // M4 P4 arch: the kit's launcher and ammunition, never the other template's or an older build's (an Archer built before holds the Shortbow and the Arrows beside the Longbow and the Greater Frost
@@ -1227,13 +1256,13 @@ public sealed partial class HuntScenario : IScenario
         var strayAmmo = FighterItems.WieldedAmmunition(state);
         if (strayAmmo != 0 && state.Objects.TryGet(strayAmmo, out var strayAmmoObject) && strayAmmoObject.Weenie.WeenieClassId != ammoWcid)
         {
-            return Send(session, $"the other ammunition (weenie {strayAmmoObject.Weenie.WeenieClassId}) 0x{strayAmmo:X8} to the pack (the kit's is weenie {ammoWcid})", session.Actions.MoveToPack(strayAmmo, source: ActionSource.Host), "swap", fatal: true);
+            return Send(session, $"the other ammunition (weenie {strayAmmoObject.Weenie.WeenieClassId}) 0x{strayAmmo:X8} to the pack (the kit's is weenie {ammoWcid})", session.Actions.MoveToPack(strayAmmo, source: ActionSource.Automation), "swap", fatal: true);
         }
 
         if (FighterItems.WieldedLauncher(state, _scratch) is { } strayLauncher && strayLauncher.Weenie.WeenieClassId != launcherWcid)
         {
             _swapped = true;
-            return Send(session, $"the other launcher (weenie {strayLauncher.Weenie.WeenieClassId}) 0x{strayLauncher.Guid:X8} to the pack (the kit's is weenie {launcherWcid})", session.Actions.MoveToPack(strayLauncher.Guid, source: ActionSource.Host), "swap", fatal: true);
+            return Send(session, $"the other launcher (weenie {strayLauncher.Weenie.WeenieClassId}) 0x{strayLauncher.Guid:X8} to the pack (the kit's is weenie {launcherWcid})", session.Actions.MoveToPack(strayLauncher.Guid, source: ActionSource.Automation), "swap", fatal: true);
         }
 
         if (!FighterItems.Find(state, _scratch, launcherWcid, out var bow, out var bowWielded))
@@ -1244,7 +1273,7 @@ public sealed partial class HuntScenario : IScenario
         if (!bowWielded)
         {
             _swapped = true;
-            return Send(session, $"wield the {launcherName} 0x{bow:X8}", session.Actions.Wield(bow, EquipMask.MissileWeapon, ActionSource.Host), "swap", fatal: true);
+            return Send(session, $"wield the {launcherName} 0x{bow:X8}", session.Actions.Wield(bow, EquipMask.MissileWeapon, ActionSource.Automation), "swap", fatal: true);
         }
 
         // Live round 3: the fighter-build top-up had added arrows as a second stack, and the wield of the first one found was never seen in the read model. Every Arrow stack is merged into the largest, which is
@@ -1271,18 +1300,18 @@ public sealed partial class HuntScenario : IScenario
                 {
                     if (stack.Equipped)
                     {
-                        return Send(session, "an Arrow stack wielded before the merge goes to the pack", session.Actions.MoveToPack(stack.Guid, source: ActionSource.Host), "swap", fatal: true);
+                        return Send(session, "an Arrow stack wielded before the merge goes to the pack", session.Actions.MoveToPack(stack.Guid, source: ActionSource.Automation), "swap", fatal: true);
                     }
                 }
 
-                return Send(session, $"merge the Arrows 0x{from.Guid:X8} ({from.Size}) into the largest stack 0x{largest.Guid:X8} ({largest.Size}) of {stacks.Count}", session.Actions.MergeStack(from.Guid, largest.Guid, amount, ActionSource.Host), "swap", fatal: true);
+                return Send(session, $"merge the Arrows 0x{from.Guid:X8} ({from.Size}) into the largest stack 0x{largest.Guid:X8} ({largest.Size}) of {stacks.Count}", session.Actions.MergeStack(from.Guid, largest.Guid, amount, ActionSource.Automation), "swap", fatal: true);
             }
         }
 
         _arrowStack = largest.Guid;
         if (!largest.Equipped)
         {
-            return Send(session, $"wield the Arrows 0x{largest.Guid:X8} ({largest.Size})", session.Actions.Wield(largest.Guid, EquipMask.MissileAmmo, ActionSource.Host), "swap", fatal: true);
+            return Send(session, $"wield the Arrows 0x{largest.Guid:X8} ({largest.Size})", session.Actions.Wield(largest.Guid, EquipMask.MissileAmmo, ActionSource.Automation), "swap", fatal: true);
         }
 
         _log.Info(LogCategory, $"swap: the {launcherName} and the ammunition (weenie {ammoWcid}) are wielded");
@@ -1303,13 +1332,13 @@ public sealed partial class HuntScenario : IScenario
         var ammunition = FighterItems.WieldedAmmunition(state, _arrowStack);
         if (ammunition != 0)
         {
-            return Send(session, $"the Arrows 0x{ammunition:X8} to the pack", session.Actions.MoveToPack(ammunition, source: ActionSource.Host), "wind-restore", fatal: false);
+            return Send(session, $"the Arrows 0x{ammunition:X8} to the pack", session.Actions.MoveToPack(ammunition, source: ActionSource.Automation), "wind-restore", fatal: false);
         }
 
         if (FighterItems.WieldedLauncher(state, _scratch) is { } launcher)
         {
             var name = launcher.Weenie.WeenieClassId == _template.Kit.LauncherWcid ? $"the {_template.Kit.ItemOf(_template.Kit.LauncherWcid)!.Item.Name}" : $"the launcher '{launcher.Name}'";
-            return Send(session, $"{name} to the pack 0x{launcher.Guid:X8}", session.Actions.MoveToPack(launcher.Guid, source: ActionSource.Host), "wind-restore", fatal: false);
+            return Send(session, $"{name} to the pack 0x{launcher.Guid:X8}", session.Actions.MoveToPack(launcher.Guid, source: ActionSource.Automation), "wind-restore", fatal: false);
         }
 
         if (!_template.Kit.HasMelee)
@@ -1335,7 +1364,7 @@ public sealed partial class HuntScenario : IScenario
 
         if (!maceWielded)
         {
-            return Send(session, $"wield the Mace again 0x{mace:X8}", session.Actions.Wield(mace, EquipMask.MeleeWeapon, ActionSource.Host), "wind-restore", fatal: false);
+            return Send(session, $"wield the Mace again 0x{mace:X8}", session.Actions.Wield(mace, EquipMask.MeleeWeapon, ActionSource.Automation), "wind-restore", fatal: false);
         }
 
         Restored = true;
@@ -1455,7 +1484,7 @@ public sealed partial class HuntScenario : IScenario
                 continue;
             }
 
-            var point = HuntGround.PlacePoint(cell, height);
+            var point = HuntGround.StopPoint(cell, height);
             _anchor = AcCoordinates.ToGlobal(new CellPosition(cell.CellId, point));
             var name = "hunt cell 0x" + cell.CellId.ToString("X8", CultureInfo.InvariantCulture);
             var destination = new TeleportDestination(name, [], new WorldLocation(name, new CellPosition(cell.CellId, point), HasHeight: true, HeadingDegrees: 0), "hunt ground");
@@ -1482,6 +1511,16 @@ public sealed partial class HuntScenario : IScenario
         if (TimeOrHealthEnds(session) is { } ended)
         {
             return ended;
+        }
+
+        if (KillsDone())
+        {
+            return Finish(session); // M5 7 P7u: the fight-back's next pick (a refused, blocked or dead attacker came back here); the end check decides
+        }
+
+        if (DefendBetweenKills(session) is { } defend)
+        {
+            return defend; // M5 7 P7u (D88): an attacker in reach is fought back before the ground's targets
         }
 
         if (missile && !_clearLineTodoLogged && !OnFoot)
@@ -1647,7 +1686,7 @@ public sealed partial class HuntScenario : IScenario
         }
 
         _log.Info(LogCategory, "mode: " + wanted);
-        _pending = session.Actions.SetCombatMode(wanted, ActionSource.Host);
+        _pending = session.Actions.SetCombatMode(wanted, ActionSource.Automation);
         return Enter("mode-wait");
     }
 
@@ -1670,7 +1709,7 @@ public sealed partial class HuntScenario : IScenario
             if (KillsDone())
             {
                 // P4 g4: the Archer reached its kills, then a creature kept hitting it while it looted; a retreat after the goal ends the hunt as done.
-                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"retreat: the health fell to {share * 100:0}% (under {RetreatShareFor(_options.Weapon) * 100:0}%) after the goal ({_tally.Kills} kill(s)); ending the hunt and returning"));
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"retreat: the health fell to {share * 100:0}% (under {RetreatShareFor(_options.Weapon) * 100:0}%) after the goal ({_tally.Kills} kill(s)); ending the hunt and returning{(_defending ? $" (the fight-back ends with the retreat after {_foughtBack.Count} attacker(s); the next station's pre-check is the fallback)" : string.Empty)}"));
                 return Succeed(session);
             }
 
@@ -1679,7 +1718,7 @@ public sealed partial class HuntScenario : IScenario
 
         if (!double.IsNaN(_huntStart) && _clock - _huntStart > _options.Seconds)
         {
-            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"time: {_options.Seconds:0.#} s of hunting passed with {_tally.Kills} of {_options.Kills} kill(s)"));
+            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"time: {_options.Seconds:0.#} s of hunting passed {(_defending ? $"while fighting back '{_foughtBack[^1].Name}' 0x{_foughtBack[^1].Guid:X8} (self-defence, D88; {_foughtBack.Count} attacker(s)) " : string.Empty)}with {_tally.Kills} of {_options.Kills} kill(s)"));
         }
 
         return null;
@@ -1703,9 +1742,9 @@ public sealed partial class HuntScenario : IScenario
             return ended;
         }
 
-        if (KillsDone())
+        if (KillsDone() && !StillFightingBack(session))
         {
-            return Succeed(session);
+            return Finish(session); // M5 7 P7u (D148, D88): no end while a creature attacks the player
         }
 
         if (!TargetAlive(session))
@@ -1735,7 +1774,7 @@ public sealed partial class HuntScenario : IScenario
             _stalls++;
             _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight: the attack sequence {session.Attack.Number} was still Active {_clock - _activeSince:0} s after it should have ended (the final 01A7 never came); sending CancelAttack and excluding 0x{_target:X8}"));
             _activeSince = double.NaN;
-            _ = session.Actions.CancelAttack(ActionSource.Host); // fire and go on: the outcome is not waited for
+            _ = session.Actions.CancelAttack(CancelSource(session)); // fire and go on: the outcome is not waited for
             return Exclude(session);
         }
 
@@ -1754,8 +1793,8 @@ public sealed partial class HuntScenario : IScenario
         _sentAt = _clock;
         _attacks++;
         _pending = _options.Weapon == HuntWeapon.Missile
-            ? session.Actions.MissileAttack(_target, AttackHeight.Medium, AttackBar, ActionSource.Host)
-            : session.Actions.Attack(_target, AttackHeight.Medium, AttackBar, ActionSource.Host);
+            ? session.Actions.MissileAttack(_target, AttackHeight.Medium, AttackBar, ActionSource.Automation)
+            : session.Actions.Attack(_target, AttackHeight.Medium, AttackBar, ActionSource.Automation);
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight: {(_options.Weapon == HuntWeapon.Missile ? "MissileAttack" : "Attack")} {_attacks} at '{_targetName}' 0x{_target:X8}; the client is {_distAtSend:0.#} m from it ({(_follow is null ? "session position" : "own body")})"));
         return Enter("fight-sent");
     }
@@ -1977,7 +2016,7 @@ public sealed partial class HuntScenario : IScenario
         }
 
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"corpse: at 0x{_corpseGuid:X8} ({Distance(session, _corpseGuid):0.#} m) by {means.ToString().ToLowerInvariant()}{(fields.Length == 0 ? string.Empty : " " + fields)}; opening it"));
-        _pending = session.Actions.OpenContainer(_corpseGuid, ActionSource.Host);
+        _pending = session.Actions.OpenContainer(_corpseGuid, ActionSource.Automation);
         _corpse = CorpsePhase.Opening;
         return true;
     }
@@ -2001,7 +2040,7 @@ public sealed partial class HuntScenario : IScenario
         _corpseLeg = null;
         if (_corpse is CorpsePhase.Opened or CorpsePhase.Looting)
         {
-            _ = session.Actions.CloseContainer(_corpseGuid, ActionSource.Host);
+            _ = session.Actions.CloseContainer(_corpseGuid, ActionSource.Automation);
         }
 
         if (_looter is { } running)
@@ -2090,7 +2129,7 @@ public sealed partial class HuntScenario : IScenario
                     }
 
                     _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"corpse: 0x{corpse:X8} appeared {_clock - _stageStart:0.00} s after the kill; opening it"));
-                    _pending = session.Actions.OpenContainer(corpse, ActionSource.Host);
+                    _pending = session.Actions.OpenContainer(corpse, ActionSource.Automation);
                     _corpse = CorpsePhase.Opening;
                     return true;
                 }
@@ -2160,7 +2199,7 @@ public sealed partial class HuntScenario : IScenario
                     return true;
                 }
 
-                _pending = session.Actions.CloseContainer(_corpseGuid, ActionSource.Host);
+                _pending = session.Actions.CloseContainer(_corpseGuid, ActionSource.Automation);
                 _corpse = CorpsePhase.Closing;
                 return true;
             default: // Closing
@@ -2176,16 +2215,16 @@ public sealed partial class HuntScenario : IScenario
     }
 
     /// <summary>
-    /// Adds a finished (or abandoned) loot loop's counts to the tally and, once per run, names the stacking gap: a looted stackable beside a held stack of its class stays a separate stack
-    /// (<c>TODO(m4-loot-merge-stacks)</c>; ACE never merges at pick-up and the hunt does not call <c>MergeStack</c> in 2.2).
+    /// Adds a finished (or abandoned) loot loop's counts to the tally and, once per run, names the stacking gap that remains: ACE never merges at pick-up, the shared looter merges a looted stackable into a held stack of its class
+    /// (M5 7, <see cref="CorpseLooter.StackMerges"/>), and a stack beside a held one that was not merged (a refused merge, no room, an equipped stack) stays separate (<c>TODO(m4-loot-merge-stacks)</c>).
     /// </summary>
     private void FoldLoot(CorpseLooter looter)
     {
         _tally.AddLoot(looter.Looted, looter.Skipped);
-        if (looter.StacksBesideHeld > 0 && !_mergeGapLogged)
+        if (looter.StacksBesideHeld > looter.StackMerges && !_mergeGapLogged)
         {
             _mergeGapLogged = true;
-            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"TODO(m4-loot-merge-stacks): {looter.StacksBesideHeld} looted stack(s) (weenie class {looter.FirstStackBesideHeldWcid}) have a held stack of their class; they stay separate stacks, the hunt does not call MergeStack in 2.2"));
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"TODO(m4-loot-merge-stacks): {looter.StacksBesideHeld} looted stack(s) (weenie class {looter.FirstStackBesideHeldWcid}) had a held stack of their class and {looter.StackMerges} merge(s) were confirmed ({looter.MergesRefused} refused); the rest stay separate stacks"));
         }
     }
 
@@ -2227,7 +2266,7 @@ public sealed partial class HuntScenario : IScenario
         if (done.Kind == ActionOutcomeKind.Confirmed)
         {
             _log.Info(LogCategory, $"corpse: the abandoned open of 0x{_corpseGuid:X8} landed Confirmed; closing it");
-            _ = session.Actions.CloseContainer(_corpseGuid, ActionSource.Host);
+            _ = session.Actions.CloseContainer(_corpseGuid, ActionSource.Automation);
         }
     }
 
@@ -2271,7 +2310,7 @@ public sealed partial class HuntScenario : IScenario
         _log.Info(LogCategory, done ? "fight: the sequence is over" : $"fight: no Done within {KillDoneSeconds:0} s of the kill; going on");
         if (KillsDone())
         {
-            return Succeed(session);
+            return Finish(session); // M5 7 P7u (D148, D88): the end check: an attacker in reach is fought back first
         }
 
         _ = Exclude(session);
@@ -2283,7 +2322,7 @@ public sealed partial class HuntScenario : IScenario
     {
         _blockedWalks++;
         _log.Warn(LogCategory, $"fight: {_tally.BlockedRun} environment misses in a row at '{_targetName}' 0x{_target:X8} (blocked shots {_tally.Blocked}); cancelling the attack and walking on (the target is skipped in this cell)");
-        _ = session.Actions.CancelAttack(ActionSource.Host); // fire and go on: the sequence's Done is waited for in fight-send
+        _ = session.Actions.CancelAttack(CancelSource(session)); // fire and go on: the sequence's Done is waited for in fight-send
         if (!_blockedHere.Contains(_target))
         {
             _blockedHere.Add(_target);
@@ -2293,6 +2332,12 @@ public sealed partial class HuntScenario : IScenario
         _target = 0;
         return Enter("acquire");
     }
+
+    /// <summary>
+    /// The source of a CancelAttack (M5 4 h2, <c>m5-hunt-host-sends</c>): the hunt's sends are <see cref="ActionSource.Automation"/>, so the kill switch stops them, but a cancel is the stop the switch itself wants. ACE repeats a melee
+    /// or missile sequence until it is cancelled (W/Player_Melee.cs 240-250), so while the switch is on the cancel goes as the host's own safety action; refused, it would leave the swing repeating on the server.
+    /// </summary>
+    private static ActionSource CancelSource(IGameSessionView session) => session.Actions.KillSwitch ? ActionSource.Host : ActionSource.Automation;
 
     private ScenarioStatus Exclude(IGameSessionView session)
     {
@@ -2464,7 +2509,7 @@ public sealed partial class HuntScenario : IScenario
             }
 
             _log.Info(LogCategory, "wind-down: CancelAttack");
-            _pending = session.Actions.CancelAttack(ActionSource.Host);
+            _pending = session.Actions.CancelAttack(CancelSource(session));
             return ScenarioStatus.Running;
         }
 
@@ -2499,7 +2544,7 @@ public sealed partial class HuntScenario : IScenario
             }
 
             _log.Info(LogCategory, "wind-down: NonCombat");
-            _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
+            _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation);
             return ScenarioStatus.Running;
         }
 

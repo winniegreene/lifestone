@@ -8,6 +8,7 @@ using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Credentials;
 using Lifestone.Data.Checkout;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Data.Dat;
@@ -39,7 +40,7 @@ namespace Lifestone.Game.Sessions;
 /// vendor-facts stations' <c>vendor_frame_max_ms=</c> (smoke judges them; the headless host prints <c>n/a</c>).
 /// Since J7 the other slots are taken too (JourneyLegRunner.StationShots.cs): the hunt's melee window frames (<c>c1-combat</c>, <c>c1-powerbar</c>, <c>meter</c>) with the review camera and its side turn, the den fight's <c>bolt</c>, <c>hit</c> and <c>kill</c>,
 /// the death's and the buff's <c>mid-cast</c>, and with <c>--journey-shots</c> the showpiece bursts (<c>&lt;stem&gt;-&lt;station&gt;-&lt;event&gt;-NN.png</c>); a slot whose trigger never held is logged by name at the end.</para>
-/// <para><b>Limits.</b> <see cref="WholeSecondsFor"/>: the login and the arrival, then one and a half times the plan's expected seconds plus a margin.</para>
+/// <para><b>Limits.</b> <see cref="WholeSecondsFor"/>: the login and the arrival, then one and a half times the plan's expected seconds plus a margin, and (M5 1 fix B) the raise of a long den fight (<see cref="JourneyLimits"/>).</para>
 /// </remarks>
 public sealed partial class JourneyLegRunner : Node
 {
@@ -49,28 +50,17 @@ public sealed partial class JourneyLegRunner : Node
     /// <summary>The margin added to the plan's expected seconds (known-state recovery, the station cuts' slack).</summary>
     public const double MarginSeconds = 300.0;
 
-    /// <summary>How long the log off after a failure or the limit may take, in seconds.</summary>
-    public const double RecoverySeconds = 120.0;
-
-    /// <summary>The whole check's limit for <paramref name="plan"/>: the login, then one and a half times the plan's expected seconds and the margin.</summary>
+    /// <summary>The whole check's limit for <paramref name="plan"/>: the login, then one and a half times the plan's expected seconds and the margin; with <paramref name="fight"/> raised over its default (<c>--fight-minutes</c>, a long <c>--fight-seconds</c>) the raise is added for each den fight (<see cref="JourneyLimits.WholeExtraSeconds"/>, M5 1 fix B).</summary>
     /// <param name="plan">The plan.</param>
-    public static double WholeSecondsFor(JourneyPlan plan) => LoginSeconds + (1.5 * plan.ExpectedSeconds) + MarginSeconds;
+    /// <param name="fight">The fight options of the command line, or null for the defaults.</param>
+    public static double WholeSecondsFor(JourneyPlan plan, FightOptions? fight = null) => LoginSeconds + (1.5 * plan.ExpectedSeconds) + MarginSeconds + JourneyLimits.WholeExtraSeconds(plan, fight ?? new FightOptions());
 
     private const string LogCategory = "logincheck";
-    private const double ListSeconds = 60.0;
-    private const double SettleSeconds = 3.0;
-    private const double QuitFlushSeconds = 1.5;
-
     private enum Phase
     {
         Loading,
-        Login,
-        Entering,
-        Arriving,
-        Settling,
+        Session, // the login to the world, and the log off and quit: LegSessionFlow (M5 4 h1: shared with the autopilot check)
         Journey,
-        LoggingOff,
-        Quitting,
     }
 
     private SessionHost _host = null!;
@@ -85,22 +75,17 @@ public sealed partial class JourneyLegRunner : Node
     private double _wholeSeconds;
     private Task<IReadOnlyDictionary<uint, SpellInfo>>? _spells;
     private Task<RoomGraph>? _den;
+    private HuntingGround _ground = null!;
     private JourneyScenario? _scenario;
     private GodotJourneyRunnerHost? _runners;
     private JourneyFrameObserver _observer = null!;
     private readonly JourneyWindowSamplers _windows = new(); // M4 4.2 J1: attack_frame_max_ms, loot_frame_max_ms, vendor_frame_max_ms of the running station
-    private ActionHandle? _pending;
+    private LegSessionFlow _flow = null!;
+
+    private bool _failed => _flow.Failed; // the fail path's flag lives in the shared flow (M5 4 h1)
     private Phase _phase = Phase.Loading;
     private double _runSeconds;
-    private double _phaseStart;
-    private string? _failure;
-    private string _failedAt = "start";
-    private bool _failed;
-    private bool _recoveryStarted;
-    private double _recoveryStart = double.NaN;
-    private double _quitAt = double.NaN;
     private bool _finished;
-    private bool _entered;
     private bool _scenarioEnded;
     private bool _skipNextFrame;
     private int _linesPrinted;
@@ -108,7 +93,7 @@ public sealed partial class JourneyLegRunner : Node
     private string? _stem;
     private bool _film;
     private readonly List<string> _notTaken = [];
-    private readonly List<(Node Node, bool WasVisible)> _hidden = [];
+    private DeveloperHudHider _hud = null!;
 
     // The hunt and vendor stations' retail-UI slots that read from the session (the plan is the hunt leg's, reset at each station).
     private HuntUiShotPlan _uiPlan = new();
@@ -125,6 +110,7 @@ public sealed partial class JourneyLegRunner : Node
         var play = services.Options.Play;
         var plan = JourneyPlans.ForName(play.Journey);
         var errors = new List<string>(play.Errors);
+        var ground = JourneyLimits.FightOf(OS.GetCmdlineUserArgs()).GroundProfile; // a bad --fight-ground is the station factory's error and keeps the default
         if (plan is null)
         {
             errors.Add("--journey: " + (play.Journey is null ? "none given or refused (see the option errors)" : "'" + play.Journey + "' is not a plan"));
@@ -150,23 +136,17 @@ public sealed partial class JourneyLegRunner : Node
             _services = services,
             _plan = plan,
             _arguments = OS.GetCmdlineUserArgs(),
+            _ground = ground,
             _optionError = errors.Count == 0 ? null : "bad journey option: " + string.Join("; ", errors),
-            _wholeSeconds = plan is null ? LoginSeconds : WholeSecondsFor(plan),
+            _wholeSeconds = plan is null ? LoginSeconds : WholeSecondsFor(plan, JourneyLimits.FightOf(OS.GetCmdlineUserArgs())),
             _stem = play.BuffShotPath,
             _film = play.JourneyFilm,
         };
+        runner._hud = new DeveloperHudHider(runner);
+        runner._flow = new LegSessionFlow("journey", LogCategory, plan?.Character ?? string.Empty);
         runner._observer = new JourneyFrameObserver(runner._stem, play.JourneyShots, GodotLogSink.Instance);
 
-        // The spell table and (for a plan with a den station) the den's room graph are read on workers, so the game thread does not load them in the first frames.
-        runner._spells = Task.Factory.StartNew<IReadOnlyDictionary<uint, SpellInfo>>(() => SpellTableData.Load(dats).Spells, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-        if (plan is not null && plan.Ground == StationWhere.Den)
-        {
-            runner._den = Task.Factory.StartNew(
-                () => DenRooms.GraphOf(LandblockCellSet.Load(new CellStructureLibrary(dats), LandblockCoord.FromId(JourneyGrounds.DenLandblock << 16))),
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default);
-        }
+        (runner._spells, runner._den) = StartLoads(dats, plan, ground);
 
         main.AddChild(runner);
         Log.Info(
@@ -177,6 +157,19 @@ public sealed partial class JourneyLegRunner : Node
             ("review_frames", runner._stem is null ? "not asked for" : "station-<name> at each station's end"),
             ("journey_shots", play.JourneyShots.Enabled),
             ("journey_film", play.JourneyFilm));
+    }
+
+    /// <summary>The spell table and (for a plan with a den station) the den.s room graph, read on workers so the game thread does not load them in the first frames (the autopilot check calls this too).</summary>
+    internal static (Task<IReadOnlyDictionary<uint, SpellInfo>> Spells, Task<RoomGraph>? Den) StartLoads(DatSet dats, JourneyPlan? plan, HuntingGround ground)
+    {
+        var spells = Task.Factory.StartNew<IReadOnlyDictionary<uint, SpellInfo>>(() => SpellTableData.Load(dats).Spells, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        Task<RoomGraph>? den = null;
+        if (plan is not null && plan.Ground == StationWhere.Den)
+        {
+            den = Task.Factory.StartNew(() => GroundRooms.Load(dats, ground), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        }
+
+        return (spells, den);
     }
 
     /// <inheritdoc/>
@@ -222,19 +215,14 @@ public sealed partial class JourneyLegRunner : Node
             return;
         }
 
-        if (!double.IsNaN(_quitAt))
+        _flow.Seconds = _runSeconds;
+        if (_flow.Quitting || _flow.Failed)
         {
-            if (_runSeconds - _quitAt >= QuitFlushSeconds)
+            if (_flow.Step(session) == LegFlowStatus.Ended)
             {
-                Finish(null);
+                Finish(null); // the quit was flushed, or the failed run could not log off (the flow keeps the failure)
             }
 
-            return;
-        }
-
-        if (_failed)
-        {
-            StepRecovery(session);
             return;
         }
 
@@ -255,23 +243,20 @@ public sealed partial class JourneyLegRunner : Node
             case Phase.Loading:
                 Loading();
                 break;
-            case Phase.Login:
-                Login(session);
-                break;
-            case Phase.Entering:
-                Entering(session);
-                break;
-            case Phase.Arriving:
-                Arriving(session);
-                break;
-            case Phase.Settling:
-                Settling(session);
+            case Phase.Session:
+                switch (_flow.Step(session))
+                {
+                    case LegFlowStatus.Ready:
+                        BeginJourney(session);
+                        break;
+                    case LegFlowStatus.Ended:
+                        Finish(null);
+                        break;
+                }
+
                 break;
             case Phase.Journey:
                 StepJourney(session);
-                break;
-            case Phase.LoggingOff:
-                LoggingOff(session);
                 break;
         }
     }
@@ -299,116 +284,13 @@ public sealed partial class JourneyLegRunner : Node
             return;
         }
 
-        Go(Phase.Login);
+        _flow.Begin();
+        _phase = Phase.Session;
     }
-
-    private void Login(IGameSessionView session)
-    {
-        var state = session.State;
-        if (BuffLegPhases.Failed(state))
-        {
-            Fail(session, "login: the connection failed (" + (state.FailureMessage ?? "no reason given") + ")");
-            return;
-        }
-
-        if (!BuffLegPhases.AtCharacterSelect(state))
-        {
-            if (_runSeconds - _phaseStart > ListSeconds)
-            {
-                Fail(session, string.Create(CultureInfo.InvariantCulture, $"login: the character list did not come within {ListSeconds:0} s (phase {state.Phase}, data check {state.DataCheck})"));
-            }
-
-            return;
-        }
-
-        if (state.DataCheck != DataCheckState.Complete)
-        {
-            Fail(session, "login: the character list came without a completed data check (" + state.DataCheck + ")");
-            return;
-        }
-
-        var name = _plan!.Character;
-        foreach (var c in state.Characters.Entries)
-        {
-            if (!string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (c.PendingDeletion)
-            {
-                Fail(session, "choosing: " + name + " is pending deletion (restore it first)");
-                return;
-            }
-
-            session.Actions.SelectCharacter(c.Guid, ActionSource.Host);
-            _pending = session.Actions.EnterWorld(c.Guid, ActionSource.Host);
-            Log.Info(LogCategory, "journey: entering the existing character " + name);
-            Go(Phase.Entering);
-            return;
-        }
-
-        Fail(session, "choosing: " + name + " is not in the character list (run its build scenario first; the journey creates nobody)");
-    }
-
-    private void Entering(IGameSessionView session)
-    {
-        if (_pending is not { Outcome: { } outcome })
-        {
-            return;
-        }
-
-        _pending = null;
-        if (outcome.Kind != ActionOutcomeKind.Confirmed)
-        {
-            Fail(session, "entering the world: " + Describe(outcome));
-            return;
-        }
-
-        _entered = true;
-        Go(Phase.Arriving);
-    }
-
-    private void Arriving(IGameSessionView session)
-    {
-        var state = session.State;
-        if (state.Self.Travel == SelfTravel.Present)
-        {
-            Go(Phase.Settling);
-            return;
-        }
-
-        if (BuffLegPhases.Failed(state) || BuffLegPhases.AtCharacterSelect(state))
-        {
-            Fail(session, "arriving: the session left the world before the player was unhidden (phase " + state.Phase + ")");
-            return;
-        }
-
-        if (_runSeconds - _phaseStart > LoginScenario.DefaultArrivalSeconds)
-        {
-            Fail(session, string.Create(CultureInfo.InvariantCulture, $"arriving: the player was not unhidden within {LoginScenario.DefaultArrivalSeconds:0} s (travel {state.Self.Travel})"));
-        }
-    }
-
-    private void Settling(IGameSessionView session)
-    {
-        var state = session.State;
-        if (!BuffLegPhases.InWorld(state) || state.Self.Travel != SelfTravel.Present || state.Self.Hidden)
-        {
-            Fail(session, "settling: the player did not stay in the world (phase " + state.Phase + ", travel " + state.Self.Travel + ")");
-            return;
-        }
-
-        if (_runSeconds - _phaseStart >= SettleSeconds)
-        {
-            BeginJourney(session);
-        }
-    }
-
     // ------------------------------------------------------------------------------------------------ the journey
 
     /// <summary>The login name of the account the run signs in to (the kit hashes it; it is never stored, logged or printed).</summary>
-    private static string LoginName(string? accountKey)
+    internal static string LoginName(string? accountKey)
     {
         if (!ServerRuntimePaths.TryFind(System.Environment.GetEnvironmentVariable(ServerRuntimePaths.EnvironmentVariable), CheckoutLocator.DefaultSearchRoots(), out var runtime, out var problem))
         {
@@ -427,15 +309,24 @@ public sealed partial class JourneyLegRunner : Node
         }
     }
 
+    /// <summary>
+    /// The journey's parts for a plan in a session: the vitals keeper, the station factory, the Godot runner host (the player's own body is the walker) and the one context (M5 4 h1: the autopilot check calls this too, so the two checks build one way).
+    /// </summary>
+    internal static (IStationFactory Factory, JourneyContext Context, GodotJourneyRunnerHost Runners) BuildParts(JourneyPlan plan, IGameSessionView session, IReadOnlyDictionary<uint, SpellInfo> spells, IReadOnlyList<string> arguments, DatSet dats, string? account, PlayMode mode, GameServices services, Task<RoomGraph>? den, HuntingGround ground, IJourneyObserver? observer, IJourneyWindowFrames? windows)
+    {
+        var log = GodotLogSink.Instance;
+        var keeper = JourneyStations.CreateKeeper(plan, session, spells, arguments, log);
+        var factory = JourneyStations.Create(plan, arguments, dats, LoginName(account));
+        var runners = new GodotJourneyRunnerHost(mode, services, dats, den, ground, log);
+        var context = JourneyScenario.NewContext(plan, log, spells, keeper, dats, runners, observer, windowFrames: windows, dungeon: ground);
+        return (factory, context, runners);
+    }
+
     private void BeginJourney(IGameSessionView session)
     {
         var plan = _plan!;
-        var log = GodotLogSink.Instance;
-        var spells = _spells!.Result;
-        var keeper = JourneyStations.CreateKeeper(plan, session, spells, _arguments, log);
-        var factory = JourneyStations.Create(plan, _arguments, _dats, LoginName(_host.Options.Account));
-        _runners = new GodotJourneyRunnerHost(_mode, _services, _dats, _den, log);
-        var context = JourneyScenario.NewContext(plan, log, spells, keeper, _dats, _runners, _observer, windowFrames: _windows);
+        var (factory, context, runners) = BuildParts(plan, session, _spells!.Result, _arguments, _dats, _host.Options.Account, _mode, _services, _den, _ground, _observer, _windows);
+        _runners = runners;
         // endSession: false, the node logs off itself when the journey ends (the journey ends at Holtburg's lifestone).
         _scenario = new JourneyScenario(plan, factory, context, endSession: false);
         if (_stem is not null || _film)
@@ -443,7 +334,7 @@ public sealed partial class JourneyLegRunner : Node
             HideDeveloperHud();
         }
 
-        Go(Phase.Journey);
+        _phase = Phase.Journey;
     }
 
     private void StepJourney(IGameSessionView session)
@@ -470,8 +361,8 @@ public sealed partial class JourneyLegRunner : Node
                 break;
             case ScenarioStatus.Succeeded:
                 _scenarioEnded = true;
-                _pending = session.Actions.LogOff(ActionSource.Host);
-                Go(Phase.LoggingOff);
+                _flow.BeginLogOff(session);
+                _phase = Phase.Session;
                 break;
         }
     }
@@ -617,148 +508,22 @@ public sealed partial class JourneyLegRunner : Node
         }
     }
 
-    private bool HudShowing()
-    {
-        foreach (var (node, _) in _hidden)
-        {
-            if (IsInstanceValid(node) && node is CanvasItem { Visible: true } item && item.IsVisibleInTree())
-            {
-                return true;
-            }
+    private bool HudShowing() => _hud.Showing();
 
-            if (IsInstanceValid(node) && node is CanvasLayer { Visible: true })
-            {
-                return true;
-            }
-        }
+    private void HideDeveloperHud() => _hud.Hide();
 
-        return false;
-    }
-
-    private void HideDeveloperHud()
-    {
-        foreach (var name in PlayMode.PlayShotDeveloperHudNames)
-        {
-            switch (GetTree().Root.FindChild(name, recursive: true, owned: false))
-            {
-                case CanvasLayer layer:
-                    NoteHidden(layer, layer.Visible);
-                    layer.Visible = false;
-                    break;
-                case CanvasItem item:
-                    NoteHidden(item, item.Visible);
-                    item.Visible = false;
-                    break;
-            }
-        }
-    }
-
-    private void NoteHidden(Node node, bool wasVisible)
-    {
-        foreach (var (known, _) in _hidden)
-        {
-            if (ReferenceEquals(known, node))
-            {
-                return;
-            }
-        }
-
-        _hidden.Add((node, wasVisible));
-    }
-
-    private void RestoreDeveloperHud()
-    {
-        foreach (var (node, wasVisible) in _hidden)
-        {
-            if (!IsInstanceValid(node))
-            {
-                continue;
-            }
-
-            switch (node)
-            {
-                case CanvasLayer layer:
-                    layer.Visible = wasVisible;
-                    break;
-                case CanvasItem item:
-                    item.Visible = wasVisible;
-                    break;
-            }
-        }
-
-        _hidden.Clear();
-    }
+    private void RestoreDeveloperHud() => _hud.Restore();
 
     // ------------------------------------------------------------------------------------------------ the way out
 
-    private void LoggingOff(IGameSessionView session)
-    {
-        if (_pending is not { Outcome: { } outcome })
-        {
-            return;
-        }
-
-        _pending = null;
-        if (outcome.Kind != ActionOutcomeKind.Confirmed)
-        {
-            Fail(null, "logging off: " + Describe(outcome));
-            return;
-        }
-
-        _ = session.Actions.Quit(ActionSource.Host);
-        _quitAt = _runSeconds;
-        _phase = Phase.Quitting;
-    }
-
-    /// <summary>Records the first failure and logs off before it is reported, so ACE does not keep the character in the world for the next run.</summary>
+    /// <summary>Records the first failure (the flow logs off before it is reported, so ACE does not keep the character in the world for the next run) and finishes at once when there is nothing to log off.</summary>
     private void Fail(IGameSessionView? session, string why)
     {
-        if (_failed)
+        if (_flow.Fail(session, why, _phase == Phase.Session ? null : _phase.ToString()))
         {
-            return;
-        }
-
-        _failed = true;
-        _failure = why;
-        _failedAt = _phase.ToString();
-        Log.Error(LogCategory, "the journey leg failed", ("phase", _failedAt), ("why", why));
-        if (session is not null && _entered && BuffLegPhases.InWorld(session.State) && _phase != Phase.LoggingOff)
-        {
-            Log.Info(LogCategory, "journey: logging off before the run ends as failed");
-            _pending = session.Actions.LogOff(ActionSource.Host);
-            _recoveryStarted = true;
-            _recoveryStart = _runSeconds;
-            return;
-        }
-
-        Finish(why);
-    }
-
-    private void StepRecovery(IGameSessionView session)
-    {
-        if (_recoveryStarted && _pending is { Outcome: { } left })
-        {
-            _pending = null;
-            Log.Info(LogCategory, "journey: the failed run logged off: " + left.Kind + (left.Detail is null ? string.Empty : ": " + left.Detail));
-            _ = session.Actions.Quit(ActionSource.Host);
-            _quitAt = _runSeconds;
-            return;
-        }
-
-        if (!_recoveryStarted || _runSeconds - _recoveryStart > RecoverySeconds)
-        {
-            Finish(_failure);
+            Finish(why);
         }
     }
-
-    private void Go(Phase next)
-    {
-        _phase = next;
-        _phaseStart = _runSeconds;
-    }
-
-    private static string Describe(in ActionOutcome outcome) =>
-        outcome.Kind + (outcome.Code == 0 ? string.Empty : string.Create(CultureInfo.InvariantCulture, $" (code 0x{outcome.Code:X})")) + (outcome.Detail is null ? string.Empty : ": " + outcome.Detail);
 
     private void Finish(string? why)
     {
@@ -775,11 +540,11 @@ public sealed partial class JourneyLegRunner : Node
             PrintNewLines(scenario);
         }
 
-        var ok = _failure is null && why is null && _scenarioEnded && scenario is not null && scenario.Verdict.Ok(scenario.Context.Facts);
-        Log.Info(LogCategory, $"journey leg done ok={(ok ? "true" : "false")} name={_plan?.Name ?? "n/a"} seconds={_runSeconds.ToString("0.0", CultureInfo.InvariantCulture)} frames_saved={_framesSaved} frames_not_taken={(_notTaken.Count == 0 ? "none" : string.Join(',', _notTaken))} failure={_failure ?? why ?? "none"}");
+        var ok = _flow.Failure is null && why is null && _scenarioEnded && scenario is not null && scenario.Verdict.Ok(scenario.Context.Facts);
+        Log.Info(LogCategory, $"journey leg done ok={(ok ? "true" : "false")} name={_plan?.Name ?? "n/a"} seconds={_runSeconds.ToString("0.0", CultureInfo.InvariantCulture)} frames_saved={_framesSaved} frames_not_taken={(_notTaken.Count == 0 ? "none" : string.Join(',', _notTaken))} failure={_flow.Failure ?? why ?? "none"}");
         if (!ok)
         {
-            Log.Error(LogCategory, "the journey leg failed", ("phase", _failedAt), ("why", _failure ?? why ?? scenario?.Failure ?? "the journey's verdict did not hold"));
+            Log.Error(LogCategory, "the journey leg failed", ("phase", _flow.FailedAt), ("why", _flow.Failure ?? why ?? scenario?.Failure ?? "the journey's verdict did not hold"));
         }
 
         if (_notTaken.Count > 0)

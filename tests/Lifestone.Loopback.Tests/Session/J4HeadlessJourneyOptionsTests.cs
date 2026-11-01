@@ -54,10 +54,31 @@ public sealed class J4HeadlessJourneyOptionsTests
     {
         foreach (var plan in JourneyPlans.All)
         {
-            Assert.Equal(plan.ExpectedSeconds + Program.JourneyLoginMarginSeconds, Program.JourneyQuitAfterSeconds(plan));
+            Assert.Equal(plan.ExpectedSeconds + Program.JourneyLoginMarginSeconds + JourneyLimits.HuntExtraSeconds(plan), Program.JourneyQuitAfterSeconds(plan));
         }
 
         Assert.Equal(1_290, Program.JourneyQuitAfterSeconds(JourneyPlans.Melee));
+        // k2: the archer's forest hunt runs 1,200 s against its 400 s expected, so the whole-run limit holds the other stations at their expected seconds plus the whole hunt and the login margin.
+        Assert.Equal(1_080 + 300 + 800, Program.JourneyQuitAfterSeconds(JourneyPlans.Archer));
+        Assert.True(Program.JourneyQuitAfterSeconds(JourneyPlans.Archer) >= (JourneyPlans.Archer.ExpectedSeconds - JourneyPlans.ArcherHuntExpectedSeconds) + JourneyStations.ArcherHuntSeconds + Program.JourneyLoginMarginSeconds);
         Assert.Equal(400, HeadlessOptions.Parse(["--scenario=journey", "--journey=melee", "--quit-after=400"]).QuitAfter);
+    }
+
+    [Fact]
+    public void A_raised_fight_limit_raises_the_journeys_limit_by_the_raise_for_each_den_fight_and_the_default_fight_does_not()
+    {
+        // M5 1 fix B (review 1-R4): --fight-minutes and a long --fight-seconds reach the journey's den fight, so the whole-run limit must cover them.
+        var thirty = HeadlessOptions.Parse(["--scenario=journey", "--journey=mage", "--fight-minutes=30", "--fight-kills=0"]);
+        Assert.Empty(thirty.Errors);
+        var plan = thirty.Journey!;
+        Assert.Equal(plan.ExpectedSeconds + Program.JourneyLoginMarginSeconds + 1500, Program.JourneyQuitAfterSeconds(plan, thirty.Fight));
+        Assert.True(Program.JourneyQuitAfterSeconds(plan, thirty.Fight) >= thirty.Fight.FailSeconds + JourneyLimits.FightMarginSeconds);
+
+        var plain = HeadlessOptions.Parse(["--scenario=journey", "--journey=mage"]);
+        Assert.Equal(Program.JourneyQuitAfterSeconds(plan), Program.JourneyQuitAfterSeconds(plan, plain.Fight));
+        Assert.Equal(plan.ExpectedSeconds + Program.JourneyLoginMarginSeconds, Program.JourneyQuitAfterSeconds(plan, plain.Fight)); // the mage has no archer hunt
+
+        var longSeconds = HeadlessOptions.Parse(["--scenario=journey", "--journey=mage", "--fight-seconds=1200"]);
+        Assert.Equal(plan.ExpectedSeconds + Program.JourneyLoginMarginSeconds + 900, Program.JourneyQuitAfterSeconds(plan, longSeconds.Fight));
     }
 }

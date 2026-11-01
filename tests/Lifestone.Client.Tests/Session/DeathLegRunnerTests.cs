@@ -108,11 +108,11 @@ public sealed class DeathLegRunnerTests
         plan.MarkTaken(DeathShotPlan.CorpseOpenSlot);
 
         Assert.False(plan.IsOwed(31.7));
-        Assert.EndsWith("corpse-open=taken decoys=trigger never came", plan.Note(), StringComparison.Ordinal);
+        Assert.EndsWith("corpse-open=taken", plan.Note(), StringComparison.Ordinal);
 
         var never = new DeathShotPlan();
         never.Begin(0, 0, 0, 0);
-        Assert.EndsWith("corpse-open=trigger never came decoys=trigger never came", never.Note(), StringComparison.Ordinal); // a run with no trip names the missing frame
+        Assert.EndsWith("corpse-open=trigger never came", never.Note(), StringComparison.Ordinal); // a run with no trip names the missing frame
 
         var closed = new DeathShotPlan();
         closed.Begin(0, 0, 0, 0);
@@ -120,52 +120,6 @@ public sealed class DeathLegRunnerTests
         closed.Step(40.1, 0, false, 0, 0, true, 0, true, corpseOpen: true);
         closed.Step(46.0, 0, false, 0, 0, true, 0, true, corpseOpen: false); // 6 s of tunnel after the trigger: past the give-up time
         Assert.Contains("corpse-open=not taken (portal space was up until the give-up time)", closed.Note(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_decoys_frame_is_watched_before_the_plan_is_armed_due_only_with_the_decoys_listed_and_given_up_by_name_when_they_never_are()
-    {
-        // M4 3.1 d2: the decoys frame belongs to the gear stage, so it is triggered (the runner opened the inventory page) without Begin, long before the wait among the tuskers; it is never faked.
-        var plan = new DeathShotPlan();
-
-        Assert.Equal(5, DeathShotPlan.DecoysSlot);
-        Assert.Equal(-1, plan.Step(5.0, 0, false, 0, 0, true, 0, false)); // no trigger, no Begin: nothing
-        Assert.False(plan.Pending(DeathShotPlan.DecoysSlot));
-        Assert.Equal(-1, plan.Step(6.0, 0, false, 0, 0, true, 0, false, decoysOpen: true)); // the trigger frame: the page was just opened
-        Assert.True(plan.Pending(DeathShotPlan.DecoysSlot));
-        Assert.True(plan.IsOwed(6.0)); // the scenario is held from here, as for every slot
-        Assert.Equal(-1, plan.Step(6.1, 0, false, 0, 0, true, 0, false, decoysOpen: true));
-        Assert.Equal(-1, plan.Step(6.4, 0, false, 0, 0, true, 0, false, decoysOpen: true, decoysListed: false)); // due, but the page lists no decoy yet: wait
-        Assert.Equal(DeathShotPlan.DecoysSlot, plan.Step(6.5, 0, false, 0, 0, true, 0, false, decoysOpen: true, decoysListed: true));
-        plan.MarkTaken(DeathShotPlan.DecoysSlot);
-
-        Assert.True(plan.Decided(DeathShotPlan.DecoysSlot));
-        Assert.False(plan.IsOwed(6.5));
-        Assert.EndsWith("corpse-open=trigger never came decoys=taken", plan.Note(), StringComparison.Ordinal);
-        Assert.Equal(-1, plan.Step(7.0, 0, false, 0, 0, true, 0, false, decoysOpen: true, decoysListed: true)); // once
-
-        // Armed later, the other slots still work and the decoys slot does not disturb their bases.
-        plan.Begin(0, 0, 0, 0);
-        plan.Step(30.0, 1, true, 0, 0, true, 0, false);
-        Assert.Equal(0, plan.Step(30.3, 1, true, 0, 0, true, 0, false));
-
-        // A page that never lists the decoys: the frame is given up by name once the give-up time has passed, never faked.
-        var never = new DeathShotPlan();
-        never.Step(10.0, 0, false, 0, 0, true, 0, false, decoysOpen: true);
-        never.Step(10.1, 0, false, 0, 0, true, 0, false, decoysOpen: true);
-        never.Step(10.5, 0, false, 0, 0, true, 0, false, decoysOpen: true);
-        Assert.True(never.Pending(DeathShotPlan.DecoysSlot));
-        never.Step(13.2, 0, false, 0, 0, true, 0, false, decoysOpen: true);
-        Assert.True(never.Decided(DeathShotPlan.DecoysSlot));
-        Assert.Contains("decoys=not taken (the inventory page did not list the decoys within 3.0 s)", never.Note(), StringComparison.Ordinal);
-
-        // A frame in portal space waits for the world and is given up at the give-up time as the others are.
-        var tunnel = new DeathShotPlan();
-        tunnel.Step(20.0, 0, false, 0, 0, true, 0, true, decoysOpen: true, decoysListed: true);
-        tunnel.Step(20.1, 0, false, 0, 0, true, 0, true, decoysOpen: true, decoysListed: true);
-        Assert.Equal(-1, tunnel.Step(20.5, 0, false, 0, 0, true, 0, true, decoysOpen: true, decoysListed: true));
-        tunnel.Step(23.5, 0, false, 0, 0, true, 0, true, decoysOpen: true, decoysListed: true);
-        Assert.Contains("decoys=not taken (portal space was up until the give-up time)", tunnel.Note(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -194,7 +148,7 @@ public sealed class DeathLegRunnerTests
         Step(plan, 2.0, arrivals: 1, portal: true);
         Step(plan, 20.0, arrivals: 1, portal: true); // 19 s of tunnel: past the give-up time
 
-        Assert.Equal("hit=trigger never came dead=trigger never came corpse=trigger never came lifestone=not taken (portal space was up until the give-up time) corpse-open=trigger never came decoys=trigger never came", plan.Note());
+        Assert.Equal("hit=trigger never came dead=trigger never came corpse=trigger never came lifestone=not taken (portal space was up until the give-up time) corpse-open=trigger never came", plan.Note());
     }
 
     [Fact]
@@ -223,8 +177,8 @@ public sealed class DeathLegRunnerTests
     {
         Assert.Equal(Path.Combine("cache", "m3", "3-2", "death-hit.png"), DeathShotPlan.ShotPath("cache/m3/3-2/death.png", 0));
         Assert.Equal("death-lifestone.png", DeathShotPlan.ShotPath("death.png", 3));
-        Assert.Equal(["hit", "dead", "corpse", "lifestone", "corpse-open", "decoys"], DeathShotPlan.Names);
-        Assert.Equal([0.2, 1.5, 0.3, 3.5, 0.5, 0.3], DeathShotPlan.DelaysSeconds);
+        Assert.Equal(["hit", "dead", "corpse", "lifestone", "corpse-open"], DeathShotPlan.Names);
+        Assert.Equal([0.2, 1.5, 0.3, 3.5, 0.5], DeathShotPlan.DelaysSeconds);
         Assert.Equal("death-corpse-open.png", DeathShotPlan.ShotPath("death.png", DeathShotPlan.CorpseOpenSlot));
     }
 
@@ -420,20 +374,20 @@ public sealed class DeathLegRunnerTests
     {
         var runner = Runner;
         var m3Stages = new[] { "LoginSeconds", "GearSeconds", "BarsSeconds", "BindSeconds", "SuicideSeconds", "PlaceSeconds", "RespawnSeconds", "RegearSeconds" };
-        var m4Stages = new[] { "DecoyTopUpSeconds", "RebuffSeconds", "FightPlaceSeconds", "FightWalkSeconds", "PreTripHealSeconds", "TripSeconds", "TripReturnSeconds" };
+        var m4Stages = new[] { "RebuffSeconds", "FightPlaceSeconds", "FightWalkSeconds", "PreTripHealSeconds", "TripSeconds", "TripReturnSeconds" };
         var m3Fixed = m3Stages.Sum(name => Constant(runner, name));
         var m4Fixed = m4Stages.Sum(name => Constant(runner, name));
         var whole = m3Fixed + DeathOptions.DefaultSeconds + m4Fixed + DeathOptions.DefaultFightSeconds;
         var recovery = Constant(runner, "RecoverySeconds");
 
         Assert.Equal(605.0, m3Fixed); // M3's loop: 60 + 120 + 30 + 90 + 90 + 30 + 65 + 120
-        Assert.Equal(630.0, m4Fixed); // M4 3.1's stages: 30 + 240 + 30 + 60 + 120 + 90 + 60
-        Assert.Equal(2015.0, whole);
+        Assert.Equal(600.0, m4Fixed); // M4 3.1's stages: 240 + 30 + 60 + 120 + 90 + 60 (the decoy top-up's 30 is gone with the decoys, M5 3 d3)
+        Assert.Equal(1985.0, whole);
         Assert.Equal(whole, 1205.0 + m4Fixed + DeathOptions.DefaultFightSeconds);
 
         // The formulas name every stage, once: the constant for the default wait and fight, and the function for any.
-        Assert.Contains("WholeCheckSeconds = LoginSeconds + GearSeconds + BarsSeconds + BindSeconds + SuicideSeconds + DecoyTopUpSeconds + PlaceSeconds + DeathOptions.DefaultSeconds + RespawnSeconds + RegearSeconds + RebuffSeconds + FightPlaceSeconds + FightWalkSeconds + DeathOptions.DefaultFightSeconds + PreTripHealSeconds + TripSeconds + TripReturnSeconds;", runner, StringComparison.Ordinal);
-        Assert.Contains("WholeCheckSecondsFor(double deathSeconds, double fightSeconds = DeathOptions.DefaultFightSeconds) => LoginSeconds + GearSeconds + BarsSeconds + BindSeconds + SuicideSeconds + DecoyTopUpSeconds + PlaceSeconds + deathSeconds + RespawnSeconds + RegearSeconds + RebuffSeconds + FightPlaceSeconds + FightWalkSeconds + fightSeconds + PreTripHealSeconds + TripSeconds + TripReturnSeconds;", runner, StringComparison.Ordinal);
+        Assert.Contains("WholeCheckSeconds = LoginSeconds + GearSeconds + BarsSeconds + BindSeconds + SuicideSeconds + PlaceSeconds + DeathOptions.DefaultSeconds + RespawnSeconds + RegearSeconds + RebuffSeconds + FightPlaceSeconds + FightWalkSeconds + DeathOptions.DefaultFightSeconds + PreTripHealSeconds + TripSeconds + TripReturnSeconds;", runner, StringComparison.Ordinal);
+        Assert.Contains("WholeCheckSecondsFor(double deathSeconds, double fightSeconds = DeathOptions.DefaultFightSeconds) => LoginSeconds + GearSeconds + BarsSeconds + BindSeconds + SuicideSeconds + PlaceSeconds + deathSeconds + RespawnSeconds + RegearSeconds + RebuffSeconds + FightPlaceSeconds + FightWalkSeconds + fightSeconds + PreTripHealSeconds + TripSeconds + TripReturnSeconds;", runner, StringComparison.Ordinal);
         Assert.Contains("_wholeSeconds = WholeCheckSecondsFor(options.Seconds, options.FightSeconds)", runner, StringComparison.Ordinal); // --death-fight-seconds moves the limit
 
 
@@ -446,18 +400,18 @@ public sealed class DeathLegRunnerTests
         Assert.True(Constant(runner, "RebuffSeconds") >= Constant(FightRunner, "TopUpSeconds"), "the fight leg's buff top-up limit, a live full cycle of 26 casts took 56 s");
         Assert.True(Constant(runner, "RebuffSeconds") >= new Lifestone.Client.Session.Mage.BuffOptions().ManaWaitSeconds + 56, "the cycle's bounded mana wait and its casts");
         Assert.True(Constant(runner, "FightPlaceSeconds") >= Constant(runner, "PlaceSeconds"), "the teleport to the den and the settle, as the first visit's");
-        Assert.True(Constant(runner, "DecoyTopUpSeconds") >= 4 * 5, "about 4 s of item grants live, with a margin");
         Assert.True(Constant(runner, "TripReturnSeconds") >= 2 * DeathScenario.SettleSeconds, "the return teleport and its settles");
     }
 
     [Fact]
-    public void The_runner_builds_the_decoy_kit_passes_the_options_and_prints_the_new_fields_with_the_mode_watch_last()
+    public void The_runner_builds_the_mages_own_kit_passes_the_options_and_prints_the_new_fields_with_the_mode_watch_last()
     {
         var runner = Runner;
 
-        // The kit is the death loop's (the decoys with --death-decoys on), not M3's plain one; no other GearKit.Build is left in the runner.
-        Assert.Contains("GearKit.ForDeathLoop(table.Spells, LoginName(key), options)", runner, StringComparison.Ordinal);
-        Assert.DoesNotContain("GearKit.Build(", runner, StringComparison.Ordinal);
+        // The kit is the mage's own, the ground's (M5 3 d3: the decoys are retired, D51; GearKit.ForDeathLoop is gone); the one GearKit.Build in the runner.
+        Assert.Contains("GearKit.Build(table.Spells, LoginName(key), ground: runner._ground)", runner, StringComparison.Ordinal);
+        Assert.DoesNotContain("ForDeathLoop", runner, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(runner, @"GearKit\.Build\("));
 
         // The options: one parse (DeathLegOptions: the death loop's, the buff cycle's and the fight's), its errors fail the leg at its first frame, and its limit follows --death-fight-seconds.
         Assert.Contains("DeathLegOptions.FromArguments(CommandLineArgument.ParseAll(OS.GetCmdlineUserArgs()))", runner, StringComparison.Ordinal);
@@ -476,16 +430,15 @@ public sealed class DeathLegRunnerTests
 
         // The verdict line carries d1's fields in d1's order, after trip_abort= and before the optional frame_over_50=yes, so the runner needs no printing of its own for them.
         var verdict = File.ReadAllText(RepositoryFiles.PathOf("src", "Lifestone.Client", "Session", "Scenarios", "DeathLegVerdict.cs"));
-        Assert.Contains("trip_abort={measures.TripAbort ?? TripAbortNone} rebuffed={measures.Rebuffed ?? RebuffedSkipped} den_kills={measures.DenKills} decoys={Count(measures.Decoys)} decoy_safe={measures.DecoySafe ?? NotApplicable} decoys_dropped={Count(measures.DecoysDropped)} gear_dropped={Count(measures.GearDropped)} decoys_recovered={Count(measures.DecoysRecovered)} pretrip_heals={measures.PretripHeals} gear_left={Count(measures.GearLeft)}", verdict, StringComparison.Ordinal);
-        var line = DeathLegVerdict.Compose(null, default(DeathLegMeasures) with { Died = 1, Respawn = DeathRespawn.Lifestone, GearRestored = true, HitsTaken = 1, DamageTaken = 5, Rebuffed = DeathLegVerdict.RebuffedYes, DenKills = 4, Decoys = 8, DecoySafe = "yes", DecoysDropped = 7, GearDropped = 0, DecoysRecovered = 7, PretripHeals = 1 }).Line;
-        Assert.EndsWith(" rebuffed=yes den_kills=4 decoys=8 decoy_safe=yes decoys_dropped=7 gear_dropped=0 decoys_recovered=7 pretrip_heals=1 gear_left=n/a", line, StringComparison.Ordinal); // the runner appends " mode_mismatch=<n>" to this
+        Assert.Contains("trip_abort={measures.TripAbort ?? TripAbortNone} stage_rebuffed={measures.Rebuffed ?? RebuffedSkipped} den_kills={measures.DenKills} pretrip_heals={measures.PretripHeals} gear_left={Count(measures.GearLeft)}", verdict, StringComparison.Ordinal);
+        var line = DeathLegVerdict.Compose(null, default(DeathLegMeasures) with { Died = 1, Respawn = DeathRespawn.Lifestone, GearRestored = true, HitsTaken = 1, DamageTaken = 5, Rebuffed = DeathLegVerdict.RebuffedYes, DenKills = 4, PretripHeals = 1 }).Line;
+        Assert.EndsWith(" stage_rebuffed=yes den_kills=4 pretrip_heals=1 gear_left=n/a", line, StringComparison.Ordinal); // the runner appends " mode_mismatch=<n>" to this
 
-        // The decoys frame: the page is opened by the panel host's own toggle (never a session action), the frame waits for the decoys to be listed, and the page is closed again.
-        Assert.Contains("host.Toggle(GameInventoryPage.Panel)", runner, StringComparison.Ordinal);
-        Assert.Contains("_plan.Step(_runSeconds, scenario.Tally.HitsTaken, healthUnderFull, _deathSampler.DeadMotions, _deathSampler.Corpses, _deathSampler.CorpseBeforePortal, _deathSampler.Arrivals, self.Travel != SelfTravel.Present, scenario.CorpseOpen, decoysOpen, decoysListed)", runner, StringComparison.Ordinal);
-        Assert.Contains("scenario.DecoyCheckResult is not { Made: true }", runner, StringComparison.Ordinal);
-        Assert.Contains("list.FindItem(guid) is null", runner, StringComparison.Ordinal);
-        Assert.Contains("list.ScrollToShow(first)", runner, StringComparison.Ordinal);
+        // The review frames: the plan is stepped with the corpse-open trigger only; the decoys frame (the inventory page opened by the panel host's toggle) is retired with the decoys.
+        Assert.Contains("_plan.Step(_runSeconds, scenario.Tally.HitsTaken, healthUnderFull, _deathSampler.DeadMotions, _deathSampler.Corpses, _deathSampler.CorpseBeforePortal, _deathSampler.Arrivals, self.Travel != SelfTravel.Present, scenario.CorpseOpen)", runner, StringComparison.Ordinal);
+        Assert.DoesNotContain("StepDecoysPage", runner, StringComparison.Ordinal);
+        Assert.DoesNotContain("DecoyCheckResult", runner, StringComparison.Ordinal);
+        Assert.DoesNotContain("DecoyKit", runner, StringComparison.Ordinal);
     }
 
     [Fact]

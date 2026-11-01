@@ -30,6 +30,7 @@ public sealed partial class RebuffDriverHost : Node
     private Task<IReadOnlyDictionary<uint, SpellInfo>>? _loading;
     private object? _wiredHotkeys;
     private bool _saved;
+    private bool _autopilotLooked;
     private readonly Lifestone.Client.Session.Hosting.LegFaultGuard _guard = new("RebuffDriverHost", LogCategory, GodotLogSink.Instance);
 
     /// <summary>Adds the host to the scene.</summary>
@@ -70,6 +71,16 @@ public sealed partial class RebuffDriverHost : Node
         try
         {
             WireKey(session);
+            if (!_autopilotLooked)
+            {
+                // M5 4 F3, 4-R4: PlayMode.Install adds this node and the autopilot's side by side; while the dial is Running or Stopping it owns the buffs (its upkeep casts them on its own margin) and the driver stands down.
+                _autopilotLooked = true;
+                if (GetTree().Root.FindChild("AutopilotHost", recursive: true, owned: false) is AutopilotHost autopilot)
+                {
+                    _logic.StandDownWhile = () => autopilot.OwnsBuffs;
+                }
+            }
+
             if (_logic.NeedsSpells)
             {
                 LoadSpells();

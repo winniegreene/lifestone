@@ -17,7 +17,7 @@ internal sealed class LiveHarness : IDisposable
 
     private readonly List<ScriptedAceSession> _servers = [];
 
-    public LiveHarness(bool record = true, SessionOptions? options = null, byte[]? secrets = null, Action<ScriptedAceSession>? configure = null)
+    public LiveHarness(bool record = true, SessionOptions? options = null, byte[]? secrets = null, Action<ScriptedAceSession>? configure = null, RecordingHeader? header = null)
     {
         Recording = record ? new MemoryStream() : null;
         Session = SessionBootstrap.CreateLiveWith(
@@ -29,7 +29,7 @@ internal sealed class LiveHarness : IDisposable
             Log,
             Recording,
             Sockets.Open,
-            new RecordingHeader { Runner = "test", CreatedUtc = Time.GetUtcNow(), Scenario = "harness" },
+            header ?? new RecordingHeader { Runner = "test", CreatedUtc = Time.GetUtcNow(), Scenario = "harness" },
             (netOptions, sink, tap) =>
             {
                 NetOptions = netOptions;

@@ -71,6 +71,19 @@ public enum LoginCheckKind
     /// takes the review frames at the stations and judges the journey's verdict lines.
     /// </summary>
     Journey,
+
+    /// <summary>
+    /// <c>--login-check=keep</c> (M5 6 k2, D32 and D33): a separate check, never part of <see cref="All"/>, on the tools test account as Lifestone Throwaway. One process, two logins: the first flips one
+    /// character option and moves one window and logs off; the second reads both back from the server's description and the applied layout and puts the option back
+    /// (<see cref="Lifestone.Client.Session.RetailChecks.KeepAcrossLogins"/>).
+    /// </summary>
+    Keep,
+
+    /// <summary>
+    /// <c>--login-check=autopilot</c> (M5 4 h1, D57): a separate check, never part of <see cref="All"/>. BSD Mage on the test account is entered and <see cref="Lifestone.Client.Session.Autopilot.AutopilotScenario"/> runs in the game's session until its stop rules or a stop request end it
+    /// (<c>--autopilot-minutes</c>, <c>--autopilot-level</c>), then the game logs off and quits; the exit code is the done line's ok.
+    /// </summary>
+    Autopilot,
 }
 
 /// <summary>
@@ -173,6 +186,77 @@ public sealed record PlayOptions
     /// <c>--log-copies=console|file|all</c> (M5 item 0 c3, <c>m5-log-triple</c>): where the log lines go besides <c>lifestone.log</c>, which has every line in every mode. Default <see cref="Lifestone.Client.Diagnostics.LogCopies.Console"/>.
     /// </summary>
     public Lifestone.Client.Diagnostics.LogCopies LogCopies { get; init; } = Lifestone.Client.Diagnostics.LogCopies.Console;
+
+    /// <summary>The default cap of <c>lifestone.log</c> in MiB (<c>--log-max-mb</c>, M5 item 7).</summary>
+    public const int DefaultLogMaxMb = 256;
+
+    /// <summary>The largest <c>--log-max-mb</c> accepted: 100 GiB.</summary>
+    public const int MaxLogMaxMb = 102400;
+
+    /// <summary>The default folder of the soak frames (<c>--soak-frame-dir</c>), under the gitignored cache.</summary>
+    public const string DefaultSoakFrameDirectory = "cache/soak/frames";
+
+    /// <summary>
+    /// <c>--log-max-mb=N</c> (M5 item 7, <c>m5-log-rotation</c>): when <c>lifestone.log</c> passes N MiB it is rolled to <c>lifestone.1.log</c> (replacing an older one) and a new one begins, so the logs
+    /// stay under 2N MiB. Default <see cref="DefaultLogMaxMb"/>; 0 = no cap.
+    /// </summary>
+    public int LogMaxMb { get; init; } = DefaultLogMaxMb;
+
+    /// <summary>The default of <c>--log-keep</c>: only <c>lifestone.1.log</c> (the behaviour before M5 7 F17).</summary>
+    public const int DefaultLogKeep = 1;
+
+    /// <summary>The largest <c>--log-keep</c> accepted.</summary>
+    public const int MaxLogKeep = 100000;
+
+    /// <summary>
+    /// <c>--log-keep=N</c> (M5 7 F17): how many rolled files stay. A roll makes <c>lifestone.1.log</c> of the current file and moves the older ones up (<c>lifestone.2.log</c>, ...; the oldest has the highest number); those past N
+    /// are deleted. Default 1 (only <c>lifestone.1.log</c>); 0 = keep every file (the soak).
+    /// </summary>
+    public int LogKeep { get; init; } = DefaultLogKeep;
+
+    /// <summary>The longest <c>--log-vitals-s</c> accepted: a day.</summary>
+    public const double MaxLogVitalsSeconds = 86400.0;
+
+    /// <summary>
+    /// <c>--log-vitals-s=S</c> (M5 7 F17): play mode logs one Info line "vitals: health h/H stamina s/S mana m/M" every S seconds once the player's vitals are known. Default 0 = none (the soak passes 10).
+    /// </summary>
+    public double LogVitalsSeconds { get; init; }
+
+    /// <summary>The default of <c>--log-objects-m</c>, metres.</summary>
+    public const double DefaultLogObjectsMetres = 60.0;
+
+    /// <summary>The largest <c>--log-objects-m</c> accepted.</summary>
+    public const double MaxLogObjectsMetres = 10000.0;
+
+    /// <summary>
+    /// <c>--log-objects-m=N</c> (M5 7 F17): play mode logs an Info line (category objects) for every server object created or deleted within N metres of the player, with its name, guid and distance, at most
+    /// <see cref="Lifestone.Client.Diagnostics.AvatarNoticeTally.ObjectLinesPerWindow"/> lines in each <see cref="Lifestone.Client.Diagnostics.AvatarNoticeTally.ObjectWindowSeconds"/> seconds. Default 60; 0 = none.
+    /// </summary>
+    public double LogObjectsMetres { get; init; } = DefaultLogObjectsMetres;
+
+    /// <summary>
+    /// <c>--soak-frame-s=S</c> (M5 item 7): play mode saves a frame of the window every S seconds after entering the world, to <see cref="SoakFrameDirectory"/>. 0 (default) = none; otherwise
+    /// <see cref="Lifestone.Client.Diagnostics.SoakFrameSchedule.MinSeconds"/> to <see cref="Lifestone.Client.Diagnostics.SoakFrameSchedule.MaxSeconds"/>.
+    /// </summary>
+    public double SoakFrameSeconds { get; init; }
+
+    /// <summary><c>--soak-frame-dir=DIR</c>: where the soak frames go (default <see cref="DefaultSoakFrameDirectory"/>; the output-path rule of <see cref="Lifestone.Client.Diagnostics.OutputPaths"/>).</summary>
+    public string SoakFrameDirectory { get; init; } = DefaultSoakFrameDirectory;
+
+    /// <summary><c>--doll-review-frames=DIR</c> (M5 item 7, D129): the paper doll's figure and slots frames, saved once the first time the doll shows; null (default) = none.</summary>
+    public string? DollReviewFramesDirectory { get; init; }
+
+    /// <summary><c>--examine-review-frames=DIR</c> (M5 item 7, S6, D136): the examination's corpse and window frames, saved once the first time a container window shows a magic item; null (default) = none.</summary>
+    public string? ExamineReviewFramesDirectory { get; init; }
+
+    /// <summary><c>--examine-worn-frames=DIR</c> (M5 item 7, D142): the wielded caster's and the worn robe's examination frames, each once its page shows a spell-changed value (or its tries ran out); null (default) = none.</summary>
+    public string? ExamineWornFramesDirectory { get; init; }
+
+    /// <summary><c>--examine-capture-creatures=N</c> (M5 item 7, D137, the failed-roll live capture): inspect each new creature the fight aims at, up to N answers in all; null (default) = off.</summary>
+    public int? ExamineCaptureCreatures { get; init; }
+
+    /// <summary>The most answers <c>--examine-capture-creatures</c> takes.</summary>
+    public const int MaxExamineCaptureCreatures = 1000;
 
     /// <summary>The problems <see cref="Parse"/> found, one line each; the option keeps its default.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
@@ -318,6 +402,156 @@ public sealed record PlayOptions
                 continue;
             }
 
+            if (argument.Name == "--log-max-mb")
+            {
+                var known = errors.Count;
+                var megabytes = OptionValues.Int(argument, errors, DefaultLogMaxMb);
+                if (errors.Count == known && megabytes is >= 0 and <= MaxLogMaxMb)
+                {
+                    options = options with { LogMaxMb = megabytes };
+                }
+                else if (errors.Count == known)
+                {
+                    errors.Add($"--log-max-mb: '{argument.Value}' is not 0 to {MaxLogMaxMb} (0 = no cap)");
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--log-keep")
+            {
+                var known = errors.Count;
+                var keep = OptionValues.Int(argument, errors, DefaultLogKeep);
+                if (errors.Count == known && keep is >= 0 and <= MaxLogKeep)
+                {
+                    options = options with { LogKeep = keep };
+                }
+                else if (errors.Count == known)
+                {
+                    errors.Add($"--log-keep: '{argument.Value}' is not 0 to {MaxLogKeep} (0 = keep every rolled file)");
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--log-vitals-s")
+            {
+                var known = errors.Count;
+                var seconds = OptionValues.Double(argument, errors, 0.0);
+                if (errors.Count == known && seconds is >= 0 and <= MaxLogVitalsSeconds)
+                {
+                    options = options with { LogVitalsSeconds = seconds };
+                }
+                else if (errors.Count == known)
+                {
+                    errors.Add($"--log-vitals-s: '{argument.Value}' is not 0 to {MaxLogVitalsSeconds:0} (0 = no vitals line)");
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--log-objects-m")
+            {
+                var known = errors.Count;
+                var metres = OptionValues.Double(argument, errors, DefaultLogObjectsMetres);
+                if (errors.Count == known && metres is >= 0 and <= MaxLogObjectsMetres)
+                {
+                    options = options with { LogObjectsMetres = metres };
+                }
+                else if (errors.Count == known)
+                {
+                    errors.Add($"--log-objects-m: '{argument.Value}' is not 0 to {MaxLogObjectsMetres:0} (0 = no object lines)");
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--soak-frame-s")
+            {
+                var known = errors.Count;
+                var seconds = OptionValues.Double(argument, errors, 0.0);
+                if (errors.Count == known && (seconds == 0 || seconds is >= Lifestone.Client.Diagnostics.SoakFrameSchedule.MinSeconds and <= Lifestone.Client.Diagnostics.SoakFrameSchedule.MaxSeconds))
+                {
+                    options = options with { SoakFrameSeconds = seconds };
+                }
+                else if (errors.Count == known)
+                {
+                    errors.Add($"--soak-frame-s: '{argument.Value}' is not 0 or {Lifestone.Client.Diagnostics.SoakFrameSchedule.MinSeconds:0} to {Lifestone.Client.Diagnostics.SoakFrameSchedule.MaxSeconds:0} (0 = no frames)");
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--examine-capture-creatures")
+            {
+                if (int.TryParse(argument.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var answers) && answers is >= 1 and <= MaxExamineCaptureCreatures)
+                {
+                    options = options with { ExamineCaptureCreatures = answers };
+                }
+                else
+                {
+                    errors.Add($"--examine-capture-creatures: '{argument.Value}' is not a whole number from 1 to {MaxExamineCaptureCreatures}");
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--examine-review-frames")
+            {
+                if (argument.Value.Length == 0)
+                {
+                    errors.Add("--examine-review-frames: needs a folder (--name=VALUE)");
+                }
+                else
+                {
+                    options = options with { ExamineReviewFramesDirectory = argument.Value };
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--examine-worn-frames")
+            {
+                if (argument.Value.Length == 0)
+                {
+                    errors.Add("--examine-worn-frames: needs a folder (--name=VALUE)");
+                }
+                else
+                {
+                    options = options with { ExamineWornFramesDirectory = argument.Value };
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--doll-review-frames")
+            {
+                if (argument.Value.Length == 0)
+                {
+                    errors.Add("--doll-review-frames: needs a folder (--name=VALUE)");
+                }
+                else
+                {
+                    options = options with { DollReviewFramesDirectory = argument.Value };
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--soak-frame-dir")
+            {
+                if (argument.Value.Length == 0)
+                {
+                    errors.Add("--soak-frame-dir: needs a folder (--name=VALUE)");
+                }
+                else
+                {
+                    options = options with { SoakFrameDirectory = argument.Value };
+                }
+
+                continue;
+            }
+
             if (argument.Name == "--log-copies")
             {
                 options = options with
@@ -365,14 +599,17 @@ public sealed record PlayOptions
                         ("bsd-death", LoginCheckKind.BsdDeath),
                         ("hunt", LoginCheckKind.Hunt),
                         ("journey", LoginCheckKind.Journey),
+                        ("autopilot", LoginCheckKind.Autopilot),
+                        ("keep", LoginCheckKind.Keep),
                         ("all", LoginCheckKind.All)),
                 };
             }
         }
 
         options = JourneyChecked(options, args, errors);
+        options = AutopilotChecked(options, args, errors);
         options = JourneyShotsChecked(options, args, errors);
-        if (options is { LoginCheck: LoginCheckKind.Buff or LoginCheckKind.BsdFight or LoginCheckKind.BsdDeath or LoginCheckKind.Hunt or LoginCheckKind.Journey, ScreenshotPath: { } shot, ScreenshotAfterGiven: false })
+        if (options is { LoginCheck: LoginCheckKind.Buff or LoginCheckKind.BsdFight or LoginCheckKind.BsdDeath or LoginCheckKind.Hunt or LoginCheckKind.Journey or LoginCheckKind.Autopilot, ScreenshotPath: { } shot, ScreenshotAfterGiven: false })
         {
             options = options with { ScreenshotPath = null, BuffShotPath = shot }; // the buff leg takes its own frames, mid-cast, and the fight leg its three
         }
@@ -469,6 +706,28 @@ public sealed record PlayOptions
         }
 
         return options with { JourneyShots = new JourneyShots(true, BurstFrames: frames, StepSeconds: step) };
+    }
+
+    /// <summary>
+    /// <c>--login-check=autopilot</c>'s account rule (M5 4 h1): the mage's plan is the autopilot's, so the run is on the mage's test account (no <c>--account</c> is the test account); any other account is an error.
+    /// </summary>
+    private static PlayOptions AutopilotChecked(PlayOptions options, IEnumerable<CommandLineArgument> args, List<string> errors)
+    {
+        if (options.LoginCheck != LoginCheckKind.Autopilot)
+        {
+            return options;
+        }
+
+        var plan = Lifestone.Client.Session.Scenarios.Journey.JourneyPlans.Mage;
+        foreach (var argument in args)
+        {
+            if (argument.Name == "--account" && argument.HasValue && !string.IsNullOrWhiteSpace(argument.Value) && !string.Equals(argument.Value, plan.Account, StringComparison.Ordinal))
+            {
+                errors.Add($"--login-check=autopilot: the autopilot runs {plan.Character} on the account '{plan.Account}' (give --account={plan.Account} or none); '{argument.Value}' is refused");
+            }
+        }
+
+        return options;
     }
 
     /// <summary>

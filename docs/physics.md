@@ -358,7 +358,7 @@ A `PhysicsWorld` holds what retail keeps in statics and the object maintainer: t
 (`player_object`), the objects by id, the shadows moving objects cast into cells, and the lost cell.
 
 **Stepping.** The host calls `PhysicsWorld.UseTime(now)` every frame (`CPhysics::UseTime`'s 30 Hz gate) and, when it
-answers true, `UpdateObject()` on the objects it steps (the player; owner decision D24 keeps server objects out).
+answers true, `UpdateObject()` on the objects it steps (the player; owner decision D24 keeps the other server objects out, but since M5 item 5 an avatar's step runs its transition through its server-object host, D45, D72).
 `update_object`: an object outside a cell or frozen is inactive; one more than 96 m from the player is inactive; a gap
 of at most 0.0002 s or more than 2 s is skipped; otherwise steps of at most `PhysicsCompat.MaxQuantum` (0.2 s) with a
 remainder of at most 1/30 s carried. Each step (`UpdateObjectInternal`):
@@ -398,13 +398,9 @@ object stops. The stationary-fall count zeroes the velocity from 2 on and keeps 
 statics, and a transition meets them like statics, with retail's rules: a creature is never stepped onto and the camera
 passes through it; two players pass through each other unless either is impenetrable or both are PK (or PK-lite); an
 ethereal object is passed through but reported; a missile ignores missiles and, aimed, creatures other than its target.
-Server objects are not stepped (D24), so a host that wants one to block the player keeps a PhysicsObj for it and moves it
+Server objects are not stepped by `UpdateObject` (D24; since M5 item 5 an avatar's step runs its transition through the host, D45, D72), so a host that wants one to block the player keeps a PhysicsObj for it and moves it
 with `ForceIntoCell` (retail recomputes the shadows only when the cell changes; `RecalcCrossCells` does it on demand).
-No host does yet (`TODO(d25-server-object-host)`): the live player walks through lifestones and NPCs that ACE and retail collide with. Seen at M4 4.2's
-live gate round 1: the recall into Holtburg's lifestone (docs/session.md, "Off the lifestone") and a stop of the Holtburg laps where ACE held the player
-against Alcott (a world-database NPC 1.3 m from the ring's start, which the dat-only ring check cannot see) while the client walked on, 1.02 m apart.
-Seen again in the M4 hero takes: the Brawler's vendor leg walked through Renald the Elder's closed shop door; the host
-and the door handling are planned in docs/milestones/m4-hero-visual-bugs.md §4.
+The host exists: `ServerObjectPhysicsHost` (`src/Lifestone.Client/Physics`) keeps one PhysicsObj per server object with collision, fed by the avatar set in the game and by the session's object table headless (M5 item 5, D70). In the game the server objects are stepped through it (D24's deferral ended by D45): the player is stopped by lifestones, doors and creatures as in retail, and creatures collide with one another (`TODO(d25-server-object-host)`, closed). The M4 sightings that made it necessary (the recall into Holtburg's lifestone, a Holtburg lap that walked through Alcott, the Brawler's walk through Renald the Elder's closed shop door) are history, in docs/milestones/m4-hero-visual-bugs.md §4. The host, its transitions, doors and the lifestone's landing are in docs/session.md section 55.
 An object with physics BSPs (a door) poses its parts when it moves; `SetEthereal(false)` fails while another moving object
 overlaps it and is retried each update (CheckEthereal).
 

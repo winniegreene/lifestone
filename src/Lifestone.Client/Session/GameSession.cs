@@ -242,6 +242,9 @@ public sealed class GameSession : IGameSessionView, Lifestone.Client.RetailUi.Pa
     public Lifestone.Data.Magic.SpellInfo? Spell(uint id) => _actions.FindSpell(id);
 
     /// <inheritdoc/>
+    public IReadOnlyDictionary<uint, IReadOnlyDictionary<uint, IReadOnlyList<uint>>>? SpellSets => _spellHost?.SpellSets ?? _actions.SpellTable?.SpellSets;
+
+    /// <inheritdoc/>
     public Lifestone.Data.CharacterCreation.XpTableData? XpTable => _xpTable;
 
     /// <inheritdoc/>

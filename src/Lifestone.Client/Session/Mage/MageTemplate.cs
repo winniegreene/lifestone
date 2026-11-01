@@ -4,6 +4,20 @@ using Lifestone.Data.CharacterCreation;
 
 namespace Lifestone.Client.Session.Mage;
 
+/// <summary>
+/// M5 7 F6 (D87, amended): which mage is built. <see cref="Gate126"/> is the level-126 template as it has always been (War Magic and Melee Defense specialised at creation; Life Magic trained afterwards). <see cref="Traditional"/> is the soak's level-80 mage,
+/// A traditional mage soaks the damage: no Melee Defense at all (untrained), War Magic and Life Magic specialised at creation (28 + 20 = 48 of the heritage's 52 credits, the same 4 spare as the gate build), Creature Enchantment, Item Enchantment and Mana
+/// Conversion trained afterwards. <see cref="MageTemplate.BuildFor"/> chooses by level: every level below <see cref="MageTemplate.TargetLevel"/> is the traditional mage.
+/// </summary>
+public enum MageBuild
+{
+    /// <summary>The level-126 template: War Magic and Melee Defense specialised; Life Magic, Creature, Item and Mana Conversion trained afterwards.</summary>
+    Gate126,
+
+    /// <summary>The soak's mage: no Melee Defense; War Magic and Life Magic specialised; Creature, Item and Mana Conversion trained afterwards.</summary>
+    Traditional,
+}
+
 /// <summary>One check of a template check: what the character has against what the template needs.</summary>
 /// <param name="Target">The plan target (null for the level and the creation-value checks).</param>
 /// <param name="Label">What was checked.</param>
@@ -14,6 +28,34 @@ public sealed record StatCheck(StatTarget? Target, string Label, long Actual, lo
 {
     /// <summary>A one-line description for logs and verdicts.</summary>
     public override string ToString() => $"{Label} {(Actual < 0 ? "missing" : Actual)}/{Expected} {(Met ? "met" : "SHORT")}";
+}
+
+/// <summary>
+/// M5 7 F3 (D87): the mage's build at one level (<see cref="MageTemplate.PlanAt"/>): the credits, the skills they train and those they leave out, the target ranks and what they cost.
+/// </summary>
+/// <param name="Level">The build's level.</param>
+/// <param name="TotalXp">The XpTable's total experience for the level.</param>
+/// <param name="Credits">The skill credits after creation: the spare ones and the levels' (2 up to <paramref name="Level"/>).</param>
+/// <param name="Trained">The <see cref="MageTemplate.TrainedLater"/> skills the credits pay for, in training order.</param>
+/// <param name="LeftOut">The <see cref="MageTemplate.TrainedLater"/> skills they do not (empty from <see cref="MageTemplate.FullTrainingLevel"/> up).</param>
+/// <param name="Targets">The stats with their target ranks, in plan order.</param>
+/// <param name="Spent">The experience the targets cost, from nothing spent.</param>
+/// <param name="Remainder"><c>TotalXp - Spent</c>.</param>
+/// <param name="Build">M5 7 F6: the mage built (<see cref="MageBuild"/>); the creation and the checks follow it.</param>
+public sealed record MageLevelPlan(int Level, ulong TotalXp, int Credits, IReadOnlyList<uint> Trained, IReadOnlyList<uint> LeftOut, IReadOnlyList<StatTarget> Targets, ulong Spent, ulong Remainder, MageBuild Build = MageBuild.Gate126)
+{
+    /// <summary>The credits left after the training.</summary>
+    public int CreditsLeft => Credits - Trained.Sum(id => MageTemplate.TrainCredits[id]);
+
+    /// <summary>The ranks the plan buys in an attribute, vital or skill, or 0.</summary>
+    public int RanksOf(MageStatKind kind, uint id) => Targets.FirstOrDefault(t => t.Kind == kind && t.Id == id)?.Ranks ?? 0;
+
+    /// <summary>The loud line for a plan that leaves a skill out (<c>TODO(m5-mage-level-credits)</c>), or an empty string when nothing is left out.</summary>
+    public string LeftOutLine => LeftOut.Count == 0
+        ? string.Empty
+        : string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"TODO(m5-mage-level-credits): level {Level} grants {Credits} skill credits after creation, enough to train {(Trained.Count == 0 ? "none of the later skills" : string.Join(", ", Trained.Select(MageTemplate.SkillName)))} but not {string.Join(", ", LeftOut.Select(MageTemplate.SkillName))}; the plan leaves {(LeftOut.Count == 1 ? "it" : "them")} untrained{(Build == MageBuild.Gate126 ? $" (all four are trained from level {MageTemplate.FullTrainingLevel})" : string.Empty)}");
 }
 
 /// <summary>The template check of a character's read model: every check met or short.</summary>
@@ -78,7 +120,7 @@ public static class MageTemplate
     /// <summary>The creation values of Coordination, Focus and Self.</summary>
     public const uint HighAttribute = 100;
 
-    /// <summary>The level the build reaches (the mod's <c>xp</c> verb gives the experience).</summary>
+    /// <summary>The level the build reaches by default (the mod's <c>xp</c> verb gives the experience); <c>--mage-level</c> (M5 7 F3, D87) asks for another, <see cref="MinLevel"/> to this, and <see cref="PlanAt"/> plans it.</summary>
     public const int TargetLevel = 126;
 
     /// <summary>The XpTable's total experience for level 126 (pinned by <c>MageTemplateDatTests</c>).</summary>
@@ -86,6 +128,22 @@ public static class MageTemplate
 
     /// <summary>The skill credits levels 2 through 126 grant (pinned by <c>MageTemplateDatTests</c>).</summary>
     public const int Level126Credits = 37;
+
+    /// <summary>
+    /// M5 7 F3 (D87): the lowest level the build can be asked for (<c>--mage-level</c>). For the gate's build (<see cref="MageBuild.Gate126"/>) it is the first level whose credits (<see cref="SpareCreationCredits"/> and the levels 2 up to it) pay for Life Magic, Creature Enchantment and Mana Conversion
+    /// (26 of <see cref="TrainingCredits"/>, <see cref="TrainingPriority"/>). Between it and <see cref="FullTrainingLevel"/> Item Enchantment (8 credits, cast by no profile spell) is left out, named by <see cref="MageLevelPlan.LeftOutLine"/>. The traditional mage (<see cref="MageBuild.Traditional"/>, every level below <see cref="TargetLevel"/>, M5 7 F6) trains its three later skills (22 credits) from level 32 up, so this range holds for it.
+    /// Pinned by <c>MageLevelPlanDatTests</c> against the XpTable.
+    /// </summary>
+    public const int MinLevel = 50;
+
+    /// <summary>M5 7 F3 (D87): the first level whose credits pay for all four <see cref="TrainedLater"/> skills (<see cref="PlanAt"/> leaves nothing out from it up, for the gate build; M5 7 F6: the traditional mage needs only 22 credits). Pinned by <c>MageLevelPlanDatTests</c> against the XpTable.</summary>
+    public const int FullTrainingLevel = 90;
+
+    /// <summary>The skill credits the Aluvian heritage gives at creation (pinned by <c>MageTemplateDatTests</c>).</summary>
+    public const int HeritageSkillCredits = 52;
+
+    /// <summary>The creation credits the specialisations leave unspent (<see cref="HeritageSkillCredits"/> less <see cref="CreationSkillCredits"/>: 4).</summary>
+    public const int SpareCreationCredits = HeritageSkillCredits - CreationSkillCredits;
 
     /// <summary>The credits the later training costs (8 + 8 + 12 + 6 for the magic skills and Mana Conversion).</summary>
     public const int TrainingCredits = 34;
@@ -112,6 +170,18 @@ public static class MageTemplate
     /// <summary>Skills specialised at creation: War Magic and Melee Defense.</summary>
     public static IReadOnlyList<uint> SpecializedAtCreation { get; } = [WarMagic, MeleeDefense];
 
+    /// <summary>M5 7 F6 (D87, amended): the build of a level: <see cref="MageBuild.Gate126"/> at <see cref="TargetLevel"/> and above, <see cref="MageBuild.Traditional"/> below it.</summary>
+    public static MageBuild BuildFor(int level) => level >= TargetLevel ? MageBuild.Gate126 : MageBuild.Traditional;
+
+    /// <summary>M5 7 F6: the skills a build specialises at creation (the gate build: War Magic and Melee Defense; the traditional mage: War Magic and Life Magic).</summary>
+    public static IReadOnlyList<uint> SpecializedAtCreationFor(MageBuild build) => build == MageBuild.Gate126 ? SpecializedAtCreation : TraditionalSpecializedAtCreation;
+
+    /// <summary>M5 7 F6: War Magic and Life Magic, the traditional mage's creation specialisations (28 + 20 credits; pinned by <c>MageTraditionalDatTests</c> against the CharGen).</summary>
+    public static IReadOnlyList<uint> TraditionalSpecializedAtCreation { get; } = [WarMagic, LifeMagic];
+
+    /// <summary>M5 7 F6: the skills a build trains after creation by <c>TrainSkill</c>, in training order (the gate build's <see cref="TrainedLater"/>; the traditional mage's without Life Magic, which it specialised at creation).</summary>
+    public static IReadOnlyList<uint> TrainedLaterFor(MageBuild build) => build == MageBuild.Gate126 ? TrainedLater : [.. TrainedLater.Where(id => id != LifeMagic)];
+
     /// <summary>
     /// Skills the heritage and <see cref="HeadlessCharacter.RetailSkillClasses"/> train at creation for free (Arcane Lore, Magic
     /// Defense, Jump, Run, Loyalty, Salvaging; pinned by <c>MageTemplateDatTests</c>). They join the 10% pool of D19.
@@ -120,6 +190,12 @@ public static class MageTemplate
 
     /// <summary>D19's priority for the spare credits: Magic Defense, Run, Jump (each only if not trained yet and its cost fits; all three are creation-trained, so none is bought; Healing dropped by the owner, 2026-10-15).</summary>
     public static IReadOnlyList<uint> SurvivalPriority { get; } = [MagicDefense, Run, Jump];
+
+    /// <summary>
+    /// M5 7 F3 (D87): the order the credits are spent in when they cannot pay for all of <see cref="TrainedLater"/> (a build below <see cref="FullTrainingLevel"/>): Life Magic, Creature Enchantment, Mana Conversion, then Item Enchantment. The profile's
+    /// buffs and the dance are Creature Enchantment and Life Magic spells, and the dance lands on Mana Conversion; no profile spell is an Item Enchantment spell, so the skill the credits leave out is Item Enchantment.
+    /// </summary>
+    public static IReadOnlyList<uint> TrainingPriority { get; } = [LifeMagic, CreatureEnchantment, ManaConversion, ItemEnchantment];
 
     /// <summary>Skills trained after creation by <c>TrainSkill</c>, in training order (the magic skills, Mana Conversion, no survival skill: the 7 spare credits stay unspent).</summary>
     public static IReadOnlyList<uint> TrainedLater { get; } = [LifeMagic, CreatureEnchantment, ItemEnchantment, ManaConversion];
@@ -195,7 +271,9 @@ public static class MageTemplate
     /// The skill advancement classes of the creation: <paramref name="retailClasses"/> (<see cref="HeadlessCharacter.RetailSkillClasses"/>:
     /// Arcane Lore and the other free skills trained, the rest untrained) with War Magic and Melee Defense specialised.
     /// </summary>
-    public static uint[] CreationSkillClasses(IReadOnlyList<uint> retailClasses)
+    /// <param name="retailClasses">The retail classes (<see cref="HeadlessCharacter.RetailSkillClasses"/>).</param>
+    /// <param name="build">M5 7 F6: the mage built; the gate build by default.</param>
+    public static uint[] CreationSkillClasses(IReadOnlyList<uint> retailClasses, MageBuild build = MageBuild.Gate126)
     {
         ArgumentNullException.ThrowIfNull(retailClasses);
         var classes = new uint[retailClasses.Count];
@@ -204,7 +282,7 @@ public static class MageTemplate
             classes[i] = retailClasses[i];
         }
 
-        foreach (var skill in SpecializedAtCreation)
+        foreach (var skill in SpecializedAtCreationFor(build))
         {
             classes[skill] = HeadlessCharacter.SpecializedSkill;
         }
@@ -215,8 +293,9 @@ public static class MageTemplate
     /// <summary>The intent that creates "BSD Mage" (or another name): <see cref="HeadlessCharacter.Intent"/> with the attributes and skill classes of the template.</summary>
     /// <param name="name">The character's name.</param>
     /// <param name="retailClasses"><see cref="HeadlessCharacter.RetailSkillClasses"/> of the dats.</param>
-    public static CharacterCreateIntent CreationIntent(string name, IReadOnlyList<uint> retailClasses) =>
-        HeadlessCharacter.Intent(name, CreationSkillClasses(retailClasses)) with
+    /// <param name="build">M5 7 F6 (D87, amended): the mage built; the gate build by default (byte for byte the intent of before).</param>
+    public static CharacterCreateIntent CreationIntent(string name, IReadOnlyList<uint> retailClasses, MageBuild build = MageBuild.Gate126) =>
+        HeadlessCharacter.Intent(name, CreationSkillClasses(retailClasses, build)) with
         {
             Strength = LowAttribute,
             Endurance = LowAttribute,
@@ -246,6 +325,56 @@ public static class MageTemplate
     /// <summary>The experience a plan from scratch leaves unspent out of <see cref="Level126Xp"/> (<see cref="XpRemainder"/>).</summary>
     public static ulong Remainder(XpTableData table) => Level126Xp - TotalXp(table);
 
+    /// <summary>M5 7 F3 (D87): the shares a build or a spend at <paramref name="level"/> uses: the owner's D19 split at <see cref="TargetLevel"/> and above, the dance split below it.</summary>
+    public static MageShares SharesAt(int level) => level >= TargetLevel ? MageShares.D19 : MageShares.Dance;
+
+    /// <summary>
+    /// M5 7 F3 (D87): the build at <paramref name="level"/>, computed by the same planner as level 126's (<see cref="MageSpendingPlanner.Compute"/>, as <c>FighterTemplate.Compute</c> takes its level). The skill credits are
+    /// <see cref="SpareCreationCredits"/> and the XpTable's credits for levels 2 up to <paramref name="level"/>; the skills of <see cref="TrainedLater"/> are trained in that order while their <see cref="TrainCredits"/> fit, and a skill
+    /// that does not fit is left out (<see cref="MageLevelPlan.LeftOut"/>, and <see cref="MageLevelPlan.LeftOutLine"/> names it); the experience of level <paramref name="level"/> is split over the stats that remain. At level
+    /// <see cref="TargetLevel"/> it returns the pinned <see cref="Targets"/>.
+    /// </summary>
+    /// <param name="table">The XpTable.</param>
+    /// <param name="level">The build's level, 2 up to the table's last level.</param>
+    /// <param name="build">M5 7 F6 (D87, amended): the mage built; null: <see cref="BuildFor"/> the level. The traditional mage has no Melee Defense target, specialises Life Magic (its ranks are priced by the specialised list) and trains only the other three later skills; its credits after creation are
+    /// the same 4 spare and the levels', and what its credits do not spend (<see cref="SurvivalPriority"/> buys nothing: Magic Defense, Run and Jump are the heritage's free skills) stays unspent.</param>
+    public static MageLevelPlan PlanAt(XpTableData table, int level, MageBuild? build = null)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentOutOfRangeException.ThrowIfLessThan(level, 2);
+        var kind = build ?? BuildFor(level);
+        var credits = SpareCreationCredits + (int)table.SkillCreditsThroughLevel(level, 1);
+        var trained = new List<uint>();
+        var leftOut = new List<uint>();
+        var left = credits;
+        var later = TrainedLaterFor(kind);
+        foreach (var skill in TrainingPriority.Where(later.Contains))
+        {
+            if (TrainCredits[skill] <= left)
+            {
+                left -= TrainCredits[skill];
+                trained.Add(skill);
+            }
+            else
+            {
+                leftOut.Add(skill);
+            }
+        }
+
+        trained = [.. later.Where(trained.Contains)]; // the build trains in TrainedLater's order
+        leftOut = [.. later.Where(leftOut.Contains)];
+
+        var total = table.XpForLevel(level);
+        if (level >= TargetLevel && leftOut.Count == 0 && kind == MageBuild.Gate126)
+        {
+            var spent = TotalXp(table);
+            return new MageLevelPlan(level, total, credits, trained, leftOut, Targets, spent, total - spent);
+        }
+
+        var plan = MageSpendingPlanner.Compute(table, total, leftOut, SharesAt(level), kind);
+        return new MageLevelPlan(level, total, credits, trained, leftOut, plan.Targets, plan.Spent, plan.Remainder, kind);
+    }
+
     /// <summary>
     /// The expected base value of a magic skill after the plan: <c>round((Focus + Self) / 4)</c> over the base attributes
     /// (creation value plus target ranks), plus ACE's <c>InitLevel</c> (10 specialised, 0 trained later), plus the target ranks.
@@ -270,17 +399,30 @@ public static class MageTemplate
     /// skill's advancement class and every target's ranks. It reads the model only; the verdict <c>template=ok</c> is
     /// <see cref="TemplateCheck.AllMet"/>.
     /// </summary>
-    public static TemplateCheck IsMet(PlayerQualities qualities)
+    public static TemplateCheck IsMet(PlayerQualities qualities) => IsMet(qualities, TargetLevel, Targets);
+
+    /// <summary>
+    /// M5 7 F3 (D87): <see cref="IsMet(PlayerQualities)"/> against the build at another level: the level check and the targets are <paramref name="plan"/>'s (<see cref="PlanAt"/>), so a level-80 mage is judged by level 80's plan.
+    /// </summary>
+    /// <param name="qualities">The character's read model.</param>
+    /// <param name="plan">The run's plan.</param>
+    public static TemplateCheck IsMet(PlayerQualities qualities, MageLevelPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return IsMet(qualities, plan.Level, plan.Targets, plan.Build);
+    }
+
+    private static TemplateCheck IsMet(PlayerQualities qualities, int level, IReadOnlyList<StatTarget> targets, MageBuild build = MageBuild.Gate126)
     {
         ArgumentNullException.ThrowIfNull(qualities);
-        var checks = new List<StatCheck> { new(null, "level", qualities.Level, TargetLevel, qualities.Level >= TargetLevel) };
+        var checks = new List<StatCheck> { new(null, "level", qualities.Level, level, qualities.Level >= level) };
         for (uint id = Strength; id <= Self; id++)
         {
             long start = qualities.TryGetAttribute(id, out var attribute) ? attribute.Start : -1;
             checks.Add(new StatCheck(null, $"attribute {id} start", start, CreationValue(id), start == CreationValue(id)));
         }
 
-        foreach (var t in Targets)
+        foreach (var t in targets)
         {
             long ranks = -1;
             switch (t.Kind)
@@ -307,6 +449,13 @@ public static class MageTemplate
             }
 
             checks.Add(new StatCheck(t, $"{t.Name} ranks", ranks, t.Ranks, ranks >= t.Ranks));
+        }
+
+        if (build == MageBuild.Traditional)
+        {
+            // M5 7 F6 (D87, amended): the traditional mage has no Melee Defense; a record that is absent is untrained, one that is trained or specialised is short.
+            long cls = qualities.TryGetSkill(MeleeDefense, out var melee) ? melee.AdvancementClass : HeadlessCharacter.UntrainedSkill;
+            checks.Add(new StatCheck(null, "Melee Defense class (untrained)", cls, HeadlessCharacter.UntrainedSkill, cls == HeadlessCharacter.UntrainedSkill));
         }
 
         return new TemplateCheck(checks);

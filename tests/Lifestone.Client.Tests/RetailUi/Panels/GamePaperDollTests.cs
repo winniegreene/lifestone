@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Lifestone.Client.Avatars;
+using Lifestone.Client.RetailUi;
 using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Flow;
 using Lifestone.Client.RetailUi.Input;
@@ -262,6 +263,189 @@ public sealed class GamePaperDollTests(DatSetFixture fixture) : IClassFixture<Da
         Assert.NotNull(wand.ComposedIcon);
     }
 
+    // The owner's question (M5 item 7): a worn robe shows on the figure and in no slot. gmPaperDollUI::SetUIItemIntoLocation
+    // (11.6096 0x004A6300) tests the placement's mask against every slot, so a robe is in each armour slot it covers; PostInit
+    // (0x004A56D0) hides those nine slots on the figure view, so there it shows on the figure only, as retail. The hooded
+    // robe's mask is the world database's Faran Robe with Hood (weenie 5851, ValidLocations 0x7F01).
+    [RequiresLocalDatsFact]
+    public void A_robe_is_in_every_armour_slot_it_covers_on_the_slots_view_and_on_the_figure_only_on_the_figure_view()
+    {
+        const uint Robe = 0x80000210;
+        const uint HoodedRobe = 0x80000211;
+        const uint RobeLocations = 0x200 | 0x400 | 0x800 | 0x1000 | 0x2000 | 0x4000 | 0x100; // chest to lower leg armour, and the feet
+        const uint HoodedRobeLocations = RobeLocations | HeadWear; // 0x7F01
+        Assert.Equal(0x7F01u, HoodedRobeLocations);
+        uint[] robeSlots = [0x100005AC, 0x100005AD, 0x100005AE, 0x100005AF, 0x100005B1, 0x100005B2, 0x100005B3];
+
+        using var g = Enter(equip: false);
+        g.Create(Item(Robe, "Faran Robe", 0x060011D2, 0x4, RobeLocations));
+        g.Create(Item(HoodedRobe, "Faran Robe with Hood", 0x060011D2, 0x4, HoodedRobeLocations));
+        g.Create(Item(RingA, "Ring", 0x060011D1, 0x8, Rings));
+        g.Create(Item(0x80000212, "Foci of Strife", 0x060011D0, 0x80, 0)); // the live kit's pack: a focus, a scarab stack and a trade note are in no slot
+        g.Create(Item(0x80000213, "Platinum Scarab", 0x060011D0, 0x1000, 0));
+        g.Create(Item(0x80000214, "Trade Note (250,000)", 0x060011D0, 0x40, 0));
+        g.Wield(Robe, RobeLocations);
+        g.Wield(Gauntlets, HandWear); // a single-slot armour piece beside it
+        g.Wield(RingA, RightRing); // a single-slot item outside the armour slots
+        var doll = g.Doll;
+        g.Open();
+        Assert.True(doll.SlotsViewShown); // the rig has no figure view: the page opens on the slots
+
+        void Expect(uint robe, uint head)
+        {
+            foreach (var slot in GamePaperDoll.SlotTable)
+            {
+                var want = slot.ElementId switch
+                {
+                    0x100005AB => head,
+                    0x100005B0 => Gauntlets,
+                    RightRingSlot => RingA,
+                    _ when robeSlots.Contains(slot.ElementId) => robe,
+                    _ => 0u, // the shirt and pants slots are clothing (0x2, 0x40): a robe is not in them
+                };
+                Assert.True(want == doll.ItemIn(slot.ElementId), $"{slot.Name}: 0x{doll.ItemIn(slot.ElementId):X8}, expected 0x{want:X8}");
+            }
+        }
+
+        Expect(Robe, 0);
+
+        g.Unwield(Robe);
+        g.Wield(HoodedRobe, HoodedRobeLocations);
+        g.Frames(2);
+        Expect(HoodedRobe, HoodedRobe); // the hood puts it in the head slot too
+
+        // The figure view: the nine armour slots hide (they keep the robe), the ring's slot stays.
+        Assert.True(g.Rig.Click(doll.Checkbox!));
+        g.Frames(2);
+        Assert.False(doll.SlotsViewShown);
+        Assert.All(robeSlots, s => Assert.False(doll.SlotList(s)!.Visible));
+        Assert.Equal(HoodedRobe, doll.ItemIn(0x100005AC));
+        Assert.True(doll.SlotList(RightRingSlot)!.Visible);
+    }
+
+    // The owner's three round icons (blue, yellow, red) at the top of the slots were the empty Aetheria sigil slots, which
+    // showed always. gmPaperDollUI::UpdateAetheria (11.6096 0x004A41C0) shows each only by its bit of the player's int 322.
+    [RequiresLocalDatsFact]
+    public void The_sigil_slots_show_only_for_the_aetheria_slots_the_player_has_unlocked()
+    {
+        uint[] sigils = [0x10000595, 0x10000596, 0x10000597]; // blue, yellow, red
+        using var g = Enter(equip: true);
+        var doll = g.Doll;
+        g.Open();
+        Assert.All(sigils, s => Assert.False(doll.SlotList(s)!.Visible)); // no int 322: none
+        Assert.True(doll.SlotList(WeaponSlot)!.Visible);
+
+        byte sequence = 0;
+        void Unlock(int bits)
+        {
+            g.Handler.OnPublicUpdatePropertyInt(g.Context, new PublicUpdatePropertyIntMsg(++sequence, Player, GamePaperDoll.AetheriaBitfieldProperty, bits));
+            g.Frames(1);
+        }
+
+        Unlock(1);
+        Assert.Equal([true, false, false], sigils.Select(s => doll.SlotList(s)!.Visible));
+        Unlock(1 | 4);
+        Assert.Equal([true, false, true], sigils.Select(s => doll.SlotList(s)!.Visible));
+        Unlock(7);
+        Assert.All(sigils, s => Assert.True(doll.SlotList(s)!.Visible));
+        Assert.All(sigils, s => Assert.Equal(0u, doll.ItemIn(s))); // shown empty: nothing worn there
+    }
+
+    // M5 7 D122: the live mage's worn set as the database had it on 2026-10-29 (BSD Mage: the Faran Robe with Hood at 32513, Leather Gauntlets at 32, a Shirt at 30, Wide
+    // Breeches at 68 and the Wand held at 16777216), arriving as a login does: the PlayerDescription's equipped list, then each item's CreateObject with its wielder and
+    // location. Each slot shows what retail's SetUIItemIntoLocation (0x004A6300) puts there; the figure view hides the nine armour slots and keeps the rest.
+    [RequiresLocalDatsFact]
+    public void The_live_mages_worn_set_from_a_login_shows_in_retails_slots_on_both_views()
+    {
+        const uint Robe = 0x80000230, Mitts = 0x80000231, Shirt = 0x80000232, Breeches = 0x80000233, LiveWand = 0x80000234;
+        (uint Guid, string Name, uint ItemType, uint Location)[] worn =
+        [
+            (Robe, "Faran Robe with Hood", 0x4, 32513),
+            (Mitts, "Leather Gauntlets", 0x2, 32),
+            (Shirt, "Shirt", 0x4, 30),
+            (Breeches, "Wide Breeches", 0x4, 68),
+            (LiveWand, "Wand", 0x8000, 16777216),
+        ];
+        using var g = Enter(equip: false);
+        g.Handler.OnPlayerDescription(g.Context, new GameEventHeader(Player, 1, 0x0013), new PlayerDescriptionMsg { Equipped = [.. worn.Select(w => new EquippedDesc(w.Guid, w.Location, 0))] });
+        foreach (var w in worn)
+        {
+            var basis = Item(w.Guid, w.Name, 0x060011D2, w.ItemType, w.Location);
+            g.Create(basis with { Weenie = basis.Weenie with { ContainerId = null, WielderId = Player, CurrentlyWieldedLocation = w.Location } });
+        }
+
+        g.Frames(2);
+        var doll = g.Doll;
+        g.Open();
+        Assert.Equal(5, g.Inventory.Equipped.Count);
+
+        var expected = new Dictionary<uint, uint>
+        {
+            [WeaponSlot] = LiveWand,
+            [0x100001E2] = Shirt, // the shirt slot (chest wear 0x2)
+            [0x100001E3] = Breeches, // the pants slot (upper leg wear 0x40)
+            [0x100005B0] = Mitts, // hand
+        };
+        foreach (var slot in GamePaperDoll.SlotTable.Where(static s => s.Armour && s.ElementId != 0x100005B0))
+        {
+            expected[slot.ElementId] = Robe; // head, chest, abdomen, both arms, both legs and feet: the hooded robe covers them all
+        }
+
+        foreach (var slot in GamePaperDoll.SlotTable)
+        {
+            Assert.True(expected.GetValueOrDefault(slot.ElementId) == doll.ItemIn(slot.ElementId), $"{slot.Name}: 0x{doll.ItemIn(slot.ElementId):X8}");
+        }
+
+        // The views: on the slots view every filled slot shows; on the figure view the armour slots hide and the wand, shirt and breeches stay in sight.
+        doll.ShowSlotsView(true);
+        Assert.All(expected.Keys, s => Assert.True(doll.SlotList(s)!.Visible));
+        doll.ShowSlotsView(false);
+        Assert.Equal([WeaponSlot, 0x100001E2u, 0x100001E3u], expected.Keys.Where(s => doll.SlotList(s)!.Visible).Order());
+    }
+
+    // M5 7 D122 (closes TODO(m3-paperdoll-tooltips)): gmPaperDollUI::UpdateItemSlotTooltip (11.6096 0x004A5200) names what an empty slot takes, and a filled
+    // slot's item, worn or wielded, with how to take it off.
+    [RequiresLocalDatsFact]
+    public void Each_slot_s_tooltip_names_what_it_takes_when_empty_and_its_item_worn_or_wielded_when_filled()
+    {
+        using var g = Enter(equip: true);
+        var doll = g.Doll;
+        g.Open();
+
+        string? Tip(uint slot) => doll.SlotList(slot)!.CellAt(0)!.TooltipText?.Literal;
+        Assert.Equal("Wand (wielded)\nDouble-click to unwield", Tip(WeaponSlot));
+        Assert.Equal("Leather Cap (worn)\nDouble-click to take off", Tip(HeadSlot));
+        Assert.Equal("Leather Coat (worn)\nDouble-click to take off", Tip(ChestSlot));
+        Assert.Equal("Drag rings here to wear them", Tip(LeftRingSlot));
+        Assert.Equal("Drag shields here to wield them", Tip(ShieldSlot));
+        Assert.Equal("Drag a Red Aetheria sigil here to activate it", Tip(0x10000597));
+        Assert.Equal("Drag foot coverings here to wear them", GamePaperDoll.SlotTooltip(GamePaperDoll.SlotTable.Count - 1, null));
+
+        g.Unwield(Wand);
+        g.Frames(2);
+        Assert.Equal("Drag weapons here to wield them", Tip(WeaponSlot));
+    }
+
+    // M5 7 D122 (closes TODO(m4-paperdoll-figure-select)): the left button over the figure selects the worn item under the mouse, or the player where nothing covers the part
+    // (gmPaperDollUI::ListenToElementMessage 0x004A5FA0, message 28 with parameter 7; GetPaperDollItemUnderMouse).
+    [RequiresLocalDatsFact]
+    public void A_left_click_on_the_figure_selects_the_worn_item_under_it_or_the_player()
+    {
+        using var g = Enter(equip: true);
+        var doll = g.Doll;
+        g.Open();
+        var selected = new List<uint>();
+        doll.SelectRequester = selected.Add;
+
+        Assert.True(doll.SelectMask(0x200 | 0x2)); // the chest: the coat
+        Assert.True(doll.SelectMask(0x20)); // the hands: the gauntlets
+        g.Unwield(Cap);
+        g.Frames(2);
+        Assert.True(doll.SelectMask(0x1)); // the head with nothing on it: the player
+        Assert.False(doll.SelectMask(0)); // no part
+        Assert.Equal([Coat, Gauntlets, Player], selected);
+    }
+
     [RequiresLocalDatsFact]
     public void The_paperdoll_follows_the_inventory_redrawing_once_when_shown_and_nothing_while_hidden()
     {
@@ -353,6 +537,81 @@ public sealed class GamePaperDollTests(DatSetFixture fixture) : IClassFixture<Da
         g.Frames(2);
         Assert.True(doll.SlotsViewShown);
         Assert.True(doll.SlotList(0x100005AB)!.Visible);
+    }
+
+    // M5 7 D129: the live review frames tick "Slots" through the doll's own handler: the box toggles and the views swap as a click does.
+    [RequiresLocalDatsFact]
+    public void Clicking_the_slots_checkbox_from_code_toggles_the_box_and_swaps_the_views_as_a_click_does()
+    {
+        using var g = Enter(equip: true);
+        var doll = g.Doll;
+        g.Open();
+        Assert.True(doll.SlotsViewShown); // the rig has no figure view: the page opens on the slots
+
+        Assert.True(doll.ClickSlotsCheckbox());
+        Assert.False(doll.SlotsViewShown);
+        Assert.False(doll.Checkbox!.Highlighted);
+        Assert.False(doll.SlotList(HeadSlot)!.Visible);
+        Assert.True(doll.Viewport!.Visible);
+
+        Assert.True(doll.ClickSlotsCheckbox());
+        Assert.True(doll.SlotsViewShown);
+        Assert.True(doll.Checkbox.Highlighted);
+        Assert.True(doll.SlotList(HeadSlot)!.Visible);
+        Assert.Equal(Cap, doll.ItemIn(HeadSlot));
+    }
+
+    // M5 7 D129 fix: the live run of 2026-10-29 15:19 UTC took both review frames in the login's portal space (the page open by the saved layout, nothing of it drawn).
+    // A frame waits for the player placed, the tunnel gone, the shell built and painted, the inventory page shown and the doll drawn.
+    [RequiresLocalDatsFact]
+    public void The_review_frames_wait_out_portal_space_and_an_unpainted_or_closed_page()
+    {
+        using var g = Enter(equip: true);
+        var shell = g.Screen;
+        g.Open();
+
+        Assert.Equal("the player to be placed in the world", GamePaperDoll.ReviewFrameWait(shell, playerPlaced: false, tunnelVisible: true));
+        Assert.Equal("the portal tunnel to end", GamePaperDoll.ReviewFrameWait(shell, playerPlaced: true, tunnelVisible: true)); // portal space: the page may be open already
+        Assert.Equal("the shell to be built and painted", GamePaperDoll.ReviewFrameWait(shell, playerPlaced: true, tunnelVisible: false)); // the host has not painted it yet
+        Assert.Equal("the shell to be built and painted", GamePaperDoll.ReviewFrameWait(null, playerPlaced: true, tunnelVisible: false));
+
+        shell.MarkPainted(3, 50.0, timedOut: false);
+        Assert.Null(GamePaperDoll.ReviewFrameWait(shell, playerPlaced: true, tunnelVisible: false)); // arrived, painted, the page and the doll drawn
+
+        // The 15:34 UTC run took both frames 0.4 s into the arrival, the player still hidden in the Hidden script's pink bubbles (retail's look before LoginComplete).
+        Assert.StartsWith("the player to materialise", GamePaperDoll.ReviewFrameWait(shell, playerPlaced: true, tunnelVisible: false, playerMaterialised: false));
+        Assert.Null(GamePaperDoll.ReviewFrameWait(shell, playerPlaced: true, tunnelVisible: false, playerMaterialised: true));
+
+        Assert.True(g.Rig.Click(g.Button)); // the page closed
+        g.Frames(4);
+        Assert.Equal("the inventory page to show", GamePaperDoll.ReviewFrameWait(shell, playerPlaced: true, tunnelVisible: false));
+        g.Open();
+        Assert.Null(GamePaperDoll.ReviewFrameWait(shell, playerPlaced: true, tunnelVisible: false));
+    }
+
+    [RequiresLocalDatsFact]
+    public void The_last_portal_notice_expires_five_seconds_after_it_is_posted_and_the_review_frames_wait_it_out()
+    {
+        // M5 7: the stale "In Portal Space - Please Wait..." by the vitals in early town frames is the tunnel's last notice, alive for its row media's 5 s pause (gmSpewBoxUI's row state 0x10000002, then the message 0x10000003
+        // ListenToElementMessage 0x004D6420 deletes it on); retail posts it at each rotation segment (gmSmartBoxUI::UseTime 0x004D7A90) and clears nothing at the arrival. Kept as retail; the frames wait.
+        using var g = Enter(equip: true);
+        var shell = g.Screen;
+        g.Open();
+        shell.MarkPainted(3, 50.0, timedOut: false);
+        var spew = Assert.IsType<Lifestone.Client.RetailUi.Chat.GameSpewBox>(shell.Chat?.Spew);
+        Assert.Null(GamePaperDoll.ReviewFrameWait(shell, playerPlaced: true, tunnelVisible: false));
+
+        g.Rig.Screens.Notices.DisplayStringInfo(Lifestone.Client.RetailUi.Flow.UiNoticeRouter.SpewBoxTextType, Lifestone.Data.Ui.UiStringRef.FromLiteral("In Portal Space - Please Wait..."));
+        g.Frames(1);
+        Assert.Equal(1, spew.RowCount);
+        Assert.StartsWith("the spew box's last notice to expire", GamePaperDoll.ReviewFrameWait(shell, playerPlaced: true, tunnelVisible: false));
+        Assert.StartsWith("the spew box's last notice to expire", GamePaperDoll.WorldReviewWait(shell, playerPlaced: true, tunnelVisible: false));
+
+        g.Rig.Run(4.5);
+        Assert.Equal(1, spew.RowCount); // still inside its 5 s
+        g.Rig.Run(1.0);
+        Assert.Equal(0, spew.RowCount); // gone by its own media, as retail's
+        Assert.Null(GamePaperDoll.ReviewFrameWait(shell, playerPlaced: true, tunnelVisible: false));
     }
 
     [RequiresLocalDatsFact]
@@ -562,6 +821,49 @@ public sealed class GamePaperDollTests(DatSetFixture fixture) : IClassFixture<Da
         Assert.Equal(DropVerdict.NotHeld, doll.DropOf(HeadSlot)!.Check(0x7FFFFFFF, out _)); // an object the player does not carry
         Assert.Equal(DropVerdict.NotHeld, doll.DropOf(HeadSlot)!.Check(0, out _));
         Assert.Equal(DropVerdict.NotHeld, doll.DropOf(HeadSlot)!.Check(Leggings, out _)); // created but never put in the pack: not carried
+    }
+
+    // M5 7 D122: gmPaperDollUI::AcceptDragObject (0x004A3E80) takes a melee weapon on the shield slot (the off hand), and HandleDropRelease (0x004A50F0) over the figure
+    // wears a carried wearable (AcceptPaperDollDragObject 0x004A4DE0) and refuses anything else with "You can't put that item there".
+    [RequiresLocalDatsFact]
+    public void A_melee_weapon_fits_the_shield_slot_and_a_wearable_dropped_on_the_figure_is_worn_while_anything_else_is_refused_aloud()
+    {
+        const uint Dagger = 0x80000220;
+        using var g = Enter(equip: false);
+        g.Create(Item(Dagger, "Dagger", 0x060011CF, 0x1, 0x100000));
+        g.Create(Item(RingA, "Ring", 0x060011D1, 0x8, Rings));
+        foreach (var item in new[] { Wand, Cap, Coat, Dagger, RingA })
+        {
+            g.Unwield(item);
+        }
+
+        g.Wield(Gauntlets, HandWear);
+        g.Open();
+        var doll = g.Doll;
+        Assert.Equal(DropVerdict.Ok, doll.DropOf(ShieldSlot)!.Check(Dagger, out var mask));
+        Assert.Equal(0x200000u, mask); // the off hand
+        Assert.Equal(DropVerdict.DoesNotFit, doll.DropOf(ShieldSlot)!.Check(Wand, out _)); // a held caster is no off-hand weapon
+
+        var figure = doll.FigureDrop;
+        var notices = new List<string>();
+        figure.Notice = notices.Add;
+        Assert.Equal(DropVerdict.Ok, figure.Check(Coat, out mask));
+        Assert.Equal(CoatLocations, mask);
+        Assert.Equal(DropVerdict.Ok, figure.Check(Cap, out mask));
+        Assert.Equal(HeadWear, mask);
+        Assert.Equal(DropVerdict.AlreadyThere, figure.Check(Gauntlets, out _)); // worn already: stays, no word
+        Assert.Equal(DropVerdict.DoesNotFit, figure.Check(Wand, out _)); // a weapon goes in a slot, not on the body
+        Assert.Equal(DropVerdict.NotHeld, figure.Check(Leggings, out _));
+
+        var source = doll.SlotList(LeftRingSlot)!.CellAt(0)!; // any cell stands for the drag's source
+        Assert.NotNull(figure.Refusal(new UiDragPayload(Wand, source, null, false), null));
+        Assert.NotNull(figure.Refusal(new UiDragPayload(Gauntlets, source, null, false), null));
+        Assert.Equal([GamePaperDollFigureDrop.CannotPutThere], notices); // the wand's refusal alone, aloud
+
+        var before = g.Rig.Session.ActionLog.Total;
+        figure.Drop(new UiDragPayload(Coat, source, null, false), null);
+        Assert.Equal(before + 1, g.Rig.Session.ActionLog.Total);
+        Assert.Contains($"item=0x{Coat:X8} location=0x{CoatLocations:X8}", figure.LastAction!.Summary, StringComparison.OrdinalIgnoreCase);
     }
 
     [RequiresLocalDatsFact]

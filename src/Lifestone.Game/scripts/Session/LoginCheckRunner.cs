@@ -228,6 +228,12 @@ public sealed partial class LoginCheckRunner : Node
             return;
         }
 
+        if (kind == LoginCheckKind.Keep)
+        {
+            KeepLegRunner.Install(main, services, host, mode, ui); // a kind of its own (M5 6 k2): one process, two logins of Lifestone Throwaway, an option and a window kept across them, never part of 'all'
+            return;
+        }
+
         if (kind == LoginCheckKind.Buff)
         {
             BuffLegRunner.Install(main, services, host, mode, ui); // a kind of its own (docs/session.md section 30): BSD Mage's buff cycle, never part of 'all'
@@ -249,6 +255,12 @@ public sealed partial class LoginCheckRunner : Node
         if (kind == LoginCheckKind.Journey)
         {
             JourneyLegRunner.Install(main, services, host, mode, ui); // a kind of its own (M4 P5b J5): a journey's stations in one login on foot, never part of 'all'
+            return;
+        }
+
+        if (kind == LoginCheckKind.Autopilot)
+        {
+            AutopilotLegRunner.Install(main, services, host, mode, ui); // a kind of its own (M5 4 h1): BSD Mage's autopilot until its stop rules, never part of 'all'
             return;
         }
 

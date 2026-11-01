@@ -1,6 +1,6 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
-using Lifestone.Client.Interiors;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
@@ -17,26 +17,25 @@ namespace Lifestone.Client.Session.Scenarios;
 
 /// <summary>
 /// M3 3.2's death-and-regear scenario (<c>--scenario=death-and-regear</c>, plan section 4.8 lane da; BSD Mage and nobody else): the character is geared and gets its spell bars, is bound at Holtburg's lifestone (D34), goes to the
-/// Black Spawn Den, takes its armour off and lies down (D37, M4 P5b, <c>DeathScenario.LieDown.cs</c>: the D33 unbuff suicide is in no path since; <see cref="DeathStages.Unbuff"/> runs only when named), its places going through the travel seam (<see cref="DeathOptions.Travel"/>, <see cref="DeathOptions.StartAt"/>, <see cref="DeathOptions.LeaveOnFailure"/>), waits in non-combat among the Tusker Slaves until they kill it, respawns, is re-geared and logs off. By the Action API and
+/// Black Spawn Den, takes its armour off and lies down (D37, M4 P5b, <c>DeathScenario.LieDown.cs</c>: the D33 unbuff suicide is in no path since; <see cref="DeathStages.Unbuff"/> runs only when named), its places going through the travel seam (<see cref="DeathOptions.Travel"/>, <see cref="DeathOptions.StartAt"/>, <see cref="DeathOptions.LeaveOnFailure"/>), waits in non-combat among the Tusker Slaves until they kill it, respawns, hands over to the death handler (M5 3, D51: the rebuff, the corpse trip, the items back, the item lines, the fight) and logs off. By the Action API and
 /// <c>PlayerTools</c> only; what it saw is <see cref="DeathTally"/>'s and the verdict is <see cref="DeathLegVerdict"/>'s.
 /// </summary>
 /// <remarks>
-/// <para><b>Stages</b> (<see cref="Stage"/>, each logged once on entry as <c>[death] stage &lt;name&gt;</c>; <see cref="DeathStages"/> masks the groups): <c>start</c>; <c>gear</c> (<see cref="GearScenario"/>'s steps) and <c>bars</c>
-/// (<see cref="MageSpellBars"/>: tab I the buffs, tab II the fight, exactly; only what <see cref="Spellbook.SpellBars"/> differs in is sent, <c>bars=set:&lt;n&gt;</c> or <c>bars=ok</c>); <c>bind-place</c>, <c>bind-teleporting</c>, <c>bind-settle</c>, <c>bind-use</c>, <c>bind-line</c> (the Holtburg point of interest through <c>PlayerTools.Place</c>, the nearest
-/// <see cref="WorldObjectTable.LifestoneFlag"/> object within <see cref="LifestoneSearchMetres"/>, <c>IActionApi.Use</c>; ACE's <c>Lifestone.cs</c> 55-75: the Sanctuary motion, then in one action the weenie's UseMessage as a
-/// Magic chat line and the stamina halved by a 0x02E9; done when that line, that halving and the UseDone all followed the Use, the line logged as the world database wrote it; the known Magic lines that are not the attune, an
-/// enchantment's expiry among them, are ignored and counted); <c>den-place</c>, <c>den-teleporting</c>, <c>den-settle</c> (the floor rule of D12: a settle off the floor fails); <c>unbuff</c>,
-/// <c>unbuff-dying</c>, <c>unbuff-arrival</c>, <c>unbuff-vitals</c> (the suicide, its death, the death's teleport, the arrival and ACE's 3 s of vitals; then the den stages again); <c>death-mode</c>, <c>death-wait</c> (non-combat among
-/// the tuskers; <see cref="IFightWalk"/> walks to the nearest tusker cell first and on to the next tour cell when no blow came in <see cref="IdleLegSeconds"/> s; the walk is ticked from <c>den-teleporting</c> to <c>death-wait</c>
-/// and nowhere else, and a leg still running when the death or the StopAfterHits stop comes is abandoned); <c>respawn</c>, <c>respawn-vitals</c>; M4 2.2 s1: <c>corpse-teleporting</c>, <c>corpse-settle</c>, <c>corpse-seek</c>, <c>corpse-opening</c>, <c>corpse-looting</c>, <c>corpse-closing</c>, <c>corpse-return</c>, <c>corpse-return-settle</c> (the trip back for the mage's own corpse, <c>DeathScenario.Corpse.cs</c>; skipped, named, by <c>--death-recover-corpse off</c> or a failed precondition); <c>regear</c>; M4 3.1 d1: <c>unbuff-decoys</c> (after <c>unbuff-vitals</c>: the decoys the suicide dropped are spawned again, <c>DeathScenario.TopUp.cs</c>), <c>rebuff</c>, <c>rebuff-peace</c>, <c>fight</c> and <c>pretrip-heal</c> (Heal Self VII and regeneration before the trip when the health share is the one failing precondition, <c>DeathScenario.Heal.cs</c>) (the composed inner
-/// <see cref="FightScenario"/>; the order, the freeze of the judged measures and the decoy fields are in <c>DeathScenario.Order.cs</c>: after <c>respawn-vitals</c> the order is <c>regear</c>, <c>rebuff</c>, <c>fight</c>, <c>corpse-*</c> with the fight on, M4 2.2's <c>corpse-*</c>, <c>regear</c> with it off); <c>logging-off</c>, <c>quitting</c>, <c>done</c>. With
-/// <c>endSession: false</c> (the game's leg, the tests) it ends at <c>done</c> in the world.</para>
+/// <para><b>Stages</b> (<see cref="Stage"/>, each logged once on entry as <c>[death] stage &lt;name&gt;</c>; <see cref="DeathStages"/> masks the groups): <c>start</c>; <c>gear</c> (<see cref="GearScenario"/>'s steps: the kit is the mage's own, <see cref="GearKit.Build"/> of the ground; the gear station's grants are item 3 c1's) and <c>bars</c> (<see cref="MageSpellBars"/>: tab I the buffs, tab II the fight, exactly; only what <see cref="Spellbook.SpellBars"/> differs in is sent, <c>bars=set:&lt;n&gt;</c> or <c>bars=ok</c>); <c>bind-place</c>, <c>bind-teleporting</c>, <c>bind-settle</c>,
+/// <c>bind-use</c>, <c>bind-line</c> (the Holtburg point of interest through <c>PlayerTools.Place</c>, the nearest <see cref="WorldObjectTable.LifestoneFlag"/> object within <see cref="LifestoneSearchMetres"/>, <c>IActionApi.Use</c>; ACE's <c>Lifestone.cs</c> 55-75: the Sanctuary motion, then in one action
+/// the weenie's UseMessage as a Magic chat line and the stamina halved by a 0x02E9; done when that line, that halving and the UseDone all followed the Use, the line logged as the world database wrote it; the known Magic lines that are not the attune, an enchantment's expiry among them, are ignored and counted);
+/// <c>den-place</c>, <c>den-teleporting</c>, <c>den-settle</c> (the floor rule of D12: a settle off the floor fails); <c>death-mode</c>, <c>death-wait</c> (the armour off and the lie-down in the non-combat stance, D37, <c>DeathScenario.LieDown.cs</c>, then the wait among the tuskers;
+/// <see cref="IFightWalk"/> walks to the tour's first offer and on to its next when no blow came in <see cref="IdleLegSeconds"/> s, the wait telling the tour what the player sees, M5 7 P7v, <c>DeathScenario.WaitTour.cs</c>; the walk is ticked from <c>den-teleporting</c> to <c>death-wait</c> and nowhere else, and a leg still running when the death or the StopAfterHits stop comes is abandoned);
+/// <c>respawn</c>, <c>respawn-vitals</c> (the death's teleport to the lifestone, the arrival and ACE's 3 s of vitals). <b>The one order after <c>respawn-vitals</c></b> (M5 3 d1 and d2, D51; <c>DeathScenario.Order.cs</c>): the death handler (<see cref="DeathHandler"/>) runs for every option set, its steps shown as the stages
+/// <c>handler-&lt;step&gt;</c> (<see cref="HandlerStagePrefix"/>): the rebuff of what the mage still holds, the pre-trip heal (<c>DeathScenario.Heal.cs</c>), the corpse trip by its route, the items back (worn and wielded again), the item lines re-cast, and the fight (<c>--death-fight off</c> skips only that return); no grant of any kind follows the respawn
+/// (no vitae, no item, no decoy, no place verb), and the death loop carries only the mage's own kit. The judged measures freeze at the end of <c>respawn-vitals</c> and the handler never moves them. <c>unbuff</c>, <c>unbuff-dying</c>, <c>unbuff-arrival</c>, <c>unbuff-vitals</c> run only when <see cref="DeathStages.Unbuff"/> is named (the D33 suicide: it is
+/// a death too, and the tally is not reset after it). <c>logging-off</c>, <c>quitting</c>, <c>done</c>. With <c>endSession: false</c> (the game's leg, the tests) it ends at <c>done</c> in the world.</para>
 /// <para><b>What counts.</b> <c>died</c> is the 0x01AC victim notices: a suicide sends none (<c>Player_Death.cs</c> 299-345), so the suicide's death is <c>suicides=1</c>, in <c>deaths</c> (the NumDeaths delta) and, through its
 /// purge, in <c>purged</c>. The tally is not reset after the suicide, so every counter is the run's; <c>respawn</c> reads the last arrival.</para>
-/// <para><b>Failure</b> is loud: in the world the run leaves the den first (<see cref="DenExit"/>, whatever <c>endSession</c> is: the game's leg logs off as soon as the scenario returns Failed, and a mage logged off in the den
+/// <para><b>Failure</b> is loud: in the world the run leaves the den first (<see cref="GroundExit"/>, whatever <c>endSession</c> is: the game's leg logs off as soon as the scenario returns Failed, and a mage logged off in the den
 /// meets the tuskers at its next login), then logs off (<c>endSession: true</c>, as the fight scenario) or ends Failed where it stands. The causes: a lifestone that is not near, a settle off the floor, a suicide that is refused
 /// or leaves enchantments, a walk that fails, the <see cref="DeathOptions.Seconds"/> limit (with the hits, evades and the lowest health share, D17), no teleport within <see cref="ArrivalSeconds"/> s of the death, an arrival
-/// away from the lifestone the bind used (or, when the run did not bind, with no lifestone near: <c>respawn=elsewhere</c>, the arrival cell named) and a re-gear that leaves the kit not wielded.</para>
+/// away from the lifestone the bind used (or, when the run did not bind, with no lifestone near: <c>respawn=elsewhere</c>, the arrival cell named) and a death handler step that fails (its failure is named).</para>
 /// <para>Per-step code allocates nothing but log lines on events: the handlers are subscribed once and the health share is formatted only when it crosses a 10% step.</para>
 /// </remarks>
 public sealed partial class DeathScenario : IScenario, IDisposable
@@ -73,7 +72,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <summary>The limit on a death's teleport to arrive, in seconds from the death signal (and from the suicide's confirmation).</summary>
     public const double ArrivalSeconds = 60;
 
-    /// <summary>Seconds the scenario waits after the arrival is present for ACE's 3 s of vitals (<c>Player_Death.cs</c> 262-282) and for the arrival's objects.</summary>
+    /// <summary>Seconds the scenario waits after the arrival is present for ACE's 3 s of vitals (@95ef426d <c>Player_Death.cs</c> 262-282) and for the arrival's objects.</summary>
     public const double VitalsSeconds = 5;
 
     /// <summary>The seconds <see cref="DeathOptions.StopAfterHits"/> waits after the first 0x01B2 with the health share under 100%, so the health updates and the health share are logged.</summary>
@@ -88,32 +87,12 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <summary>The limit on the approach walk, in seconds; past it the Use is sent from where the player stands (ACE's check is the judge).</summary>
     public const double ApproachSeconds = 30;
 
-    /// <summary>How long the re-gear waits for held items with no world object to get one, in seconds, before it fails naming them.</summary>
-    public const double RegearSettleSeconds = 5;
-
     /// <summary>The limit on the spell bars to be known and sent, in seconds.</summary>
     public const double BarsSeconds = MageSpellBars.Seconds;
 
-    /// <summary>The most seconds the vitae stage waits for the vitae to leave the registry after the grant (ACE removes it 2 s after the penalty reaches 1.0, <c>Player_Xp.cs</c> 166-171).</summary>
-    public const double VitaeSeconds = 10;
-
-    /// <summary>
-    /// The total experience a character needs for a level (null at or above the cap): the vitae stage's level-crossing log (D42: a grant may cross a level; M3 D37's refusal is replaced). When null the session's own table (<see cref="IGameSessionView.XpTable"/>) is used, and when neither is loaded the stage
-    /// fails loudly. Hosts set it from <see cref="LevelXpOf"/>.
-    /// </summary>
-    public Func<int, ulong?>? LevelXp { get; set; }
-
-    /// <summary>The level guard's function over a loaded XpTable.</summary>
-    /// <param name="table">The XpTable.</param>
-    public static Func<int, ulong?> LevelXpOf(XpTableData table)
-    {
-        ArgumentNullException.ThrowIfNull(table);
-        return level => (uint)level < (uint)table.CharacterLevelXpList.Count ? table.XpForLevel(level) : null;
-    }
 
     private readonly GearKit _kit;
     private readonly GearScenario? _gear;
-    private GearScenario? _regear;
     private readonly IReadOnlyDictionary<uint, SpellInfo> _spells;
     private readonly DeathOptions _options;
     private readonly IFightWalk? _walk;
@@ -122,9 +101,10 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     private readonly DeathStages _stages;
     private readonly double _arrivalSeconds;
     private readonly ILogSink _log;
-    private readonly DeathTally _tally = new();
+    private DeathTally _tally = new(); // the autopilot's own, running since its start, replaces it at the entry after a respawn (BeginAfterRespawn)
     private readonly TeleportDestination _holtburg;
-    private readonly TeleportDestination _den = TeleportCatalog.FromInterior(InteriorLocations.BlackSpawnDenAluvian);
+    private readonly HuntingGround _ground;
+    private readonly TeleportDestination _den;
     private MageSpellBars? _bars;
     private ActionHandle? _pending;
     private IDisposable? _movedSubscription;
@@ -160,20 +140,10 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     private uint _respawnCell;
     private bool _lateChecked;
     private DeathLegMeasures? _frozen;
-    private bool _vitaeDone;
     private bool _enteredHere;
-    private readonly DenExit _exit;
+    private readonly GroundExit _exit;
     private readonly SeamLeg _seam;
     private bool _failLeave;
-    private bool _failVitae;
-    private bool _vitaeSent;
-    private long? _vitaePaid;
-    private int? _vitaeAfter;
-    private long _vitaeAsked;
-    private double _vitaeUntil = double.NaN;
-    private ToolHandle<XpResult>? _vitaeHandle;
-    private bool _unsettledLogged;
-    private readonly List<uint> _scratch = [];
     private float _stopWithin;
     private bool _diedEarly;
     private double _deathStart = double.NaN;
@@ -194,7 +164,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <param name="spells">The SpellTable's spells (<c>SpellTableData.Spells</c>): the kit's components are those of the profile's spells.</param>
     /// <param name="account">The account name the kit is built for (hashed by the kit, never stored, logged or printed).</param>
     /// <param name="death">The death loop's options.</param>
-    /// <param name="walk">The walk along the den's floor (<see cref="DenWalk"/>; the game's <c>GameFightWalk</c>), or null: the death stage then fails loudly.</param>
+    /// <param name="walk">The walk along the den's floor (<see cref="GroundWalk"/>; the game's <c>GameFightWalk</c>), or null: the death stage then fails loudly.</param>
     /// <param name="log">Where the scenario logs.</param>
     /// <param name="arrivalSeconds">The limit on the arrival of the regear's gear scenario.</param>
     /// <param name="endSession">True: log off and quit when done. False: end at <c>done</c> in the world.</param>
@@ -204,7 +174,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <param name="fight">M4 3.1 d1: the fight's options for the fight stage, or null for <see cref="FightOptions"/> with <see cref="DeathOptions.FightKills"/> and <see cref="DeathOptions.FightSeconds"/>.</param>
     /// <param name="fightFactory">M4 3.1 d1: how the composed inner fight scenario is made (default <see cref="DefaultFightLeg"/>, the real <see cref="FightScenario"/>); the tests give a scripted one.</param>
     public DeathScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, DeathOptions death, IFightWalk? walk, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, DeathStages stages = DeathStages.All, IApproachWalk? approach = null, BuffOptions? buff = null, FightOptions? fight = null, FightLegFactory? fightFactory = null)
-        : this(GearKit.ForDeathLoop(spells ?? throw new ArgumentNullException(nameof(spells)), account, death ?? throw new ArgumentNullException(nameof(death))), spells, death, walk, log, arrivalSeconds, endSession, stages, approach, buff, fight, fightFactory)
+        : this(GearKit.Build(spells ?? throw new ArgumentNullException(nameof(spells)), account, ground: fight?.GroundProfile), spells, death, walk, log, arrivalSeconds, endSession, stages, approach, buff, fight, fightFactory)
     {
     }
 
@@ -229,11 +199,12 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         ArgumentNullException.ThrowIfNull(log);
         (_kit, _spells, _options, _walk, _endSession, _stages, _arrivalSeconds, _log) = (kit, spells, death, walk, endSession, stages, arrivalSeconds, log);
         _approach = approach;
-        _regearKit = kit.HasDecoys ? kit.WithDecoys([]) : kit; // M4 3.1 d1: the decoys the death dropped are on the corpse; a regear that spawned them would carry a second copy of each
         _buffOptions = buff ?? new BuffOptions();
         var travel = death.Travel ?? new PlaceTravel(); // M4 P5b: one seam per run, shared by the places, the composed fight and the den exit
         _seam = new SeamLeg(travel);
         _fightOptions = fight ?? new FightOptions { Kills = death.FightKills, Seconds = death.FightSeconds };
+        _ground = _fightOptions.GroundProfile; // M5 2 g2b: the death loop runs in the fight options' ground
+        _den = _ground.ArrivalDestination();
         if (death.Travel is not null || !death.LeaveOnFailure)
         {
             // An embedded run (a journey): the composed fight goes through the same seam, back to the den after the respawn (Primary Portal Recall), and stays in the den at its end (the corpse trip follows on
@@ -241,8 +212,8 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             _fightOptions = _fightOptions with { Travel = travel, PlacePurpose = TravelPurpose.Ground, LeaveOnFailure = death.LeaveOnFailure, LeaveAtEnd = death.LeaveOnFailure };
         }
         _fightFactory = fightFactory ?? DefaultFightLeg;
-        _gear = (stages & DeathStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) : null;
-        _exit = new DenExit(log, LogCategory, travel);
+        _gear = (stages & DeathStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) { NoGrant = true } : null;
+        _exit = new GroundExit(_ground, log, LogCategory, travel);
         _holtburg = _exit.Destination;
     }
 
@@ -307,16 +278,13 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <summary>The inner gear scenario of the gear stage (null when <see cref="DeathStages.Gear"/> is off).</summary>
     public GearScenario? Gear => _gear;
 
-    /// <summary>The inner gear scenario of the regear stage (null until that stage began).</summary>
-    public GearScenario? Regear => _regear;
-
-    /// <summary>The verdict fields: <see cref="DeathLegVerdict"/>'s (<c>ok= died= suicides= ...</c>) and, at the end, <c>bars= unbuff= bound=</c>. No account or character name is in it.</summary>
+    /// <summary>The verdict fields: <see cref="DeathLegVerdict"/>'s (<c>ok= died= suicides= ... respawn_deaths= ... stage_rebuffed= ...</c>: the respawn's own measures, named so that they do not collide with the handler's) and, at the end, <c>bars= unbuff= bound=</c> and the handler's <c>deaths= corpse_recovered= route= items_back= vitae_grants= rebuffed= relines=</c> (M5 3 d2; 3-R2: each judged key is on the line once, <c>deaths=</c> and <c>rebuffed=</c> the handler's). No account or character name is in it.</summary>
     public string VerdictFields()
     {
         var line = Outcome().Line;
         const string Prefix = "bsd-death done ";
         var fields = line.StartsWith(Prefix, StringComparison.Ordinal) ? line[Prefix.Length..] : line;
-        return string.Create(CultureInfo.InvariantCulture, $"{fields} bars={_barsNote} unbuff={_unbuffNote} bound={(_bound ? "yes" : "no")}");
+        return string.Create(CultureInfo.InvariantCulture, $"{fields} bars={_barsNote} unbuff={_unbuffNote} bound={(_bound ? "yes" : "no")} {HandlerFields}");
     }
 
     /// <summary>The leg's verdict from the scenario's failure and what the tally saw (<see cref="DeathLegVerdict.Compose"/>); the game's leg passes its frame figures, the headless host has none (<c>n/a</c>).</summary>
@@ -354,7 +322,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     private DeathLegOutcome OutcomeFromTally(double? deathFrameMaxMs, double? fightFrameMaxMs)
     {
         var measures = _frozen is { } frozen
-            ? frozen with { DeathFrameMaxMs = deathFrameMaxMs, FightFrameMaxMs = fightFrameMaxMs, VitaePaid = _vitaePaid, VitaeAfter = _vitaeAfter } // the vitae stage runs after the freeze
+            ? frozen with { DeathFrameMaxMs = deathFrameMaxMs, FightFrameMaxMs = fightFrameMaxMs }
             : MeasuresNow(deathFrameMaxMs, fightFrameMaxMs);
         return DeathLegVerdict.Compose(Failure, in measures, (_stages & DeathStages.Death) != 0);
     }
@@ -364,12 +332,12 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         var worn = ParseWorn(_regearFields);
         var seconds = double.IsNaN(_deathStart) ? (double?)null : DeathSeconds;
         var measures = _view is null
-            ? new DeathLegMeasures(_tally.VictimNotices, _suicides, _tally.Deaths, _tally.VitaePercent, DeathRespawn.None, _tally.CorpsesSeen, _tally.Purges, _tally.ProtectedHits, null, _gearRestored, worn, _tally.HitsTaken, _tally.DamageTaken, _tally.Evades, null, seconds, deathFrameMaxMs, fightFrameMaxMs, _tally.StaleCorpses, _tally.Protection, _vitaePaid, _vitaeAfter)
+            ? new DeathLegMeasures(_tally.VictimNotices, _suicides, _tally.Deaths, _tally.VitaePercent, DeathRespawn.None, _tally.CorpsesSeen, _tally.Purges, _tally.ProtectedHits, null, _gearRestored, worn, _tally.HitsTaken, _tally.DamageTaken, _tally.Evades, null, seconds, deathFrameMaxMs, fightFrameMaxMs, _tally.StaleCorpses, _tally.Protection)
             : DeathLegVerdict.Measure(_tally, _view.State.Objects, _suicides, _gearRestored, worn, seconds, deathFrameMaxMs, fightFrameMaxMs, BoundLifestone);
         if (_atRespawn is { } atRespawn)
         {
             // M4 2.2 s1 and 3.1 d1: the stages after the respawn ran (the regear, the rebuff, the fight, the corpse trip), so M3's tally-derived measures stay as the respawn's vitals wait left them (their blows, teleports and old corpses
-            // must not move died=, deaths=, vitae=, vitals_pct=, hits_taken=, health_min_pct= or protection=).
+            // must not move died=, respawn_deaths=, vitae=, vitals_pct=, hits_taken=, health_min_pct= or protection=).
             measures = atRespawn with { GearRestored = _gearRestored, Worn = worn, DeathSeconds = seconds, DeathFrameMaxMs = deathFrameMaxMs, FightFrameMaxMs = fightFrameMaxMs };
         }
 
@@ -378,7 +346,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             measures = measures with { Respawn = kept }; // the respawn stage's classification stands (it was taken at the arrival plus the vitals wait, in the world)
         }
 
-        return measures with { CorpseLooted = CorpseLooted, ItemsRecovered = ItemsRecovered, TripSeconds = TripElapsedSeconds, TripAbort = _tripAbort, Rebuffed = _rebuffed, DenKills = _denKills, Decoys = DecoysCarried, DecoySafe = DecoySafeField, DecoysDropped = DecoysDropped, GearDropped = GearDropped, DecoysRecovered = DecoysRecovered, PretripHeals = _pretripHeals, GearLeft = GearLeft, Undressed = _undressed, LieDown = _lieDown, LieEcho = LieEcho };
+        return measures with { CorpseLooted = CorpseLooted, ItemsRecovered = ItemsRecovered, TripSeconds = TripElapsedSeconds, TripAbort = TripAbort, Rebuffed = _rebuffed, DenKills = _denKills, PretripHeals = PretripHeals, GearLeft = GearLeft, Undressed = _undressed, LieDown = _lieDown, LieEcho = LieEcho };
     }
 
     /// <summary>
@@ -417,11 +385,6 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             if (_failLeave)
             {
                 return FailLeaveStep(session);
-            }
-
-            if (_failVitae)
-            {
-                return VitaeStep(session, session.Clock.Now);
             }
 
             if (_failLogOff && _pending is { Outcome: { } left })
@@ -528,7 +491,6 @@ public sealed partial class DeathScenario : IScenario, IDisposable
                     case ScenarioStatus.Succeeded:
                         _gearFields = _gear.VerdictFields();
                         _log.Info(LogCategory, "gear done (" + _gearFields + ")");
-                        RunDecoyCheck(session);
                         Enter("bars", clock);
                         break;
                 }
@@ -566,8 +528,6 @@ public sealed partial class DeathScenario : IScenario, IDisposable
                 return ArrivalStep(session, clock, "unbuff: ", "unbuff-vitals");
             case "unbuff-vitals":
                 return UnbuffVitalsStep(session, clock);
-            case "unbuff-decoys":
-                return UnbuffDecoysStep(session, clock);
 
             case "death-mode":
                 return _undressing ? UndressStep(session, clock) : DeathModeStep(session, clock);
@@ -579,43 +539,11 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             case "respawn-vitals":
                 return RespawnVitalsStep(session, clock);
 
-            case "corpse-teleporting":
-                return CorpseTeleportingStep(session, clock);
-            case "corpse-settle":
-                return CorpseSettleStep(session, clock);
-            case "corpse-seek":
-                return CorpseSeekStep(session, clock);
-            case "corpse-opening":
-                return CorpseOpeningStep(session, clock);
-            case "corpse-looting":
-                return CorpseLootingStep(session, clock);
-            case "corpse-closing":
-                return CorpseClosingStep(session, clock);
-            case "corpse-return":
-                return CorpseReturnStep(session, clock);
-            case "corpse-return-settle":
-                return CorpseReturnSettleStep(session, clock);
-
-            case "regear-settle":
-                return RegearSettleStep(session, clock);
-            case "regear":
-                return RegearStep(session, now, clock);
-
-            case "pretrip-heal":
-                return PretripHealStep(session, clock);
-
-            case "rebuff":
-                return RebuffStep(session, now);
-            case "rebuff-peace":
-                return RebuffPeaceStep(session, clock);
-            case "fight":
-                return FightStep(session, now);
+            case var handlerStage when handlerStage.StartsWith(HandlerStagePrefix, StringComparison.Ordinal):
+                return HandlerStep(session, now); // M5 3 d2: one order, the handler's (DeathScenario.Order.cs); the stage is the handler's step, shown as handler-<step>
 
             case "leave-den":
                 return LeaveDenStep(session, clock);
-
-            case "vitae":
-                return VitaeStep(session, clock);
 
             case "logging-off":
                 if (_pending is { Outcome: { } loggedOff })
@@ -671,6 +599,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         _seam.Abandon();
         _approach?.Dispose();
         _inner?.Dispose();
+        _handler?.Dispose();
         _walk?.Dispose();
     }
 
@@ -711,6 +640,12 @@ public sealed partial class DeathScenario : IScenario, IDisposable
 
         if (from <= DeathStages.Death && (_stages & DeathStages.Death) != 0)
         {
+            if ((_options.Facts ?? _options.Journey?.Facts) is { ObservedDeath: { } observed } facts)
+            {
+                facts.ObservedDeath = null; // taken: one entry per death the autopilot did not script
+                return BeginAfterRespawn(session, clock, observed);
+            }
+
             Subscribe(session);
             SubscribeMotion(session);
             if (_options.StartAt is not null)
@@ -727,23 +662,38 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
-        if (from <= DeathStages.Regear && RegearOn)
-        {
-            StartRegear(clock);
-            return ScenarioStatus.Running;
-        }
-
         return Conclude(session, clock);
     }
 
-    /// <summary>M4 P5b: a <see cref="DeathOptions.StartAt"/> that is not one of the linear stages (gear, bind, den, death, regear), or one the stage mask leaves out, is refused loudly; null when it is fine or not given.</summary>
+    /// <summary>
+    /// M5 4 a3 (<c>m5-autopilot-death-unscripted</c>): the entry after a respawn. A death the autopilot did not script (its tally, running since its start, saw it: <see cref="JourneyFacts.ObservedDeath"/>) is handled by this station without the walk, the undress
+    /// and the lie-down: the observed tally replaces this scenario's own (the corpse, the deaths, the arrival are known), the stage is the respawn's arrival wait, and the order after it is the handler's as for a scripted death (D51, D53).
+    /// </summary>
+    private ScenarioStatus BeginAfterRespawn(IGameSessionView session, double clock, DeathTally observed)
+    {
+        _tally.Dispose();
+        _tally = observed;
+        Subscribe(session);
+        SubscribeMotion(session);
+        _deathTeleportBase = 0;
+        _selfBase = 0;
+        _selfTeleports = observed.DeathTeleports; // the teleports the observed tally already saw were the player's own positions too
+        _deathStart = double.IsNaN(observed.LastCorpseAt) ? clock : observed.LastCorpseAt;
+        _deathEnd = clock;
+        _pending = null;
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: entered after a death the autopilot did not script (m5-autopilot-death-unscripted): victim notices {observed.VictimNotices}, deaths {observed.Deaths}, corpse 0x{observed.LastCorpseGuid:X8}, death teleports {observed.DeathTeleports}; no walk, no undress, no lie-down: the respawn, then the handler's order"));
+        Enter("respawn", clock);
+        return ScenarioStatus.Running;
+    }
+
+    /// <summary>M4 P5b: a <see cref="DeathOptions.StartAt"/> that is not one of the linear stages (gear, bind, den, death), or one the stage mask leaves out, is refused loudly; null when it is fine or not given.</summary>
     private string? StartAtProblem() =>
         _options.StartAt switch
         {
             null => null,
-            DeathStages.Gear or DeathStages.Bind or DeathStages.Den or DeathStages.Death or DeathStages.Regear when (_stages & _options.StartAt.Value) != 0 => null,
-            DeathStages.Gear or DeathStages.Bind or DeathStages.Den or DeathStages.Death or DeathStages.Regear => $"start_at: the stage {_options.StartAt.Value.ToString().ToLowerInvariant()} is not in this run's stages ({_stages.ToString().ToLowerInvariant()})",
-            _ => $"start_at: {_options.StartAt.Value.ToString().ToLowerInvariant()} is not a stage a run can begin at (gear, bind, den, death, regear); TODO(m4-death-start-at)",
+            DeathStages.Gear or DeathStages.Bind or DeathStages.Den or DeathStages.Death when (_stages & _options.StartAt.Value) != 0 => null,
+            DeathStages.Gear or DeathStages.Bind or DeathStages.Den or DeathStages.Death => $"start_at: the stage {_options.StartAt.Value.ToString().ToLowerInvariant()} is not in this run's stages ({_stages.ToString().ToLowerInvariant()})",
+            _ => $"start_at: {_options.StartAt.Value.ToString().ToLowerInvariant()} is not a stage a run can begin at (gear, bind, den, death); TODO(m4-death-start-at)",
         };
 
     // ------------------------------------------------------------------------------------------------ the spell bars
@@ -984,10 +934,10 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         }
 
         var cell = session.State.Self.Position?.CellId ?? 0;
-        if (!BlackSpawnDen.IsFloorCell(cell))
+        if (!_ground.IsWalkable(cell))
         {
             // D12: the floor rule; a settle that ends elsewhere is a loud failure, not a note.
-            return Fail(session, $"den: the player settled in cell 0x{cell:X8}, which is not a floor cell of the den (floor cell no); the wait would start off the floor");
+            return Fail(session, $"den: the player settled in cell 0x{cell:X8}, which is not a walkable cell of {_ground.Name} (floor cell no); the wait would start off the floor");
         }
 
         _log.Info(LogCategory, $"den: settled in cell 0x{cell:X8}; floor cell yes");
@@ -1064,7 +1014,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         _afterSuicide = true;
         _ = _tally.SampleVitalsAfterArrival(); // the suicide's own restore, read at the end of its wait as the respawn's is (M4 2.2 fix R1)
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"unbuff: the mage is unbuffed (vitae {_tally.VitaePercent}%, {VitalsText(_tally)})"));
-        return BeginDecoyTopUp(session, clock); // M4 3.1 d1 F2: the suicide dropped items too: the decoys the pack lacks are spawned again before the den stages run again
+        return Begin(DeathStages.Den, session, clock); // M5 3 d2: the decoy top-up is removed (D51); the explicit unbuff stage is not a death the loop recovers from
     }
 
     /// <summary>
@@ -1110,7 +1060,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
                 return BeginUndress(session, clock);
             }
 
-            _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
+            _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation);
             return ScenarioStatus.Running;
         }
 
@@ -1135,7 +1085,6 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             return Fail(session, "death: the wait must walk to the tuskers but has no walker; TODO(m3-fight-no-walker)");
         }
 
-        CountDecoysAtDeath(session);
         _deathStart = clock;
         _lastBlowAt = clock;
         _blowMark = Blows();
@@ -1150,6 +1099,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
+        BeginWaitTour(session, clock); // M5 7 P7v: the legs are the tour's choice (in a journey the ground's one tour, which knows the den fight's kills), and the wait tells it what the player sees
         if (!_walk.BeginLeg(session, clock, out var leg))
         {
             return Fail(session, "death: no walk could be planned to a tusker cell: " + _walk.Failure);
@@ -1157,7 +1107,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
 
         StoodUp();
         _legs++;
-        _log.Info(LogCategory, $"death: walking to the nearest tusker cell: {leg}; then non-combat among the tuskers for up to {_options.Seconds:0.#} s");
+        _log.Info(LogCategory, $"death: walking to the tuskers: {LegPurpose()}{leg}; then non-combat among the tuskers for up to {_options.Seconds:0.#} s");
         Enter("death-wait", clock);
         return ScenarioStatus.Running;
     }
@@ -1192,6 +1142,8 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
+        LookAround(session, clock); // M5 7 P7v (F5's look): a slot's cell in view with no creature of its own is seen empty, and the next leg skips it
+
         if (_options.StopAfterHits && double.IsNaN(_stopAt) && _tally.HitsTaken >= 1 && HealthUnderFull(session.State.Self.Qualities))
         {
             _stopAt = clock + StopAfterHitsSeconds;
@@ -1204,7 +1156,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             _deathEnd = clock;
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: stopping after {elapsed:0} s among the tuskers (hits {_tally.HitsTaken}, damage {_tally.DamageTaken}, lowest health {_tally.HealthMinPercent:0}%)"));
             _walk?.Abandon();
-            return Begin(DeathStages.Regear, session, clock);
+            return Conclude(session, clock);
         }
 
         if (elapsed > _options.Seconds)
@@ -1233,7 +1185,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
 
             StoodUp();
             _legs++;
-            _log.Info(LogCategory, $"death: no blow in {IdleLegSeconds:0} s; moving on: {leg}");
+            _log.Info(LogCategory, $"death: no blow in {IdleLegSeconds:0} s; moving on: {LegPurpose()}{leg}");
         }
 
         return ScenarioStatus.Running;
@@ -1273,7 +1225,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         if (_diedEarly && clock - _stageStart > ArrivalSeconds)
         {
             _log.Warn(LogCategory, "respawn: no arrival within " + ArrivalSeconds.ToString("0", CultureInfo.InvariantCulture) + " s of the early death (not judged under StopAfterHits)");
-            return Begin(DeathStages.Regear, session, clock);
+            return Conclude(session, clock);
         }
 
         return clock - _stageStart > ArrivalSeconds
@@ -1301,7 +1253,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         if (_diedEarly)
         {
             _log.Info(LogCategory, "respawn: " + respawn.ToString().ToLowerInvariant() + " (report-only under StopAfterHits)");
-            return Begin(DeathStages.Regear, session, clock);
+            return Conclude(session, clock);
         }
 
         if (respawn != DeathRespawn.Lifestone)
@@ -1310,82 +1262,6 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         }
 
         return BeginPost(session, clock); // M4 3.1 d1: the measures freeze here, then the stages after the respawn in their order (DeathScenario.Order.cs)
-    }
-
-    // ------------------------------------------------------------------------------------------------ the regear
-
-    /// <summary>
-    /// Before the re-gear: the held items with no world object (the gear spawn would wait on them: "inventory-unsettled") are named, with where the read model holds them, and given <see cref="RegearSettleSeconds"/> to
-    /// arrive; past that the run fails naming their guids, instead of the gear scenario's unnamed wait. A dropped item should have left the model with its F747 or 0024 (<c>GameStateReducer.ReleaseDeletedHeld</c>).
-    /// </summary>
-    private ScenarioStatus RegearSettleStep(IGameSessionView session, double clock)
-    {
-        _scratch.Clear();
-        GearInventory.Collect(session.State, _scratch);
-        var unsettled = 0;
-        foreach (var guid in _scratch)
-        {
-            if (!session.State.Objects.TryGet(guid, out _))
-            {
-                unsettled++;
-            }
-        }
-
-        if (unsettled == 0)
-        {
-            Enter("regear", clock);
-            return ScenarioStatus.Running;
-        }
-
-        if (!_unsettledLogged)
-        {
-            _unsettledLogged = true;
-            _log.Warn(LogCategory, $"regear: {unsettled} held item(s) have no world object: {DescribeUnsettled(session)}; waiting up to {RegearSettleSeconds:0} s for them");
-        }
-
-        return clock - _stageStart > RegearSettleSeconds
-            ? Fail(session, $"regear: {unsettled} held item(s) still have no world object after {RegearSettleSeconds:0} s: {DescribeUnsettled(session)} (a dropped item should have left the inventory with its F747 or 0024)")
-            : ScenarioStatus.Running;
-    }
-
-    private string DescribeUnsettled(IGameSessionView session)
-    {
-        var text = new System.Text.StringBuilder();
-        foreach (var guid in _scratch)
-        {
-            if (session.State.Objects.TryGet(guid, out _))
-            {
-                continue;
-            }
-
-            var place = session.State.Self.Inventory.Find(guid);
-            text.Append(text.Length == 0 ? string.Empty : "; ");
-            text.Append(CultureInfo.InvariantCulture, $"guid 0x{guid:X8} wcid unknown (no world object) held {place.Kind} container 0x{place.Container:X8} placement {place.Placement} location 0x{place.Location:X}");
-        }
-
-        return text.ToString();
-    }
-
-    private ScenarioStatus RegearStep(IGameSessionView session, double now, double clock)
-    {
-        switch (_regear!.Step(session, now))
-        {
-            case ScenarioStatus.Failed:
-                _regearFields = _regear.VerdictFields();
-                return Fail(session, "regear: " + _regear.Failure);
-            case ScenarioStatus.Succeeded:
-                _regearFields = _regear.VerdictFields();
-                _gearRestored = _regearFields.Contains("gear=wielded", StringComparison.Ordinal) && ParseWorn(_regearFields) == 5;
-                _log.Info(LogCategory, $"regear done ({_regearFields}); gear_restored={(_gearRestored ? "yes" : "no")}; {RegearCorpseNote()}");
-                if (!_gearRestored)
-                {
-                    return Fail(session, "regear: gear_restored=no (" + _regearFields + ")");
-                }
-
-                return NextPost(session, clock);
-        }
-
-        return ScenarioStatus.Running;
     }
 
     // ------------------------------------------------------------------------------------------------ the end
@@ -1398,7 +1274,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         return AfterMeasures(session, clock);
     }
 
-    /// <summary>After the freeze: out of the den, then the vitae stage, then the end.</summary>
+    /// <summary>After the freeze: out of the den, then the end (M5 3 d2: the vitae stage is removed, D51).</summary>
     private ScenarioStatus AfterMeasures(IGameSessionView session, double clock)
     {
         if (_exit.Begin(session, clock, _selfTeleports))
@@ -1407,18 +1283,12 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
-        if ((_stages & DeathStages.Vitae) != 0 && !_vitaeDone)
-        {
-            Enter("vitae", clock);
-            return ScenarioStatus.Running;
-        }
-
         return Finish(session, clock);
     }
 
     // ------------------------------------------------------------------------------------------------ out of the den
 
-    /// <summary>The conclusion's leave (<see cref="DenExit"/>, best effort): waits for it, then goes on to the vitae stage and the end.</summary>
+    /// <summary>The conclusion's leave (<see cref="GroundExit"/>, best effort): waits for it, then goes on to the end.</summary>
     private ScenarioStatus LeaveDenStep(IGameSessionView session, double clock) =>
         _exit.Tick(session, clock, _selfTeleports) ? AfterMeasures(session, clock) : ScenarioStatus.Running;
 
@@ -1437,16 +1307,6 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <summary>The failed run's end in the world, out of the den: the log off when the scenario owns the session (as the fight scenario's failure, so the next login is not refused as CharacterInWorld), else Failed at once (the game's leg logs off itself).</summary>
     private ScenarioStatus FailInWorld(IGameSessionView session)
     {
-        // P5a r3: the vitae stage also runs after a failure (out of the den, before the log off). Round 3's two death runs both failed in the fight, so the success-only stage never ran, the mage's vitae grew from 20% to
-        // 40% across the gate and the lowered skills failed the heal and buff loops after it. The verdict logged by Fail stays the run's; the stage only pays what ACE's rule asks (D42), and its own failure is logged by name.
-        if ((_stages & DeathStages.Vitae) != 0 && !_vitaeDone && session.State.Phase == SessionPhase.InWorld)
-        {
-            _failVitae = true;
-            _log.Info(LogCategory, "vitae after the failure: the run still pays its vitae before it ends as failed (the next run must not start under this run's penalty); the verdict above stays the run's");
-            Enter("vitae", session.Clock.Now);
-            return ScenarioStatus.Running;
-        }
-
         if (!_endSession)
         {
             Dispose();
@@ -1459,13 +1319,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         return ScenarioStatus.Running;
     }
 
-    // ------------------------------------------------------------------------------------------------ the vitae (D37)
-
-    /// <summary>
-    /// The last stage (after the freeze, before the log off): when the registry holds the vitae, asks the server mod's <c>xp</c> verb for the experience ACE's rule needs to clear it
-    /// (<see cref="EffectRules.VitaeExperienceToClear"/>), refuses loudly if that would cross the next level (the XpTable), then waits up to <see cref="VitaeSeconds"/> for the vitae to leave the registry. The verdict's measures
-    /// were frozen before, so the death's <c>vitae=</c> stays the penalty the death put on; <c>vitae_paid=</c> and <c>vitae_after=</c> report this stage. A failure here fails the run after the verdict, by name.
-    /// </summary>
+    /// <summary>Chooses the existing mage in the character list and enters the world (a run of stages that do not include the gear stage logs in itself).</summary>
     private ScenarioStatus ChooseCharacter(IGameSessionView session, double clock)
     {
         foreach (var c in session.State.Characters.Entries)
@@ -1485,119 +1339,6 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         }
 
         return Fail(session, "choosing: " + MageTemplate.CharacterName + " is not in the character list (run --scenario=mage-build first)");
-    }
-
-    private ScenarioStatus VitaeStep(IGameSessionView session, double clock)
-    {
-        var q = session.State.Self.Qualities;
-        if (_vitaeHandle is { } handle)
-        {
-            if (handle.Outcome is not { } outcome)
-            {
-                return ScenarioStatus.Running;
-            }
-
-            if (outcome.Kind != ActionOutcomeKind.Confirmed)
-            {
-                _vitaeHandle = null;
-                return VitaeFail(session, q, "the xp grant was not confirmed: " + Describe(outcome));
-            }
-
-            if (!_vitaeSent)
-            {
-                _vitaeSent = true;
-                _vitaeAsked = handle.Result?.Added ?? _vitaeAsked;
-                _vitaeUntil = clock + VitaeSeconds;
-                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitae: {_vitaeAsked:N0} experience granted ({outcome.Detail}); waiting for the penalty to clear"));
-            }
-
-            if (!q.TryGetVitae(out _) || VitaePercentOf(q) == 0)
-            {
-                return VitaeDone(session, clock, 0);
-            }
-
-            return clock > _vitaeUntil
-                ? VitaeFail(session, q, string.Create(CultureInfo.InvariantCulture, $"the vitae is still {VitaePercentOf(q)}% {VitaeSeconds:0} s after the grant of {_vitaeAsked:N0} experience (ACE's rule asked for it; the level, DeathLevel or pool may differ from the read model's)"))
-                : ScenarioStatus.Running;
-        }
-
-        if (!q.IsKnown)
-        {
-            return clock - _stageStart > VitaeSeconds
-                ? VitaeFail(session, q, "the player description has not arrived")
-                : ScenarioStatus.Running;
-        }
-
-        if (!q.TryGetVitae(out var vitae))
-        {
-            _log.Info(LogCategory, "vitae: the registry holds none; nothing to pay");
-            return VitaeDone(session, clock, 0);
-        }
-
-        var multiplier = vitae.Enchantment.StatModValue;
-        var level = q.TryGetInt(EffectRules.VitaeLevelProperty, out var deathLevel) && deathLevel > 0 ? deathLevel : q.Level;
-        q.TryGetInt(EffectRules.VitaeCpPoolProperty, out var pool);
-        var amount = EffectRules.VitaeExperienceToClear(multiplier, level, pool);
-        var levelXp = LevelXp ?? (session.XpTable is { } table ? LevelXpOf(table) : null);
-        if (levelXp is null)
-        {
-            return VitaeFail(session, q, "no XpTable is loaded, so a level crossing by the grant cannot be named (TODO(m3-vitae-xptable))");
-        }
-
-        // D42 (the owner, 2026-10-23, replacing M3 D37's "never across a level"): the grant may cross a level, because a clear costs millions of experience against a level step of a similar size and a gate's two death runs
-        // could never both fit. The grant stays bounded (exactly what clears the vitae, never more) and a crossing is logged loudly.
-        if (q.Level >= 1)
-        {
-            var reached = (ulong)Math.Max(0, q.TotalExperience) + (ulong)amount;
-            var to = q.Level;
-            while (levelXp(to + 1) is { } next && reached >= next)
-            {
-                to++;
-            }
-
-            if (to > q.Level)
-            {
-                _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitae_level_crossed=yes level={q.Level}->{to} (clearing the {VitaePercentOf(q)}% vitae needs {amount:N0} experience; total {q.TotalExperience:N0}; D42 allows it)"));
-            }
-        }
-
-        _vitaeAsked = amount;
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitae: {VitaePercentOf(q)}% (level {level}, pool {pool}); asking for {amount:N0} experience to clear it"));
-        _vitaeHandle = session.Tools.AddXp(amount, ActionSource.Host);
-        return ScenarioStatus.Running;
-    }
-
-    private static int VitaePercentOf(PlayerQualities q) =>
-        q.TryGetVitae(out var vitae) ? (int)Math.Round((1.0 - vitae.Enchantment.StatModValue) * 100.0, MidpointRounding.AwayFromZero) : 0;
-
-    private ScenarioStatus VitaeDone(IGameSessionView session, double clock, int after)
-    {
-        _vitaeDone = true;
-        _vitaePaid = _vitaeSent ? _vitaeAsked : 0;
-        _vitaeAfter = after;
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitae: paid {_vitaePaid:N0} experience, {after}% left"));
-        if (_failVitae)
-        {
-            _failVitae = false;
-            return FailInWorld(session);
-        }
-
-        return Finish(session, clock);
-    }
-
-    private ScenarioStatus VitaeFail(IGameSessionView session, PlayerQualities q, string why)
-    {
-        _vitaeDone = true;
-        _vitaePaid = _vitaeSent ? _vitaeAsked : 0;
-        _vitaeAfter = VitaePercentOf(q);
-        if (_failVitae)
-        {
-            _failVitae = false;
-            _log.Error(LogCategory, "vitae after the failure: " + why);
-            return FailInWorld(session);
-        }
-
-        return Fail(session, "vitae: " + why);
     }
 
     private ScenarioStatus Finish(IGameSessionView session, double clock)
@@ -1632,7 +1373,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         _log.Info(LogCategory, "verdict " + VerdictFields());
         if (session.State.Phase == SessionPhase.InWorld && Stage is not ("logging-off" or "quitting"))
         {
-            // Out of the den first, whatever endSession is (best effort, DenExit): a mage logged off in the den, by this scenario or by the game's leg as soon as this returns Failed, meets the tuskers at its next login. The
+            // Out of the den first, whatever endSession is (best effort, GroundExit): a mage logged off in the den, by this scenario or by the game's leg as soon as this returns Failed, meets the tuskers at its next login. The
             // run stays Running until the leave is over, then logs off (endSession: true) or ends Failed where it stands.
             Subscribe(session); // the leave reads the player's own teleport positions: a failure before the first place (in a den a previous run left the mage in) has not subscribed yet
             if (_options.LeaveOnFailure && _exit.Begin(session, session.Clock.Now, _selfTeleports))
@@ -1657,7 +1398,11 @@ public sealed partial class DeathScenario : IScenario, IDisposable
 
         _subscribed = true;
         _view = session;
-        _tally.Start(session);
+        if (!_tally.Running)
+        {
+            _tally.Start(session); // an adopted tally (the autopilot's) is running already: starting it again would zero the deaths it counted
+        }
+
         _movedSubscription = session.Events.Subscribe<ObjectMoved>(OnMoved);
         _chatSubscription = session.Events.Subscribe<ChatReceived>(OnChat);
         _qualitiesSubscription = session.Events.Subscribe<QualitiesChanged>(OnQualities);
@@ -1741,13 +1486,13 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <summary>The end of <see cref="ExpiredLineStart"/>'s line.</summary>
     public const string ExpiredLineEnd = " has expired.";
 
-    /// <summary>ACE's line when the lifestone protection runs out (<c>Player_Death.cs</c> 934, a Magic line).</summary>
+    /// <summary>ACE's line when the lifestone protection runs out (@95ef426d <c>Player_Death.cs</c> 934, a Magic line).</summary>
     public const string ProtectionExpiredLine = "You're no longer protected by the Lifestone's magic!";
 
-    /// <summary>ACE's line when the player's own action dispels the lifestone protection (<c>Player_Death.cs</c> 942, a Magic line).</summary>
+    /// <summary>ACE's line when the player's own action dispels the lifestone protection (@95ef426d <c>Player_Death.cs</c> 942, a Magic line).</summary>
     public const string ProtectionDispelledLine = "Your actions have dispelled the Lifestone's magic!";
 
-    /// <summary>ACE's line when earned experience lowers the vitae (<c>Player_Xp.cs</c> 164, a Magic line).</summary>
+    /// <summary>ACE's line when earned experience lowers the vitae (@95ef426d <c>Player_Xp.cs</c> 164, a Magic line).</summary>
     public const string VitaeReducedLine = "Your experience has reduced your Vitae penalty!";
 
     /// <summary>

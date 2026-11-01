@@ -75,7 +75,7 @@ public sealed class RecordingFormatTests
         string[] forbidden = ["account", "user", "username", "machine", "computer", "host", "path", "file", "dir", "directory", "password", "secret", "token", "key", "name"];
         var keys = new List<string>();
         Collect(json.RootElement, keys);
-        Assert.Equal(["format", "formatVersion", "runner", "createdUtc", "lifestoneVersion", "clientVersion", "aceCommit", "iterations", "portal", "cell", "local", "highRes", "scenario"], keys);
+        Assert.Equal(["format", "formatVersion", "runner", "createdUtc", "lifestoneVersion", "clientVersion", "aceCommit", "iterations", "portal", "cell", "local", "highRes", "scenario", "clientRules"], keys);
         Assert.DoesNotContain(keys, k => forbidden.Any(f => k.Contains(f, StringComparison.OrdinalIgnoreCase)));
         Assert.Equal(Header, RecordingHeader.FromJson(Header.ToJson()));
 
@@ -86,8 +86,19 @@ public sealed class RecordingFormatTests
         Assert.Throws<ArgumentException>(() => (Header with { LifestoneVersion = "1.0 built by someone" }).ToJson());
         Assert.Throws<ArgumentException>(() => (Header with { AceCommit = "../../secrets" }).ToJson());
         Assert.Throws<ArgumentException>(() => (Header with { ClientVersion = "1802x" }).ToJson());
-        Assert.Equal("""{"format":"lsrec","formatVersion":1,"runner":"x","createdUtc":"2026-10-12T14:22:33.0000000Z","clientVersion":"1802"}""",
+        Assert.Equal("""{"format":"lsrec","formatVersion":1,"runner":"x","createdUtc":"2026-10-12T14:22:33.0000000Z","clientVersion":"1802","clientRules":1}""",
             Encoding.UTF8.GetString(new RecordingHeader { Runner = "x", CreatedUtc = Created }.ToJson()));
+    }
+
+    [Fact]
+    public void A_header_without_client_rules_predates_them_and_a_new_header_carries_the_current_rules()
+    {
+        // M5 7 P7d: every recording made before the field reads ClientRulesKeepOrphans, so its replay keeps the orphans its live client kept.
+        var old = RecordingHeader.FromJson("""{"format":"lsrec","formatVersion":1,"runner":"x","createdUtc":"2026-10-12T14:22:33.0000000Z","clientVersion":"1802"}"""u8);
+        Assert.Equal(RecordingHeader.ClientRulesKeepOrphans, old.ClientRules);
+        Assert.Equal(RecordingHeader.CurrentClientRules, new RecordingHeader { Runner = "x", CreatedUtc = Created }.ClientRules);
+        Assert.Equal(RecordingHeader.ClientRulesDropOrphans, RecordingHeader.CurrentClientRules);
+        Assert.Throws<ArgumentException>(() => (Header with { ClientRules = -1 }).ToJson());
     }
 
     [Fact]

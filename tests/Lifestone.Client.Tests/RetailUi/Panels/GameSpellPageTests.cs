@@ -272,6 +272,10 @@ public sealed class GameSpellPageTests(DatSetFixture fixture, ITestOutputHelper 
         var info = Table.Spells[expected[0]];
         Assert.Equal(expected[0], first.SpellId);
         Assert.False(first.IsEmpty);
+        Assert.Equal(UiImageLookup.Ready, g.Rig.Manager.SpellIcons.TryGetSpell(UiSpellIcon.Of(info), out var picture));
+        Assert.Same(picture, first.ComposedIcon); // the composed picture (GetSpellIcon, M5 D147), drawn with three-channel alpha
+        Assert.Same(picture, first.IconElement!.GeneratedImage);
+        Assert.Equal(UiBlitMode.ThreeChannelAlpha, first.IconElement.Image.Mode);
         Assert.Equal(info.Name, g.Rig.Session.Spell(expected[0])!.Name);
         for (var i = 0; i < expected.Count; i++)
         {
@@ -599,7 +603,10 @@ public sealed class GameSpellPageTests(DatSetFixture fixture, ITestOutputHelper 
         Assert.NotEqual(0x060011D7u, expected); // the table's icon, not the pack object's
         var icon = g.Screen.Root!.GetChildRecursive(GameComponentsPage.RowIconId);
         Assert.NotNull(icon);
-        Assert.Equal(expected, icon!.Image.Did);
+        Assert.Equal(UiImageLookup.Ready, g.Rig.Manager.SpellIcons.TryGetComponent(expected, out var picture));
+        Assert.Same(picture, icon!.GeneratedImage); // MakeIcon over CompositeSpellComponentIcon (0x005684C0): the table's icon with its white made black (M5 D147)
+        Assert.Equal(UiBlitMode.ThreeChannelAlpha, icon.Image.Mode);
+        Assert.DoesNotContain(Enumerable.Range(0, 1024), p => picture!.Pixels[p * 4] == 255 && picture.Pixels[(p * 4) + 1] == 255 && picture.Pixels[(p * 4) + 2] == 255 && picture.Pixels[(p * 4) + 3] == 255);
         Assert.DoesNotContain(g.Rig.Log.Entries, static e => e.Message.Contains("TODO(m3-component-icon)", StringComparison.Ordinal));
     }
 

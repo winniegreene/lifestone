@@ -24,7 +24,7 @@
         }
         'actions'   = @{
             Paths   = @('src/Lifestone.Client/Session/Actions/', 'src/Lifestone.Client/Session/Contracts/', 'src/Lifestone.Client/Session/State/', 'src/Lifestone.Client/Objects/')
-            Classes = @('InventoryLiveTests', 'ItemMovesLiveTests', 'StatsLiveTests', 'ContainerLiveTests', 'ShortcutLiveTests')
+            Classes = @('InventoryLiveTests', 'ItemMovesLiveTests', 'StatsLiveTests', 'ContainerLiveTests', 'ShortcutLiveTests', 'KeyChestLiveTests')
         }
         # The fighters' and the mage's abilities are exercised by the journeys (the default gate always runs all three, smoke journey-*), not by loopback classes: these two areas keep their folders and run only what is left.
         'fighter'   = @{
@@ -32,8 +32,11 @@
             Classes = @('FighterBuildLoopbackTests')
         }
         'mage'      = @{
-            Paths   = @('src/Lifestone.Client/Session/Mage/', 'src/Lifestone.Client/Magic/', 'src/Lifestone.Client/Session/Scenarios/Journey/')
-            Classes = @('DenMeasureLiveTests')   # M5 0 c4: Lane=solo, so the account lanes leave it out; named so that R12 sees it in an area
+            Paths   = @('src/Lifestone.Client/Session/Mage/', 'src/Lifestone.Client/Magic/', 'src/Lifestone.Client/Session/Scenarios/Journey/', 'src/Lifestone.Client/Session/Autopilot/', 'src/Lifestone.Game/scripts/Session/Autopilot')
+            # M5 0 c4, M5 1 K3, M5 4 c1: Lane=solo, so the account lanes leave them out (the lead runs them); named so that R12 sees them in an area. AutopilotLiveTests (M5 4 h1) was tagged Tier=Soak only to
+            # get past R12; R12 exempts a Soak class because the soak phase (Category=Loopback&Tier=Soak) runs it, and this one is a 40-minute lead's run on the mage, not the soak (item 7's night), so its tag is gone and
+            # it is named here, in the mage area, with the autopilot's folders: a change to the autopilot selects it under -Loopback core, and the lane filter's Lane!=solo still leaves it out of the account lanes.
+            Classes = @('DenMeasureLiveTests', 'KillSwitchBuffLiveTests', 'AutopilotLiveTests')
         }
         'servermod' = @{
             Paths   = @('server/mod/')

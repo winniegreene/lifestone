@@ -87,7 +87,6 @@ public sealed class StandInWeenieArtTests
         served.UnionWith(ComponentWeenies.All.Select(static c => c.Wcid));
         served.UnionWith(GearKit.FociWcids);
         served.UnionWith(StandInWorld.VendorCatalog.Keys);
-        served.UnionWith(DecoyKit.All.Select(static d => d.Wcid));
         served.UnionWith([StandInChest.Wcid, StandInWorld.BowlWcid, StandInWorld.SmockWcid, RecordedDescription.PackWcid, StandInWorld.ThelnothWcid, StandInWorld.RenaldWcid, StandInItemKind.PyrealWcid]);
         served.UnionWith([StandInWorld.HandyKitWcid, StandInWorld.HealingPotionWcid, Lifestone.Client.Session.Fighter.FighterKit.MaceWcid, Lifestone.Client.Session.Fighter.FighterKit.ShortbowWcid, Lifestone.Client.Session.Fighter.FighterKit.ArrowWcid]);
         served.UnionWith([DeathDropModel.ManaScarabWcid, GearKit.PrismaticTaperWcid]);

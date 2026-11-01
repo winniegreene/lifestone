@@ -29,35 +29,26 @@ public enum DeathStages
     /// <summary>The walk to the nearest tusker cell and the wait for the tuskers' death of the player, the respawn and the vitals.</summary>
     Death = 16,
 
-    /// <summary>The gear scenario's steps again: what the death dropped is spawned again, the wand and the five pieces wielded.</summary>
-    Regear = 32,
-
     /// <summary>
-    /// D37, the last stage, after the measures are frozen and before the log off: the vitae is paid back with the server mod's <c>xp</c> verb (ACE <c>GrantXP</c> then <c>UpdateXpVitae</c>, <c>Player_Xp.cs</c> 53-82, 133-175), the
-    /// amount computed from ACE's rule (<see cref="Lifestone.Client.Session.Contracts.EffectRules.VitaeExperienceToClear"/>), allowed to cross a level since D42 (logged as vitae_level_crossed=yes level=a->b) but never more than it clears; skipped when the registry holds no vitae.
-    /// </summary>
-    Vitae = 64,
-
-    /// <summary>
-    /// M4 2.2 s1 (D5): the trip back to the mage's own corpse: teleport to where it died, open it, take everything, close it, teleport back to Holtburg (<c>--death-recover-corpse</c>, <c>--death-recover-min-health</c>). It comes after the respawn's vitals
-    /// and before <see cref="Regear"/> when <see cref="Fight"/> is off (M4 2.2's order), after the regear, the rebuff and the fight when it is on (M4 3.1 d1). A skipped precondition or an abort leaves M3's run (the regear spawns the gear).
+    /// The corpse trip of the death handler (M5 3 d2, D51; <c>--death-recover-corpse</c>, <c>--death-recover-min-health</c>): the route to the ground, the runner to the corpse, the take-all and the items worn and wielded again. One order for every option set:
+    /// the handler runs after the respawn's vitals; with this stage out of <c>--death-stages</c> (or the option off) it makes no trip.
     /// </summary>
     Corpse = 128,
 
     /// <summary>
-    /// M4 3.1 d1 (D20): after the respawn and its vitals (and the regear), the buff cycle at Holtburg: the death purged every enchantment, so this is the full cycle (<see cref="FightStages.Buffs"/> of the composed inner <see cref="FightScenario"/>;
-    /// <c>--death-rebuff</c>). With <see cref="Fight"/> off it runs after the regear; the order is in <see cref="DeathScenario"/>'s class doc.
+    /// M4 3.1 d1 (D20), the death handler's first step since M5 3 d2: after the respawn and its vitals, the buff cycle: the death purged every enchantment, so this is the full cycle (<see cref="FightStages.Buffs"/> of the composed inner <see cref="FightScenario"/>;
+    /// <c>--death-rebuff</c>). The order is the handler's, in <see cref="DeathScenario"/>'s class doc.
     /// </summary>
     Rebuff = 256,
 
     /// <summary>
     /// M4 3.1 d1 (D20): after the rebuff, the fight at the Black Spawn Den (<see cref="FightStages.Place"/> and <see cref="FightStages.Mode"/> and the kill loop of the composed inner <see cref="FightScenario"/>; <c>--death-fight</c>,
-    /// <c>--death-fight-kills</c>, <c>--death-fight-seconds</c>): the corpse trip then comes after it, with the tuskers dead. With it off the order is M4 2.2's (the trip straight after the respawn's vitals, the regear after it).
+    /// <c>--death-fight-kills</c>, <c>--death-fight-seconds</c>): the handler's last step, after the corpse trip and the item lines. With it off the handler runs the same order and skips only this return to the fight.
     /// </summary>
     Fight = 512,
 
     /// <summary>Everything (the headless host's, and the game's bsd-death leg); since D37 (M4 P5b) without the <see cref="Unbuff"/> suicide: one death a run.</summary>
-    All = Gear | Bind | Den | Death | Regear | Vitae | Corpse | Rebuff | Fight,
+    All = Gear | Bind | Den | Death | Corpse | Rebuff | Fight,
 }
 
 /// <summary>
@@ -83,13 +74,13 @@ public sealed record DeathOptions
 
     /// <summary>
     /// True: the scenario does not wait for the death (DoD 9's live test, not on the command line). On the first 0x01B2 melee notice with the health share under 100% it waits <see cref="DeathScenario.StopAfterHitsSeconds"/> s, then
-    /// stays in non-combat and logs off; the regear stage does not run. A mage that dies first (unbuffed it can in about 20 s) is reported, its respawn is not judged, and the run still logs off cleanly.
+    /// stays in non-combat and logs off. A mage that dies first (unbuffed it can in about 20 s) is reported, its respawn is not judged, and the run still logs off cleanly.
     /// </summary>
     public bool StopAfterHits { get; init; }
 
     /// <summary>
-    /// The stages to run (<c>--death-stages=gear,bind,den,unbuff,death,corpse,regear,rebuff,fight,vitae</c>, or <c>all</c> or <c>none</c>), or null for all of them. A run without the Death stage judges nothing about the death (only a failure fails it),
-    /// so <c>--death-stages=vitae</c> pays the vitae of BSD Mage alone. Read by the headless host; the game's bsd-death leg always runs all.
+    /// The stages to run (<c>--death-stages=gear,bind,den,unbuff,death,corpse,rebuff,fight</c>, or <c>all</c> or <c>none</c>), or null for all of them. A run without the Death stage judges nothing about the death (only a failure fails it),
+    /// the stages after the respawn (rebuff, corpse, fight) run only after a death. Read by the headless host; the game's bsd-death leg always runs all.
     /// </summary>
     public DeathStages? Stages { get; init; }
 
@@ -102,9 +93,15 @@ public sealed record DeathOptions
     /// <summary>The default of <c>--death-recover-min-health</c>, in percent of the maximum health.</summary>
     public const double DefaultRecoverMinHealthPercent = 60;
 
+    /// <summary>The default of <c>--death-recover-abort-health</c>, in percent of the maximum health (M4 2.2's 40).</summary>
+    public const double DefaultAbortHealthPercent = 40;
+
+    /// <summary>The default of <c>--death-recover-abort-seconds</c>, in seconds (M4 2.2's 90).</summary>
+    public const double DefaultAbortSeconds = DeathScenario.TripSeconds;
+
     /// <summary>
-    /// True (default, <c>--death-recover-corpse on</c>): the <see cref="DeathStages.Corpse"/> stage goes back for the mage's own corpse after the respawn. False (<c>off</c>) is M3's run exactly (D8: the corpse is not looted,
-    /// the regear spawns the gear).
+    /// True (default, <c>--death-recover-corpse on</c>): the <see cref="DeathStages.Corpse"/> stage goes back for the mage's own corpse after the respawn. False (<c>off</c>) makes no trip (the corpse is not gone back for and the items stay on it; M5 D51:
+    /// nothing is spawned in their place).
     /// </summary>
     public bool RecoverCorpse { get; init; } = true;
 
@@ -112,10 +109,22 @@ public sealed record DeathOptions
     public double RecoverMinHealthPercent { get; init; } = DefaultRecoverMinHealthPercent;
 
     /// <summary>
-    /// True (default, <c>--death-decoys on</c>): the death loop's kit carries the eight decoys of <see cref="Lifestone.Client.Session.Mage.DecoyKit"/> (ordinary, light, expensive items a death drops instead of the gear the loops need; M4 3.1 d0, D20), built by
-    /// <see cref="Lifestone.Client.Session.Mage.GearKit.ForDeathLoop"/>. False (<c>off</c>) is M3's kit exactly: no decoy is spawned and none is counted.
+    /// The health line among the creatures (<c>--death-recover-abort-health</c>, 0 to 100, default 40; M5 3 d4): when the share falls under it on the trip the handler holds where it stands and heals up to the larger of this and
+    /// <see cref="RecoverMinHealthPercent"/>, and turns back (gives the corpse up, <c>trip_abort=health-under-&lt;N&gt;</c>) only when the heals cannot bring it back. 0 never holds or turns back for health.
     /// </summary>
-    public bool Decoys { get; init; } = true;
+    public double AbortHealthPercent { get; init; } = DefaultAbortHealthPercent;
+
+    /// <summary>The default of <c>--death-trip-aggro-m</c> (M5 7 F19, D92: Lifestone's own aggro reach of a creature near the corpse trip's path, 20 m).</summary>
+    public const double DefaultTripAggroMetres = 20;
+
+    /// <summary>
+    /// M5 7 F19 (D92, the owner: the corpse trip never runs past tuskers): the reach, in metres, within which a living target creature of the ground near the path ahead is fought before the trip advances, and near the corpse before it is
+    /// looted (<c>--death-trip-aggro-m</c>, 0 to 200, default 20; 0 is off).
+    /// </summary>
+    public double TripAggroMetres { get; init; } = DefaultTripAggroMetres;
+
+    /// <summary>The trip's time, in seconds, counted from the arrival in the ground (<c>--death-recover-abort-seconds</c>, above 0, default 90; M5 3 d4): past it the trip is given up, <c>trip_abort=trip-over-&lt;N&gt;s</c>.</summary>
+    public double AbortSeconds { get; init; } = DefaultAbortSeconds;
 
     /// <summary>
     /// True (default, <c>--death-rebuff on</c>): after the respawn the loop runs the buff cycle at Holtburg (<see cref="DeathStages.Rebuff"/>; the death purged every enchantment). False (<c>off</c>) leaves the mage unbuffed for the next stage.
@@ -123,8 +132,8 @@ public sealed record DeathOptions
     public bool Rebuff { get; init; } = true;
 
     /// <summary>
-    /// True (default, <c>--death-fight on</c>): after the respawn, the regear and the rebuff the loop goes to the Black Spawn Den and kills <see cref="FightKills"/> tuskers (<see cref="DeathStages.Fight"/>) before the corpse trip. False (<c>off</c>) is M4 2.2's order
-    /// exactly (the trip straight after the respawn's vitals, the regear after it).
+    /// True (default, <c>--death-fight on</c>): after the respawn, the rebuff, the corpse trip and the item lines the handler returns to the fight (<see cref="FightKills"/> kills; <see cref="DeathStages.Fight"/>). False (<c>off</c>) keeps the handler and skips only this return
+    /// (M5 3 d2: one order for every option set).
     /// </summary>
     public bool Fight { get; init; } = true;
 
@@ -154,14 +163,26 @@ public sealed record DeathOptions
     public IJourneyTravel? Travel { get; init; }
 
     /// <summary>
+    /// M5 3 d1 (D51): the journey's facts, or null. The death handler reads the handler's ground's tie from <see cref="JourneyFacts.PortalTieOf"/> (tied: Primary Portal Recall; untied: the runner; unknown: the recall, whose 0x04A3 answer switches to
+    /// the runner) and writes back what the recall taught (the tie, <see cref="JourneyFacts.Recalls"/>). Not on the command line.
+    /// </summary>
+    public JourneyFacts? Facts { get; init; }
+
+    /// <summary>
+    /// M5 3 F5 (D53): the journey's context, or null. The death handler's rearm (a mage whose wielded caster went to the corpse, with none in the pack, buys the ground's kit wand at the home vendor) runs the resupply's kit trip with it
+    /// (<see cref="ResupplyRun"/>: its log, travel seam and ground). Null (the standalone death leg): the rearm cannot shop and fails by name (<c>TODO(m5-death-rearm-standalone)</c>). Not on the command line.
+    /// </summary>
+    public JourneyContext? Journey { get; init; }
+
+    /// <summary>
     /// M4 P5b (3.4): the stage the run begins at (an embedded run: the journey's death station begins at <see cref="DeathStages.Death"/>, after the den fight), or null for the first enabled one. One of
-    /// <see cref="DeathStages.Gear"/>, <see cref="DeathStages.Bind"/>, <see cref="DeathStages.Den"/>, <see cref="DeathStages.Death"/> or <see cref="DeathStages.Regear"/>; the stages before it are skipped (the login too:
+    /// <see cref="DeathStages.Gear"/>, <see cref="DeathStages.Bind"/>, <see cref="DeathStages.Den"/>, <see cref="DeathStages.Death"/>/>; the stages before it are skipped (the login too:
     /// a run that starts past the gear waits only for the player's description). Not on the command line.
     /// </summary>
     public DeathStages? StartAt { get; init; }
 
     /// <summary>
-    /// M4 P5b (3.4): true (the default, every existing run) leaves the den on a failure (<see cref="DenExit"/>) before the run ends; false (a journey) ends Failed where the player stands, in the world (no exit; no log off when
+    /// M4 P5b (3.4): true (the default, every existing run) leaves the den on a failure (<see cref="GroundExit"/>) before the run ends; false (a journey) ends Failed where the player stands, in the world (no exit; no log off when
     /// <c>endSession</c> is false). The composed fight inherits it, and with it false the fight also stays in the den at its end (the corpse trip follows on foot).
     /// </summary>
     public bool LeaveOnFailure { get; init; } = true;
@@ -201,7 +222,8 @@ public sealed record DeathOptions
 
             if (argument.Name == "--death-decoys")
             {
-                o = o with { Decoys = OptionValues.Switch(argument, errors, o.Decoys) };
+                // M5 3 d3 (D51): the decoys are retired; the option is refused by name, never ignored in silence.
+                errors.Add($"{argument.Name}: the decoys are retired: M5 D51 (a death drops the mage's own gear and the corpse trip brings it back)");
                 continue;
             }
 
@@ -265,6 +287,54 @@ public sealed record DeathOptions
                 continue;
             }
 
+            if (argument.Name == "--death-recover-abort-health")
+            {
+                var before = errors.Count;
+                var line = OptionValues.Double(argument, errors, o.AbortHealthPercent);
+                if (errors.Count == before && line is >= 0 and <= 100)
+                {
+                    o = o with { AbortHealthPercent = line };
+                }
+                else if (errors.Count == before)
+                {
+                    errors.Add($"{argument.Name}: '{argument.Value}' is not 0 to 100 percent");
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--death-trip-aggro-m")
+            {
+                var before = errors.Count;
+                var reach = OptionValues.Double(argument, errors, o.TripAggroMetres);
+                if (errors.Count == before && reach is >= 0 and <= 200)
+                {
+                    o = o with { TripAggroMetres = reach };
+                }
+                else if (errors.Count == before)
+                {
+                    errors.Add($"{argument.Name}: '{argument.Value}' is not 0 to 200 metres");
+                }
+
+                continue;
+            }
+
+            if (argument.Name == "--death-recover-abort-seconds")
+            {
+                var before = errors.Count;
+                var limit = OptionValues.Double(argument, errors, o.AbortSeconds);
+                if (errors.Count == before && limit > 0)
+                {
+                    o = o with { AbortSeconds = limit };
+                }
+                else if (errors.Count == before)
+                {
+                    errors.Add($"{argument.Name}: '{argument.Value}' is not a positive number of seconds");
+                }
+
+                continue;
+            }
+
             if (argument.Name != "--death-seconds")
             {
                 continue;
@@ -293,7 +363,7 @@ public sealed record DeathOptions
         problem = null;
         if (string.IsNullOrWhiteSpace(text))
         {
-            problem = "a list of stages is expected (gear, bind, den, unbuff, death, corpse, regear, rebuff, fight, vitae, all, none)";
+            problem = "a list of stages is expected (gear, bind, den, unbuff, death, corpse, rebuff, fight, all, none)";
             return DeathStages.All;
         }
 
@@ -308,14 +378,18 @@ public sealed record DeathOptions
                 case "unbuff": stages |= DeathStages.Unbuff; break;
                 case "death": stages |= DeathStages.Death; break;
                 case "corpse": stages |= DeathStages.Corpse; break;
-                case "regear": stages |= DeathStages.Regear; break;
+                case "regear":
+                    problem = "the stage 'regear' is removed: the death handler wears and wields what the corpse gives back, nothing is spawned (M5 D51)";
+                    return DeathStages.All;
                 case "rebuff": stages |= DeathStages.Rebuff; break;
                 case "fight": stages |= DeathStages.Fight; break;
-                case "vitae": stages |= DeathStages.Vitae; break;
+                case "vitae":
+                    problem = "the stage 'vitae' is removed: the vitae clears by earned experience, M5 D51";
+                    return DeathStages.All;
                 case "all": stages |= DeathStages.All; break;
                 case "none": break;
                 default:
-                    problem = $"'{part}' is not a stage (gear, bind, den, unbuff, death, corpse, regear, rebuff, fight, vitae, all, none)";
+                    problem = $"'{part}' is not a stage (gear, bind, den, unbuff, death, corpse, rebuff, fight, all, none)";
                     return DeathStages.All;
             }
         }
@@ -324,5 +398,5 @@ public sealed record DeathOptions
     }
 
     /// <summary>The options as the run logs them, in invariant culture.</summary>
-    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"seconds={Seconds}{(StopAfterHits ? " stop_after_hits=yes" : string.Empty)}{(RecoverCorpse ? string.Empty : " recover_corpse=off")}{(Decoys ? string.Empty : " decoys=off")}{(Rebuff ? string.Empty : " rebuff=off")}{(Fight ? string.Empty : " fight=off")}{(FightKills == DefaultFightKills ? string.Empty : " fight_kills=" + FightKills)}{(FightSeconds == DefaultFightSeconds ? string.Empty : " fight_seconds=" + FightSeconds)}{(RecoverMinHealthPercent == DefaultRecoverMinHealthPercent ? string.Empty : " recover_min_health=" + RecoverMinHealthPercent)}{(Stages is { } stages ? " stages=" + stages.ToString().Replace(", ", "+", StringComparison.Ordinal).ToLowerInvariant() : string.Empty)}{(StartAt is { } at ? " start_at=" + at.ToString().ToLowerInvariant() : string.Empty)}{(LeaveOnFailure ? string.Empty : " leave_on_failure=no")}{(Travel is null or PlaceTravel ? string.Empty : " travel=journey")}");
+    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"seconds={Seconds}{(StopAfterHits ? " stop_after_hits=yes" : string.Empty)}{(RecoverCorpse ? string.Empty : " recover_corpse=off")}{(Rebuff ? string.Empty : " rebuff=off")}{(Fight ? string.Empty : " fight=off")}{(FightKills == DefaultFightKills ? string.Empty : " fight_kills=" + FightKills)}{(FightSeconds == DefaultFightSeconds ? string.Empty : " fight_seconds=" + FightSeconds)}{(RecoverMinHealthPercent == DefaultRecoverMinHealthPercent ? string.Empty : " recover_min_health=" + RecoverMinHealthPercent)}{(AbortHealthPercent == DefaultAbortHealthPercent ? string.Empty : " abort_health=" + AbortHealthPercent)}{(AbortSeconds == DefaultAbortSeconds ? string.Empty : " abort_seconds=" + AbortSeconds)}{(Stages is { } stages ? " stages=" + stages.ToString().Replace(", ", "+", StringComparison.Ordinal).ToLowerInvariant() : string.Empty)}{(StartAt is { } at ? " start_at=" + at.ToString().ToLowerInvariant() : string.Empty)}{(LeaveOnFailure ? string.Empty : " leave_on_failure=no")}{(Travel is null or PlaceTravel ? string.Empty : " travel=journey")}");
 }

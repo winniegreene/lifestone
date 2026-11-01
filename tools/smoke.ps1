@@ -8,7 +8,7 @@
     timeout, so silent: Dummy audio):
 
       build                    dotnet build Lifestone.slnx (must report 0 warnings and 0 errors)
-      test                     dotnet test Lifestone.slnx --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure" (must pass): the
+      test                     dotnet test Lifestone.slnx --filter "Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Tier!=Tool&Status!=KnownFailure" (must pass): the
                                loopback tests need the backend, the soak tier runs only at merge gates and the Exhaustive tier (the dat
                                sweeps and pins, M4 D30: every test that reads the retail dats outside the retail UI, session and avatar tests) runs through slice-check -Exhaustive (G-A and before a merge). The
                                step writes <OutDir>\test-results\*.trx (per-test timings, VSTest's trx logger) and <OutDir>\test-times.txt (the
@@ -45,6 +45,8 @@
                                portal space plays and sends LoginComplete once per arrival, a server teleport (the scripted one, a tools place, a portal Use)
                                moves the world, the physics and the camera, a boot and a silent server end on the disconnected screen whose button
                                reconnects, a log off through Shift+Escape takes it all away; one [playcheck] PASS|FAIL line each and a final line)
+                               M5 D34: with -AllSizes also at 1280x720 and 1920x1080, one extra Godot run per size through tools\godot.ps1 -Resolution, each judged by its own log (<nn>-play-checks-<W>x<H>.log; the window must be the size
+                               asked for, read from the camera's start-up line) and leaving its verdict in <OutDir>\play-checks\<W>x<H>\play-checks.txt; the 800x600 run is the one record-audio shares
       record-audio             --play-checks --record-audio=<OutDir>\record-audio\record-audio.wav (M3 1.3 s3, no backend; the audio check; M3 4.2 p5a C3: when play-checks is
                                wanted too, the two steps SHARE this one Godot run, started at the play-checks step, and each keeps its own judges and row; the record-audio row
                                says "shared run <log>", the play-checks row fails on the checks and on any ERROR that is not the recording's, the record-audio row on the
@@ -56,7 +58,7 @@
                                "audio recording levels file= seconds= peak_dbfs= rms_dbfs= active_windows= sources=<server:n,hooks:n,footsteps:n,footsteps_sounded:n,ui:n,ambient:n,server_handed:n,hooks_handed:n; each n or n/a; server and hooks are voices started, the *_handed counts are calls handed to the sound player> windows= muted=true". The step passes on the play
                                checks' own verdict, a recording that exists, is non-silent (peak above -60 dBFS and at least one active 50 ms window) and was taken with the Master bus
                                muted, and the sounded counts in sources= are judged: server>=1 and hooks>=1 (a recording of portal sounds alone fails; footsteps stay unjudged, TODO(footstep-sound-table)). Detail: "peak_dbfs=<x> rms_dbfs=<x> active_windows=<n>/<n> seconds=<x> muted=true sources=<..>"
-      shell-frames             --play-checks --play-frames=<OutDir>\shell-frames\<W>x<H> at 800x600 (UI scale 1; with -AllSizes also 1920x1080 at scale 1 and 2560x1440 at scale 2; M3 4.2 p5a C4;
+      shell-frames             --play-checks --play-frames=<OutDir>\shell-frames\<W>x<H> at 800x600 (UI scale 1; with -AllSizes also 1280x720 and 1920x1080 at scale 1, M5 D34; with -HiDpi also 2560x1440 at scale 2; M3 4.2 p5a C4;
                                the stand-in has no fight or death scenarios since M4 4.1 t1, so there is nothing to leave out), each through
                                tools\godot.ps1 -Resolution: the play checks on the stand-in server save the shell's ten review frames (portal space in the
                                SmartBox, the arrival, the spew box and chat, a NotInM2 message, an object selected with the vivid indicator, character information,
@@ -86,15 +88,33 @@
                                enter_to_walk_max_ms=<x> teleport_frame_max_ms=<x>" (the two frame figures judged against 50)
       journey-mage             --account=test --login-check=journey --journey=mage --play-screenshot=<OutDir>/frames/journey-mage.png (M4 P5b G1; the mage's journey on BSD Mage: the Godot journey host, the stations in one
                                login; replaces login-buff (journey-mage buff station), login-bsd (den-fight) and login-death (death); needs the local backend; runs ONLY with -Backend require, SKIP under auto and start;
-                               muted, 800x600, the Godot run gets 2200 s: the runner's own limit is 2,010 s). Judged by the journey's own done line, "[logincheck] journey done ok=true name=mage stations=<n>/<m> failed=none
+                               muted, 800x600, the Godot run gets 2500 s: above the runner's own limit, WholeSecondsFor, 2,108 s, and 2,333 s with the logistics station of about 150 s that M5 item 3 adds). Judged by the journey's own done line, "[logincheck] journey done ok=true name=mage stations=<n>/<m> failed=none
                                teleports=<n> ... budget=<n>" (ok is the scenario's: every station ok or skipped by a precondition, teleports<=budget; the step also reads failed=none, an ok=false station line without skipped=, and
                                teleports against budget itself). The station frames (<OutDir>/frames/journey-mage-station-<name>.png and the hunt, vendor and fight frames) are the review frames; the
                                "journey frames station=<n> frame_max_ms=<x>" lines are copied report-only (frame_over_50 is yes when any station's max is over 50; -ContendedFrames reports it, never judges it).
                                Judged from M4 4.2 J2 (the owner's call): teleports<=1 on every journey, recalls>=2 on the mage, recovery_places=0 on every journey, granted=0 on the mage and the archer (melee's granted stays
                                report-only); and the window frames on the station lines (attack_frame_max_ms and loot_frame_max_ms on hunt, vendor_frame_max_ms on vendor and vendor-facts): over 75 ms fails, over 50 ms flags
-                               frame_over_50, n/a or absent fails nothing, and with -ContendedFrames (or another Godot run up) they are reported, never judged
-      journey-melee            --account=test-melee --login-check=journey --journey=melee (as journey-mage, on Holtburg Brawler; replaces login-hunt (journey-melee hunt station); the Godot run gets 1900 s: the runner's limit is 1,710 s)
-      journey-archer           --account=test-archer --login-check=journey --journey=archer (as journey-mage, on Holtburg Archer; replaces login-hunt-missile (journey-archer hunt station); the Godot run gets 2000 s: the runner's limit is 1,860 s)
+                               frame_over_50, n/a or absent fails nothing, and with -ContendedFrames (or another Godot run up) they are reported, never judged.
+                               Judged from M5 item 2's gate (k1; m5-plan.md section 5 item 3): mana_wait_max_s<=10 on the mage journey's den-fight station line (over 10, or the field missing from that station, fails the
+                               journey: "mana_wait_max_s <x> over 10 (mage den-fight)" or "mana_wait_max_s n/a on the den-fight station, not 10 or less (mage)").
+                               Judged from M5 item 3's gate (c2b; m5-plan.md section 5 item 3, D44): storeys_visited>=2 and basement_entries=0 on the mage journey's den-fight station line, beside the mana wait (a value under 2 or over 0,
+                               or either field missing or n/a, fails the journey: "storeys_visited <x> under 2 (mage den-fight)", "basement_entries <x> over 0 (mage den-fight)", "storeys_visited n/a on the den-fight station, not 2 or
+                               more (mage)", "basement_entries n/a on the den-fight station, not 0 (mage)"); contention does not excuse them. Report-only, shown in the step's detail: the den-fight station's returns= slots_standing=
+                               legs_recovered= kills_unpaired= slots_expired= loot= looted= kept= loot_value=; the logistics station's trigger= granted= places= loot= sold= bought= spent= notes_sold= spent_xp= raises=; the death station's
+                               deaths= corpse_recovered= route= items_back= vitae_grants= rebuffed= rebuffed_pretrip= relines= trip_abort= (n/a for a field a line lacks).
+                               Judged from M5 item 4's gate (c1; m5-plan.md section 5 item 3, D55, D38, D56), on the MAGE journey only (the melee and archer journeys read the same fields report-only): places=0 on the done line and
+                               granted=0 places=0 on every station line that prints either; bought>=1 and spent_xp>0 on the logistics station's line (sold= stays report-only while looting is off); deaths=1 corpse_recovered=yes
+                               vitae_grants=0 rebuffed=yes on the death station's line (rebuffed_pretrip= stays report-only). A miss, or an absent field or line, fails the journey naming the field and the line.
+                               M5 item 5 c1: the den-fight station's physics fields creature_jumps= creature_flips= transit_ms_max= place_ms_max= transits_max= stay report-only
+                               (the mage's journey, the Godot host's avatars; n/a headless), the vendor and vendor-facts stations' door_opened= (the melee journey; shown here, and JUDGED from M5 item 7's gate: door_opened=yes on a station that ran, or the journey fails, named; n/a for a station that did not run) and the recall-home station's stepped_off= (report-only)
+      journey-melee            --account=test-melee --login-check=journey --journey=melee (as journey-mage, on Holtburg Brawler; replaces login-hunt (journey-melee hunt station); the Godot run gets 1900 s: above the runner's limit, 1,845 s)
+      journey-archer           --account=test-archer --login-check=journey --journey=archer (as journey-mage, on Holtburg Archer; replaces login-hunt-missile (journey-archer hunt station); the Godot run gets 2900 s: above the runner's limit, 2,780 s, which holds the 1,200 s hunt)
+      autopilot-mage           --account=test --login-check=autopilot --autopilot-minutes=30 --autopilot-trip-after-kills=5 --autopilot-test-death=on --autopilot-test-interrupt-at=30 --autopilot-test-handback-after=20
+                               --play-screenshot=<OutDir>/frames/autopilot-mage.png (M5 item 4 c1, D19 and D58: 30 minutes of the session clock of the autopilot on BSD Mage, one trip forced early, the scripted death, and the scripted
+                               hand-off typed into the chat (M5 7 D145): /stop 30 s into the first fight after the death, /auto 20 s after that; runs after journey-mage in the same lane; needs the local backend; runs ONLY with -Backend require,
+                               SKIP under auto and start; muted, 800x600, the Godot run gets 3600 s: above the leg's own limit, 3,360 s = 60 + 300 + 30 x 60 + 1,200). Judged by the "autopilot done" line (GateJudge.psm1
+                               Get-AutopilotVerdict): the run itself, ok=yes, and a done line present, and from M5 item 7's gate cycles>=2 (a value under 2, or the field missing, fails the step: "cycles=<n> (judged >=2)"); the row's
+                               godot_errors=0 is judged as everywhere. REPORT-ONLY ("report-only autopilot: ..."): reconnects=0, interrupted=1, resumed=1, deaths>=1, trips>=1, granted=0 and places=0. The frames (<OutDir>/frames/autopilot-mage-autopilot-<state>-c<cycle>.png) are report-only (contended).
       spell-showcase           --scene=spellviewer --showcase (four entries; must end with exceptions=0)
       golden-viewpoints        --golden-viewpoints (every viewpoint captured)
       fly-path                 --fly-path=holtburg:arwic:<FlySpeed> (DoD 8: no frame over 50 ms; exit 2 if one is)
@@ -153,7 +173,7 @@
     the detail names the checks. With no other run it fails as today. The live legs' rule, settled (M4 1.1 s3): -Backend require implies -SoloFrames, so at the live gate a
     leg's frame judge counts only when no other engine process is up (a leg waits for a quiet machine and a frame-time failure fails); elsewhere a leg that ran
     with another engine process up reports frames=contended (the verdict stands, the frame judge is not counted). -SoloFrames: any frame-time failure fails, and a frame-judged
-    step does not start while another Godot run is up (it waits at most 10 minutes, one line per minute, then fails as refused).
+    step does not start while another Godot run is up (it waits at most -ForeignGodotSeconds, 120 by default, naming each foreign Godot process, then fails as foreign-godot).
 
     A Godot step also fails when Lifestone logged an ERROR line during it (the "Errors logged" column), except
     cli-bad-argument, whose ERROR is the point: false ERRORs (shutdown cancellations) once went unnoticed in passing runs.
@@ -213,8 +233,15 @@
 .PARAMETER AllSizes
     Owner rule (2026-10-14): tests, checks and frame runs stay at retail's native 800x600 (the play-checks, retail-ui, shell-frames,
     login-check and login steps pass -Resolution 800x600), and several resolutions are a polish step at the end of the project.
-    -AllSizes is the opt-in: the retail-ui frames also at 1920x1080, the shell frames also at 1920x1080 and 2560x1440, and the
-    shell's [uicheck] placement also at those sizes (--all-sizes). Never run by default.
+    -AllSizes is the opt-in: the retail-ui frames also at 1920x1080, the shell frames (shell-frames) and the play-checks also at 1280x720 and 1920x1080
+    (M5 DoD 12, D34: the sizes of a window the player drags), and the shell's [uicheck] placement also at 1920x1080 and 2560x1440 (--all-sizes; the option
+    has no 1920-only form, TODO(uicheck-hidpi-split)). The frame judge (login-check, login) stays at 800x600 (M2 D57). Never run by default; the item-end
+    offline check runs it (slice-check -Smoke implies it). M5 D36: the 1280x720 and 1920x1080 runs of the play-checks and the shell frames are JUDGED from M5 item 7's gate (they were report-only
+    in item 6's): a failed row, a wrong window or a failed frames run fails the step, and play-checks\<W>x<H>\play-checks.txt says judged=yes. EXCEPT the play-checks' frame-time rows, which stay report-only above 800x600
+    (frame time is judged only at 800x600, DoD 12): they are counted and printed as frame_time_rows=<n> (report-only above 800x600), never failing. godot_errors=0 is judged at every size. 800x600 is unchanged.
+
+.PARAMETER HiDpi
+    M5 D34: the 2560x1440 shell run at UI scale 2 (shell-frames) is opt-in behind this switch, on its own or with -AllSizes; it is not part of the gate.
 
 .PARAMETER MaxFps
     M5 item 0 c5: appends --max-fps=<n> to the game arguments of every Godot step (the option is OptionCatalog's, 0 = none). The live gate passes 60
@@ -247,10 +274,14 @@ param(
     [int] $FlySpeed = 200,
     [switch] $JudgeLifestoneFramesOnly,
     [switch] $AllSizes,
+    [switch] $HiDpi,
     [ValidateRange(0, 1000)]
     [int] $MaxFps = 0,
     [string] $DotnetRoot = '',
     [switch] $SoloFrames,
+    # M5 item 4 c2 (m5-gate-foreign-godot): how long a -SoloFrames step waits for a Godot run that is not this run's (it is named: pid, start time, game arguments) before it is refused as foreign-godot. 0 = refuse at once.
+    [ValidateRange(0, 3600)]
+    [int] $ForeignGodotSeconds = 120,
     # M4 P4 gate: the parallel live phase. The live steps run beside other Godot runs (the gate's three lanes), so a frame-time failure with another run up is REPORTED
     # (frames=contended, a PASS), as it is without -Backend require; -Backend require no longer implies -SoloFrames then. Mutually exclusive with -SoloFrames.
     [switch] $ContendedFrames,
@@ -301,16 +332,25 @@ $OutDir = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($OutDir)
 # Owner rule (2026-10-14): every Godot check and frame run stays at retail's native 800x600; -AllSizes adds the larger sizes (a polish step at the end of the project).
 $defaultSize = '800x600'
 $frameSizes = if ($AllSizes) { @('800x600', '1920x1080') } else { @('800x600') }
-$shellFrameSizes = if ($AllSizes) { @('800x600', '1920x1080', '2560x1440') } else { @('800x600') }
+# M5 6 v1 (D34, DoD 12): -AllSizes runs the shell frames and the play-checks at the three sizes; the 2560x1440 scale-2 shell run is -HiDpi's.
+$gateSizes = @('1280x720', '1920x1080')
+$shellFrameSizes = @('800x600') + @(if ($AllSizes) { $gateSizes }) + @(if ($HiDpi) { '2560x1440' })
+$playCheckSizes = @('800x600') + @(if ($AllSizes) { $gateSizes })
+# M5 D36 (6-R4's first gate is over): the 1280x720 and 1920x1080 runs are JUDGED from M5 item 7's gate: a failed row fails the step, EXCEPT the play-checks' frame-time rows, which stay report-only above 800x600
+# (DoD 12: frame time is judged only at 800x600; the row count is printed as frame_time_rows=<n> (report-only above 800x600)). godot_errors=0 is a fact at every size.
+$largeSizes = $gateSizes
 Import-Module (Join-Path $PSScriptRoot 'lib\Toolchain.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'lib\TestTimes.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'lib\GateJudge.psm1') -Force -Function Get-AutopilotVerdict   # M5 item 4 c1: the autopilot step's judge lives with the gate's other judges
+# GateHost after GateJudge: GateJudge imports GateHost with -Force inside itself, which removes a global GateHost imported before it (M5 4 round 1: Wait-GateForeignGodot unknown, the frame judge wrote no rows)
+Import-Module (Join-Path $PSScriptRoot 'lib\GateHost.psm1') -Force
 $DotnetRoot = Find-LifestoneDotnetRoot -DotnetRoot $DotnetRoot
 $dotnetExe = Join-Path $DotnetRoot 'dotnet.exe'
 
 $allSteps = @('build', 'test', 'cli-help', 'cli-bad-argument', 'terrain-golden', 'engine-checks', 'interior-engine-checks',
-    'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'journey-mage', 'journey-melee', 'journey-archer', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
+    'sky-checks', 'blend-checks', 'portal-space-checks', 'portal-space', 'retail-ui', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'journey-mage', 'journey-melee', 'journey-archer', 'autopilot-mage', 'spell-showcase', 'golden-viewpoints', 'fly-path', 'stray-output')
 # The steps that need the local backend (gated by -Backend).
-$backendSteps = @('login-check', 'login', 'login-throwaway', 'journey-mage', 'journey-melee', 'journey-archer')
+$backendSteps = @('login-check', 'login', 'login-throwaway', 'journey-mage', 'journey-melee', 'journey-archer', 'autopilot-mage')
 # M4 P4 gate (D31): the test account each backend step logs in with, from the step's character (the fighter templates' accounts for the hunts). The readiness probe checks the key of each account a wanted
 # step needs (by key name only), and -Lanes groups the wanted steps by this value.
 $stepAccounts = [ordered]@{
@@ -320,15 +360,23 @@ $stepAccounts = [ordered]@{
     'journey-mage'       = 'test'          # BSD Mage (M4 P5b G1)
     'journey-melee'      = 'test-melee'    # Holtburg Brawler (FighterTemplate.Melee)
     'journey-archer'     = 'test-archer'   # Holtburg Archer (FighterTemplate.Archer)
+    'autopilot-mage'     = 'test'          # BSD Mage again, after journey-mage in the same lane (M5 item 4 c1, D19: one character per account in the world)
 }
-# The journey steps (M4 P5b G1): the journey name and the Godot timeout of each (J5's handoff: the runner's own limit is WholeSecondsFor(plan) = 60 + 1.5 x expected + 300: mage 2,010 s, melee 1,710, archer 1,860).
+# The journey steps (M4 P5b G1): the journey name and the Godot timeout of each. Each is above the runner's own limit, JourneyLegRunner.WholeSecondsFor(plan) = 60 + 1.5 x the plan's expected seconds + 300 + the archer hunt's extra (M5 2 k2): mage 2,108 s (2,333 s with M5 3 c2b's logistics station of about 150 s expected: 2500 s covers a plan whose sum grows by up to 228 s of expected time), melee 1,845, archer 2,780. M5 2 fix F2 (review 2-R5): the archer's 2,000 s was under the 2,780 s k2 gave it; JourneyLimitsTests pins the relation for every journey, and live-gate.ps1's SmokeJourneyTimeouts to this table.
 $journeySteps = @{
-    'journey-mage'   = @{ Journey = 'mage'; Seconds = 2200 }
+    'journey-mage'   = @{ Journey = 'mage'; Seconds = 2500 }
     'journey-melee'  = @{ Journey = 'melee'; Seconds = 1900 }
-    'journey-archer' = @{ Journey = 'archer'; Seconds = 2000 }
+    'journey-archer' = @{ Journey = 'archer'; Seconds = 2900 }
+}
+# The autopilot step (M5 item 4 c1, D19, D58; m5-plan.md section 5 item 4): `--login-check=autopilot` on BSD Mage (account test) for Minutes minutes of the session clock, with one trip forced after TripAfterKills kills,
+# the scripted death, and D58's scripted hand-off (the person's own input path, typed into the chat since M5 7 D145: /stop InterruptAt seconds into the first fight after the scripted death's cycle (M5 4 F3, 4-R10), /auto HandbackAfter seconds after that). All the numbers are here.
+# Seconds is above the leg's own limit, AutopilotLegRunner.WholeSecondsFor = 60 + 300 + Minutes x 60 + 1,200 = 3,360 s (the login, the margin, the minutes, the safe point that lets a trip of 600 s or a death of 280 s finish), so a hung run is
+# killed by the smoke limit and not by the leg's own deadline. live-gate.ps1's SmokeAutopilotSeconds is pinned to this value.
+$autopilotSteps = @{
+    'autopilot-mage' = @{ Minutes = 30; TripAfterKills = 5; InterruptAt = 30; HandbackAfter = 20; Seconds = 3600 }
 }
 # The steps whose Godot run installs the audio service (play mode: the portal view, M2 D8): their log must say `audio service installed ... muted=true` (Get-AudioMuteVerdict, Invoke-Godot).
-$audioSteps = @('portal-space', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'journey-mage', 'journey-melee', 'journey-archer')
+$audioSteps = @('portal-space', 'offline-player-checks', 'offline-player', 'play-checks', 'record-audio', 'shell-frames', 'login-check', 'login', 'login-throwaway', 'journey-mage', 'journey-melee', 'journey-archer', 'autopilot-mage')
 # The steps whose verdict judges frame time: a failure of one of their frame-time checks is judged against the machine (D42, the help above).
 $frameJudgedSteps = @('play-checks', 'record-audio', 'login-check', 'login', 'journey-mage', 'journey-melee', 'journey-archer')
 # The frame-time checks of the play checks (PlayChecks.cs: the ones that compare a frame or a UI step with FrameLimitMilliseconds / MaxUiStepMilliseconds).
@@ -341,7 +389,7 @@ $frameTimeChecks = @(
 # The steps -Parallel runs two at a time: backend-free, and never frame-judged (a frame-judged step never shares the machine with them).
 $parallelSteps = @('cli-help', 'cli-bad-argument', 'terrain-golden', 'engine-checks', 'interior-engine-checks', 'sky-checks', 'blend-checks', 'portal-space-checks', 'retail-ui', 'spell-showcase', 'golden-viewpoints')
 # The default test run leaves out the loopback tests (they need the backend), the soak tier (merge gates only) and the Exhaustive tier (the dat sweeps and pins, M4 D30; slice-check -Exhaustive runs it at G-A and before a merge).
-$testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure'
+$testFilter = 'Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Tier!=Tool&Status!=KnownFailure'
 # 'pwsh -File' passes '-Only a,b' as one string: split on commas either way.
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Skip = @($Skip | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -572,28 +620,15 @@ function Get-LiveFrameVerdict {
 
 function Wait-SoloEngine {
     <#
-      -SoloFrames: a frame-judged step does not start while another Godot run is up. Waits at most 10 minutes with a line per minute; after that the step
-      is recorded as a FAIL (refused) and this returns $false. Without -SoloFrames it returns $true at once.
+      -SoloFrames: a frame-judged step does not start while another Godot run is up. M5 item 4 c2 (m5-gate-foreign-godot): each such process is named (pid, start time, game arguments), the wait is bounded by
+      -ForeignGodotSeconds (default 120, not the old 10 minutes), and after that the step is recorded as a FAIL naming `foreign-godot` (not started) and this returns $false. Without -SoloFrames it returns $true at once.
     #>
     param([string] $Step, [System.Diagnostics.Stopwatch] $Timer)
     if (-not $SoloFrames) { return $true }
-    $started = Get-Date
-    $reported = -1
-    while ($true) {
-        $count = Get-EngineProcessCount
-        if ($count -eq 0) { return $true }
-        $waited = ((Get-Date) - $started).TotalSeconds
-        if ($waited -ge 600) {
-            Add-Result $Step $false 0 $Timer.Elapsed.TotalSeconds "refused to start: $count other Godot run(s) were up for 10 minutes (-SoloFrames)" -NotRun
-            return $false
-        }
-        $minute = [int][math]::Floor($waited / 60)
-        if ($minute -gt $reported) {
-            $reported = $minute
-            Write-Host "[smoke] $Step`: waiting for $count other Godot run(s) to end (-SoloFrames), minute $($minute + 1) of 10"
-        }
-        Start-Sleep -Seconds 5
-    }
+    $wait = Wait-GateForeignGodot -Seconds $ForeignGodotSeconds -Label "[smoke] $Step" -Say { param($l) Write-Host $l } -Probe { Get-ForeignGodot -OwnRoot $PID }
+    if ($wait.Ok) { return $true }
+    Add-Result $Step $false 0 $Timer.Elapsed.TotalSeconds "refused to start: $($wait.Detail) (-SoloFrames)" -NotRun
+    return $false
 }
 
 function Resolve-LiveFrames {
@@ -626,6 +661,55 @@ function Get-PlayChecksRun {
     return $shared
 }
 
+function Get-PlayChecksSizeVerdict {
+    <#
+      M5 6 v1 (D34): the verdict of one play-checks Godot run at one window size, and the size's result file (<OutDir>\play-checks\<W>x<H>\play-checks.txt).
+      $Run is Invoke-Godot's result; $Size 'WxH' is what was asked for. The window must be that size: the world camera's start-up line (Main.ApplyRetailFov: window="(W, H)") says
+      what the game drew into. $Shared: this is the run record-audio shares (its recording errors are that row's).
+      $LargeSize (M5 D36, judged from M5 item 7's gate): 1280x720 and 1920x1080. Every row is JUDGED there (a failed row, a wrong window or a run that did not hold fails the step) EXCEPT the frame-time rows ($frameTimeChecks), which stay
+      report-only above 800x600 (frame time is judged only at 800x600, DoD 12): they are counted and printed ("frame_time_rows=<n> (report-only above 800x600)"), never failing, and the ERROR lines they log are theirs. The result file says
+      judged=yes. godot_errors=0 is judged by the smoke row at every size (D19). Returns @{ Ok; Contended; Errors; Detail; Would }.
+    #>
+    param($Run, [string] $Size, [bool] $Shared, [int] $RecordingErrors, [bool] $LargeSize = $false)
+    $pass = ([regex]::Matches($Run.Text, '\[playcheck\] PASS')).Count
+    $fail = ([regex]::Matches($Run.Text, '\[playcheck\] FAIL')).Count
+    $max = if ($Run.Text -match 'all play checks hold[^\r\n]*max_frame_ms_after_arrival=([\d.]+)') { " max_frame_ms=$($Matches[1])" } else { '' }
+    $frames = Get-FrameVerdict $Run.Text $Run.Others ([bool]$SoloFrames) $frameTimeChecks $RecordingErrors -Reported $parallelPhase
+    $holds = $Run.Text -match 'all play checks hold'
+    $drawn = if ($Run.Text -match 'the world camera (?:draws with retail|keeps the --fov)[^\r\n]*window="\((?<w>\d+), (?<h>\d+)\)"') { "$($Matches['w'])x$($Matches['h'])" } else { '' }
+    $sizeOk = $drawn -eq $Size
+    $detail = "$Size pass=$pass fail=$fail$max$(if ($Shared) { "; shared run with record-audio ($([IO.Path]::GetFileName($Run.Log)))" })$($frames.Note)"
+    if ($RecordingErrors -gt 0) { $detail += "; the recording half logged $RecordingErrors ERROR line(s) (the record-audio row judges them)" }
+    if (-not $sizeOk) { $detail += "; FAIL: the window was $(if ($drawn) { $drawn } else { 'not reported' }), not the $Size asked for" }
+    $ok = $sizeOk -and (($Run.Code -eq 0 -and $holds) -or $frames.Contended)
+    $errorsOut = $frames.Errors
+    $contendedOut = $frames.Contended
+    $extraFields = ''
+    if ($LargeSize) {
+        # D36: the frame-time rows are the one report-only part above 800x600. Only they failing (and nothing else: no other failed row, a window as asked) is a pass; the ERROR lines they log are not counted against the step.
+        $failedRows = @(Get-PlayCheckFailures $Run.Text)
+        $frameRows = @($failedRows | Where-Object { $frameTimeChecks -contains $_ })
+        $otherRows = @($failedRows | Where-Object { $frameTimeChecks -notcontains $_ })
+        # 7-R1: the run must have ended by its own verdict line; a run killed by the timeout (or hung) after an early frame-time row ran none of the checks after it.
+        $endedByVerdict = $Run.Text -match 'PLAY CHECKS FAILED'
+        $onlyFrameRows = $frameRows.Count -gt 0 -and $otherRows.Count -eq 0 -and $endedByVerdict
+        $ok = $sizeOk -and (($Run.Code -eq 0 -and $holds) -or $onlyFrameRows)
+        $contendedOut = $false
+        $errorsOut = if ($onlyFrameRows) { [math]::Max(0, (Get-ErrorCount $Run.Text) - $RecordingErrors - $frameRows.Count) } else { [math]::Max(0, (Get-ErrorCount $Run.Text) - $RecordingErrors) }
+        $frameNote = "frame_time_rows=$($frameRows.Count) (report-only above 800x600)"
+        $detail = "$Size pass=$pass fail=$fail$max$(if ($Shared) { "; shared run with record-audio ($([IO.Path]::GetFileName($Run.Log)))" }); $frameNote"
+        if ($RecordingErrors -gt 0) { $detail += "; the recording half logged $RecordingErrors ERROR line(s) (the record-audio row judges them)" }
+        if (-not $sizeOk) { $detail += "; FAIL: the window was $(if ($drawn) { $drawn } else { 'not reported' }), not the $Size asked for" }
+        if ($otherRows.Count -gt 0) { $detail += "; FAIL: failed_rows=$($otherRows.Count) [$(($otherRows | Select-Object -First 25) -join ', ')]" }
+        if ($frameRows.Count -gt 0) { $detail += " [frame-time: $(($frameRows | Select-Object -First 25) -join ', ')]" }
+        $extraFields = " $frameNote"
+    }
+    $dir = Join-Path (Join-Path $OutDir 'play-checks') $Size
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Set-Content -LiteralPath (Join-Path $dir 'play-checks.txt') -Value @("size=$Size window=$drawn ok=$ok judged=yes pass=$pass fail=$fail$max$extraFields", "log=$([IO.Path]::GetFileName($Run.Log))") -Encoding utf8
+    return @{ Ok = $ok; Contended = $contendedOut; Errors = $errorsOut; Detail = $detail; Would = $ok }
+}
+
 function Get-FrameFlags([string] $Text, [string] $Prefix) {
     <#
       The 50 ms flags of a login-check leg (docs/milestones/m3-plan.md section 5: a window's worst frame over 75 ms fails in the leg;
@@ -651,9 +735,22 @@ function Get-JourneyVerdict([string] $Text, [bool] $FrameContended = $false) {
       The window frames (m4-plan.md section 5, the frame rule), on the station lines: attack_frame_max_ms and loot_frame_max_ms (the hunt station), vendor_frame_max_ms (the vendor and vendor-facts stations);
       'n/a' (the headless host) or an absent field fails nothing. Over 75 ms fails the step and over 50 ms flags it (WindowOver50), unless $FrameContended (another Godot run was up or the run is a parallel
       phase, and -SoloFrames is off): then they are reported, never judged (the Detail names them as contended). Windows is the 'station:field=x' pairs; WindowMax the largest number seen.
+      M5 item 2 k1 (m5-plan.md section 5 item 3): mana_wait_max_s<=10 on the mage journey's den-fight station line ('[logincheck] journey station=den-fight ...'), judged from this gate: a value over 10, or the field
+      absent (or n/a) from that station, or no den-fight station line at all, fails by name.
+      M5 item 3 c2b (m5-plan.md section 5 item 3, D44): on the same line of the mage journey, storeys_visited>=2 and basement_entries=0 are judged from this gate, beside the mana wait: the worst den-fight line counts (the fewest
+      storeys, the most entries); a field absent or n/a, or no den-fight line, fails by name; contention does not excuse them (a count is not a frame time). Only the mage journey is judged. Report-only, never failing, for any journey that
+      runs the station (n/a for a field the line lacks): TourFields, the den-fight station's 'returns= slots_standing= legs_recovered= kills_unpaired= slots_expired= loot= looted= kept= loot_value=' (storeys_visited and basement_entries left
+      this bracket for the judge above); LogisticsFields, the logistics station's 'trigger= granted= places= loot= sold= bought= spent= notes_sold= spent_xp= raises='; DeathFields, the death station's 'deaths= corpse_recovered= route= items_back=
+      vitae_grants= rebuffed= rebuffed_pretrip= relines= trip_abort='; Places, the done line's places= (report-only for the melee and the archer).
+      M5 item 4 c1 (D55, D38, D56): on the MAGE journey those fields are judged from this gate: places=0 on the done line and granted=0 places=0 on every station line that prints either; bought>=1 and spent_xp>0 on the logistics
+      station; deaths=1 corpse_recovered=yes vitae_grants=0 rebuffed=yes on the death station (a miss or an absent field or line fails by name; sold= and rebuffed_pretrip= stay report-only).
+      M5 item 5 c1 (report-only): PhysicsFields, the den-fight station's 'creature_jumps= creature_flips= transit_ms_max= place_ms_max= transits_max='; RecallFields, the recall-home station's 'stepped_off='; DoorFields,
+      'vendor:door_opened=x vendor-facts:door_opened=y', still shown here. JUDGED from M5 item 7's gate (m5-plan.md section 5 item 3): door_opened=yes on the MELEE journey's vendor and vendor-facts stations: a station that ran
+      (a line that is not a skip) with another value or no door_opened= fails the journey, named ("door_opened <x> not yes (melee vendor station)", "door_opened n/a on the vendor station, not yes (melee)"); a station that did not
+      run is n/a and fails nothing. The mage and archer journeys do not run these stations.
     #>
     $done = [regex]::Match($Text, '\[logincheck\] (journey done ok=[^\r\n]*)')
-    if (-not $done.Success) { return @{ Ok = $false; Detail = 'no journey done line'; Frames = ''; FramesSeen = $false; FrameMax = 0.0; Windows = ''; WindowsSeen = $false; WindowMax = 0.0; WindowOver50 = $false } }
+    if (-not $done.Success) { return @{ Ok = $false; Detail = 'no journey done line'; Frames = ''; FramesSeen = $false; FrameMax = 0.0; Windows = ''; WindowsSeen = $false; WindowMax = 0.0; WindowOver50 = $false; TourFields = ''; LogisticsFields = ''; DeathFields = ''; Places = 'n/a'; PhysicsFields = ''; DoorFields = ''; RecallFields = '' } }
     $inv = [Globalization.CultureInfo]::InvariantCulture
     $line = $done.Groups[1].Value
     $why = @()
@@ -676,6 +773,89 @@ function Get-JourneyVerdict([string] $Text, [bool] $FrameContended = $false) {
         $granted = & $field 'granted'
         if ($null -eq $granted) { $why += "granted n/a, not 0 ($journeyName)" } elseif ($granted -ne 0) { $why += "granted $granted not 0 ($journeyName)" }
     }
+    # M5 item 2 k1: the den-fight station's line (the fight's verdict fields, FightScenario.VerdictFields). mana_wait_max_s<=10 is judged on the mage journey's; the tour's fields are shown for any journey, never judged.
+    $denFights = @([regex]::Matches($Text, '\[logincheck\] journey station=den-fight [^\r\n]*') | ForEach-Object { $_.Value })
+    if ($journeyName -eq 'mage') {
+        $waitWorst = $null; $waitMissing = $false
+        foreach ($station in $denFights) {
+            $w = [regex]::Match($station, '(?<![\w])mana_wait_max_s=([\d.]+)(?=\s|$)')
+            if (-not $w.Success) { $waitMissing = $true; continue }
+            if ($null -eq $waitWorst -or [double]::Parse($w.Groups[1].Value, $inv) -gt [double]::Parse($waitWorst, $inv)) { $waitWorst = $w.Groups[1].Value }
+        }
+        if ($denFights.Count -eq 0 -or $waitMissing) { $why += 'mana_wait_max_s n/a on the den-fight station, not 10 or less (mage)' }
+        elseif ([double]::Parse($waitWorst, $inv) -gt 10.0) { $why += "mana_wait_max_s $waitWorst over 10 (mage den-fight)" }
+        # M5 item 3 c2b (D44): the tour's two judged counts, the fewest storeys and the most no-go entries of the den-fight lines.
+        $storeysWorst = $null; $storeysMissing = $false; $basementWorst = $null; $basementMissing = $false
+        foreach ($station in $denFights) {
+            $sv = [regex]::Match($station, '(?<![\w])storeys_visited=(\d+)(?=\s|$)')
+            if (-not $sv.Success) { $storeysMissing = $true } elseif ($null -eq $storeysWorst -or [int]$sv.Groups[1].Value -lt $storeysWorst) { $storeysWorst = [int]$sv.Groups[1].Value }
+            $be = [regex]::Match($station, '(?<![\w])basement_entries=(\d+)(?=\s|$)')
+            if (-not $be.Success) { $basementMissing = $true } elseif ($null -eq $basementWorst -or [int]$be.Groups[1].Value -gt $basementWorst) { $basementWorst = [int]$be.Groups[1].Value }
+        }
+        if ($denFights.Count -eq 0 -or $storeysMissing) { $why += 'storeys_visited n/a on the den-fight station, not 2 or more (mage)' }
+        elseif ($storeysWorst -lt 2) { $why += "storeys_visited $storeysWorst under 2 (mage den-fight)" }
+        if ($denFights.Count -eq 0 -or $basementMissing) { $why += 'basement_entries n/a on the den-fight station, not 0 (mage)' }
+        elseif ($basementWorst -gt 0) { $why += "basement_entries $basementWorst over 0 (mage den-fight)" }
+    }
+    # M5 item 4 c1 (D55, D38, D56; m5-plan.md section 5 item 3): judged from this gate on the MAGE journey only (the melee and archer journeys read these report-only, in LogisticsFields, DeathFields and Places below; the archer's
+    # granted=0 stays the M4 judge above). A judged miss names the field, the line and the journey: a value that is wrong, or a field or line that is absent (a verdict that reads nothing is not a pass).
+    #   D55: places=0 on the done line (granted=0 is judged above) and granted=0 places=0 on every station line that prints either (the logistics station's, the scripted stations' granted=; recovery_places= is another field).
+    #   DoD 6 (D38): bought>=1 and spent_xp>0 on the logistics station's line; sold= stays report-only while looting is off (LogisticsFields).
+    #   DoD 7 (D56): deaths=1 corpse_recovered=yes vitae_grants=0 rebuffed=yes on the death station's line; rebuffed_pretrip= stays report-only (DeathFields).
+    if ($journeyName -eq 'mage') {
+        $donePlacesValue = & $field 'places'
+        if ($null -eq $donePlacesValue) { $why += 'places n/a on the done line, not 0 (mage)' } elseif ($donePlacesValue -ne 0) { $why += "places $donePlacesValue not 0 (mage done line)" }
+        foreach ($stationLine in [regex]::Matches($Text, '\[logincheck\] journey station=(?<n>\S+) [^\r\n]*')) {
+            foreach ($k in 'granted', 'places') {
+                $g = [regex]::Match($stationLine.Value, '(?<![\w])' + $k + '=(?<v>\S+)')
+                if ($g.Success -and $g.Groups['v'].Value -ne '0') { $why += "$k $($g.Groups['v'].Value) not 0 (mage $($stationLine.Groups['n'].Value) station)" }
+            }
+        }
+        $logisticsLine = [regex]::Match($Text, '\[logincheck\] journey station=logistics [^\r\n]*')
+        $judgeAtLeast = {
+            param([string] $lineName, $lineMatch, [string] $k, [int] $least)
+            if (-not $lineMatch.Success) { return "$k n/a, no $lineName station line (mage), not $least or more" }
+            $f = [regex]::Match($lineMatch.Value, '(?<![\w])' + $k + '=(\d+)(?=\s|$)')
+            if (-not $f.Success) { return "$k n/a on the $lineName station, not $least or more (mage)" }
+            if ([int]$f.Groups[1].Value -lt $least) { return "$k $($f.Groups[1].Value) under $least (mage $lineName station)" }
+            return $null
+        }
+        foreach ($k in 'bought') { $miss = & $judgeAtLeast 'logistics' $logisticsLine $k 1; if ($miss) { $why += $miss } }
+        foreach ($k in 'spent_xp') { $miss = & $judgeAtLeast 'logistics' $logisticsLine $k 1; if ($miss) { $why += $miss } }
+        $deathLine = [regex]::Match($Text, '\[logincheck\] journey station=death [^\r\n]*')
+        $deathValue = { param([string] $k) if ($deathLine.Success) { $f = [regex]::Match($deathLine.Value, '(?<![\w])' + $k + '=(\S+)'); if ($f.Success) { return $f.Groups[1].Value } }; return $null }
+        foreach ($want in @(@('deaths', '1'), @('corpse_recovered', 'yes'), @('vitae_grants', '0'), @('rebuffed', 'yes'))) {
+            $got = & $deathValue $want[0]
+            if (-not $deathLine.Success) { $why += "$($want[0]) n/a, no death station line (mage), not $($want[1])" }
+            elseif ($null -eq $got) { $why += "$($want[0]) n/a on the death station, not $($want[1]) (mage)" }
+            elseif ($got -ne $want[1]) { $why += "$($want[0]) $got not $($want[1]) (mage death station)" }
+        }
+    }
+    # M5 item 7's gate (m5-plan.md section 5 item 3, D36's neighbours): door_opened=yes is judged on the MELEE journey's vendor and vendor-facts stations. A station that ran (its line is there and is not a skip) with any other value, or with
+    # no door_opened= at all, fails the journey by name; a station with no line, or one skipped by a precondition, is n/a and fails nothing. stepped_off= and the physics fields stay report-only.
+    if ($journeyName -eq 'melee') {
+        foreach ($doorStation in 'vendor', 'vendor-facts') {
+            $doorLine = [regex]::Match($Text, '\[logincheck\] journey station=' + [regex]::Escape($doorStation) + ' [^\r\n]*')
+            if (-not $doorLine.Success -or $doorLine.Value -match ' skipped=') { continue }
+            $door = [regex]::Match($doorLine.Value, '(?<![\w])door_opened=(?<v>\S+)')
+            if (-not $door.Success) { $why += "door_opened n/a on the $doorStation station, not yes (melee)" }
+            elseif ($door.Groups['v'].Value -ne 'yes') { $why += "door_opened $($door.Groups['v'].Value) not yes (melee $doorStation station)" }
+        }
+    }
+    # The report-only fields of a station line (the first line of that station; n/a for a field it lacks): c2b, item 3's, named by the station that prints them.
+    $stationFields = {
+        param([string] $station, [string[]] $names)
+        $m = [regex]::Match($Text, '\[logincheck\] journey station=' + [regex]::Escape($station) + ' [^\r\n]*')
+        ($names | ForEach-Object { $f = if ($m.Success) { [regex]::Match($m.Value, '(?<![\w])' + $_ + '=(\S+)') } else { $null }; "$_=$(if ($f -and $f.Success) { $f.Groups[1].Value } else { 'n/a' })" }) -join ' '
+    }
+    $tourFields = & $stationFields 'den-fight' @('returns', 'slots_standing', 'legs_recovered', 'kills_unpaired', 'slots_expired', 'loot', 'looted', 'kept', 'loot_value')
+    $logisticsFields = & $stationFields 'logistics' @('trigger', 'granted', 'places', 'loot', 'sold', 'bought', 'spent', 'notes_sold', 'spent_xp', 'raises')
+    $deathFields = & $stationFields 'death' @('deaths', 'corpse_recovered', 'route', 'items_back', 'vitae_grants', 'rebuffed', 'rebuffed_pretrip', 'relines', 'trip_abort')
+    # M5 item 5 c1 (report-only here; door_opened= of the melee journey is judged above, from M5 item 7's gate): the den-fight station's physics fields, door_opened= of the vendor and vendor-facts stations, the recall-home station's stepped_off=; by key, n/a for a field or station that is not there.
+    $physicsFields = & $stationFields 'den-fight' @('creature_jumps', 'creature_flips', 'transit_ms_max', 'place_ms_max', 'transits_max')
+    $doorFields = ('vendor', 'vendor-facts' | ForEach-Object { "${_}:" + (& $stationFields $_ @('door_opened')) }) -join ' '
+    $recallFields = & $stationFields 'recall-home' @('stepped_off')
+    $donePlaces = [regex]::Match($line, '(?:^|\s)places=(\S+)')
     $bad = @([regex]::Matches($Text, '\[logincheck\] journey station=(\S+) ok=false[^\r\n]*') | Where-Object { $_.Value -notmatch ' skipped=' } | ForEach-Object { $_.Groups[1].Value })
     if ($bad.Count) { $why += "station(s) ok=false: $($bad -join ',')" }
     $pairs = @(); $max = 0.0; $seen = $false
@@ -698,7 +878,7 @@ function Get-JourneyVerdict([string] $Text, [bool] $FrameContended = $false) {
     if ($over75.Count -and -not $FrameContended) { $why += "window frame over 75 ms: $($over75 -join ', ')" }
     elseif ($over75.Count) { $contendedNote = "; window frames=contended: $($over75 -join ', ') over 75 ms (reported, not judged)" }
     $detail = $line + $(if ($why.Count) { '; ' + ($why -join '; ') } else { '' }) + $contendedNote
-    return @{ Ok = ($why.Count -eq 0); Detail = $detail; Frames = ($pairs -join ' '); FramesSeen = $seen; FrameMax = $max; Windows = ($windows -join ' '); WindowsSeen = $windowSeen; WindowMax = $windowMax; WindowOver50 = $over50 }
+    return @{ Ok = ($why.Count -eq 0); Detail = $detail; Frames = ($pairs -join ' '); FramesSeen = $seen; FrameMax = $max; Windows = ($windows -join ' '); WindowsSeen = $windowSeen; WindowMax = $windowMax; WindowOver50 = $over50; TourFields = $tourFields; LogisticsFields = $logisticsFields; DeathFields = $deathFields; Places = $(if ($donePlaces.Success) { $donePlaces.Groups[1].Value } else { 'n/a' }); PhysicsFields = $physicsFields; DoorFields = $doorFields; RecallFields = $recallFields }
 }
 
 function Get-FrameFields {
@@ -1511,6 +1691,11 @@ try {
             Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it runs the $($journeySteps[$step].Journey) journey on the $($stepAccounts[$step]) account (the whole route, about 20 to 35 minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
             continue
         }
+        if ($autopilotSteps.ContainsKey($step) -and $Backend -ne 'require') {
+            # The autopilot lane plays BSD Mage for 30 minutes of the session clock (a trip, a scripted death, a scripted hand-off): only a run that demands the backend (the lead's gate) does that. slice-check never runs it.
+            Add-Result $step $true 0 $timer.Elapsed.TotalSeconds "it runs the autopilot on BSD Mage on the $($stepAccounts[$step]) account for $($autopilotSteps[$step].Minutes) minutes of the session clock (about 35 minutes); runs only with -Backend require (this is -Backend $Backend)" -Skipped
+            continue
+        }
         if ($backendSteps -contains $step -and -not (Test-BackendGate $step $timer)) { continue }
         # -Lanes: at the first backend step the accounts' lanes run at once (joined before anything else starts); each backend step then replays its row here, in the table's order.
         if ($Lanes -and $backendSteps -contains $step) {
@@ -1630,7 +1815,10 @@ try {
                     $hasVerdict = $run.Text -match $verdictPattern
                     $ok = $run.Code -eq 0 -and $hasVerdict -and $Matches['size'] -eq $size -and $Matches['failures'] -eq '0' -and [int]$Matches['captured'] -gt 0
                     $parts.Add($(if ($hasVerdict) { "$($Matches['size']) scale=$($Matches['scale']) captured=$($Matches['captured']) failures=$($Matches['failures']) missing_images=$($Matches['missing'])" } else { "$size no verdict line" }))
-                    $errors += Get-ErrorCount $run.Text
+                    $runErrors = Get-ErrorCount $run.Text
+                    # M5 D36: the 1280x720 and 1920x1080 frame runs are judged from item 7's gate, like the 800x600 one (no frame time in them: a frames run is not a timing run).
+                    if ($largeSizes -contains $size) { $parts[$parts.Count - 1] += '; judged (from M5 item 7''s gate)' }
+                    $errors += $runErrors
                     if (-not $firstLog) { $firstLog = $run.Log }
                     if (-not $ok) {
                         $pass = $false
@@ -1661,20 +1849,37 @@ try {
             }
             'play-checks' {
                 # C3: with record-audio wanted too, the two steps share one Godot run (--play-checks --record-audio=<wav>, Get-PlayChecksRun); this row judges the checks and every ERROR that is not the recording's.
+                # M5 6 v1 (D34, DoD 12): with -AllSizes the checks run again at 1280x720 and 1920x1080 (one Godot run each, not shared with the recording); the row passes when every size holds.
                 $shared = Test-Wanted 'record-audio'
                 if ($shared) { $sharedRun = Get-PlayChecksRun $step $timer; $run = $sharedRun.Run; $refused = $sharedRun.Refused }
                 elseif (Wait-SoloEngine $step $timer) { $run = Invoke-Godot $step '--play-checks' 420 '' $defaultSize; $refused = $false }
                 else { $run = $null; $refused = $true }
                 if (-not $refused) {
-                    $pass = ([regex]::Matches($run.Text, '\[playcheck\] PASS')).Count
-                    $fail = ([regex]::Matches($run.Text, '\[playcheck\] FAIL')).Count
-                    $max = if ($run.Text -match 'all play checks hold[^\r\n]*max_frame_ms_after_arrival=([\d.]+)') { " max_frame_ms=$($Matches[1])" } else { '' }
                     $recordingErrors = if ($shared) { Get-RecordingErrorCount $run.Text } else { 0 }
-                    $frames = Get-FrameVerdict $run.Text $run.Others ([bool]$SoloFrames) $frameTimeChecks $recordingErrors -Reported $parallelPhase
-                    $holds = $run.Text -match 'all play checks hold'
-                    $detail = "pass=$pass fail=$fail$max$(if ($shared) { "; shared run with record-audio ($([IO.Path]::GetFileName($run.Log)))" })$($frames.Note)"
-                    if ($recordingErrors -gt 0) { $detail += "; the recording half logged $recordingErrors ERROR line(s) (the record-audio row judges them)" }
-                    Add-Result $step (($run.Code -eq 0 -and $holds) -or $frames.Contended) $run.Code $timer.Elapsed.TotalSeconds $detail $run.Log $frames.Errors $(if ($frames.Contended) { 'frames=contended' } else { '' })
+                    $judgedRun = Get-PlayChecksSizeVerdict $run $defaultSize ([bool]$shared) $recordingErrors
+                    $sizeParts = [System.Collections.Generic.List[string]]::new()
+                    $sizeParts.Add($judgedRun.Detail)
+                    $sizeOk = $judgedRun.Ok; $sizeErrors = $judgedRun.Errors; $sizeContended = $judgedRun.Contended; $sizeCode = $run.Code
+                    $firstLog = $run.Log; $failedLog = if ($judgedRun.Ok) { '' } else { $run.Log }
+                    $sizeStopped = $false
+                    foreach ($size in $playCheckSizes) {
+                        if ($size -eq $defaultSize) { continue }
+                        if (-not (Wait-SoloEngine $step $timer)) { $sizeStopped = $true; break }
+                        $extra = Invoke-Godot $step '--play-checks' 420 "-$size" $size
+                        $judged = Get-PlayChecksSizeVerdict $extra $size $false 0 ($largeSizes -contains $size)
+                        $sizeParts.Add($judged.Detail)
+                        $sizeErrors += $judged.Errors
+                        if ($judged.Contended) { $sizeContended = $true }
+                        if (-not $judged.Ok) {
+                            $sizeOk = $false
+                            if (-not $failedLog) { $failedLog = $extra.Log }
+                            if ($sizeCode -eq 0) { $sizeCode = if ($extra.Code -ne 0) { $extra.Code } else { 1 } }
+                        }
+                    }
+                    if (-not $sizeStopped) {
+                        if ($playCheckSizes.Count -gt 1) { $sizeParts.Add("results in $(Join-Path $OutDir 'play-checks')") }
+                        Add-Result $step $sizeOk $sizeCode $timer.Elapsed.TotalSeconds ($sizeParts -join '; ') $(if ($failedLog) { $failedLog } else { $firstLog }) $sizeErrors $(if ($sizeContended) { 'frames=contended' } else { '' })
+                    }
                 }
             }
             'record-audio' {
@@ -1689,7 +1894,7 @@ try {
                 elseif (Wait-SoloEngine $step $timer) { $run = Invoke-Godot $step "--play-checks --record-audio=$rel" 420 '' $defaultSize; $refused = $false; $owner = $step }
                 else { $run = $null; $refused = $true; $owner = $step }
                 if ($refused) {
-                    if ($owner -ne $step) { Add-Result $step $false 0 $timer.Elapsed.TotalSeconds "refused with the shared play-checks run (-SoloFrames: another Godot run was up for 10 minutes)" -NotRun }
+                    if ($owner -ne $step) { Add-Result $step $false 0 $timer.Elapsed.TotalSeconds "refused with the shared play-checks run (-SoloFrames, foreign-godot: another Godot run was up for $ForeignGodotSeconds s)" -NotRun }
                 }
                 else {
                     $pass = ([regex]::Matches($run.Text, '\[playcheck\] PASS')).Count
@@ -1780,6 +1985,21 @@ try {
                 if ($legOk -and -not $framesOk -and -not $contended) { $note = '; enter_to_walk_max_ms or teleport_frame_max_ms over 50 ms (frame-only failure: the gate judges it over three runs, two of three fail)' }
                 Add-Result $step ($legOk -and ($framesOk -or $contended)) $run.Code $timer.Elapsed.TotalSeconds ($verdict + $note) $run.Log (Get-ErrorCount $run.Text) $(if ($contended) { 'frames=contended' } else { '' })
             }
+            { $autopilotSteps.ContainsKey($_) } {
+                # M5 item 4 c1 (D19, D58): --login-check=autopilot on BSD Mage (the test account), $auto.Minutes minutes of the session clock, with one trip forced early (--autopilot-trip-after-kills), the scripted death (M4 D37) and D58's scripted
+                # hand-off (/stop and then /auto typed into the chat, the person's own path; M5 7 D145). It runs after journey-mage in the same lane (one character per account in the world). The Godot run gets $auto.Seconds, above the
+                # leg's own limit. Judged by the autopilot done line (Get-AutopilotVerdict in GateJudge.psm1): the run itself, ok=yes, and cycles>=2 (judged from M5 item 7's gate); reconnects=0, interrupted=1, resumed=1, deaths>=1, trips>=1 and granted=0 places=0 are
+                # REPORT-ONLY. godot_errors=0 is judged from the row (a fact, D19). The review frames (<OutDir>/frames/autopilot-mage-autopilot-<state>-c<cycle>.png) are report-only: the lane is contended.
+                $auto = $autopilotSteps[$step]
+                $frameStem = [IO.Path]::GetRelativePath($repoRoot, (Join-Path (Join-Path $OutDir 'frames') "$step.png")).Replace([string][char]92, '/')
+                New-Item -ItemType Directory -Force -Path (Join-Path $OutDir 'frames') | Out-Null
+                $autopilotArgs = "--account=$($stepAccounts[$step]) --login-check=autopilot --autopilot-minutes=$($auto.Minutes) --autopilot-trip-after-kills=$($auto.TripAfterKills) --autopilot-test-death=on --autopilot-test-interrupt-at=$($auto.InterruptAt) --autopilot-test-handback-after=$($auto.HandbackAfter) --play-screenshot=$frameStem"
+                $run = Invoke-Godot $step $autopilotArgs $auto.Seconds '' $defaultSize
+                $judged = Get-AutopilotVerdict $run.Text
+                $live = Resolve-LiveFrames ($run.Code -eq 0 -and $judged.Ok) $run
+                $judge = if ($run.Others -gt 0) { 'contended' } else { 'counted' }
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($judged.Detail + "; report-only autopilot: $($judged.ReportOnly); report-only frames: $($judged.Frames)" + $live.Note) $run.Log $live.Errors $live.PassNote -FrameOver50 'n/a' -FrameJudge $judge
+            }
             { $journeySteps.ContainsKey($_) } {
                 # M4 P5b G1: --login-check=journey --journey=<name> (J5's Godot host over J1's scenario): one login, the stations in order, the journey's own verdict. Replaces login-buff, login-bsd, login-death, login-hunt and login-hunt-missile.
                 # The Godot run gets $journeySteps[$step].Seconds (the runner's WholeSecondsFor(plan) plus a margin); the account is the step's ($stepAccounts); the review frames go to <OutDir>/frames (J5: <stem>-station-<name>.png and the in-station frames).
@@ -1796,7 +2016,7 @@ try {
                 $judge = if ($run.Others -gt 0) { 'contended' } else { 'counted' }
                 # Report-only (a new judge: M4 P5b G1): the per-station frame figures, never judged here; -ContendedFrames / -Lanes reports them and the step passes on its journey verdict alone.
                 # Judged (M4 4.2 J2): the window frames, shown beside them ('windows: station:field=x ...'; n/a on the headless host or in a log from before J1), judged inside Get-JourneyVerdict.
-                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + "; report-only: frame_over_50=$over50 $($judged.Frames); windows (judged over 75 ms unless contended): $(if ($judged.Windows) { $judged.Windows } else { 'n/a' })" + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($over50 -eq 'yes') { 'frame over 50 ms' } else { '' }) -FrameOver50 $over50 -FrameJudge $judge
+                Add-Result $step $live.Ok $run.Code $timer.Elapsed.TotalSeconds ($verdict + "; report-only: frame_over_50=$over50 $($judged.Frames); windows (judged over 75 ms unless contended): $(if ($judged.Windows) { $judged.Windows } else { 'n/a' }); report-only den-fight: $($judged.TourFields); report-only logistics: $($judged.LogisticsFields); report-only death: $($judged.DeathFields); report-only done: places=$($judged.Places); report-only den-fight physics: $($judged.PhysicsFields); report-only door: $($judged.DoorFields); report-only recall-home: $($judged.RecallFields)" + $live.Note) $run.Log $live.Errors $(if ($live.PassNote) { $live.PassNote } elseif ($over50 -eq 'yes') { 'frame over 50 ms' } else { '' }) -FrameOver50 $over50 -FrameJudge $judge
             }
             'login' {
                 # The player's own entry point (tools\play.ps1) on the test account (-Offscreen makes it the test account and refuses any other). The backend is the

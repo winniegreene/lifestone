@@ -303,6 +303,12 @@ public static class BuffStatMods
         new(1603, 0x9008, 169, 0.1), // Aura of Defender Self IV
         new(1604, 0x9008, 169, 0.13), // Aura of Defender Self V
         new(1605, 0x9008, 169, 0.15), // Aura of Defender Self VI
+        new(3253, 0x2008008, 170, 0.01), // Aura of Spirit Drinker Self I (M5 7 P7j, D143: WeaponAuraElemental, additive; the pinned world SQL v0.9.296's spell rows)
+        new(3254, 0x2008008, 170, 0.02), // Aura of Spirit Drinker Self II
+        new(3255, 0x2008008, 170, 0.03), // Aura of Spirit Drinker Self III
+        new(3256, 0x2008008, 170, 0.04), // Aura of Spirit Drinker Self IV
+        new(3257, 0x2008008, 170, 0.05), // Aura of Spirit Drinker Self V
+        new(3258, 0x2008008, 170, 0.06), // Aura of Spirit Drinker Self VI
         new(2053, 0xA080, 0, 225.0), // Executor's Blessing
         new(2059, 0x9001, 4, 40.0), // Honed Control
         new(2061, 0x9001, 2, 40.0), // Perseverance

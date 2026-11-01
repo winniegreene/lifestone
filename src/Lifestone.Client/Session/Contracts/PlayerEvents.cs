@@ -73,4 +73,16 @@ public enum QualityChange
     /// moved with it. Published beside <see cref="EnchantmentChanged"/> on every registry change; <c>Key</c> is 0. A screen that shows effective values refreshes on this alone.
     /// </summary>
     Enchantments,
+
+    /// <summary>A boolean property (GameMessage 0x02D1 PrivateUpdatePropertyBool; M5 6 w2), e.g. ACE's <c>PropertyBool.Afk</c> (110) after <c>/afk</c>.</summary>
+    Bool,
+
+    /// <summary>An instance-id property (GameMessage 0x02D9 PrivateUpdatePropertyInstanceId; M5 6 w2), e.g. CurrentAttacker in a fight.</summary>
+    InstanceId,
+
+    /// <summary>A data-id property (GameMessage 0x02D7 PrivateUpdatePropertyDataId; M5 6 w2), e.g. the player's MotionTable.</summary>
+    DataId,
+
+    /// <summary>One of the player's stored positions (GameMessage 0x02DB PrivateUpdatePosition; M5 6 w2), e.g. LastOutsideDeath; <c>Key</c> is the position type.</summary>
+    Position,
 }

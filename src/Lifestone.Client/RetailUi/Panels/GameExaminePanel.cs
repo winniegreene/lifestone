@@ -40,13 +40,26 @@ public enum ExamineKind
 /// </para>
 /// <para>
 /// <b>Not built, named.</b> Each part retail shows that the model or the layout cannot yet draw answers with a named <c>TODO</c> in the log and a line saying so where the part would be: the creature's 3D view
-/// (<c>TODO(m4-examine-creature-view)</c>), the creature's player-killer, allegiance and rating lines and its attribute list (<c>TODO(m4-examine-creature-lines)</c>), the inscription (<c>TODO(m4-examine-inscription)</c>), the spells
-/// and enchantments (<c>TODO(m4-examine-spells)</c>), the ratings and sets (<c>TODO(m4-examine-ratings)</c>), the workmanship and speed words (<c>TODO(m4-examine-words)</c>), a requirement of a kind other than a skill, a level or a
-/// training (<c>TODO(m4-examine-requirement)</c>), the toolbar's Examine button (still the NotInM3 message), and the poll that re-asks while the window stays open outside peace (<c>gmExaminationUI::UseTime</c> 0x004AB8B0,
-/// <c>TODO(m3-examine-poll-mode)</c>). A failed creature roll shows what ACE sends (the tables, no profile) and a line naming <c>TODO(m4-examine-failed-roll-text)</c>: the docs do not give retail's text for it.
+/// (<c>TODO(m4-examine-creature-view)</c>), and the poll that re-asks while the window stays open
+/// outside peace (<c>gmExaminationUI::UseTime</c> 0x004AB8B0, creatures only, <c>TODO(m3-examine-poll-mode)</c>).
+/// </para>
+/// <para>
+/// <b>Built in M5 7 D137.</b> The inscription box (<c>GameExaminePanel.Inscription.cs</c>), every wield requirement kind with the dats' heritage and creature-type names (<see cref="WieldLine"/>), the set and the gear ratings
+/// (<see cref="ExamineRatingLines"/>, lane L2; the set's pieces and spells behind <c>--examine-set-details on</c>), and the failed roll's texts (the creature's vitals in retail's value format, an item's unknown uses).
+/// </para>
+/// <para>
+/// <b>Magic and words (M5 7 S4, D122, D125).</b> The workmanship and weapon speed carry retail's words (<see cref="WorkmanshipWord"/>, <see cref="SpeedWord"/>: the client's own literals, read from the 11.6096 executable; closes
+/// <c>TODO(m4-examine-words)</c>). A magic item shows its spells by name in retail's place ("Spells: ..."), what activates them in retail's words ("Activation requires Arcane Lore: N, ..."; closes
+/// <c>TODO(m5-examine-activation-wording)</c> and <c>TODO(m5-examine-skill-limit)</c>), a caster's bonuses in retail's three lines (closes <c>TODO(m5-examine-caster-wording)</c>), and near the end the spellcraft, the mana now and at
+/// most ("Mana: N / M."), the mana it burns, each spell's description and the enchantments on the item (closes <c>TODO(m4-examine-enchantments)</c>). The lines are one a row; retail's blank line before a double-spaced line
+/// (<c>ItemExamineUI::AddItemInfo</c> 0x004AE020's last argument) is not drawn, except where a retail line holds one itself. The floaty's half of the window is <see cref="UiFloatyExamination"/>.
+/// </para>
+/// <para>
+/// <b>Spell-changed values (M5 7 D142).</b> A line whose value an enchantment raised or lowered is drawn whole in the raised or lowered colour, as retail's <c>AddItemInfo</c> draws it (<see cref="ItemPage"/>,
+/// <c>GameExaminePanel.Enchanted.cs</c>): the damage and speed, the defence bonus, the armour level and the protections (now shown, <c>Appraisal_ShowArmorMods</c>), the mana conversion and elemental bonuses.
 /// </para>
 /// </remarks>
-public sealed class GameExaminePanel : IUiElementListener, IDisposable
+public sealed partial class GameExaminePanel : IUiElementListener, IDisposable
 {
     /// <summary>The floaty that holds the window in the gameplay layout (<c>gmFloatyExaminationUI</c>, class 0x1000004C).</summary>
     public const uint WindowId = 0x100005F7;
@@ -91,15 +104,6 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
     /// <summary>The creature window's level value (<c>m_levelValueText</c>).</summary>
     public const uint LevelTextId = 0x1000014C;
 
-    /// <summary>The creature window's three vitals lines (the sub-panel 0x1000014F holds them).</summary>
-    public static readonly uint[] VitalLineIds = [0x10000150, 0x10000151, 0x10000152];
-
-    /// <summary>The creature window's character sub-panel text (<c>CharExamineUI</c>, 0x1000014E).</summary>
-    public const uint CreatureInfoId = 0x1000014E;
-
-    /// <summary>The creature window's note line (<c>CharExamineUI</c>'s fourth text, 0x1000053A).</summary>
-    public const uint CreatureNoteId = 0x1000053A;
-
     /// <summary>ItemType bit of a creature (<c>ITEM_TYPE::TYPE_CREATURE</c>).</summary>
     public const uint CreatureItemType = 0x10;
 
@@ -118,9 +122,6 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
     private bool _retryRegistered;
     private readonly UiTextElement? _itemText;
     private readonly UiTextElement? _level;
-    private readonly UiTextElement?[] _vitals = new UiTextElement?[3];
-    private readonly UiTextElement? _creatureInfo;
-    private readonly UiTextElement? _creatureNote;
     private IDisposable? _subscription;
     private bool _disposed;
 
@@ -138,13 +139,6 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
         _itemIcon = window.GetChildRecursive(ItemIconId) ?? (context.Manager.Services.ExamineIcon ? MakeIconElement(_itemField) : null); // the icon is an addition to retail: only with --examine-icon on
         _itemText = window.GetChildRecursive(ItemTextId) as UiTextElement;
         _level = window.GetChildRecursive(LevelTextId) as UiTextElement;
-        for (var i = 0; i < _vitals.Length; i++)
-        {
-            _vitals[i] = window.GetChildRecursive(VitalLineIds[i]) as UiTextElement;
-        }
-
-        _creatureInfo = window.GetChildRecursive(CreatureInfoId) as UiTextElement;
-        _creatureNote = window.GetChildRecursive(CreatureNoteId) as UiTextElement;
         window.RegisterForElementMessages(this);
         _window.SetVisible(false); // retail shows the floaty when something is examined
         _spellField?.SetVisible(false);
@@ -179,6 +173,8 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
 
         var panel = new GameExaminePanel(context, window);
         ByContext.AddOrUpdate(context, panel);
+        var target = context.Manager.TargetMode;
+        target.Examiner = guid => panel.Open(guid); // ClientUISystem::ExamineObject: a list with no owner of its own, the toolbar's Examine and the examine target mode reach the window here (M5 7 S6)
         return panel;
     }
 
@@ -206,11 +202,8 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
     /// <summary>The item window's lines now, one per row.</summary>
     public IReadOnlyList<string> Lines { get; private set; } = [];
 
-    /// <summary>The creature window's level text now.</summary>
-    public string LevelText { get; private set; } = string.Empty;
-
-    /// <summary>The creature window's vitals lines now.</summary>
-    public IReadOnlyList<string> VitalLines { get; private set; } = [];
+    /// <summary>The font colour index of each of <see cref="Lines"/> (<see cref="ExamineColor"/>; M5 7 D142: a line an enchantment raised or lowered).</summary>
+    public IReadOnlyList<int> LineColors { get; private set; } = [];
 
     /// <summary>The icon the item window shows (0 for none).</summary>
     public uint IconId { get; private set; }
@@ -230,6 +223,9 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
     /// <summary>The last Identify <see cref="Open"/> sent, or null.</summary>
     public IdentifyHandle? LastIdentify { get; private set; }
 
+    /// <summary>Whether the answer the window shows was a successful roll, or null before it came (M5 7 D138: the capture's frames tell a full page from a failed roll).</summary>
+    public bool? ShownSuccess { get; private set; }
+
     /// <summary>How many times <see cref="Open"/> sent an Identify.</summary>
     public int Opens { get; private set; }
 
@@ -248,28 +244,52 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
 
         var session = _context.Session;
         WorldObject? obj = session.State.Objects.TryGet(guid, out var found) ? found : null;
+        var stock = obj is null ? session.State.Vendor?.Find(guid) : null; // a vendor's row is no world object: its name and icon come from the vendor's list (M5 7 S6)
         ShownGuid = guid;
         Pending = true;
         Kind = obj is not null && (obj.ItemType & CreatureItemType) != 0 ? ExamineKind.Creature : ExamineKind.Item;
-        SetTitle(obj?.Name is { Length: > 0 } name ? name : "???");
-        var objectIcon = obj is not null ? GameInventoryPage.IconOf(obj) : default;
+        SetTitle(obj?.Name is { Length: > 0 } name ? name : stock?.Name is { Length: > 0 } stockName ? stockName : "???");
+        var objectIcon = obj is not null ? GameInventoryPage.IconOf(obj) : stock is not null ? GameVendorPanel.IconOf(stock, 0) : default;
         IconId = objectIcon.IconId;
         ShowKind(Kind);
         if (Kind == ExamineKind.Item)
         {
-            SetItem(objectIcon, ["Value: ???", "Burden: ???"]);
+            SetItem(objectIcon, new ExamineItemPage(["Value: ???", "Burden: ???"], [ExamineColor.Normal, ExamineColor.Normal]));
         }
         else
         {
-            SetCreature("???", ["???", "???", "???"], string.Empty);
+            ShowPendingCreature(); // M5 7 D137: the creature window waits for the answer
         }
 
+        ClearInscription(); // the box waits for the answer (SetInscription runs with the appraisal)
+        ShownSuccess = null;
         _window.SetVisible(true);
         _subscription ??= session.Events.Subscribe<AppraisalReceived>(OnAppraisal);
         LastIdentify = session.Actions.Identify(guid, ActionSource.Ui);
         Opens++;
         return true;
     }
+
+    /// <summary>
+    /// The lines the examination's review frame needs on screen (M5 7 S6, D136): the spells by name ("Spells: "), the activation line ("Activation requires "), the mana ("Mana: ") and the workmanship ("Workmanship: "). Null when
+    /// <paramref name="lines"/> shows all four, else the missing ones, comma separated.
+    /// </summary>
+    public static string? MissingReviewLines(IReadOnlyList<string> lines)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        List<string>? missing = null;
+        foreach (var (prefix, name) in ReviewLines)
+        {
+            if (!lines.Any(l => l.StartsWith(prefix, StringComparison.Ordinal) && !l.StartsWith("Spells: unknown", StringComparison.Ordinal)))
+            {
+                (missing ??= []).Add(name);
+            }
+        }
+
+        return missing is null ? null : string.Join(",", missing);
+    }
+
+    private static readonly (string Prefix, string Name)[] ReviewLines = [("Spells: ", "spells"), ("Activation requires ", "activation"), ("Mana: ", "mana"), ("Workmanship: ", "workmanship")];
 
     /// <summary>Hides the window and stops listening to the session.</summary>
     public void Close()
@@ -292,6 +312,7 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
             return UiListenResult.Handled;
         }
 
+        InscriptionMessage(message); // the inscription's press and focus (M5 7 D137)
         return UiListenResult.Default;
     }
 
@@ -309,6 +330,8 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
         if (ByContext.TryGetValue(_context, out var current) && ReferenceEquals(current, this))
         {
             ByContext.Remove(_context);
+            _context.Manager.TargetMode.Examiner = null;
+            _context.Manager.TargetMode.Set(UiTargetModeKind.None);
         }
     }
 
@@ -325,70 +348,128 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
     /// <summary><c>gmExaminationUI::SetAppraiseInfo</c> (0x004ADE60): the answer goes to the active window.</summary>
     private void Fill(Appraisal appraisal)
     {
+        LogAnswer(appraisal);
+        ShownSuccess = appraisal.Success;
         var session = _context.Session;
         WorldObject? obj = session.State.Objects.TryGet(ShownGuid, out var found) ? found : null;
+        var stock = obj is null ? session.State.Vendor?.Find(ShownGuid) : null;
         Pending = false;
         Fills++;
-        var name = appraisal.Name is { Length: > 0 } n ? n : obj?.Name is { Length: > 0 } on ? on : "???";
+        var name = appraisal.Name is { Length: > 0 } n ? n : obj?.Name is { Length: > 0 } on ? on : stock?.Name is { Length: > 0 } sn ? sn : "???";
         SetTitle(name);
-        var creature = appraisal.Creature is not null || (appraisal.ItemType is { } type ? (type & CreatureItemType) != 0 : obj is not null && (obj.ItemType & CreatureItemType) != 0);
+        var log = _context.Manager.Services.Log;
+        var page = ExamineCreatureLines.Build(appraisal, ContextFor(appraisal, obj), log); // gmExaminationUI::SetAppraiseInfo 0x004ADE60: a creature profile picks the creature window (M5 7 D137, lane L3)
+        var creature = page is not null || (appraisal.ItemType is { } type ? (type & CreatureItemType) != 0 : obj is not null && (obj.ItemType & CreatureItemType) != 0);
         Kind = creature ? ExamineKind.Creature : ExamineKind.Item;
         ShowKind(Kind);
-        var log = _context.Manager.Services.Log;
-        if (creature)
+        if (page is not null)
         {
-            var (level, vitals, note) = CreatureLines(appraisal, log);
-            SetCreature(level, vitals, note);
+            ShowCreaturePage(page);
+        }
+        else if (creature)
+        {
+            ShowPendingCreature(); // no creature profile (ACE always sends one for a creature): the values stay unknown
+            LevelText = ExamineCreatureLines.LevelText(appraisal);
+            _level?.SetText(LevelText);
         }
         else
         {
             // The object's composed icon; the Appraisal's own icon (property data 8) only when the world table has none for it.
-            var icon = obj is not null && obj.ItemFields().IconId != 0 ? GameInventoryPage.IconOf(obj) : new UiItemIcon(appraisal.DataId(8) ?? 0, 0, 0, obj?.ItemType ?? 0, 0);
-            SetItem(icon, ItemLines(appraisal, log));
+            var icon = obj is not null && obj.ItemFields().IconId != 0 ? GameInventoryPage.IconOf(obj) : stock is not null && stock.IconId != 0 ? GameVendorPanel.IconOf(stock, 0) : new UiItemIcon(appraisal.DataId(8) ?? 0, 0, 0, obj?.ItemType ?? 0, 0);
+            var enumNames = _context.Manager.Services.EnumNames;
+            SetItem(icon, ItemPage(appraisal, log, session.Spell, enumNames is null ? null : enumNames.GetString, obj?.DescriptionFlags ?? 0, SetDetails(appraisal)));
+            LogEnchantedLines(appraisal); // M5 7 D142
+            SetInscription(appraisal, obj); // ItemExamineUI::SetInscription 0x004AE670 (M5 7 D137)
         }
+
+        LogShownLines();
+    }
+
+    /// <summary>
+    /// The set details (<c>--examine-set-details on</c>, an addition to retail; M5 7 D137): for an item of a set retail names, the pieces of that set the player wears (each worn item's set from its own appraisal; one not yet appraised
+    /// counts as unknown) and the set's spells by pieces (<see cref="ExamineSetLines.WornLines"/>). Null when the option is off or the item has no named set.
+    /// </summary>
+    private IReadOnlyList<string>? SetDetails(Appraisal appraisal)
+    {
+        if (!_context.Manager.Services.ExamineSetDetails || ExamineSetLines.SetIdOf(appraisal) is not { } setId || ExamineSetLines.SetName(setId) is null)
+        {
+            return null;
+        }
+
+        var session = _context.Session;
+        var worn = new List<int?>();
+        foreach (var obj in session.State.Objects.All)
+        {
+            if (obj.WielderId == session.State.Self.Guid)
+            {
+                worn.Add(session.TryGetAppraisal(obj.Guid, out var wornAppraisal) ? wornAppraisal.Int(ExamineSetLines.EquipmentSetId) ?? 0 : null);
+            }
+        }
+
+        var (pieces, unknown) = ExamineSetLines.CountWorn(setId, worn);
+        return ExamineSetLines.WornLines(appraisal, pieces, session.SpellSets ?? new Dictionary<uint, IReadOnlyDictionary<uint, IReadOnlyList<uint>>>(), session.Spell, _context.Manager.Services.Log, unknown);
     }
 
     // --- the lines (static: a test reads them without a shell) ----------------------------------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// <c>ItemExamineUI::SetAppraiseInfo</c> (11.6096 0x004B7ED0): the item window's lines in retail's order: value, burden, workmanship, the weapon's and armour's data, the armour level, the usage, the wield requirements, the potion's or kit's
-    /// boost, the uses left, the sale rule, the spells and the description.
+    /// <c>ItemExamineUI::SetAppraiseInfo</c> (11.6096 0x004B7ED0): the item window's lines in retail's order: value, burden, the tinkering and workmanship, the ratings and set, the weapon's and armour's data, the armour level, the
+    /// item's spells by name, the usage, the wield requirements, what activates the spells, a caster's bonuses, the potion's or kit's boost, a mana stone's charge, the uses left, the sale rule, the spellcraft, mana and spell descriptions,
+    /// and the description.
     /// </summary>
-    public static IReadOnlyList<string> ItemLines(Appraisal a, ILogSink log)
+    /// <param name="a">The appraisal.</param>
+    /// <param name="log">Where a named TODO goes.</param>
+    /// <param name="spell">The SpellTable lookup (<see cref="IGameSessionView.Spell"/>) that names the item's spells; null names none (each shows as "Spell N" with a logged TODO).</param>
+    /// <param name="enumString">The dat's EnumMapper strings (<see cref="Lifestone.Data.Dat.EnumMapperNames.GetString"/>: map id, value): the heritage and creature-type names of a requirement; null names none (the line is left out, a named TODO).</param>
+    /// <param name="objectFlags">The object's ObjectDescriptionFlags (its healer 0x10000 and lockpick 0x20000 bits make a failed appraisal say its uses are unknown); 0 when the world table has no object.</param>
+    /// <param name="setDetails">Lines under "Set: name" (<c>--examine-set-details on</c>: the pieces worn and the set's spells, <see cref="ExamineSetLines.WornLines"/>), or null for retail's name alone.</param>
+    public static IReadOnlyList<string> ItemLines(Appraisal a, ILogSink log, Func<uint, Lifestone.Data.Magic.SpellInfo?>? spell = null, Func<uint, uint, string?>? enumString = null, uint objectFlags = 0, IReadOnlyList<string>? setDetails = null) =>
+        ItemPage(a, log, spell, enumString, objectFlags, setDetails).Lines;
+
+    /// <summary>
+    /// <see cref="ItemLines"/> with each line's font colour index (M5 7 D142): the lines an enchantment raised or lowered (the appraisal's armour, weapon and resist masks, <see cref="EnchantmentColor"/>) in <see cref="ExamineColor.Raised"/> or
+    /// <see cref="ExamineColor.Lowered"/>, every other line <see cref="ExamineColor.Normal"/>. The parameters are <see cref="ItemLines"/>'.
+    /// </summary>
+    public static ExamineItemPage ItemPage(Appraisal a, ILogSink log, Func<uint, Lifestone.Data.Magic.SpellInfo?>? spell = null, Func<uint, uint, string?>? enumString = null, uint objectFlags = 0, IReadOnlyList<string>? setDetails = null)
     {
+        ArgumentNullException.ThrowIfNull(a);
         var lines = new List<string>(12);
+        var colors = new Dictionary<int, int>();
         lines.Add(a.Value is { } value ? "Value: " + Number(value) : "Value: ???"); // Appraisal_ShowValueInfo 0x004AE220
         lines.Add(a.Burden is { } burden ? "Burden: " + Number(burden) : "Burden: ???"); // Appraisal_ShowBurdenInfo 0x004AE500
-        if (a.Workmanship is { } workmanship)
-        {
-            lines.Add("Workmanship: " + workmanship.ToString(CultureInfo.InvariantCulture)); // Appraisal_ShowTinkeringInfo 0x004B1510 ("Workmanship: %s (%d)": the word is not built)
-            Todo(log, "m4-examine-words", "the workmanship and speed words (the skill-check and workmanship string tables) are not read; the number shows alone");
-        }
+        TinkeringLines(a, lines); // Appraisal_ShowTinkeringInfo 0x004B1510
+        lines.AddRange(ExamineRatingLines.SetAndRatings(a, setDetails)); // Appraisal_ShowSet 0x004AEC00, Appraisal_ShowRatings 0x004AF400 and SetAppraiseInfo's blank line (M5 7 D137, lane L2)
 
         if (a.Weapon is not null || a.WeaponDamage is not null)
         {
-            WeaponLines(a, lines, log);
+            WeaponLines(a, lines, colors);
         }
 
-        if (a.ArmorLevel is { } armorLevel)
-        {
-            lines.Add("Armor Level: " + armorLevel.ToString(CultureInfo.InvariantCulture)); // Appraisal_ShowArmorMods 0x004B2600
-        }
+        DefenseModLines(a, lines, colors); // Appraisal_ShowDefenseModData 0x004B2490 (M5 7 D142)
+        ArmorModLines(a, lines, colors); // Appraisal_ShowArmorMods 0x004B2600 (M5 7 D142: the protections and the colours)
 
+        SpellNamesLine(a, lines, log, spell); // Appraisal_ShowShortMagicInfo 0x004B3330
         if (a.UseText is { Length: > 0 } use)
         {
             lines.Add(use); // Appraisal_ShowUsage 0x004AFFD0
         }
 
-        WieldLines(a, lines, log);
+        WieldLines(a, lines, log, enumString); // Appraisal_ShowWieldRequirements 0x004B0040
+        ActivationLines(a, lines, log, enumString); // Appraisal_ShowActivationRequirements 0x004B3910
+        CasterLines(a, lines, colors); // Appraisal_ShowCasterData 0x004B21B0
         if (a.HealingBoost is not null || a.Float(100) is not null)
         {
             BoostLines(a, lines);
         }
 
+        ManaStoneLines(a, lines); // Appraisal_ShowManaStoneInfo 0x004B3FA0
         if (a.UsesLeft is { } left)
         {
             lines.Add("Number of uses remaining: " + left.ToString(CultureInfo.InvariantCulture)); // Appraisal_ShowRemainingUses 0x004B40C0
+        }
+        else if (!a.Success && ((objectFlags & HealerOrLockpickFlags) != 0 || (a.HookFlags is { } hook && (hook & HookHealerOrLockpickFlags) != 0)))
+        {
+            lines.Add("Number of uses remaining:  Unknown"); // the failed roll's line (Appraisal_ShowRemainingUses), two spaces as retail's literal (M5 7 D137)
         }
 
         if (a.Bool(69) == false)
@@ -396,30 +477,381 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
             lines.Add("This item cannot be sold.");
         }
 
-        if (a.SpellBook.Length > 0)
-        {
-            lines.Add(Placeholder("Spells", "m4-examine-spells", log)); // Appraisal_ShowShortMagicInfo 0x004B3330, ShowMagicInfo 0x004B34B0
-        }
-
-        if (a.String(7) is { Length: > 0 })
-        {
-            lines.Add(Placeholder("Inscription", "m4-examine-inscription", log)); // SetInscription 0x004AE670
-        }
-
-        if (a.Ints.Keys.Any(static k => k is 307 or 308 or 309 or 310 or 311 or 312 or 313 or 314 or 315) || a.Ints.ContainsKey(170))
-        {
-            lines.Add(Placeholder("Ratings and set", "m4-examine-ratings", log)); // Appraisal_ShowRatings 0x004AF400, ShowSet 0x004AEC00
-        }
+        MagicLines(a, lines, log, spell); // Appraisal_ShowMagicInfo 0x004B34B0
 
         if (a.LongDescription is { Length: > 0 } description)
         {
             lines.Add(description); // Appraisal_ShowDescription 0x004B75B0
         }
 
-        return lines;
+        var lineColors = new int[lines.Count];
+        foreach (var (index, color) in colors)
+        {
+            lineColors[index] = color;
+        }
+
+        return new ExamineItemPage(lines, lineColors);
     }
 
-    private static void WeaponLines(Appraisal a, List<string> lines, ILogSink log)
+    /// <summary>
+    /// One INFO line an answer the window shows (M5 7 D137; the failed-roll live capture reads it): the guid, the name, success, the flags of the answer and of its creature profile, the health it holds, and the window's lines once filled
+    /// (<see cref="LogShownLines"/>).
+    /// </summary>
+    private void LogAnswer(Appraisal a)
+    {
+        var flags = a.CreatureProfileFlags;
+        _context.Manager.Services.Log.Info(
+            "retailui",
+            string.Create(CultureInfo.InvariantCulture, $"examine answer guid=0x{a.Guid:X8} name=\"{a.Name}\" success={a.Success} flags=0x{(uint)a.Flags:X} creature_flags={(flags is null ? "none" : "0x" + flags.Value.ToString("X", CultureInfo.InvariantCulture))} health={(a.CreatureHealth is null ? "none" : a.CreatureHealth + "/" + a.CreatureHealthMax)} attributes={(a.CreatureShowsAttributes ? "yes" : "no")} ints={a.Ints.Count} strings={a.Strings.Count} spells={a.Spells.Length}"));
+    }
+
+    private void LogShownLines()
+    {
+        var shown = Kind == ExamineKind.Creature ? string.Join(" | ", [LevelText, .. VitalLines]) : string.Join(" | ", Lines);
+        _context.Manager.Services.Log.Info("retailui", $"examine shown guid=0x{ShownGuid:X8} kind={Kind} title=\"{Title}\" lines=[{shown}]");
+    }
+
+    /// <summary>ObjectDescriptionFlags Healer (0x10000) and Lockpick (0x20000): a failed roll on such an item says its uses are unknown (<c>Appraisal_ShowRemainingUses</c>' <c>pwd._bitfield &amp; 0x30000</c>).</summary>
+    internal const uint HealerOrLockpickFlags = 0x30000;
+
+    /// <summary>The hook profile's IsHealer (0x2) and IsLockpick (0x8) flags (<c>AppraisalProfile::IsHookedItemHealer</c>, <c>IsHookedItemLockpick</c>).</summary>
+    internal const uint HookHealerOrLockpickFlags = 0x2 | 0x8;
+
+    /// <summary>PropertyFloat 152 (ACE <c>ElementalDamageMod</c>): a caster's multiplier on its spells' damage (1.03 is +3%).</summary>
+    internal const uint ElementalDamageModId = 152;
+
+    /// <summary>PropertyFloat 144 (ACE <c>ManaConversionMod</c>): a caster's bonus to Mana Conversion (0.05 is +5%).</summary>
+    internal const uint ManaConversionModId = 144;
+
+    /// <summary>PropertyFloat 5 (ACE <c>ManaRate</c>): the mana a worn item burns a second (negative).</summary>
+    internal const uint ManaRateId = 5;
+
+    /// <summary>PropertyInt 117 (ACE <c>ItemManaCost</c>): the mana an item's use costs.</summary>
+    internal const uint ItemManaCostId = 117;
+
+    /// <summary>PropertyInt 170 (ACE <c>NumItemsInMaterial</c>): how many items a salvage bag was made from.</summary>
+    internal const uint SalvagedItemsId = 170;
+
+    /// <summary>PropertyInt 265 (ACE <c>EquipmentSetId</c>): the set an item belongs to, the one property <c>Appraisal_ShowSet</c> (11.6096 0x004AEC00) asks for (before M5 7 S4 the placeholder looked for 170 instead).</summary>
+    internal const uint SetId = 265;
+
+    /// <summary>PropertyInt 171 (ACE <c>NumTimesTinkered</c>).</summary>
+    internal const uint TinkeredId = 171;
+
+    /// <summary>PropertyInt 204 (ACE <c>ElementalDamageBonus</c>): a weapon's flat elemental bonus.</summary>
+    internal const uint ElementalDamageBonusId = 204;
+
+    /// <summary>
+    /// <c>CombatSystem::ElementalModPKModifier</c>, the share of a caster's elemental bonus that counts against players (<c>CombatSystem::GetElementalModPKModifier</c>, 11.6096 0x005CA000: <c>(mod - 1) x share + 1</c>); the double read from
+    /// the 11.6096 executable's data at 0x00823C60.
+    /// </summary>
+    internal const double ElementalModPKShare = 0.5;
+
+    /// <summary>
+    /// <c>AppraisalSystem::InqWorkmanshipAdjective</c> (11.6096 0x005B5990) over its table <c>rgWorkmanshipStrings</c> (the executable's data at 0x0082260C, eleven literals, read from the 11.6096 executable): the word for a workmanship of 0 to 10
+    /// (above 10 is 10); for 4 and below "crafted" follows ("cut" for a gem, which the examine window never asks for).
+    /// </summary>
+    internal static string WorkmanshipWord(int level)
+    {
+        ReadOnlySpan<string> words = ["", "Poorly ", "Well-", "Finely ", "Exquisitely ", "Magnificent", "Nearly flawless", "Flawless", "Utterly flawless", "Incomparable", "Priceless"];
+        var index = (uint)level >= 11 ? 10 : level; // retail compares unsigned: a negative level is "Priceless" too
+        return index <= 4 ? words[index] + "crafted" : words[index];
+    }
+
+    /// <summary><c>AppraisalSystem::WeaponTimeToString</c> (11.6096 0x005B5A20): the word for a weapon's speed (its time: lower is faster).</summary>
+    internal static string SpeedWord(int time) => time switch
+    {
+        < 11 => "Very Fast",
+        < 31 => "Fast",
+        < 50 => "Average",
+        < 80 => "Slow",
+        _ => "Very Slow",
+    };
+
+    /// <summary><c>ModifierToString</c> (11.6096 0x004AB550): a multiplier as a whole percent with its sign ("+5%", "-10%"), rounded half up.</summary>
+    internal static string ModifierText(double modifier) =>
+        string.Create(CultureInfo.InvariantCulture, $"{(modifier < 1.0 ? '-' : '+')}{(ulong)((Math.Abs(1.0 - modifier) * 100.0) + 0.5)}%");
+
+    /// <summary><c>SmallModifierToString</c> (11.6096 0x004AB5C0): a multiplier as a percent to a tenth with its sign ("+3.0%").</summary>
+    internal static string SmallModifierText(double modifier) =>
+        string.Create(CultureInfo.InvariantCulture, $"{(modifier < 1.0 ? '-' : '+')}{(Math.Abs(1.0 - modifier) * 100.0).ToString("F1", CultureInfo.InvariantCulture)}%");
+
+    /// <summary>
+    /// <c>Appraisal_ShowTinkeringInfo</c> (11.6096 0x004B1510): how often the item was tinkered (PropertyInt 171), who tinkered it last (PropertyString 39), who imbued it (PropertyString 40) and its workmanship (PropertyInt 105) with its word; a
+    /// salvage bag (PropertyInt 170, the items it was made from) shows the average to two places and how many items made it.
+    /// </summary>
+    private static void TinkeringLines(Appraisal a, List<string> lines)
+    {
+        if (a.Int(TinkeredId) is { } tinkers)
+        {
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"This item has been tinkered {tinkers} time{(tinkers > 1 ? "s" : string.Empty)}."));
+        }
+
+        if (a.String(39) is { } tinkerer)
+        {
+            lines.Add($"Last tinkered by {tinkerer}.");
+        }
+
+        if (a.String(40) is { } imbuer)
+        {
+            lines.Add($"Imbued by {imbuer}.");
+        }
+
+        if (a.Workmanship is not { } workmanship)
+        {
+            return;
+        }
+
+        if (a.Int(SalvagedItemsId) is { } items && items != 0)
+        {
+            var average = (double)workmanship / items;
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"Workmanship: {WorkmanshipWord((int)(average + 0.5))} ({average:F2})"));
+            lines.Add(string.Empty);
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"Salvaged from {items} items."));
+        }
+        else
+        {
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"Workmanship: {WorkmanshipWord(workmanship)} ({workmanship})"));
+        }
+    }
+
+    /// <summary>The name and description of one of the item's spells (<c>ClientMagicSystem::GetSpellName</c> 11.6096 0x00567EF0, <c>GetSpellDescription</c> 0x00567F60), or "Spell N" with a logged TODO when the table lacks it.</summary>
+    private static (string Name, string Description) SpellText(uint id, ILogSink log, Func<uint, Lifestone.Data.Magic.SpellInfo?>? spell)
+    {
+        if (spell?.Invoke(id) is { Name.Length: > 0 } info)
+        {
+            return (info.Name, info.Description);
+        }
+
+        Todo(log, "m5-examine-spell-name", $"spell {id} is not in the SpellTable (or the table has not loaded), so the examine panel shows its number");
+        return ("Spell " + id.ToString(CultureInfo.InvariantCulture), string.Empty);
+    }
+
+    /// <summary>
+    /// True when the answer has a spell book (retail's <c>_spellBook</c> is set). Read from the entries, not the section flag (the retail UI does not name the wire's types): ACE writes the section only when the book has an entry
+    /// (<c>AppraiseInfo</c>), so the two agree.
+    /// </summary>
+    private static bool HasSpellBook(Appraisal a) => !a.SpellBook.IsEmpty;
+
+    /// <summary>
+    /// <c>Appraisal_ShowShortMagicInfo</c> (11.6096 0x004B3330): the item's spells by name after "Spells: ", comma separated in the order the server sent them; the enchantments on the item (the 0x80000000 entries) are not among them, and with none
+    /// left there is no line. A failed appraisal with a spell book says "Spells: unknown.".
+    /// </summary>
+    private static void SpellNamesLine(Appraisal a, List<string> lines, ILogSink log, Func<uint, Lifestone.Data.Magic.SpellInfo?>? spell)
+    {
+        if (!HasSpellBook(a))
+        {
+            return;
+        }
+
+        if (!a.Success)
+        {
+            lines.Add("Spells: unknown.");
+            return;
+        }
+
+        if (a.Spells.Length == 0)
+        {
+            return;
+        }
+
+        var names = new List<string>(a.Spells.Length);
+        foreach (var id in a.Spells)
+        {
+            names.Add(SpellText(id, log, spell).Name);
+        }
+
+        lines.Add("Spells: " + string.Join(", ", names));
+    }
+
+    /// <summary>
+    /// <c>Appraisal_ShowMagicInfo</c> (11.6096 0x004B34B0): when the item has a spell of its own, the spellcraft ("Spellcraft: N."), the mana now and at most ("Mana: N / M."), the mana it burns (from its rate, "Mana Cost: 1 point per N seconds.",
+    /// else its use cost) and "Spell Descriptions:" with a "~ name: description" line a spell; then, when enchantments are on the item, "Enchantments:", a blank line and one such line each. A failed appraisal with a spell book says
+    /// "Spells: unknown." (again: the short line said it too, as retail).
+    /// </summary>
+    private static void MagicLines(Appraisal a, List<string> lines, ILogSink log, Func<uint, Lifestone.Data.Magic.SpellInfo?>? spell)
+    {
+        if (!HasSpellBook(a))
+        {
+            return;
+        }
+
+        if (!a.Success)
+        {
+            lines.Add("Spells: unknown.");
+            return;
+        }
+
+        if (a.Spells.Length > 0)
+        {
+            if (a.Int(AppraisalIds.Spellcraft) is { } spellcraft)
+            {
+                lines.Add(string.Create(CultureInfo.InvariantCulture, $"Spellcraft: {spellcraft}."));
+            }
+
+            if (a.ItemMana is { } mana && a.ItemMaxMana is { } maxMana)
+            {
+                lines.Add(string.Create(CultureInfo.InvariantCulture, $"Mana: {mana} / {maxMana}."));
+            }
+
+            if (a.Float(ManaRateId) is { } rate && rate != 0.0) // a rate of 0 would divide by nothing (retail's cast of the infinity is undefined): Lifestone shows no line for it
+            {
+                lines.Add(string.Create(CultureInfo.InvariantCulture, $"Mana Cost: 1 point per {(ulong)(Math.Abs(1.0 / rate) + 0.5)} seconds."));
+            }
+            else if (a.Int(ItemManaCostId) is { } cost)
+            {
+                lines.Add(string.Create(CultureInfo.InvariantCulture, $"Mana Cost: {cost}."));
+                if (cost > 0)
+                {
+                    lines.Add("(Can be reduced by the Mana Conversion skill)");
+                }
+            }
+
+            lines.Add("Spell Descriptions:");
+            foreach (var id in a.Spells)
+            {
+                var (name, description) = SpellText(id, log, spell);
+                lines.Add($"~ {name}: {description}");
+            }
+        }
+
+        if (a.ItemEnchantments.Length > 0)
+        {
+            lines.Add("Enchantments:");
+            lines.Add(string.Empty);
+            foreach (var id in a.ItemEnchantments)
+            {
+                var (name, description) = SpellText(id, log, spell);
+                lines.Add($"~ {name}: {description}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>Appraisal_ShowActivationRequirements</c> (11.6096 0x004B3910): "Activation requires " and, comma separated, the Arcane Lore (PropertyInt 109), the allegiance rank (110), the heritage (188), a skill's level (115, the skill in 176),
+    /// an attribute's (258, the attribute in 257) and a vital's (260, the vital in 259); then "This item can only be activated by" the craftsman (PropertyString 25, else "the original owner") when PropertyBool 94 is set. A heritage
+    /// retail names from the EnumMapper table 0x10000002 (all but Gharu'ndim, Umbraen and Olthoi) is not read here: it is left out with a named TODO, never guessed.
+    /// </summary>
+    private static void ActivationLines(Appraisal a, List<string> lines, ILogSink log, Func<uint, uint, string?>? enumString)
+    {
+        if (!a.Success)
+        {
+            return;
+        }
+
+        var parts = new List<string>(2);
+        if (a.Int(AppraisalIds.ArcaneLore) is { } difficulty and > 0)
+        {
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"Arcane Lore: {difficulty}"));
+        }
+
+        if (a.Int(110) is { } rank and >= 1)
+        {
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"Allegiance Rank: {rank}"));
+        }
+
+        if (a.Int(188) is { } heritage and not 0)
+        {
+            if (HeritageName(heritage, enumString) is { } heritageName)
+            {
+                parts.Add(heritageName);
+            }
+            else
+            {
+                Todo(log, "m5-examine-heritage-name", $"the item is activated only by heritage {heritage}, which the dat's EnumMapper 0x10000002 does not name (or no dats are attached); the activation line leaves it out");
+            }
+        }
+
+        if (a.Int(115) is { } skillLimit and > 0 && a.Int(176) is { } skill)
+        {
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"{SkillName(skill)}: {skillLimit}"));
+        }
+
+        if (a.Int(258) is { } attributeLimit and > 0 && a.Int(257) is { } attribute && AttributeName(attribute) is { } attributeName)
+        {
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"{attributeName}: {attributeLimit}"));
+        }
+
+        if (a.Int(260) is { } vitalLimit and > 0 && a.Int(259) is { } vital && VitalName(vital) is { } vitalName)
+        {
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"{vitalName}: {vitalLimit}"));
+        }
+
+        if (parts.Count > 0)
+        {
+            lines.Add("Activation requires " + string.Join(", ", parts));
+        }
+
+        if (a.Bool(94) == true)
+        {
+            lines.Add($"This item can only be activated by {a.String(25) ?? "the original owner"}.");
+        }
+    }
+
+    /// <summary>
+    /// <c>Appraisal_ShowCasterData</c> (11.6096 0x004B21B0): a caster's bonus to Mana Conversion (PropertyFloat 144, shown as one more than it is), then its elemental damage bonus (PropertyFloat 152, with the element in PropertyInt 45) as
+    /// three lines: "Damage bonus for &lt;element&gt; spells:", the bonus against monsters and the smaller one against players (<see cref="ElementalModPKShare"/>). A bonus an enchantment raised or lowered (Hermetic Link, Spirit Drinker:
+    /// the resist mask's 0x1000 and 0x2000) is drawn in the raised or lowered colour, all three damage lines alike (M5 7 D142).
+    /// </summary>
+    private static void CasterLines(Appraisal a, List<string> lines, Dictionary<int, int> colors)
+    {
+        if (a.Float(ManaConversionModId) is { } manaConversion)
+        {
+            AddColored(lines, colors, $"Bonus to Mana Conversion: {ModifierText(manaConversion + 1.0)}.", ResistColor(a, ResistManaConversionBit));
+        }
+
+        if (a.Float(ElementalDamageModId) is { } damageMod && a.Int(AppraisalIds.DamageType) is { } element)
+        {
+            var color = ResistColor(a, ResistElementalDamageBit);
+            AddColored(lines, colors, $"Damage bonus for {DamageTypeName(unchecked((uint)element))} spells:", color);
+            AddColored(lines, colors, $" vs. Monsters: {SmallModifierText(damageMod)}.", color);
+            AddColored(lines, colors, $" vs. Players: {SmallModifierText(((damageMod - 1.0) * ElementalModPKShare) + 1.0)}.", color);
+        }
+    }
+
+    /// <summary><c>Appraisal_ShowManaStoneInfo</c> (11.6096 0x004B3FA0): an object with no spell book (a mana stone) shows the mana it holds (PropertyInt 107), its efficiency (PropertyFloat 87) and its chance of destruction (PropertyFloat 137).</summary>
+    private static void ManaStoneLines(Appraisal a, List<string> lines)
+    {
+        if (HasSpellBook(a))
+        {
+            return;
+        }
+
+        if (a.ItemMana is { } stored)
+        {
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"Stored Mana: {stored}"));
+        }
+
+        if (a.Float(87) is { } efficiency)
+        {
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"Efficiency: {(ulong)(efficiency * 100.0)}%"));
+        }
+
+        if (a.Float(137) is { } destruction)
+        {
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"Chance of Destruction: {(ulong)(destruction * 100.0)}%"));
+        }
+    }
+
+    /// <summary><c>SkillSystem::InqAttributeName</c> (11.6096 0x005C97E0): the six attributes' names; null for another id.</summary>
+    internal static string? AttributeName(int id) => id switch
+    {
+        1 => "Strength", 2 => "Endurance", 3 => "Quickness", 4 => "Coordination", 5 => "Focus", 6 => "Self",
+        _ => null,
+    };
+
+    /// <summary><c>SkillSystem::InqAttribute2ndName</c> (11.6096 0x005C9880): the six vital names; null for another id.</summary>
+    internal static string? VitalName(int id) => id switch
+    {
+        1 => "Maximum Health", 2 => "Health", 3 => "Maximum Stamina", 4 => "Stamina", 5 => "Maximum Mana", 6 => "Mana",
+        _ => null,
+    };
+
+    /// <summary>
+    /// <c>Appraisal_ShowWeaponAndArmorData</c> (11.6096 0x004B1780): the skill, the damage (in the raised or lowered colour when an enchantment changed the greatest damage, the weapon mask's 0x8, else the variance, 0x10), the elemental
+    /// bonus and the speed (the mask's 0x4; M5 7 D142).
+    /// </summary>
+    private static void WeaponLines(Appraisal a, List<string> lines, Dictionary<int, int> colors)
     {
         if (a.WeaponSkill is { } skill and > 0)
         {
@@ -431,37 +863,134 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
             // Retail shows the range ("%s%.3g - %d%s": the low end to three significant digits, then the greatest damage); the low end is the greatest damage less the weapon profile's variance share. Without a profile (or a variance of 0) the greatest shows alone.
             var type = a.WeaponDamageType is { } damageType ? DamageTypeName(unchecked((uint)damageType)) : "Unknown";
             var range = a.WeaponDamageVariance is { } variance and > 0.0 && variance < 1.0 ? (damage * (1.0 - variance)).ToString("G3", CultureInfo.InvariantCulture) + " - " + damage.ToString(CultureInfo.InvariantCulture) : damage.ToString(CultureInfo.InvariantCulture);
-            lines.Add($"Damage: {range}, {type}");
+            var damageColor = WeaponColor(a, WeaponDamageBit);
+            AddColored(lines, colors, $"Damage: {range}, {type}", damageColor != ExamineColor.Normal ? damageColor : WeaponColor(a, WeaponVarianceBit));
+        }
+
+        if (a.Int(ElementalDamageBonusId) is { } elementalBonus and > 0)
+        {
+            var element = a.WeaponDamageType is { } elementType ? DamageTypeName(unchecked((uint)elementType)) : "Unknown";
+            lines.Add(string.Create(CultureInfo.InvariantCulture, $"Elemental Damage Bonus: {elementalBonus}, {element}."));
         }
 
         if (a.WeaponSpeed is { } speed)
         {
-            lines.Add("Speed: " + speed.ToString(CultureInfo.InvariantCulture));
-            Todo(log, "m4-examine-words", "the weapon speed word is not read; the number shows alone");
-        }
-    }
-
-    private static void WieldLines(Appraisal a, List<string> lines, ILogSink log)
-    {
-        foreach (var requirement in a.WieldRequirements)
-        {
-            switch (requirement.Type)
+            // "Speed: <word> (<time>)" (AppraisalSystem::WeaponTimeToString 0x005B5A20 gives the word); a time below 0 is retail's "Speed:  Unknown", two spaces and all.
+            if (speed <= -1)
             {
-                case 1 or 2:
-                    lines.Add(string.Create(CultureInfo.InvariantCulture, $"Wield requires {SkillName(requirement.Skill)} {requirement.Difficulty}")); // Appraisal_ShowWieldRequirements 0x004B0040
-                    break;
-                case 7:
-                    lines.Add(string.Create(CultureInfo.InvariantCulture, $"Wield requires level {requirement.Difficulty}"));
-                    break;
-                case 8:
-                    lines.Add($"Wield requires {SkillName(requirement.Skill)} {(requirement.Difficulty >= 3 ? "specialized" : "trained")}");
-                    break;
-                default:
-                    lines.Add(Placeholder("A wield requirement", "m4-examine-requirement", log));
-                    break;
+                lines.Add("Speed:  Unknown");
+            }
+            else
+            {
+                AddColored(lines, colors, string.Create(CultureInfo.InvariantCulture, $"Speed: {SpeedWord(speed)} ({speed})"), WeaponColor(a, WeaponSpeedBit));
             }
         }
     }
+
+    /// <summary>The PropertyInt triples of the four wield requirements (type, skill or quality, difficulty), in retail's order: 158-160, 270-272, 273-275, 276-278.</summary>
+    private static readonly (uint Type, uint Skill, uint Difficulty)[] WieldSlots = [(158, 159, 160), (270, 271, 272), (273, 274, 275), (276, 277, 278)];
+
+    /// <summary>
+    /// <c>Appraisal_ShowWieldRequirements</c> (11.6096 0x004B0040; M5 7 D137 builds every kind): "Wield requires" the craftsman (PropertyString 25, "the original owner") when PropertyBool 85 is set; "Use requires Throne of Destiny." for
+    /// PropertyInt 26 of 1; the heritage of PropertyInt 324 by name; then each of the four requirements whose three ints are all present (<c>GetAppraisalStringFromRequirements</c> 0x004ACE40 names the kind): a skill (1, "base " for 2),
+    /// an attribute (3, 4), a vital (5, 6), the level (7), a training (8: "trained" or "specialized" before the skill, capitalised in the fourth slot as retail's text is), a society standing (9, 10), a creature type (11, "... type")
+    /// and a heritage (12, "... race"). As retail, an unknown kind in the first slot ends the lines (the later slots are not read); an unknown kind in a later slot is skipped. A name the dats do not give leaves its line out with a
+    /// named TODO, never a guess.
+    /// </summary>
+    private static void WieldLines(Appraisal a, List<string> lines, ILogSink log, Func<uint, uint, string?>? enumString)
+    {
+        if (a.Bool(85) == true)
+        {
+            lines.Add("Wield requires " + (a.String(25) ?? "the original owner"));
+        }
+
+        if (a.Int(26) == 1)
+        {
+            lines.Add("Use requires Throne of Destiny.");
+        }
+
+        if (a.Int(324) is { } heritageSpecific && HeritageName(heritageSpecific, enumString) is { } heritageName)
+        {
+            lines.Add("Wield requires " + heritageName);
+        }
+
+        for (var slot = 0; slot < WieldSlots.Length; slot++)
+        {
+            var (typeId, skillId, difficultyId) = WieldSlots[slot];
+            if (a.Int(typeId) is not { } type || a.Int(skillId) is not { } skill || a.Int(difficultyId) is not { } difficulty)
+            {
+                continue;
+            }
+
+            var line = WieldLine(type, skill, difficulty, capitalTraining: slot == 3, log, enumString);
+            if (line is not null)
+            {
+                lines.Add(line);
+            }
+            else if (slot == 0 && type is < 1 or > 12)
+            {
+                Todo(log, "m5-examine-requirement-kind", $"the first wield requirement is of kind {type}, which retail does not name; as retail, no wield requirement is shown");
+                return;
+            }
+        }
+    }
+
+    /// <summary>One wield requirement's line (<c>GetAppraisalStringFromRequirements</c> 0x004ACE40 and the line's format), or null when the kind is unknown or the dats give no name for it.</summary>
+    internal static string? WieldLine(int type, int skill, int difficulty, bool capitalTraining, ILogSink log, Func<uint, uint, string?>? enumString)
+    {
+        var basePrefix = type is 2 or 4 or 6 ? "base " : string.Empty;
+        string? name = type switch
+        {
+            1 or 2 or 8 => SkillName(skill),
+            3 or 4 => AttributeName(skill),
+            5 or 6 => VitalName(skill),
+            7 => "level",
+            9 or 10 => skill switch { 287 => "Standing with the Celestial Hand", 288 => "Standing with the Eldrytch Web", 289 => "Standing with the Radiant Blood", _ => "unknown quality" },
+            11 => CreatureTypeName(difficulty, enumString),
+            12 => HeritageName(difficulty, enumString),
+            _ => null,
+        };
+        if (name is null)
+        {
+            if (type is >= 1 and <= 12)
+            {
+                Todo(log, "m5-examine-requirement-name", $"a wield requirement of kind {type} names {(type is 11 or 12 ? difficulty : skill)}, which the dats do not name here; the line is left out");
+            }
+
+            return null;
+        }
+
+        var training = difficulty == 3 ? "specialized" : "trained";
+        return type switch
+        {
+            8 => "Wield requires " + (capitalTraining ? char.ToUpperInvariant(training[0]) + training[1..] : training) + " " + name,
+            11 => "Wield requires " + name + " type",
+            12 => "Wield requires " + name + " race",
+            _ => string.Create(CultureInfo.InvariantCulture, $"Wield requires {basePrefix}{name} {difficulty}"),
+        };
+    }
+
+    /// <summary>
+    /// <c>AppraisalSystem::InqHeritageGroupDisplayName</c> (11.6096 0x005B57C0): retail's own spellings for Gharu'ndim (2), Umbraen (5) and Olthoi (13), else the dat's EnumMapper 0x10000002 (<see cref="Lifestone.Data.Dat.EnumMapperNames.GetString"/>);
+    /// null when neither names it.
+    /// </summary>
+    internal static string? HeritageName(int heritage, Func<uint, uint, string?>? enumString) => heritage switch
+    {
+        2 => "Gharu'ndim",
+        5 => "Umbraen",
+        13 => "Olthoi",
+        _ => enumString?.Invoke(HeritageEnumMap, unchecked((uint)heritage)) is { Length: > 0 } name ? name : null,
+    };
+
+    /// <summary><c>AppraisalSystem::InqCreatureDisplayName</c> (11.6096 0x005B6A90): the dat's EnumMapper 0x10000005 name of the creature type, its underscores as spaces ("Phyntos_Wasp" reads "Phyntos Wasp"); null when it has none.</summary>
+    internal static string? CreatureTypeName(int creatureType, Func<uint, uint, string?>? enumString) =>
+        enumString?.Invoke(CreatureTypeEnumMap, unchecked((uint)creatureType)) is { Length: > 0 } name ? name.Replace('_', ' ') : null;
+
+    /// <summary>The EnumMapper of the heritage names (<c>InqHeritageGroupDisplayName</c>'s 0x10000002).</summary>
+    internal const uint HeritageEnumMap = 0x10000002;
+
+    /// <summary>The EnumMapper of the creature-type names (<c>InqCreatureDisplayName</c>'s 0x10000005).</summary>
+    internal const uint CreatureTypeEnumMap = 0x10000005;
 
     /// <summary>A potion (<c>Appraisal_ShowBoostValue</c> 0x004B2B20: "Restores %d Health when used.") or a healing kit (<c>Appraisal_ShowHealKitValues</c> 0x004B2C40: the skill bonus and the restoration bonus).</summary>
     private static void BoostLines(Appraisal a, List<string> lines)
@@ -494,35 +1023,6 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
         {
             lines.Add(string.Create(CultureInfo.InvariantCulture, $"{(amount < 0 ? "Depletes" : "Restores")} {Math.Abs(amount)} {word} when {when}."));
         }
-    }
-
-    /// <summary>The creature window: the level (<c>BasicCreatureExamineUI::SetLevelValueText</c> 0x004B4510 from property 25) and the vitals.</summary>
-    public static (string Level, string[] Vitals, string Note) CreatureLines(Appraisal a, ILogSink log)
-    {
-        var level = a.Level is { } l ? l.ToString(CultureInfo.InvariantCulture) : "???";
-        var vitals = new[] { "Health: ???", "Stamina: ???", "Mana: ???" };
-        var note = string.Empty;
-        if (a.Creature is not null && a.CreatureHealth is { } health && a.CreatureHealthMax is { } healthMax)
-        {
-            vitals[0] = string.Create(CultureInfo.InvariantCulture, $"Health: {health} / {healthMax}");
-            if (a.CreatureStamina is { } stamina && a.CreatureStaminaMax is { } staminaMax)
-            {
-                vitals[1] = string.Create(CultureInfo.InvariantCulture, $"Stamina: {stamina} / {staminaMax}");
-            }
-
-            if (a.CreatureMana is { } mana && a.CreatureManaMax is { } manaMax)
-            {
-                vitals[2] = string.Create(CultureInfo.InvariantCulture, $"Mana: {mana} / {manaMax}");
-            }
-        }
-        else if (!a.Success)
-        {
-            note = Placeholder("The failed assessment", "m4-examine-failed-roll-text", log);
-        }
-
-        Todo(log, "m4-examine-creature-view", "the creature's 3D view (the viewport 0x10000148) is not drawn");
-        Todo(log, "m4-examine-creature-lines", "the creature's attribute list, rating and player-killer lines (BasicCreatureExamineUI/CharExamineUI) are not built; the three vitals lines stand in for the extra-info list");
-        return (level, vitals, note);
     }
 
     /// <summary>
@@ -586,12 +1086,30 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
         _itemSubName?.SetText(string.Empty);
     }
 
-    private void SetItem(in UiItemIcon icon, IReadOnlyList<string> lines)
+    /// <summary>
+    /// <c>ItemExamineUI::AddItemInfo</c> (11.6096 0x004AE020): each line appended whole in font 0 and its colour index (<c>AppendTextWithFont</c>; the constructor 0x004ABB70 makes index 1 the raised font and 2 the lowered, M5 7 D142),
+    /// a line break between lines in the normal colour.
+    /// </summary>
+    private void SetItem(in UiItemIcon icon, ExamineItemPage page)
     {
-        Lines = lines;
+        Lines = page.Lines;
+        LineColors = page.Colors;
         IconId = icon.IconId;
         Icon = icon;
-        _itemText?.SetText(string.Join('\n', lines));
+        if (_itemText is { } text)
+        {
+            text.ClearAllText();
+            for (var i = 0; i < page.Lines.Count; i++)
+            {
+                if (i > 0)
+                {
+                    text.AppendTextWithFont("\n", 0, ExamineColor.Normal);
+                }
+
+                text.AppendTextWithFont(page.Lines[i], 0, page.ColorOf(i));
+            }
+        }
+
         ComposeIcon();
     }
 
@@ -668,19 +1186,5 @@ public sealed class GameExaminePanel : IUiElementListener, IDisposable
                 panel.ComposeIcon();
             }
         }
-    }
-
-    private void SetCreature(string level, IReadOnlyList<string> vitals, string note)
-    {
-        LevelText = level;
-        VitalLines = vitals;
-        _level?.SetText(level);
-        for (var i = 0; i < _vitals.Length; i++)
-        {
-            _vitals[i]?.SetText(i < vitals.Count ? vitals[i] : string.Empty);
-        }
-
-        _creatureInfo?.SetText(string.Empty);
-        _creatureNote?.SetText(note);
     }
 }

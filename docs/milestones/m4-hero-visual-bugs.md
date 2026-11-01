@@ -137,7 +137,8 @@ the camera passes through creatures, ethereal objects are passed through), doors
    player as in retail. This is the fix for §1.3: two creatures stuck to the player no longer overlap, so the client's
    sticky spots agree with ACE's and the stick's end no longer snaps them back. It also replaces the ground clamp
    (`PhysicsWorld.TryGroundZ`) for stepped objects. Its cost (a transition per moving object per frame) is measured
-   against the 50 ms frame rule before it lands.
+   against the 50 ms frame rule; since M5 D45 (the owner) it lands whatever the measure says, and an excess is made
+   cheaper, not cut.
 
-Steps 1 and 2 are needed for the hero video's vendor station; step 3 belongs to a milestone (M5 or later), and the
-detector of §1.4 tells whether it removes the flicker.
+Steps 1 and 2 are needed for the hero video's vendor station; step 3 is M5 item 5's, mandatory (m5-plan.md D45), and
+the detector of §1.4 tells whether it removes the flicker.

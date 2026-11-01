@@ -136,7 +136,12 @@ public static class ChatLineText
             case ChatKind.Notice:
                 textType = Valid(line.ChatType, ChatTextTypes.System); // a client-composed line ("<spell> has expired.", chat type 7); a notice with no type stays System
                 break;
-            case ChatKind.WeenieError:
+            case ChatKind.WeenieError or ChatKind.ChannelNotice: // M5 7 D124: a channel's notice shows retail's join or leave line in its type
+                if (!WeenieErrorText.RetailShows(line.ChatType))
+                {
+                    return false; // M5 7 D124 (S1b): HandleFailureEvent (11.6096 0x00572760) prints nothing for a code it has no case for
+                }
+
                 WeenieErrorText.TryFormat(line.ChatType, line.Text, out textType, out text);
                 break;
             default:

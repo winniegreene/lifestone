@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
@@ -227,6 +228,7 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents, I
             SendPositionEvent();
         }
 
+        WatchServerMoveTo();
         if (Enabled && ControlledByServer && !_motion.MotionsPending && !IsMovingTo
             && (_substates.HasHead || _turns.HasHead || _sidesteps.HasHead || AutoRun))
         {
@@ -235,6 +237,98 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents, I
 
         ReportUnenforcedRestriction();
         Measure();
+    }
+
+    /// <summary>
+    /// The longest a server MoveTo or TurnTo of the player is held, in seconds: ACE's <c>defaultMoveToTimeout</c> (15 s, <c>Player_Move.cs:16</c> @95ef426d). ACE's walk-to-use
+    /// chain (<c>CreateMoveToChain</c>, <c>Player_Move.cs:37-97</c>) gives up after it (<c>MoveToChain</c>, <c>Player_Move.cs:119-124</c>: the chain stops and the Use's callback runs
+    /// unsuccessful, so the client gets a UseDone with no error) and sends the client nothing that ends its MoveTo. Retail's <c>MoveToManager</c> never ends a MoveTo for want of
+    /// progress either: <c>HandleMoveToPosition</c> (11.4186 0x00529D80, 11.6096 0x0052A990) and <c>HandleTurnToHeading</c> (0x0052A0C0 / 0x0052ACD0) only count
+    /// <c>fail_progress_count</c>, which nothing reads, and <c>UseTime</c> does nothing out of contact or while a target has not reported. Retail's player ends such a walk with a key;
+    /// a body nobody is at the keys of would hold it for ever (M5 item 5 F6: the Brawler's walk to Renald, round 2). <c>TODO(m5-moveto-stuck)</c>: the rule is ACE's timeout,
+    /// not retail's; retail's server-side end of a player's MoveTo is unread.
+    /// </summary>
+    public const double ServerMoveToLimitSeconds = 15.0;
+
+    private double _serverMoveToSince = double.NaN;
+    private int _serverMoveToCancels = -1;
+    private CellFrame _serverMoveToFrom;
+
+    /// <summary>The server MoveTos the stuck rule ended (<see cref="ServerMoveToLimitSeconds"/>, <c>TODO(m5-moveto-stuck)</c>).</summary>
+    public int ServerMoveToStuckEnds { get; private set; }
+
+    /// <summary>
+    /// How the last server MoveTo or TurnTo of the player ended, for the runner's line: <c>arrived</c>, <c>cancelled (0xNNNN Name)</c> (retail's own cancels: a new movement,
+    /// the target gone or silent, charged too far), <c>not started</c> (never under way: an unknown target does nothing), or <c>stuck</c> (the <see cref="ServerMoveToLimitSeconds"/> rule); null while one is under way or before the first.
+    /// </summary>
+    public string? LastServerMoveToEnd { get; private set; }
+
+    /// <summary>A server MoveTo or TurnTo arrives (<see cref="LoseControlToServer"/>, before it is unpacked): the watch starts again.</summary>
+    private void BeginServerMoveToWatch()
+    {
+        _serverMoveToSince = _now;
+        _serverMoveToCancels = -1; // noted on the first step it is under way: the unpack cancels the MoveTo it replaces (0x36) after this call
+        _serverMoveToFrom = _player.Position;
+        LastServerMoveToEnd = null;
+    }
+
+    /// <summary>
+    /// Each step while a server MoveTo is watched: its end is named (<see cref="LastServerMoveToEnd"/>), and one held <see cref="ServerMoveToLimitSeconds"/> is cancelled as retail's
+    /// <c>CPhysicsObj::cancel_moveto</c> (11.4186 0x005101F0, 11.6096 0x00510CC0) cancels, with its error 0x36 ActionCancelled, and logged with what held it (<c>TODO(m5-moveto-stuck)</c>).
+    /// Control stays with the server until a key is held, as after any MoveTo.
+    /// </summary>
+    private void WatchServerMoveTo()
+    {
+        if (double.IsNaN(_serverMoveToSince))
+        {
+            return;
+        }
+
+        var moveTo = _player.Movement?.MoveTo;
+        if (!_player.IsMovingTo)
+        {
+            LastServerMoveToEnd = _serverMoveToCancels < 0
+                ? "not started" // never under way: an unknown target does nothing (MovementManager.MoveToObject), or it ended inside its unpack
+                : moveTo is not null && moveTo.Cancels != _serverMoveToCancels
+                    ? string.Create(CultureInfo.InvariantCulture, $"cancelled (0x{(uint)moveTo.LastCancelReason:X4} {moveTo.LastCancelReason})")
+                    : "arrived";
+            _serverMoveToSince = double.NaN;
+            return;
+        }
+
+        if (_serverMoveToCancels < 0)
+        {
+            _serverMoveToCancels = moveTo?.Cancels ?? 0;
+        }
+
+        var held = _now - _serverMoveToSince;
+        if (held < ServerMoveToLimitSeconds)
+        {
+            return;
+        }
+
+        var moved = _serverMoveToFrom.CellId == 0 ? float.NaN : PositionFrames.Distance(_serverMoveToFrom, _player.Position);
+        _log.Warn(
+            "movement",
+            "TODO(m5-moveto-stuck): the server's MoveTo held the player past ACE's MoveTo timeout without ending (retail's MoveToManager counts no-progress checks and never ends on them); cancelled as a key would end it (0x36 ActionCancelled)",
+            new LogField("held_s", held.ToString("F1", CultureInfo.InvariantCulture)),
+            new LogField("moved_m", moved.ToString("F2", CultureInfo.InvariantCulture)),
+            new LogField("type", moveTo?.MovementType.ToString() ?? "none"),
+            new LogField("target", moveTo is null ? "none" : $"0x{moveTo.TopLevelObjectId:X8}"),
+            new LogField("initialized", moveTo?.Initialized.ToString() ?? "none"),
+            new LogField("step", moveTo is { PendingActions.Count: > 0 } ? moveTo.PendingActions[0].Type.ToString() : "none"),
+            new LogField("command", $"0x{moveTo?.CurrentCommand ?? 0:X8}"),
+            new LogField("fail_progress", (moveTo?.FailProgressCount ?? 0).ToString(CultureInfo.InvariantCulture)),
+            new LogField("distance_m", moveTo is null ? "none" : moveTo.GetCurrentDistance().ToString("F2", CultureInfo.InvariantCulture)),
+            new LogField("wanted_m", moveTo is null ? "none" : moveTo.MovementParams.DistanceToObject.ToString("F2", CultureInfo.InvariantCulture)),
+            new LogField("contact", _player.HasContact.ToString()),
+            new LogField("motions_pending", _motion.MotionsPending.ToString()),
+            new LogField("obstacle", _player.LastTransitionObstacle.Kind.ToString()),
+            new LogField("at", $"0x{_player.Position.CellId:X8} {_player.Position.Frame.Origin}"));
+        ServerMoveToStuckEnds++;
+        _player.CancelMoveTo();
+        LastServerMoveToEnd = "stuck";
+        _serverMoveToSince = double.NaN;
     }
 
     /// <summary>

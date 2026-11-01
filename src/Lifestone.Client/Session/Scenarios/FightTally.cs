@@ -83,6 +83,20 @@ public sealed class FightTally : IDisposable
     /// <summary>How many GameEvent 0x01B2 DefenderNotification arrived (an attack landed on the player).</summary>
     public int HitsTaken { get; private set; }
 
+    /// <summary>The biggest single hit taken: the largest damage of a GameEvent 0x01B2 notice or a spell-damage line against the player (M5 7 F16, <c>hit_max=</c>; 0 before any).</summary>
+    public long HitMax { get; private set; }
+
+    /// <summary>The casts whose target died or left the world during the wind-up (M5 7 F28, <c>target_died_mid_cast=</c>); not misses.</summary>
+    public int TargetDiedMidCast { get; private set; }
+
+    /// <summary>Called for each 0x01B2 notice with the notice (M5 7 F16: the fight logs every hit's amount); null for none. Set once by the owner of the tally.</summary>
+    public Action<CombatEvent>? HitNotice { get; set; }
+
+    /// <summary>
+    /// M5 7 P7b (D139 i): called for each 0x01AD KillerNotification with its text, after the counts (the loot step queues the corpse of every creature the player killed, not only the target's); null for none. Set once by the owner of the tally.
+    /// </summary>
+    public Action<string>? KillNotice { get; set; }
+
     /// <summary>How many GameEvent 0x01B4 EvasionDefenderNotification arrived (the player evaded an attack).</summary>
     public int Evades { get; private set; }
 
@@ -152,6 +166,9 @@ public sealed class FightTally : IDisposable
     /// <summary>A cast ended without a projectile, or a projectile ended without a damage line.</summary>
     public void NoteMiss() => Misses++;
 
+    /// <summary>M5 7 F28: a cast's target died or left during the wind-up (0x042C on a dead target): not a miss, counted apart (<c>target_died_mid_cast=</c>).</summary>
+    public void NoteTargetDiedMidCast() => TargetDiedMidCast++;
+
     /// <summary>The clear-line rule skipped a blocked tusker.</summary>
     public void NoteBlockedPick() => BlockedPicks++;
 
@@ -170,6 +187,8 @@ public sealed class FightTally : IDisposable
         CriticalsDealt = 0;
         DrainDealt = 0;
         DamageTaken = 0;
+        HitMax = 0;
+        TargetDiedMidCast = 0;
         SpellDamageTaken = 0;
         DrainTaken = 0;
         HitsTaken = 0;
@@ -331,6 +350,7 @@ public sealed class FightTally : IDisposable
             case MagicLineKind.DamageTaken:
                 SpellDamageTaken += amount;
                 DamageTaken += amount;
+                HitMax = Math.Max(HitMax, amount);
                 break;
             case MagicLineKind.DrainTaken:
                 DrainTaken += amount;
@@ -353,6 +373,8 @@ public sealed class FightTally : IDisposable
         {
             TargetKills++;
         }
+
+        KillNotice?.Invoke(e.Text ?? string.Empty);
     }
 
     private void OnCombat(in CombatEvent e)
@@ -362,6 +384,8 @@ public sealed class FightTally : IDisposable
             case CombatEventKind.DefenseHit:
                 HitsTaken++;
                 DamageTaken += e.Damage;
+                HitMax = Math.Max(HitMax, e.Damage);
+                HitNotice?.Invoke(e);
                 break;
             case CombatEventKind.DefenseEvaded:
                 Evades++;

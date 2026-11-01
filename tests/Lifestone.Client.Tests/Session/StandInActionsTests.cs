@@ -145,7 +145,7 @@ public sealed class StandInActionsTests
         rig.Finish(cast);
 
         Assert.Equal(ActionOutcomeKind.Confirmed, cast.Outcome!.Value.Kind);
-        Assert.Equal(["02C2", "01C7"], rig.World.AnswerLog);
+        Assert.Equal(["02E9", "02C2", "01C7"], rig.World.AnswerLog); // M5 1 K2: the cast's mana (the fixture spell costs 1) comes first
         var entry = Assert.Single(rig.Q.Enchantments, e => e.SpellId == Strength);
         Assert.Equal((1, 7, 1u, 1800.0, rig.Session.State.Self.Guid), (entry.Layer, entry.SpellCategory, entry.PowerLevel, entry.Duration, entry.Caster));
         Assert.Equal(before + 10, rig.EffectiveStrength());
@@ -206,7 +206,7 @@ public sealed class StandInActionsTests
 
         Assert.Equal(ActionOutcomeKind.ServerError, fizzle.Outcome!.Value.Kind);
         Assert.Equal(StandInWorld.FizzleError, fizzle.Outcome.Value.Code);
-        Assert.Equal(["028A", "01C7"], rig.World.AnswerLog);
+        Assert.Equal(["02E9", "028A", "01C7"], rig.World.AnswerLog); // M5 1 K2: a fizzle keeps its 5 mana
         Assert.Equal(1, rig.World.Fizzles);
         Assert.Empty(rig.Q.Enchantments.Where(e => e.SpellId == Fizzler));
         var next = rig.Finish(rig.Session.Actions.Cast(Strength, ActionSource.Host));

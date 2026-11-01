@@ -1,4 +1,5 @@
 using Lifestone.Data.Animation;
+using Lifestone.Data.Physics;
 using Lifestone.Data.World;
 
 namespace Lifestone.Data.Motion;
@@ -24,6 +25,17 @@ namespace Lifestone.Data.Motion;
 /// (7.5, 999,999, true; OpenAC agrees on the first two). TODO(avatars): read them from the 11.6096 data (a D4-style
 /// read by the lead). <see cref="MaxInterpolatedVelocity"/> matters only for an object whose run rate is 0,
 /// <see cref="BigDistance"/> only as "far", and for a server object both speeds are the same (docs/avatars.md §7).</para>
+/// <para><b>Frames at retail's update rate</b> (M5 item 5 F7, D74). Retail's <c>frame_counter</c> counts
+/// <c>adjust_offset</c> calls, one per <c>CPhysicsObj::UpdateObjectInternal</c> step (11.6096 0x005161B0), and objects are
+/// only stepped behind <c>CPhysics::UseTime</c>'s 30 Hz gate (11.6096 0x0050A420, <see cref="PhysicsClock"/>): a step
+/// covers at least <see cref="PhysicsGlobals.MinQuantum"/> (1/30 s), so <see cref="ProgressCheckFrames"/> frames are at
+/// least 1/6 s of object time whatever the render rate. Lifestone steps the avatars on every drawn frame (about 240 Hz
+/// uncapped), so the drawn step here stays per call, and a call counts as a frame only when it closes
+/// <see cref="UpdateInterval"/> of accumulated quantum, as the gate opens: the time since the last counted frame is
+/// summed, and a call that brings it to the interval counts and restarts it at 0 (retail's <c>last_update = now</c>,
+/// nothing carried). A call of 1/30 s or more (a 30 Hz host, the player's gated object, a step of
+/// <see cref="Effects.ObjectClock"/>'s split gap) counts every time, as before. The gate's sum runs on every call, queued
+/// or not, as retail's world clock does, and a node's completion does not restart it.</para>
 /// <para>Not thread-safe. Allocation-free once the queue has grown.</para>
 /// </remarks>
 public sealed class InterpolationManager
@@ -37,7 +49,7 @@ public sealed class InterpolationManager
     /// <summary>A stalled node still counts as reached within this distance.</summary>
     public const float MinDistanceToReachPosition = 0.2f;
 
-    /// <summary>Progress is checked every this many frames.</summary>
+    /// <summary>Progress is checked every this many frames (update steps at retail's rate; see the remarks).</summary>
     public const int ProgressCheckFrames = 5;
 
     /// <summary>The progress a check needs, as a fraction of the maximum speed (0.30000001).</summary>
@@ -58,9 +70,21 @@ public sealed class InterpolationManager
     /// <summary>The failure count <c>InterpolateTo</c> sets for a position beyond the blip distance.</summary>
     public const int ArmedBlipFailures = 4;
 
+    /// <summary>The default <see cref="UpdateInterval"/>: retail's update step, <see cref="PhysicsGlobals.MinQuantum"/> (1/30 s).</summary>
+    public const double DefaultUpdateInterval = PhysicsGlobals.MinQuantum;
+
     private const double Epsilon = 0.00019999999;
 
+    /// <summary>
+    /// The rounding a sum of quanta may lose against <see cref="UpdateInterval"/>: retail's gate compares one difference of
+    /// its clock, the sum here adds several differences, so two 1/60 s quanta could fall a few ulps short of 1/30 s and
+    /// count a frame later than retail's gate would. A billionth of a second is far below any frame and far above the rounding.
+    /// </summary>
+    private const double SumRounding = 1e-9;
+
     private readonly List<CellFrame> _queue = new(MaxQueuedNodes + 1);
+
+    private double _sinceFrame;
 
     /// <summary>
     /// Retail <c>InterpolationManager::fUseAdjustedSpeed_</c>: step at <see cref="PositionContext.AdjustedMaxSpeed"/>
@@ -71,7 +95,15 @@ public sealed class InterpolationManager
     /// <summary>Retail <c>keep_heading</c>: the steps keep the object's heading (set by <see cref="InterpolateTo"/>).</summary>
     public bool KeepHeading { get; private set; }
 
-    /// <summary>Retail <c>frame_counter</c>: frames since the last progress check.</summary>
+    /// <summary>
+    /// The object time one frame of <see cref="FrameCounter"/> stands for: <see cref="PhysicsGlobals.MinQuantum"/>
+    /// (1/30 s), the update rate behind <c>CPhysics::UseTime</c>'s gate (see the remarks). 0 counts every
+    /// <see cref="AdjustOffset"/> call, the render rate Lifestone counted before D74; no option sets it (the offline
+    /// blip measure compares the two).
+    /// </summary>
+    public double UpdateInterval { get; set; } = DefaultUpdateInterval;
+
+    /// <summary>Retail <c>frame_counter</c>: frames (update steps at <see cref="UpdateInterval"/>) since the last progress check.</summary>
     public int FrameCounter { get; private set; }
 
     /// <summary>Retail <c>progress_quantum</c>: seconds since the last progress check.</summary>
@@ -145,7 +177,8 @@ public sealed class InterpolationManager
     /// <item>Within 0.05 m the node completes and the offset is left alone.</item>
     /// <item>The step speed is <see cref="MaxSpeedFactor"/> × the (adjusted) maximum speed, or
     /// <see cref="MaxInterpolatedVelocity"/> when that is below 0.0002.</item>
-    /// <item>Every <see cref="ProgressCheckFrames"/> frames the progress since the last check must reach
+    /// <item>Every <see cref="ProgressCheckFrames"/> frames (calls that close <see cref="UpdateInterval"/> of quantum,
+    /// retail's update steps; the remarks) the progress since the last check must reach
     /// <see cref="MinProgressRatio"/> of that speed (or the object sticks to something); if not, the node completes, as
     /// reached within 0.2 m and as a failure beyond (counted in <see cref="NodeFailCounter"/>), and the offset is left
     /// alone.</item>
@@ -156,6 +189,13 @@ public sealed class InterpolationManager
     /// </summary>
     public void AdjustOffset(ref AcFrame offset, double quantum, in PositionContext ctx)
     {
+        _sinceFrame += quantum;
+        var updateStep = _sinceFrame >= UpdateInterval - SumRounding;
+        if (updateStep)
+        {
+            _sinceFrame = 0.0;
+        }
+
         if (_queue.Count == 0 || !ctx.HasContact)
         {
             return;
@@ -175,7 +215,11 @@ public sealed class InterpolationManager
             maxSpeed = MaxInterpolatedVelocity;
         }
 
-        FrameCounter++;
+        if (updateStep)
+        {
+            FrameCounter++;
+        }
+
         ProgressQuantum = (float)(quantum + ProgressQuantum);
         if (FrameCounter >= ProgressCheckFrames)
         {

@@ -1,6 +1,7 @@
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Vitals;
 
@@ -17,12 +18,13 @@ public static class StationPreconditions
     /// <param name="needs">The needs.</param>
     /// <param name="state">The session's state.</param>
     /// <param name="log">Where the <c>buffed</c> TODO is logged, or null.</param>
-    public static string? Miss(StationNeeds needs, GameState state, ILogSink? log = null)
+    /// <param name="dungeon">The journey's dungeon ground (<see cref="JourneyContext.Dungeon"/>): the den the <c>where</c> need names. Required when the needs name <see cref="StationWhere.Den"/>.</param>
+    public static string? Miss(StationNeeds needs, GameState state, ILogSink? log = null, HuntingGround? dungeon = null)
     {
         ArgumentNullException.ThrowIfNull(needs);
         ArgumentNullException.ThrowIfNull(state);
         var self = state.Self;
-        if (!JourneyGrounds.At(needs.Where, self.Position))
+        if (!JourneyGrounds.At(needs.Where, self.Position, dungeon))
         {
             return "where";
         }
@@ -120,11 +122,13 @@ public static class StationPreconditions
 /// <param name="fields">Reads the scenario's verdict fields at its end (today's leg names).</param>
 /// <param name="ok">Judges the scenario by its leg's verdict rules from the scenario and its last status.</param>
 /// <param name="judgeWhy">Names the failing judges after <paramref name="ok"/> ran (M4 P5b fix FC-b1), or null: the station's <c>why=</c> when the scenario itself has no failure sentence.</param>
-public sealed class ScenarioStation(string name, StationNeeds needs, Func<JourneyContext, IScenario> create, Func<IScenario, string> fields, Func<IScenario, ScenarioStatus, bool> ok, Func<string?>? judgeWhy = null) : IStation
+/// <param name="sample">Called once when the scenario is made and again after each of its steps (M5 item 5 c1: the den-fight station's <see cref="PhysicsSpan"/> reads the host's physics cost); null for a station that samples nothing.</param>
+public sealed class ScenarioStation(string name, StationNeeds needs, Func<JourneyContext, IScenario> create, Func<IScenario, string> fields, Func<IScenario, ScenarioStatus, bool> ok, Func<string?>? judgeWhy = null, Action<JourneyContext>? sample = null) : IStation
 {
     private readonly Func<JourneyContext, IScenario> _create = create ?? throw new ArgumentNullException(nameof(create));
     private readonly Func<IScenario, string> _fields = fields ?? throw new ArgumentNullException(nameof(fields));
     private readonly Func<string?>? _judgeWhy = judgeWhy;
+    private readonly Action<JourneyContext>? _sample = sample;
     private readonly Func<IScenario, ScenarioStatus, bool> _ok = ok ?? throw new ArgumentNullException(nameof(ok));
 
     /// <inheritdoc />
@@ -172,7 +176,7 @@ public sealed class ScenarioStation(string name, StationNeeds needs, Func<Journe
             if (!_checked)
             {
                 _checked = true;
-                if (StationPreconditions.Miss(station.Needs, session.State, context.Log) is { } miss)
+                if (StationPreconditions.Miss(station.Needs, session.State, context.Log, context.Dungeon) is { } miss)
                 {
                     _precondition = miss;
                     context.Log.Warn(JourneyVerdict.LogCategory, $"station {station.Name}: precondition {miss} does not hold at its first step: ended without running (why=precondition:{miss})");
@@ -180,9 +184,11 @@ public sealed class ScenarioStation(string name, StationNeeds needs, Func<Journe
                 }
 
                 _scenario = station._create(context);
+                station._sample?.Invoke(context);
             }
 
             _status = _scenario!.Step(session, now);
+            station._sample?.Invoke(context);
             return _status;
         }
 

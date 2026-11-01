@@ -123,6 +123,9 @@ public sealed partial class PlayChecks
                 && sale.Source == ActionSource.Ui && sellCoinsAfter - sellCoinsBefore == payout && cleared && !(kitCell?.SellMarkShown ?? false),
             $"bracers={refused} ('{refusalText}') kit={listed} mark_shown={marked} predicted_payout={payout} clicked_sell={clickedSell} outcome={sale?.Outcome?.Kind.ToString() ?? "pending"} ({sale?.Outcome?.Detail}) coins {sellCoinsBefore} -> {sellCoinsAfter} list_cleared={cleared}");
 
+        // --- M5 7 S6 (D136): a right click on a shop row examines it, as every retail item list does (no vendor exception): the window names the row from the vendor's list and the answer fills it; no not-built dialog ---
+        await VendorRowExamineAsync(session, manager, shell, window);
+
         // The close button (both lists empty): the window and the floaty go.
         var close = window.GetChildRecursive(GameVendorPanel.CloseButtonId);
         if (close is not null)
@@ -148,6 +151,42 @@ public sealed partial class PlayChecks
     }
 
     /// <summary>A left click at the centre of <paramref name="element"/> with the real router (the pointer finds the element or one of its children first; false when something else covers the centre).</summary>
+    private async Task VendorRowExamineAsync(IGameSessionView session, UiElementManager manager, GamePlayScreen shell, GameVendorPanel window)
+    {
+        const string name = "vendor-row-right-click-examines-it";
+        window.OpenTab(GameVendorPanel.ItemsTabId);
+        await Frames(2);
+        var row = session.State.Vendor?.Entries.FirstOrDefault();
+        var cell = row is null ? null : window.ShopRow?.FindItem(row.Guid);
+        if (shell.PanelHost?.Examine is not { } examine || row is null || cell is null)
+        {
+            Check(name, false, $"setup: examine_panel={shell.PanelHost?.Examine is not null} row={row?.Name ?? "none"} cell={cell is not null}");
+            return;
+        }
+
+        var fillsBefore = examine.Fills;
+        var dialogsBefore = manager.Dialogs.OpenDialogs.Count();
+        var box = cell.ScreenBox;
+        manager.Input.MouseMove((box.X0 + box.X1) / 2, (box.Y0 + box.Y1) / 2);
+        manager.Input.MouseButton(UiMouseButton.Right, down: true);
+        manager.Input.MouseButton(UiMouseButton.Right, down: false);
+        var filled = await WaitFor(() => examine.Fills > fillsBefore && !examine.Pending, 10.0);
+        Check(
+            name,
+            filled && examine.IsOpen && examine.ShownGuid == row.Guid && examine.Title == row.Name && examine.Lines.Count > 0 && manager.Dialogs.OpenDialogs.Count() == dialogsBefore && window.ShopRow!.SelectedItemId == row.Guid,
+            $"row=0x{row.Guid:X8} '{row.Name}' open={examine.IsOpen} shown=0x{examine.ShownGuid:X8} title='{examine.Title}' filled={filled} lines=[{string.Join(" | ", examine.Lines)}] new_dialogs={manager.Dialogs.OpenDialogs.Count() - dialogsBefore} selected=0x{window.ShopRow!.SelectedItemId:X8}");
+        if (_framesDirectory is not null && filled)
+        {
+            HideLightsHud(); // the developer HUD would cover the windows; the shell's own windows stay
+            await Frames(4);
+            SaveExtraFrame(PanelFramesPlan.ExamineVendorRowFrame);
+            RestoreLightsHud();
+        }
+
+        examine.Close();
+        await Frames(1);
+    }
+
     private static bool ClickVendorElement(UiElementManager manager, UiElement element)
     {
         var box = element.ScreenBox;

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Lifestone.Client.Options;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Vitals;
 using Lifestone.Tests.Shared.Net;
@@ -17,7 +18,7 @@ public sealed partial class VitalsKeeperTests
 
     private static readonly uint[] HealSelfToIII = [6, 1157, HealSelfIII];
 
-    [GeneratedRegex(@"^vitals_min=(\d+|-)/(\d+|-)/(\d+|-) heals=\d+ kits=\d+ potions=\d+ rests=\d+ rest_s=\d+ transfers=\d+ mana_potions=\d+ stamina_potions=\d+$")]
+    [GeneratedRegex(@"^vitals_min=(\d+|-)/(\d+|-)/(\d+|-) heals=\d+ kits=\d+ potions=\d+ rests=\d+ rest_s=\d+ transfers=\d+ mana_potions=\d+ stamina_potions=\d+( mana_tries=\d+ mana_refusals=\d+ mana_landed=\d+ busy=\d+ resists=\d+ proved=\d+)?( mana_presses=\d+ dances=\d+ dances_landed=\d+)?$")] // M5 1 K5: the cast policy's fields once the keeper cast, the dance's where one ran
     private static partial Regex VerdictShape();
 
     [Fact]
@@ -372,5 +373,133 @@ public sealed partial class VitalsKeeperTests
         rig.Frame();
         Assert.Empty(rig.Used);
         Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("vitae 5% (reported, not acted on)", StringComparison.Ordinal));
+    }
+
+    // ------------------------------------------------------------------------------------------------ M5 1 K5: the mana order (D15, D27)
+
+    [Fact]
+    public void The_mana_order_is_todays_order_for_a_caster_without_Mana_Conversion_and_cast_mana_tries_0_reproduces_it_K5()
+    {
+        // The rig's character has no Mana Conversion: every try floor is the ceiling and a press lands only at its base, so the dance is today's single transfer. Both settings send the same actions.
+        var ceiling = new C2VitalsRig(new C2Character { Spells = [1676, 1677, StaminaToManaIII], Mana = 50 }, VitalsOptions.Default with { Mana = ManaOrderOptions.Ceiling });
+        ceiling.Keeper.NeedsFor(new VitalsNeeds(NextCastMana: 150));
+        Assert.Equal(VitalsKeeperState.Ready, ceiling.RunToEnd());
+
+        var order = new C2VitalsRig(new C2Character { Spells = [1676, 1677, StaminaToManaIII], Mana = 50 });
+        order.Keeper.NeedsFor(new VitalsNeeds(NextCastMana: 150));
+        Assert.Equal(VitalsKeeperState.Ready, order.RunToEnd());
+
+        Assert.Equal(ceiling.Used, order.Used);
+        Assert.Equal(ceiling.Keeper.Transfers, order.Keeper.Transfers);
+        Assert.Equal(0, ceiling.Keeper.Dances);
+        Assert.Equal(order.Keeper.Transfers, order.Keeper.DancesLanded); // each transfer was a dance that landed on its first press
+        Assert.Equal(order.Keeper.Dances, order.Keeper.DancePresses);
+        Assert.Equal(order.Keeper.DancesLanded, order.Keeper.Tally.Proved); // M5 1 fix B (G5): a landed press is proved by ACE's transfer line (Magic chat), so it ends Landed and counts as proved
+        Assert.Contains($" proved={order.Keeper.Tally.Proved}", order.Keeper.VerdictFields(), StringComparison.Ordinal);
+        Assert.Equal(0, ceiling.Keeper.Tally.Proved); // today's order asks no proof
+        Assert.Contains($" mana_presses={order.Keeper.DancePresses} dances={order.Keeper.Dances} dances_landed={order.Keeper.DancesLanded}", order.Keeper.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(" mana_tries=", order.Keeper.VerdictFields(), StringComparison.Ordinal);
+        Assert.DoesNotContain("mana_presses=", ceiling.Keeper.VerdictFields(), StringComparison.Ordinal);
+        Assert.Matches(VerdictShape(), order.Keeper.VerdictFields());
+    }
+
+    [Fact]
+    public void With_the_tries_on_a_station_need_is_met_at_its_try_floor_and_tries_0_waits_for_its_ceiling_K5()
+    {
+        var floor = new C2VitalsRig(new C2Character { Spells = [1676, 1677, StaminaToManaIII], Mana = 50 });
+        Assert.True(floor.Keeper.NeedsFor(new VitalsNeeds(NextCastMana: 150, NextCastFloor: 40))); // the station's own attempt tries the real spell from 40
+        Assert.Empty(floor.Used);
+        Assert.Contains(floor.R.H.Log.Lines, l => l.Contains("150 for the next cast (its try floor 40)", StringComparison.Ordinal));
+
+        var ceiling = new C2VitalsRig(new C2Character { Spells = [1676, 1677, StaminaToManaIII], Mana = 50 }, VitalsOptions.Default with { Mana = ManaOrderOptions.Ceiling });
+        Assert.False(ceiling.Keeper.NeedsFor(new VitalsNeeds(NextCastMana: 150, NextCastFloor: 40)));
+        Assert.Equal(VitalsKeeperState.Ready, ceiling.RunToEnd());
+        Assert.True(ceiling.Keeper.Transfers >= 1);
+
+        // Under the floor the order runs: the dance funds it.
+        var under = new C2VitalsRig(new C2Character { Spells = [1676, 1677, StaminaToManaIII], Mana = 35 });
+        Assert.False(under.Keeper.NeedsFor(new VitalsNeeds(NextCastMana: 150, NextCastFloor: 40)));
+        Assert.Equal(VitalsKeeperState.Ready, under.RunToEnd());
+        Assert.Equal(1, under.Keeper.DancesLanded);
+    }
+
+    [Fact]
+    public void The_keepers_cast_mana_options_parse_and_a_bad_one_is_a_named_error_K5()
+    {
+        var o = VitalsOptions.FromArguments(CommandLineArgument.ParseAll(["--cast-mana-tries=0", "--cast-mana-try-spacing-s=0.5"]));
+        Assert.Empty(o.Errors);
+        Assert.False(o.Mana.On);
+        Assert.Equal(0.5, o.Mana.TrySpacingSeconds);
+        var bad = VitalsOptions.FromArguments(CommandLineArgument.ParseAll(["--cast-mana-try-chance=2"]));
+        Assert.Equal("bad cast option: --cast-mana-try-chance: '2' is not more than 0 and at most 1", Assert.Single(bad.Errors));
+        Assert.Equal(ManaOrderOptions.DefaultTryChance, bad.Mana.TryChance);
+    }
+
+    // ------------------------------------------------------------------------------------------------ M5 3 m4: the keeper sees Mana Conversion (m5-keeper-tries-rig) and its tries are cut to the pass's cap (m5-keeper-tries-cap)
+
+    [Fact]
+    public void With_Mana_Conversion_a_heal_is_cast_from_its_try_floor_and_a_try_the_roll_lands_costs_the_rolled_mana_M5_3_m4()
+    {
+        // 20 mana is under Heal Self III's ceiling (30) and over its try floor at Mana Conversion 133; every roll takes the whole discount, so the cost is small and the try lands.
+        var rig = new C2VitalsRig(new C2Character { HealingClass = 1, Spells = HealSelfToIII, Health = 100, Mana = 20, ManaConversionRanks = 100 });
+        for (var i = 0; i < 30; i++)
+        {
+            rig.ManaRolls.Enqueue(0.0);
+        }
+
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        Assert.Equal(VitalsKeeperState.Ready, rig.RunToEnd());
+
+        Assert.Equal(["mode:8", "cast:1158", "cast:1158", "mode:1"], rig.Used);
+        Assert.Equal(0, rig.ManaRefused);
+        Assert.Equal(200u, rig.Health);
+        Assert.True(rig.Mana is > 0 and < 20, $"the rolled costs were charged (mana {rig.Mana})");
+        Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("from its try floor", StringComparison.Ordinal));
+        Assert.Contains(" mana_refusals=0 ", rig.Keeper.VerdictFields() + " ", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void With_Mana_Conversion_a_try_the_roll_refuses_is_a_0x0401_with_nothing_charged_and_the_next_try_lands_M5_3_m4()
+    {
+        // The first try's rolls pay the whole base (30) with 20 held: ACE refuses it 0x0401 and charges nothing; the keeper's tries send it again after the spacing and the next rolls land it.
+        var rig = new C2VitalsRig(new C2Character { HealingClass = 1, Spells = HealSelfToIII, Health = 100, Mana = 20, ManaConversionRanks = 100 });
+        for (var i = 0; i < 3; i++)
+        {
+            rig.ManaRolls.Enqueue(1.0);
+        }
+
+        for (var i = 0; i < 30; i++)
+        {
+            rig.ManaRolls.Enqueue(0.0);
+        }
+
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        Assert.Equal(VitalsKeeperState.Ready, rig.RunToEnd());
+
+        Assert.Equal(1, rig.ManaRefused);
+        Assert.Equal(["mode:8", "cast:1158", "cast:1158", "cast:1158", "mode:1"], rig.Used); // the refused try, then the two heals
+        Assert.Equal(200u, rig.Health);
+        Assert.Contains(" mana_refusals=1 ", rig.Keeper.VerdictFields() + " ", StringComparison.Ordinal);
+        Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("(0x0401", StringComparison.Ordinal) || l.Contains("mana try", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_real_spell_tries_are_cut_to_the_actions_the_pass_has_left_M5_3_m4()
+    {
+        // Every roll pays the whole base, so with 20 mana every try is refused. 40 Mana Conversion tries would send 40 casts after the mode change (an action too): 41 in a pass capped at 40. The attempt is cut to the 39 left.
+        var options = VitalsOptions.Default with { Mana = new ManaOrderOptions { Tries = ManaOrderOptions.MaxTries, TrySpacingSeconds = 0 } };
+        var rig = new C2VitalsRig(new C2Character { HealingClass = 1, Spells = HealSelfToIII, Health = 100, Mana = 20, ManaConversionRanks = 100 }, options);
+        for (var i = 0; i < 300; i++)
+        {
+            rig.ManaRolls.Enqueue(1.0);
+        }
+
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        rig.RunToEnd();
+
+        var casts = rig.Used.Count(u => u.StartsWith("cast:", StringComparison.Ordinal));
+        Assert.Equal(VitalsKeeper.MaxActionsPerPass - 1, casts); // the mode change took one of the 40
+        Assert.Equal(casts, rig.ManaRefused);
+        Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("tries are spent", StringComparison.Ordinal) || l.Contains("Mana Conversion tries refused", StringComparison.Ordinal));
     }
 }

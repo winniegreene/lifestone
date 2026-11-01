@@ -23,6 +23,9 @@ public sealed record HeadlessRunOptions
     /// <summary>The default limit on a whole run, in seconds on the session clock.</summary>
     public const double DefaultQuitAfterSeconds = 180;
 
+    /// <summary>No time limit (M5 4 h1): the run ends only by its scenario (<c>--scenario=autopilot</c>'s stop rules or a stop request) or by the person (Ctrl+C). The limit's message never prints it.</summary>
+    public const double Unlimited = double.PositiveInfinity;
+
     /// <summary>The longest wait between two frames, in seconds (the loop's idle).</summary>
     public const double FrameWaitSeconds = 0.016;
 
@@ -218,6 +221,7 @@ public sealed class HeadlessRunner : IDisposable
             HoltburgLapsScenario h => (h.Login.Character, h.Login.CreateCharacter),
             WayfindScenario w => (w.Login.Character, w.Login.CreateCharacter),
             Scenarios.Journey.HeadlessJourneyScenario j => ((string?)j.Character, (string?)null), // M4 P5b J4: the journey enters its plan's character, creates none
+            HeadlessAutopilotScenario p => ((string?)p.Character, (string?)null), // M5 4 h1: the autopilot enters the mage plan's character, creates none
             LoginCheckScenario c => ((string?)c.Character, (string?)c.Character), // the check creates its character when it is missing
             _ => ((string?)null, (string?)null),
         };

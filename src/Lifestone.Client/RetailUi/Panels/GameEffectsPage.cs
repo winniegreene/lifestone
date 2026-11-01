@@ -1,5 +1,6 @@
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.RetailUi.Core;
+using Lifestone.Client.RetailUi.Rendering;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Text;
 using Lifestone.Client.RetailUi.Widgets;
@@ -60,6 +61,7 @@ public sealed class GameEffectsPage : IGamePanel, IUiElementListener, IDisposabl
     private readonly IDisposable _qualities;
     private bool _shown;
     private bool _dirty = true;
+    private bool _iconsPending; // a line's composed spell icon was still decoding: Step tries again
     private uint _selected;
     private uint _probe;
 
@@ -172,6 +174,10 @@ public sealed class GameEffectsPage : IGamePanel, IUiElementListener, IDisposabl
         else
         {
             WriteTimes();
+            if (_iconsPending)
+            {
+                ShowIcons();
+            }
         }
     }
 
@@ -245,7 +251,7 @@ public sealed class GameEffectsPage : IGamePanel, IUiElementListener, IDisposabl
                 place++; // GetSortedInsertionPlace: stop at the first line whose name is not before this one
             }
 
-            _lines.Insert(place, new Line(entry, spell.Id, spell.Name, spell.IconId, null, null, NothingShown));
+            _lines.Insert(place, new Line(entry, spell.Id, spell.Name, UiSpellIcon.Of(spell), null, null, NothingShown));
         }
 
         if (_probe != 0)
@@ -261,10 +267,11 @@ public sealed class GameEffectsPage : IGamePanel, IUiElementListener, IDisposabl
             if (list.AddItemFromTemplateList(0) is { } item)
             {
                 (item.GetChildRecursive(RowNameId) as UiTextElement)?.SetText(line.Name);
-                item.GetChildRecursive(RowIconId)?.SetImageByDid(line.IconId, UiDrawMode.AlphaBlend);
                 _lines[i] = line with { Item = item, Time = item.GetChildRecursive(RowTimeId) as UiTextElement };
             }
         }
+
+        ShowIcons();
 
         WriteTimes();
         if (winners > 0)
@@ -283,6 +290,38 @@ public sealed class GameEffectsPage : IGamePanel, IUiElementListener, IDisposabl
             // --retail-effects-stale-info (UiRetailGlitches.EffectsStaleInfo) keeps retail's early return above.
             _selected = 0;
             _info?.SetText(string.Empty);
+        }
+    }
+
+    /// <summary>
+    /// <c>EffectInfoRegion::EffectInfoRegion</c> (11.4186 0x004F2560)'s icon: the spell's composed picture (<c>ClientMagicSystem::GetSpellIcon</c>, 11.6096 0x00569990; <see cref="UiSpellIcons"/>, M5 D147) drawn with three-channel alpha.
+    /// A picture whose layers are still decoding is drawn on a later frame.
+    /// </summary>
+    private void ShowIcons()
+    {
+        _iconsPending = false;
+        for (var i = 0; i < _lines.Count; i++)
+        {
+            var line = _lines[i];
+            if (line.IconShown || line.Item?.GetChildRecursive(RowIconId) is not { } icon)
+            {
+                continue;
+            }
+
+            switch (_context.Manager.SpellIcons.TryGetSpell(line.Icon, out var picture))
+            {
+                case UiImageLookup.Ready:
+                    icon.SetBlitMode(UiBlitMode.ThreeChannelAlpha);
+                    icon.SetGeneratedImage(picture!);
+                    _lines[i] = line with { IconShown = true };
+                    break;
+                case UiImageLookup.Pending:
+                    _iconsPending = true;
+                    break;
+                default:
+                    _lines[i] = line with { IconShown = true }; // no image services: the line keeps no icon (the composer logged it)
+                    break;
+            }
         }
     }
 
@@ -397,5 +436,5 @@ public sealed class GameEffectsPage : IGamePanel, IUiElementListener, IDisposabl
         _qualities.Dispose();
     }
 
-    private readonly record struct Line(ActiveEnchantment Entry, uint SpellId, string Name, uint IconId, UiElement? Item, UiTextElement? Time, long Shown);
+    private readonly record struct Line(ActiveEnchantment Entry, uint SpellId, string Name, UiSpellIcon Icon, UiElement? Item, UiTextElement? Time, long Shown, bool IconShown = false);
 }

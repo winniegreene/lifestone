@@ -479,7 +479,7 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
     }
 
     [RequiresLocalDatsFact]
-    public void The_option_boxes_show_the_player_options_ghosted_and_a_click_changes_nothing()
+    public void The_option_boxes_show_the_player_options_unghosted_and_a_click_asks_the_server()
     {
         using var s = Enter();
         s.ChangeMode(CombatMode.Melee);
@@ -487,13 +487,20 @@ public sealed class GameCombatPanelTests(DatSetFixture fixture) : IClassFixture<
         foreach (var box in s.Combat.OptionCheckboxes)
         {
             Assert.NotNull(box.Option);
-            Assert.False(box.Option!.Honoured);
-            Assert.Equal(UiStateIds.Ghosted, box.State); // nothing in M3 reads an attack option: ghosted, as the options page has them
-            Assert.Equal(s.Screen.Options!.Get(box.Option), box.Current);
+            Assert.NotEqual(UiStateIds.Ghosted, box.State); // M5 6 u1 (D32): every option is settable
+            Assert.Equal(s.Screen.Options!.Get(box.Option!), box.Current);
             var before = box.Current;
+            if (box.TogglesItself)
+            {
+                box.Current = !before; // the layout's boolean button flips itself on a real click, then tells the page
+            }
+
             box.BroadcastElementMessage(UiMessageIds.ButtonClick);
-            Assert.Equal(before, box.Current);
+            Assert.Equal(before, box.Current); // this rig's stand-in has no world part (AnswerLocally), so it refuses the send and the box goes back; the answered path is StandInRetail6Tests and the play-check
+            Assert.Equal(before, s.Screen.Options.Get(box.Option!));
         }
+
+        Assert.Contains(s.Rig.Log.Lines, static l => l.Contains("SetCharacterOptions options1=", StringComparison.Ordinal)); // a click asked for both words
     }
 
     [RequiresLocalDatsFact]

@@ -105,7 +105,9 @@ public sealed partial class UiElementManager
         Input = new UiInputRouter(this);
         Cursor = new UiCursorController(this);
         Busy = new UiBusyCount(services.Log);
+        TargetMode = new UiTargetMode(this);
         Dialogs = new DialogFactory(this);
+        SpellIcons = new Widgets.UiSpellIcons(this);
         RootElement = CreateHollowElement();
         _activatable.Add(RootElement);
         Roots = _roots.AsReadOnly();
@@ -126,8 +128,14 @@ public sealed partial class UiElementManager
     /// <summary>The UI's busy count (<c>ClientUISystem::IncrementBusyCount</c>; docs/retail-ui.md section 21.8): portal space raises it for its whole sequence.</summary>
     public UiBusyCount Busy { get; }
 
+    /// <summary>The target mode (<c>ClientUISystem::targetMode</c>, M5 7 S6): the toolbar's Examine and Use with nothing selected ask for the object the next click names.</summary>
+    public UiTargetMode TargetMode { get; }
+
     /// <summary>The dialogs (<c>DialogFactory</c>; R15).</summary>
     public DialogFactory Dialogs { get; }
+
+    /// <summary>The composed spell and component icons, each made once and kept (<c>ClientMagicSystem::GetSpellIcon</c>, 11.6096 0x00569990; M5 D147).</summary>
+    public Widgets.UiSpellIcons SpellIcons { get; }
 
     /// <summary>The root element (<c>m_pRootElement</c>): a Field the size of the display; the mode roots are its children.</summary>
     public UiElement RootElement { get; }
@@ -226,6 +234,7 @@ public sealed partial class UiElementManager
     {
         Now = now;
         Input.UseTime(now);
+        TargetMode.UseTime(); // ClientUISystem::UseTime: a mode a press marked to end ends after that press was handled
         var count = _ticks.Count;
         if (count != 0)
         {
@@ -639,9 +648,21 @@ public sealed partial class UiElementManager
         return root;
     }
 
+    /// <summary>
+    /// Raised with the old display size just before the display size changes and the root is resized (a window drag, a scale change, a forced resolution), while the windows are still where they were:
+    /// the game screen writes its layout under the old size's name then (M5 6 fix, 6-R3).
+    /// </summary>
+    public event Action<(int Width, int Height)>? DisplayChanging;
+
     private void UpdateDisplay()
     {
-        (DisplaySize, DisplayOrigin) = ComputeDisplay();
+        var next = ComputeDisplay();
+        if (next.Size != DisplaySize)
+        {
+            DisplayChanging?.Invoke(DisplaySize);
+        }
+
+        (DisplaySize, DisplayOrigin) = next;
         RootElement?.ResizeTo(DisplaySize.Width, DisplaySize.Height);
         Input?.RequestMouseHitTest();
     }

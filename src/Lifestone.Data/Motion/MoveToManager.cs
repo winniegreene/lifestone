@@ -172,6 +172,12 @@ public sealed class MoveToManager
     /// </summary>
     public WeenieError LastCancelReason { get; private set; }
 
+    /// <summary>
+    /// How many MoveTos <see cref="CancelMoveTo"/> has cancelled (Lifestone's diagnostic, M5 item 5 F6; retail keeps no count): a reader that noted it when a
+    /// MoveTo began tells a cancel (with <see cref="LastCancelReason"/>) from a MoveTo that ended by arriving.
+    /// </summary>
+    public int Cancels { get; private set; }
+
     /// <summary>Retail <c>is_moving_to</c> (0x00529220 / 0x00529E30): a movement is under way.</summary>
     public bool IsMovingTo => MovementType != 0;
 
@@ -340,6 +346,7 @@ public sealed class MoveToManager
         }
 
         LastCancelReason = reason;
+        Cancels++;
         _pending.Clear();
         CleanUp();
         _host.StopCompletely();

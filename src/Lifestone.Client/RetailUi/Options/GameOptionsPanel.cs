@@ -58,8 +58,9 @@ public sealed class UiOptionCheckbox : UiButton
 /// <item><b>Character</b> (class 0x10000027, <c>gmCharacterSettingsUI</c>, listbox 0x100001FA): the headers, separators and check boxes <c>InitOptions</c> (11.6096 0x004A05B0) adds through
 /// <c>PlayerOptionPage::AddHeader</c> (0x004F3510) and <c>AddToggleOption</c> (0x004F35F0) from the list templates 0, 1 and 2, with the buttons Apply (0x100001FC), Reset (0x100001FD) and Defaults
 /// (0x100001FE). A click changes the box only; <c>PlayerOptionPage::OnOptionChanged</c> (0x004F3430) enables Apply and Reset while something differs and ghosts them otherwise. Apply writes the changed
-/// options into <see cref="GameOptions"/> (retail's <c>UIOption_Checkbox::Apply</c>, 0x00487020, wrote <c>PlayerModule::SetOption</c> and so the server; D42 keeps it in the session). The options Lifestone
-/// honours are listed in <see cref="PlayerOptionTable"/>; every other box shows the value and is ghosted.</item>
+/// options into <see cref="GameOptions"/> and so to the server (retail's <c>UIOption_Checkbox::Apply</c>, 0x00487020, wrote <c>PlayerModule::SetOption</c>; M5 6 u1, D32: all 49 boxes are settable,
+/// the words go out in one packet, and ACE returns them with the next login's description). The few options with a client-side effect are listed in <see cref="PlayerOptionTable"/>; changing any other
+/// logs <c>TODO(g6-option-effects)</c> once, and the panel claims no effect for it.</item>
 /// <item><b>Gameplay Options</b> (class 0x10000029, <c>gmGameplayOptionsUI::ListenToElementMessage</c> 0x0049E390): "Exit to Character Selection" (0x10000203) is the logout (<see cref="GameLogout"/>); the
 /// others answer a click with the "not in M2" message (<c>TODO(g6-options-buttons)</c>: keyboard configuration, mouse turning, help files, urgent assistance and abuse reports open web pages or windows Lifestone has not built; Exit Game
 /// asks the same confirmation as the logout and then queues the epilogue, which quits the session and closes the application).</item>
@@ -111,6 +112,7 @@ public sealed class GameOptionsPanel : IUiElementListener, IDisposable
         _logout = logout;
         host.SetPageHandler(PanelId, Open);
         _subscription = context.Session.Events.Subscribe<Lifestone.Client.Session.Contracts.QualitiesChanged>(OnQualitiesChanged);
+        _options.Changed += OnOptionChanged;
         if (host.ElementFor(PanelId) is { } page)
         {
             BuildCharacterPage(page);
@@ -173,8 +175,28 @@ public sealed class GameOptionsPanel : IUiElementListener, IDisposable
         }
     }
 
+    // An option changed somewhere else (the combat window's boxes, a refused send): the boxes the player is not editing follow it.
+    private void OnOptionChanged(PlayerOptionDef option)
+    {
+        foreach (var box in _boxes)
+        {
+            if (box.Option is { } def && !box.Changed)
+            {
+                var value = _options.Get(def);
+                box.Saved = value;
+                box.Current = value;
+            }
+        }
+
+        UpdateButtons();
+    }
+
     /// <inheritdoc/>
-    public void Dispose() => _subscription.Dispose();
+    public void Dispose()
+    {
+        _options.Changed -= OnOptionChanged;
+        _subscription.Dispose();
+    }
 
     /// <summary>Takes the boxes' values from the options (<c>RecvNotice_RefreshOptionsPanel</c>) and sets the buttons.</summary>
     public void Refresh()
@@ -192,12 +214,13 @@ public sealed class GameOptionsPanel : IUiElementListener, IDisposable
         UpdateButtons();
     }
 
-    /// <summary>Retail's Apply: writes the changed boxes' options (the honoured ones; a ghosted box cannot differ).</summary>
+    /// <summary>Retail's Apply: sends the changed boxes' options to the server (<see cref="GameOptions.Apply"/>); a refused send leaves the boxes as they were shown.</summary>
     public void ApplyChanges()
     {
-        foreach (var box in _boxes)
+        var changed = _boxes.Where(static b => b.Option is not null && b.Changed).ToList();
+        if (changed.Count > 0 && _options.Apply([.. changed.Select(static b => (b.Option!, b.Current))]))
         {
-            if (box.Option is { Honoured: true } option && box.Changed && _options.TrySet(option, box.Current))
+            foreach (var box in changed)
             {
                 box.Saved = box.Current;
             }
@@ -217,12 +240,12 @@ public sealed class GameOptionsPanel : IUiElementListener, IDisposable
         UpdateButtons();
     }
 
-    /// <summary>Retail's Defaults: every honoured box to the option's default (a ghosted box keeps its value).</summary>
+    /// <summary>Retail's Defaults (<c>UIOption_Checkbox::RestoreDefaultValue</c>, 0x00486CF0): every box to the option's default; Apply then sends them.</summary>
     public void RestoreDefaults()
     {
         foreach (var box in _boxes)
         {
-            if (box.Option is { Honoured: true } option)
+            if (box.Option is { } option)
             {
                 box.Current = option.Default;
             }
@@ -248,12 +271,6 @@ public sealed class GameOptionsPanel : IUiElementListener, IDisposable
         switch (message.Element)
         {
             case UiOptionCheckbox box:
-                if (box.Option is not { Honoured: true })
-                {
-                    box.Current = box.Saved; // a ghosted box does not change
-                    return UiListenResult.Handled;
-                }
-
                 if (!box.TogglesItself)
                 {
                     box.Current = !box.Current;
@@ -332,11 +349,6 @@ public sealed class GameOptionsPanel : IUiElementListener, IDisposable
                 if (strings.TryReference(OptionTableEnum, option.LabelToken, out var label))
                 {
                     box.SetStringInfo(label);
-                }
-
-                if (!option.Honoured)
-                {
-                    box.SetState(UiStateIds.Ghosted);
                 }
 
                 box.RegisterForElementMessages(this);

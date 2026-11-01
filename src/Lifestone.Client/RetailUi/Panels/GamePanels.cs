@@ -69,6 +69,7 @@ public sealed partial class GamePanels : IDisposable
         RegisterC1Classes(registry);
         RegisterC2Classes(registry);
         RegisterD1Classes(registry);
+        registry.Register(UiFloatyExamination.RetailClassId, static (in UiElementInit init) => new UiFloatyExamination(init)); // gmFloatyExaminationUI::Register (11.6096 0x004D4B30; M5 7 S4)
     }
 
     private static partial void RegisterA1Classes(UiClassRegistry registry);

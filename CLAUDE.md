@@ -4,11 +4,13 @@ Lifestone is a faithful, single-player Asheron's Call. It is a Godot 4.7 (.NET, 
 - renders the user's own retail dats;
 - talks the AC protocol to a bundled ACE server on localhost.
 
-Read `README.md` and `docs/goals.md` for the project. The current milestone is **M5, "the first dungeon"**
-([docs/milestones/m5-first-dungeon.md](docs/milestones/m5-first-dungeon.md), the spec; its plan, gates, decisions and
-open TODOs in [docs/milestones/m5-plan.md](docs/milestones/m5-plan.md)): a mage that plays the Black Spawn Den by
-itself for a day, cheat-free, with the person free to take the keys; planned 2026-10-25; item 0 done, item 1 next. M4
-([docs/milestones/m4-fights-and-loot.md](docs/milestones/m4-fights-and-loot.md), "fights and loot"; its plan,
+Read `README.md` and `docs/goals.md` for the project. The current milestone is **M6, "the level ladder"**, in planning: a fresh mage that climbs from level 1 on its own over
+varied grounds, cheat-free; the planner's prompt is `cache/m6/lead-prompt.md` and its draft `cache/m6/m6-the-ladder-draft.md`
+(both gitignored); the seed list of grounds is in [docs/milestones/m5-first-dungeon.md](docs/milestones/m5-first-dungeon.md)
+section 7.1. M5 ([docs/milestones/m5-first-dungeon.md](docs/milestones/m5-first-dungeon.md), **"the first dungeon"**: a mage
+that plays the Black Spawn Den by itself for hours, cheat-free; its plan, gates, decisions and open TODOs in
+[docs/milestones/m5-plan.md](docs/milestones/m5-plan.md), section 9's last table the rows placed M6) is complete (2026-10-31).
+M4 ([docs/milestones/m4-fights-and-loot.md](docs/milestones/m4-fights-and-loot.md), "fights and loot"; its plan,
 gates, decisions and open TODOs in [docs/milestones/m4-plan.md](docs/milestones/m4-plan.md), §9 the rows placed "M5"),
 M3 ([docs/milestones/m3-lights-and-sound.md](docs/milestones/m3-lights-and-sound.md), "fights and sound" in prose;
 its plan [docs/milestones/m3-plan.md](docs/milestones/m3-plan.md)) and M2

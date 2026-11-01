@@ -23,8 +23,11 @@ public sealed class J7RingOfFireDatTests(DatSetFixture fixture, ITestOutputHelpe
 
         foreach (var account in new[] { "test", "someone-else" })
         {
-            var held = GearKit.Build(spells, account, heroRing: true).Items.Where(i => i.Kind == GearKind.Component).Select(i => i.Wcid).ToHashSet();
-            foreach (var id in SpellFormulaRules.CustomizeForAccount(ring.Formula, ring.FormulaVersion, account).Where(c => c != 0).Distinct())
+            // M5 3 m1: the hero mage casts the ring on the foci formula (the Diamond Scarab, which no profile carries yet: a named gap, MageKitTests), so the ground here holds a carried Diamond Scarab line.
+            var den = Lifestone.Client.Session.Grounds.GroundCatalog.Get(Lifestone.Client.Session.Scenarios.FightOptions.DefaultGround);
+            var ground = den.Supplies.StockOf(7299) is not null ? den : den with { Supplies = den.Supplies with { Stock = [.. den.Supplies.Stock, new Lifestone.Client.Session.Grounds.StockLine(7299, "Diamond Scarab", 10, 2, 2)] } }; // M5 7 F10: the den carries it now
+            var held = GearKit.Build(spells, account, heroRing: true, ground: ground).Items.Where(i => i.Kind == GearKind.Component).Select(i => i.Wcid).ToHashSet();
+            foreach (var id in GearKit.FociFormulaCounts(ring.Formula).Keys)
             {
                 Assert.True(ComponentWeenies.TryGetByComponent(id, out var weenie), $"component {id}");
                 Assert.True(held.Contains(weenie.Wcid), $"{account}: the Ring of Fire needs component {id} (wcid {weenie.Wcid}), which the kit does not carry");

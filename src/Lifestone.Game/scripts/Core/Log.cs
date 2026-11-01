@@ -33,7 +33,10 @@ public static class Log
     private static readonly ConcurrentQueue<(LogLevel Level, string Line)> PendingGodot = new();
     private static readonly Lock FileLock = new();
     private static StreamWriter? _file;
+    private static LogRoller? _roller;
+    private static readonly FileRollWriter RollWriter = new();
     private static int _mainThreadId = -1;
+    private static int _logKeep = 1; // --log-keep: rolled files kept (1 = lifestone.1.log only, 0 = all; M5 7 F17)
 
     /// <summary>Minimum level written (default Info; <c>--log-level=debug</c> lowers it).</summary>
     public static LogLevel MinimumLevel { get; set; } = LogLevel.Info;
@@ -52,6 +55,8 @@ public static class Log
     {
         _mainThreadId = System.Environment.CurrentManagedThreadId;
         Copies = Lifestone.Client.Play.PlayOptions.Parse(OS.GetCmdlineUserArgs()).LogCopies; // --log-copies (a bad value is reported by GameOptions; the default stays)
+        var logMaxMb = Lifestone.Client.Play.PlayOptions.Parse(OS.GetCmdlineUserArgs()).LogMaxMb; // --log-max-mb: the size cap, 0 = none (M5 item 7)
+        _logKeep = Lifestone.Client.Play.PlayOptions.Parse(OS.GetCmdlineUserArgs()).LogKeep; // --log-keep: how many rolled files stay, 0 = all (M5 7 F17)
         Lifestone.Game.Diagnostics.GodotErrorLogger.Install(); // Godot's own errors counted in process, from the start (the soak line's godot_errors)
         try
         {
@@ -63,10 +68,31 @@ public static class Log
                 File.Copy(path, Path.Combine(directory, "lifestone.1.log"), overwrite: true);
             }
 
+            // M5 7 F17: the numbered files past .1 belong to an earlier run (the soak copies them into its run folder when it ends); a new run begins with at most .1.
+            var folder = new DirectoryLogFolder(directory);
+            foreach (var old in LogFileRotation.RolledFilesOldestFirst(folder.FileNames()))
+            {
+                if (LogFileRotation.IndexOf(old) > 1)
+                {
+                    try
+                    {
+                        folder.Delete(old);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        GD.PushWarning($"[log] cannot delete the old {old}: {ex.Message}");
+                    }
+                }
+            }
+
             lock (FileLock)
             {
                 _file = new StreamWriter(path, append: false, new UTF8Encoding(false)) { AutoFlush = false };
                 FilePath = path;
+                _roller = new LogRoller(
+                    (long)logMaxMb * 1024 * 1024,
+                    RollWriter,
+                    rolls => Format(LogLevel.Info, "log", "log rolled", [("rolls", rolls), ("previous", "lifestone.1.log"), ("max_mb", logMaxMb), ("keep", _logKeep)]));
             }
         }
         catch (Exception ex)
@@ -124,7 +150,7 @@ public static class Log
         var line = Format(level, category, message, fields);
         lock (FileLock)
         {
-            _file?.WriteLine(line);
+            WriteToFile(line);
             if (level >= LogLevel.Warning)
             {
                 _file?.Flush();
@@ -160,6 +186,7 @@ public static class Log
             _file?.Flush();
             _file?.Dispose();
             _file = null;
+            _roller = null;
         }
     }
 
@@ -184,6 +211,113 @@ public static class Log
         {
             _file?.Flush();
         }
+    }
+
+    // The one write path of the file, under FileLock: the roller counts the bytes and rolls the file at the cap (before Initialize or after Shutdown there is no file and the line is dropped).
+    private static void WriteToFile(string line)
+    {
+        if (_roller is { } roller)
+        {
+            roller.WriteLine(line);
+        }
+        else
+        {
+            _file?.WriteLine(line);
+        }
+    }
+
+    /// <summary>The roller's file: the current <c>lifestone.log</c> is closed, renamed to <c>lifestone.1.log</c> (replacing an older one) and a new one opened. Called under <c>FileLock</c>.</summary>
+    private sealed class FileRollWriter : ILogRollWriter
+    {
+        private readonly LogReopenGate _reopen = new();
+
+        public void WriteLine(string line)
+        {
+            if (_file is null)
+            {
+                TryReopen(); // 7-R4: a failed reopen after a roll must not drop the log for the rest of the run
+            }
+
+            _file?.WriteLine(line);
+        }
+
+        // Under FileLock. Opens lifestone.log for appending when there is no file (the reopen after a roll failed), at most once per the gate's interval; warns once.
+        private void TryReopen()
+        {
+            if (FilePath is not { } path || !_reopen.MayTry(System.Environment.TickCount64))
+            {
+                return;
+            }
+
+            try
+            {
+                _file = new StreamWriter(path, append: true, new UTF8Encoding(false)) { AutoFlush = false };
+                _reopen.Reopened();
+                GD.PushWarning("[log] lifestone.log is open again after a failed reopen (lines written while it was closed were dropped)");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (_reopen.WarnOnce())
+                {
+                    GD.PushWarning($"[log] cannot reopen lifestone.log: {ex.Message}; trying again every few seconds"); // once, not per try
+                }
+            }
+        }
+
+        public bool Roll()
+        {
+            if (_file is null)
+            {
+                TryReopen();
+                return false;
+            }
+
+            if (FilePath is not { } path)
+            {
+                return false;
+            }
+
+            _file.Flush();
+            _file.Dispose();
+            _file = null;
+            var ok = false;
+            try
+            {
+                LogFileRotation.Roll(new DirectoryLogFolder(Path.GetDirectoryName(path)!), _logKeep); // lifestone.log to .1, the older ones up one, those past --log-keep deleted
+                ok = true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                GD.PushWarning($"[log] cannot roll lifestone.log: {ex.Message}"); // the file is reopened below and keeps growing; the roller tries again after another cap's worth
+            }
+
+            try
+            {
+                _file = new StreamWriter(path, append: !ok, new UTF8Encoding(false)) { AutoFlush = false };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (_reopen.WarnOnce())
+                {
+                    GD.PushWarning($"[log] cannot reopen lifestone.log after a roll: {ex.Message}; the next write or roll tries again");
+                }
+
+                _reopen.MayTry(System.Environment.TickCount64); // this failure is the first try of the interval
+                return false;
+            }
+
+            return ok;
+        }
+    }
+
+    // The real log folder for LogFileRotation (Client does no file I/O).
+    private sealed class DirectoryLogFolder(string directory) : ILogFolder
+    {
+        public IReadOnlyList<string> FileNames() => [.. Directory.EnumerateFiles(directory).Select(f => Path.GetFileName(f)!)];
+
+        public void Move(string from, string to) => File.Move(Path.Combine(directory, from), Path.Combine(directory, to), overwrite: true);
+
+        public void Delete(string name) => File.Delete(Path.Combine(directory, name));
     }
 
     internal static string Format(LogLevel level, string category, string message, (string Key, object? Value)[] fields)

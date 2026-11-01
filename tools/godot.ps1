@@ -60,7 +60,7 @@
 
 .PARAMETER WorkstationGC
     Run Godot with .NET's default workstation garbage collector. By default this script gives the Godot process (only
-    it) DOTNET_gcServer=1: server GC with dynamic heap counts collects in parallel and cut the GC pauses by a third to a half in
+    it) DOTNET_gcServer=1 with 8 heaps (DOTNET_GCHeapCount=8, M5 7 D151): server GC collects in parallel and cut the GC pauses by a third to a half in
     the performance measurements (docs/game-core.md section 7). The Godot editor binary ignores the project's runtimeconfig, so an
     environment variable is the only way to select it for editor and -Run launches.
 
@@ -211,6 +211,10 @@ $godotEnv['DOTNET_gcServer'] = if ($WorkstationGC) { '0' } else { '1' }
 # M4 P5b: the cap did not cure it. The cause was the shell's no-GC window, whose end left gen 0 the region's budget (up to 512 MiB); NoGcWindow now closes a held window with one gen-0 collection.
 # The cap stays as it is (not measured on its own since).
 if (-not $WorkstationGC) { $godotEnv['DOTNET_GCgen0MaxBudget'] = '2000000' }
+# M5 7 D151 (TODO(login-burst-frame)): a fixed 8 server-GC heaps for the Godot process (which turns DATAS, the dynamic heap count, off). Under DATAS the heap count at login varied, and the
+# collection that closes the shell's no-GC window (NoGcWindow) took 11 to 108 ms (75 and 135 ms on 2026-10-31's item-end gate): 3 of 8 logins over 50 ms. With 8 heaps, 8 of 8 logins at most 39 ms, that
+# collection 7 to 22 ms, the login's GC pause in all 11 to 31 ms against 55 to 221 ms, for about 150 MB more managed memory (managed_mb 251-340 against 125-174). docs/game-core.md section 7.
+if (-not $WorkstationGC) { $godotEnv['DOTNET_GCHeapCount'] = '8' }
 if ($IsolateUserData) {
     $dataRoot = if ($UserDataSlot) { Join-Path $repoRoot "cache\godot\slot-$UserDataSlot" } else { Join-Path $repoRoot 'cache\godot' }
     $roaming = Join-Path $dataRoot 'roaming'

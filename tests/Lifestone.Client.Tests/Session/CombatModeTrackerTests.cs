@@ -89,12 +89,12 @@ public sealed class CombatModeTrackerTests
         r.Tick();
 
         Assert.Single(r.H.Net.Of(FakeSendKind.ChangeCombatMode));
-        Assert.Empty(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        Assert.Empty(r.H.Net.SelfCasts(WorldActionRig.Player));
 
         r.CombatModeIs(CombatModes.Magic);
         r.Tick();
         Assert.Equal(ActionOutcomeKind.Confirmed, toMagic.Outcome!.Value.Kind);
-        Assert.Single(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        Assert.Single(r.H.Net.SelfCasts(WorldActionRig.Player));
         Assert.Single(r.H.Net.Of(FakeSendKind.ChangeCombatMode)); // the change back waits for the cast
 
         r.Enchant(100);

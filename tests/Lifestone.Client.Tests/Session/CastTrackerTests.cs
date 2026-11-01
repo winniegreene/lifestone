@@ -34,15 +34,17 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
     }
 
     [Fact]
-    public void A_self_buff_sends_0x0048_and_is_confirmed_by_its_02C2_not_another_spells()
+    public void A_self_buff_sends_0x004A_at_the_player_and_is_confirmed_by_its_02C2_not_another_spells()
     {
+        // m5-buff-effects-drawn: retail's ClientMagicSystem::CastSpell (11.6096 0x00568DE0) sends a SelfTargeted spell at the player's own id, and ACE plays a cast's target effect (the buff's orbs or
+        // shell on the player) only when the cast names a target; sent untargeted, every creature and life self buff went without its effect.
         var r = Rig();
         var cast = r.Api.Cast(StrengthSelf, ActionSource.Ui);
         r.Tick();
 
-        var sent = Assert.Single(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
-        Assert.Equal(StrengthSelf, sent.Guid);
-        Assert.Empty(r.H.Net.Of(FakeSendKind.CastTargetedSpell));
+        var sent = Assert.Single(r.H.Net.Of(FakeSendKind.CastTargetedSpell));
+        Assert.Equal((WorldActionRig.Player, (int)StrengthSelf), (sent.Guid, sent.Index));
+        Assert.Empty(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
 
         r.Enchant(999); // another spell's enchantment (a stale answer, a buff from elsewhere)
         r.Tick();
@@ -52,6 +54,18 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
         r.Tick();
         Assert.Equal(ActionOutcomeKind.Confirmed, cast.Outcome!.Value.Kind);
         Assert.Contains("gained the enchantment", cast.Outcome.Value.Detail, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(SpellFlags.Beneficial | SpellFlags.SelfTargeted, 0u, WorldActionRig.Player)] // a self spell asked with no target: at the player, as retail
+    [InlineData(SpellFlags.Beneficial, 0u, 0u)] // no target type: untargeted
+    [InlineData(SpellFlags.Beneficial | SpellFlags.SelfTargeted, 0x80000123u, 0x80000123u)] // a target asked for is kept
+    public void The_send_target_follows_retail_s_CastSpell(SpellFlags flags, uint asked, uint sent)
+    {
+        var info = WorldActionRig.Spell(StrengthSelf, SpellType.Enchantment, flags);
+        Assert.Equal(sent, CastTracker.SendTarget(info, asked, WorldActionRig.Player));
+        Assert.Equal(asked, CastTracker.SendTarget(null, asked, WorldActionRig.Player)); // no table entry: as asked
+        Assert.Equal(asked, CastTracker.SendTarget(info, asked, 0)); // no player id yet: as asked
     }
 
     [Fact]
@@ -117,7 +131,7 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
 
         r.UseDone(); // FinishCast: UseDone with no error ends the fizzled cast
         r.Tick();
-        Assert.Single(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        Assert.Single(r.H.Net.SelfCasts(WorldActionRig.Player));
         Assert.False(next.IsCompleted);
     }
 
@@ -159,11 +173,11 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
 
         r.Tick(9.9);
         Assert.False(cast.IsCompleted);
-        Assert.Empty(r.H.Net.Of(FakeSendKind.CastTargetedSpell));
+        Assert.DoesNotContain(r.H.Net.Of(FakeSendKind.CastTargetedSpell), s => s.Guid == Target);
 
         r.Tick(0.2);
         Assert.Equal(ActionOutcomeKind.TimedOut, cast.Outcome!.Value.Kind);
-        Assert.Single(r.H.Net.Of(FakeSendKind.CastTargetedSpell)); // the queued cast goes out once the first one's turn is over
+        Assert.Single(r.H.Net.Of(FakeSendKind.CastTargetedSpell), s => s.Guid == Target); // the queued cast goes out once the first one's turn is over
         Assert.False(next.IsCompleted);
         Assert.Equal(10.0, ActionPolicy.CastSeconds);
     }
@@ -181,19 +195,19 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
         r.Enchant((ushort)StrengthSelf);
         r.Tick();
         Assert.Equal(ActionOutcomeKind.Confirmed, first.Outcome!.Value.Kind);
-        Assert.Empty(r.H.Net.Of(FakeSendKind.CastTargetedSpell)); // confirmed, but ACE is still in the cast's recoil
+        Assert.DoesNotContain(r.H.Net.Of(FakeSendKind.CastTargetedSpell), s => s.Guid == Target); // confirmed, but ACE is still in the cast's recoil
 
         r.UseDone();
         r.Tick();
-        Assert.Single(r.H.Net.Of(FakeSendKind.CastTargetedSpell));
+        Assert.Single(r.H.Net.Of(FakeSendKind.CastTargetedSpell), s => s.Guid == Target);
         Assert.False(second.IsCompleted);
-        Assert.Single(r.H.Net.Of(FakeSendKind.CastUntargetedSpell)); // the third still waits
+        Assert.Single(r.H.Net.SelfCasts(WorldActionRig.Player)); // the third still waits
 
         r.Create(Projectile, 12);
         r.UseDone();
         r.Tick();
         Assert.Equal(ActionOutcomeKind.Confirmed, second.Outcome!.Value.Kind);
-        Assert.Equal([StrengthSelf, Heal], r.H.Net.Of(FakeSendKind.CastUntargetedSpell).Select(s => s.Guid));
+        Assert.Equal([StrengthSelf, Heal], r.H.Net.SelfCasts(WorldActionRig.Player).Select(s => s.Guid));
         Assert.False(third.IsCompleted);
     }
 
@@ -206,10 +220,10 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
         r.Tick();
         r.Enchant((ushort)StrengthSelf);
         r.Tick(3);
-        Assert.Single(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        Assert.Single(r.H.Net.SelfCasts(WorldActionRig.Player));
 
         r.Tick(7.1); // 10 s from the send
-        Assert.Equal(2, r.H.Net.Of(FakeSendKind.CastUntargetedSpell).Count);
+        Assert.Equal(2, r.H.Net.SelfCasts(WorldActionRig.Player).Count);
         Assert.False(second.IsCompleted);
     }
 
@@ -265,7 +279,7 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Equal(ActionOutcomeKind.Refused, refused.Outcome!.Value.Kind);
         Assert.Equal(StanceGuards.CastRefusal, refused.Outcome.Value.Detail);
         Assert.Contains("not in the magic combat mode", refused.Outcome.Value.Detail, StringComparison.Ordinal);
-        Assert.Empty(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        Assert.Empty(r.H.Net.SelfCasts(WorldActionRig.Player));
         var targeted = r.Api.Cast(FlameBolt, Target, ActionSource.Host);
         r.Tick();
         Assert.Equal(ActionOutcomeKind.Refused, targeted.Outcome!.Value.Kind);
@@ -275,7 +289,7 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
         {
             r.Api.Cast(StrengthSelf, ActionSource.Ui);
             r.Tick();
-            Assert.Single(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+            Assert.Single(r.H.Net.SelfCasts(WorldActionRig.Player));
         }
     }
 
@@ -336,7 +350,7 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
         r.Tick();
         var targeted = Assert.Single(r.H.Net.Of(FakeSendKind.CastTargetedSpell));
         Assert.Equal((5u, (int)FlameBolt), (targeted.Guid, targeted.Index));
-        Assert.Empty(r.H.Net.Of(FakeSendKind.CastUntargetedSpell)); // the second waits behind the first
+        Assert.Empty(r.H.Net.SelfCasts(WorldActionRig.Player)); // the second waits behind the first
         Assert.Equal(ActionSource.Host, literal.Source);
         Assert.Equal(ActionSource.Ui, viaEnum.Source);
     }
@@ -357,7 +371,7 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Equal(ActionOutcomeKind.Refused, none.Outcome!.Value.Kind);
         Assert.Contains("no target", none.Outcome.Value.Detail, StringComparison.Ordinal);
         Assert.Single(r.H.Net.Of(FakeSendKind.CastTargetedSpell)); // the refused cast sent nothing
-        Assert.Empty(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        Assert.Empty(r.H.Net.SelfCasts(WorldActionRig.Player));
     }
 
     [Fact]
@@ -381,7 +395,7 @@ public sealed class CastTrackerTests(DatSetFixture fixture) : IClassFixture<DatS
         r.Api.KillSwitch = true;
         var bot = r.Api.Cast(StrengthSelf, ActionSource.Automation);
         Assert.Equal(ActionOutcomeKind.Refused, bot.Outcome!.Value.Kind);
-        Assert.Empty(r.H.Net.Of(FakeSendKind.CastUntargetedSpell));
+        Assert.Empty(r.H.Net.SelfCasts(WorldActionRig.Player));
     }
 
     [Fact]

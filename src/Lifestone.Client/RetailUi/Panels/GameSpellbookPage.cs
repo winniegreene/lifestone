@@ -29,7 +29,8 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// already shows the right spell is left alone) so the 247 spells of a mage cost no frame more than a few milliseconds. The spell names and icons come from the SpellTable through
 /// <see cref="IGameSessionView.Spell"/>, which answers null until the table has loaded: the list stays empty until it does and fills when it arrives (never a guess). A filter click is session-local, as the options are
 /// (M2 D42): no <c>SpellbookFilterEvent</c> is sent (<c>TODO(m3-spellbook-filter-send)</c>: there is no action for it), so the server's word comes back only with the next description. Delete spell and the favourite-bar
-/// shortcut of a double click are not built (<c>TODO(m3-spellbook-delete)</c>, <c>TODO(m3-spellbook-shortcut)</c>: the spellcasting panel is item 3.2's).
+/// shortcut of a double click are not built (<c>TODO(m3-spellbook-delete)</c>, <c>TODO(m3-spellbook-shortcut)</c>: the spellcasting panel is item 3.2's). A spell is dragged from the list onto a spell bar (M5 6 s1:
+/// the list is a drag source; the drop is <see cref="GameSpellcastingPanel"/>'s).
 /// </para>
 /// </remarks>
 public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposable
@@ -78,6 +79,7 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
     private readonly UiButton?[] _buttons = new UiButton?[FilterButtons.Length];
     private readonly IDisposable _subscription;
     private readonly List<PlanItem> _plan = new(256);
+    private readonly Func<uint, UiSpellIcon?> _spellIcon; // the picture fields of a dragged spell (UiDrag.SpellIconOf)
     private bool _pageShown;
     private bool _dirty = true;
     private bool _awaitingTable;
@@ -105,6 +107,9 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
 
         tab.RegisterForElementMessages(this);
         _list.ItemSelected += OnSpellSelected;
+        _list.DragSource = true; // M5 6 s1: a spell is dragged from the book onto a spell bar (gmSpellcastingUI::HandleDropRelease 0x004C8520); every item target refuses it
+        _spellIcon = id => context.Session.Spell(id) is { } spell ? UiSpellIcon.Of(spell) : null;
+        context.Manager.Input.Drag.SpellIconOf ??= _spellIcon;
         _subscription = context.Session.Events.Subscribe<SpellbookChanged>(OnSpellbookChanged);
     }
 
@@ -232,7 +237,7 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
         {
             if (session.Spell(id) is { } info && !IsFilteredOut(filters, info))
             {
-                items.Add(new PlanItem(info.DisplayOrder, id, info.IconId, info.Name));
+                items.Add(new PlanItem(info.DisplayOrder, id, UiSpellIcon.Of(info), info.Name));
             }
         }
 
@@ -343,7 +348,7 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
 
             if (!IsFilteredOut(_filters, info))
             {
-                _plan.Add(new PlanItem(info.DisplayOrder, id, info.IconId, info.Name));
+                _plan.Add(new PlanItem(info.DisplayOrder, id, UiSpellIcon.Of(info), info.Name));
             }
         }
 
@@ -375,7 +380,7 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
         var stalled = false;
         for (var i = _fillIndex; i < look; i++)
         {
-            var pending = IconPending(_plan[i].IconId); // also asks the source to start decoding it
+            var pending = IconPending(_plan[i].Icon); // also asks the source to start decoding its layers (and composes it when they are ready)
             if (i < limit && !stalled)
             {
                 if (pending)
@@ -403,7 +408,7 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
                 var item = _plan[i];
                 if (cell.SpellId != item.SpellId)
                 {
-                    cell.ShowSpell(item.SpellId, item.IconId, item.Name);
+                    cell.ShowSpell(item.Icon, item.Name);
                     written++;
                 }
 
@@ -521,11 +526,15 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
     {
         _subscription.Dispose();
         _list.ItemSelected -= OnSpellSelected;
+        _list.DragSource = false;
+        if (ReferenceEquals(_context.Manager.Input.Drag.SpellIconOf, _spellIcon))
+        {
+            _context.Manager.Input.Drag.SpellIconOf = null;
+        }
     }
 
-    /// <summary>True while the image source is still decoding <paramref name="iconId"/> (never when the page has no source, as in a host that decodes at once).</summary>
-    private bool IconPending(uint iconId) =>
-        iconId != 0 && _context.Manager.Services.Images is { } images && images.TryGetImage(iconId, out _) == UiImageLookup.Pending;
+    /// <summary>True while a layer of <paramref name="icon"/>'s composed picture is still decoding (never when the page has no source, as in a host that decodes at once); once they are ready the picture is composed and kept (<see cref="UiSpellIcons"/>).</summary>
+    private bool IconPending(in UiSpellIcon icon) => _context.Manager.SpellIcons.TryGetSpell(icon, out _) == UiImageLookup.Pending;
 
     /// <summary>The table answers null for every id until it has loaded; probe with the first id the book held when it was planned (no enumerator per frame).</summary>
     private bool TableReady() => _probe == 0 || _context.Session.Spell(_probe) is not null;
@@ -581,8 +590,8 @@ public sealed class GameSpellbookPage : IGamePanel, IUiElementListener, IDisposa
         }
     }
 
-    /// <summary>One spell of the plan: its display order (<c>CSpellBase::_display_order</c>), id, icon and name.</summary>
-    public readonly record struct PlanItem(uint DisplayOrder, uint SpellId, uint IconId, string Name)
+    /// <summary>One spell of the plan: its display order (<c>CSpellBase::_display_order</c>), id, picture fields (<see cref="UiSpellIcon"/>) and name.</summary>
+    public readonly record struct PlanItem(uint DisplayOrder, uint SpellId, UiSpellIcon Icon, string Name)
     {
         /// <summary>Display order, then spell id.</summary>
         public static int Compare(PlanItem a, PlanItem b) => a.DisplayOrder != b.DisplayOrder ? a.DisplayOrder.CompareTo(b.DisplayOrder) : a.SpellId.CompareTo(b.SpellId);

@@ -1,0 +1,152 @@
+{
+  "key": "low-north-forest-mix",
+  "name": "Low North Forest Mix",
+  "kind": "outdoor",
+  "sources": {
+    "landblocks": "the cells below: the high word of each outdoor cell id (nine landblocks, 0x9FB0 to 0x9FB8), from today's HuntGround.LowNorthForestMix (M4 3.1 s0)",
+    "arrival": "the first place of a hunt: outdoor.cells[0], at its stop point (HuntScenario.NextCell), the spot nearest Holtburg; an outdoor ground has no portal, so the heading is not used",
+    "walk": "not used by an outdoor ground: the hunt's cell travels are the travel seam's point goals (HuntScenario.NextCell, TravelPurpose.Cell), not a room-graph walk; these are the dungeon walk's defaults (no doorways, stop within 1.0 m, no dwell, a leg at most WayfindScenario.LegMarginSeconds = 300 s)",
+    "storeys": "none: an outdoor ground has no storeys",
+    "no_go": "none: the hunt keeps out of no cell by a list; it keeps to dry, walkable terrain (outdoor.cells[].terrain and HuntGround.SeekHeight)",
+    "targets": "none: an outdoor ground's creatures are outdoor.creatures and the hunt takes those in level_band; which classes a character will not fight is the character's (FighterTemplate.AvoidedTargets), not the ground's",
+    "level_band": "today's HuntGround.LowNorthForestMix band 30-40 (M4 3.1: the hunter is level 40, so the lead narrowed the spec's 30 to 60); a character's own band (FighterTemplate.TargetBand, the archer's 20-30) is applied over it by the hunt",
+    "portal": "none: the hunt goes from Holtburg by a place or on foot, with no portal",
+    "home": "a measure (session.md section 41, M4 4.2 FS): Holtburg's lifestone in cell 0xA9B40019 and the known point (84, 7.7) off it, z 94 (TravelStations.HoltburgLifestone); the ground is hunted from Holtburg and returns there",
+    "vendors": "none: the hunt's selling and its kit buying are the journey's shop stations at Holtburg (HuntOptions, ShopStations), not this profile",
+    "spell_plan": "none: the hunters fight with a melee weapon or a bow (FighterTemplate); an outdoor ground has no spell plan",
+    "components": "none: no spell plan, no components",
+    "supplies": "none: an outdoor ground buys nothing from its profile (D48, m5-plan.md section 4.5 row m0): the hunters shop at the journey stations at Holtburg (HuntOptions, ShopStations) and carry no spell components, so the section is empty: no stock lines, no kit and a purse of 0; burden_trip_percent 90 is the section default and is not used by an outdoor ground",
+    "hold_spots": "none: today's hunt stands at its cells and holds no spot",
+    "respawn": "none listed: the creatures are ACE encounters, not placed generator instances with fixed guids (the pinned world SQL v0.9.296, encounter table: generator wcid 21183 \"Low North Forest Mix Generator\" at every one of the 33 cells; ACE creates it at the cell's corner when the landblock loads and rolls it afresh on every reload; each child's delay 1800 s, camps 1500-1800 s)",
+    "tour": "none: the hunt visits outdoor.cells in their order",
+    "outdoor": "cells: all 33 of today's HuntGround.LowNorthForestMix row (M4 3.1 s0: the cell ids and map coordinates from the pinned world SQL, the 0x9FB* strip, terrain the dat test's finding of 2026-10-21, re-read by HuntingGroundDatTests), each one ACE encounter of generator 21183 (m5-plan.md D42); the stop point is the encounter spot, the generator's corner (cell x * 24, cell y * 24: ACE Landblock.SpawnEncounters @95ef426d, Entity/Landblock.cs:269-330, from the encounter table's cell_X and cell_Y), z 0 because the terrain height is read from the dats at the point and never copied; the order is a loop by landblock: the landblock of the spot nearest Holtburg (0x9FB5) first, then north to the strip's end (0x9FB6, 0x9FB7, 0x9FB8), then back down from 0x9FB4 to 0x9FB0, the spots of each landblock in the shortest order from where the last one ended (about 3.2 km between the 33 spots); creatures: today's HuntGround.LowNorthForestTable (the pinned world SQL v0.9.296, generator 21183 six levels down, 38 rows less the NPC Fisana the Jeweler and the Tusker Shrine Statue, levels 8 to 80), spawn_mass computed from the same SQL: the chance that one roll of a spot's generator (cumulative probability rows, nested generators and camps multiplied, a creature that is itself a generator counted with its young) spawns the creature; acquire_radius_m 60 is HuntScenario.MeleeRange (the archer's 35 m is the weapon's, HuntScenario.MissileRange); cell_cap 33 is every cell (D42: not HuntScenario.OnFootMaxCells' 8); expected_yield_per_spot is the sum of spawn_mass over the creatures in level_band"
+  },
+  "landblocks": [
+    "0x9FB0", "0x9FB1", "0x9FB2", "0x9FB3", "0x9FB4", "0x9FB5", "0x9FB6", "0x9FB7", "0x9FB8"
+  ],
+  "arrival": {
+    "cell": "0x9FB50039",
+    "origin": { "x": 168, "y": 0, "z": 0 },
+    "heading": {
+      "w": 1,
+      "z": 0
+    }
+  },
+  "walk": {
+    "doorway_lean": 0,
+    "stop_within_m": 1.0,
+    "stop_dwell_s": 0,
+    "leg_s": 300
+  },
+  "storeys": [],
+  "no_go": [],
+  "targets": [],
+  "level_band": {
+    "min": 30,
+    "max": 40
+  },
+  "portal": null,
+  "home": {
+    "town": "Holtburg",
+    "lifestone_cell": "0xA9B40019",
+    "lifestone_point": { "x": 84, "y": 7.7, "z": 94 }
+  },
+  "vendors": [],
+  "spell_plan": [],
+  "components": [],
+  "supplies": {
+    "stock": [],
+    "kit": [],
+    "burden_trip_percent": 90,
+    "purse": {
+      "coin": 0,
+      "notes": []
+    }
+  },
+  "hold_spots": [],
+  "respawn": {
+    "generators": [],
+    "slots": []
+  },
+  "tour": [],
+  "outdoor": {
+    "cells": [
+      { "cell": "0x9FB50039", "north": 42.85, "east": 25.95, "terrain": "dry", "spot": { "x": 168, "y": 0, "z": 0 } },
+      { "cell": "0x9FB50011", "north": 42.85, "east": 25.45, "terrain": "dry", "spot": { "x": 48, "y": 0, "z": 0 } },
+      { "cell": "0x9FB5001C", "north": 43.15, "east": 25.55, "terrain": "dry", "spot": { "x": 72, "y": 72, "z": 0 } },
+      { "cell": "0x9FB50016", "north": 43.35, "east": 25.45, "terrain": "dry", "spot": { "x": 48, "y": 120, "z": 0 } },
+      { "cell": "0x9FB60019", "north": 43.65, "east": 25.55, "terrain": "dry", "spot": { "x": 72, "y": 0, "z": 0 } },
+      { "cell": "0x9FB6000C", "north": 43.95, "east": 25.35, "terrain": "dry", "spot": { "x": 24, "y": 72, "z": 0 } },
+      { "cell": "0x9FB60008", "north": 44.35, "east": 25.25, "terrain": "dry", "spot": { "x": 0, "y": 168, "z": 0 } },
+      { "cell": "0x9FB6002F", "north": 44.25, "east": 25.75, "terrain": "dry", "spot": { "x": 120, "y": 144, "z": 0 } },
+      { "cell": "0x9FB60030", "north": 44.35, "east": 25.75, "terrain": "dry", "spot": { "x": 120, "y": 168, "z": 0 } },
+      { "cell": "0x9FB60038", "north": 44.35, "east": 25.85, "terrain": "dry", "spot": { "x": 144, "y": 168, "z": 0 } },
+      { "cell": "0x9FB70022", "north": 44.55, "east": 25.65, "terrain": "dry", "spot": { "x": 96, "y": 24, "z": 0 } },
+      { "cell": "0x9FB7000B", "north": 44.65, "east": 25.35, "terrain": "dry", "spot": { "x": 24, "y": 48, "z": 0 } },
+      { "cell": "0x9FB70014", "north": 44.75, "east": 25.45, "terrain": "dry", "spot": { "x": 48, "y": 72, "z": 0 } },
+      { "cell": "0x9FB70024", "north": 44.75, "east": 25.65, "terrain": "dry", "spot": { "x": 96, "y": 72, "z": 0 } },
+      { "cell": "0x9FB70036", "north": 44.95, "east": 25.85, "terrain": "dry", "spot": { "x": 144, "y": 120, "z": 0 } },
+      { "cell": "0x9FB70037", "north": 45.05, "east": 25.85, "terrain": "dry", "spot": { "x": 144, "y": 144, "z": 0 } },
+      { "cell": "0x9FB7001E", "north": 44.95, "east": 25.55, "terrain": "dry", "spot": { "x": 72, "y": 120, "z": 0 } },
+      { "cell": "0x9FB70018", "north": 45.15, "east": 25.45, "terrain": "dry", "spot": { "x": 48, "y": 168, "z": 0 } },
+      { "cell": "0x9FB8002A", "north": 45.35, "east": 25.75, "terrain": "dry", "spot": { "x": 120, "y": 24, "z": 0 } },
+      { "cell": "0x9FB8003B", "north": 45.45, "east": 25.95, "terrain": "dry", "spot": { "x": 168, "y": 48, "z": 0 } },
+      { "cell": "0x9FB40012", "north": 42.15, "east": 25.45, "terrain": "dry", "spot": { "x": 48, "y": 24, "z": 0 } },
+      { "cell": "0x9FB30021", "north": 41.25, "east": 25.65, "terrain": "dry", "spot": { "x": 96, "y": 0, "z": 0 } },
+      { "cell": "0x9FB30039", "north": 41.25, "east": 25.95, "terrain": "dry", "spot": { "x": 168, "y": 0, "z": 0 } },
+      { "cell": "0x9FB20025", "north": 40.85, "east": 25.65, "terrain": "dry", "spot": { "x": 96, "y": 96, "z": 0 } },
+      { "cell": "0x9FB2001E", "north": 40.95, "east": 25.55, "terrain": "dry", "spot": { "x": 72, "y": 120, "z": 0 } },
+      { "cell": "0x9FB2000C", "north": 40.75, "east": 25.35, "terrain": "dry", "spot": { "x": 24, "y": 72, "z": 0 } },
+      { "cell": "0x9FB20013", "north": 40.65, "east": 25.45, "terrain": "dry", "spot": { "x": 48, "y": 48, "z": 0 } },
+      { "cell": "0x9FB20009", "north": 40.45, "east": 25.35, "terrain": "dry", "spot": { "x": 24, "y": 0, "z": 0 } },
+      { "cell": "0x9FB1000F", "north": 40.25, "east": 25.35, "terrain": "dry", "spot": { "x": 24, "y": 144, "z": 0 } },
+      { "cell": "0x9FB10015", "north": 40.05, "east": 25.45, "terrain": "dry", "spot": { "x": 48, "y": 96, "z": 0 } },
+      { "cell": "0x9FB10014", "north": 39.95, "east": 25.45, "terrain": "dry", "spot": { "x": 48, "y": 72, "z": 0 } },
+      { "cell": "0x9FB10038", "north": 40.35, "east": 25.85, "terrain": "dry", "spot": { "x": 144, "y": 168, "z": 0 } },
+      { "cell": "0x9FB00036", "north": 39.35, "east": 25.85, "terrain": "dry", "spot": { "x": 144, "y": 120, "z": 0 } }
+    ],
+    "creatures": [
+      { "wcid": 2612, "name": "Outcast Monouga", "level": 8, "spawn_mass": 0.003 },
+      { "wcid": 1756, "name": "Shadow Child", "level": 15, "spawn_mass": 0.03924 },
+      { "wcid": 1760, "name": "Skeleton Warrior", "level": 20, "spawn_mass": 0.0004 },
+      { "wcid": 1761, "name": "Skeleton Captain", "level": 20, "spawn_mass": 0.0004 },
+      { "wcid": 2574, "name": "Rough Monouga", "level": 20, "spawn_mass": 0.003 },
+      { "wcid": 11528, "name": "Elaniwood Golem", "level": 20, "spawn_mass": 0.06 },
+      { "wcid": 213, "name": "Olthoi Nymph", "level": 30, "spawn_mass": 0.04 },
+      { "wcid": 235, "name": "Goldenback Tusker", "level": 30, "spawn_mass": 0.03 },
+      { "wcid": 1627, "name": "Tusker Crimsonback", "level": 30, "spawn_mass": 0.035 },
+      { "wcid": 1758, "name": "Shadow", "level": 30, "spawn_mass": 0.06376 },
+      { "wcid": 2575, "name": "Crude Monouga", "level": 30, "spawn_mass": 0.021 },
+      { "wcid": 2576, "name": "Wild Monouga", "level": 30, "spawn_mass": 0.038 },
+      { "wcid": 194, "name": "Copper Golem", "level": 40, "spawn_mass": 0.005 },
+      { "wcid": 1608, "name": "Drudge Lurker", "level": 40, "spawn_mass": 0.057 },
+      { "wcid": 1762, "name": "Skeleton Lord", "level": 40, "spawn_mass": 0.0012 },
+      { "wcid": 22009, "name": "Olthoi Drone", "level": 40, "spawn_mass": 0.04 },
+      { "wcid": 24942, "name": "Gotrok Lithos", "level": 40, "spawn_mass": 0.0014 },
+      { "wcid": 27254, "name": "Copper Golem Kingpin", "level": 40, "spawn_mass": 0.005 },
+      { "wcid": 28877, "name": "Nasty Scarecrow", "level": 40, "spawn_mass": 0.005 },
+      { "wcid": 3, "name": "Olthoi Worker", "level": 50, "spawn_mass": 0.04 },
+      { "wcid": 217, "name": "Gold Phyntos Wasp", "level": 50, "spawn_mass": 0.06 },
+      { "wcid": 1609, "name": "Drudge Stalker", "level": 50, "spawn_mass": 0.056 },
+      { "wcid": 1989, "name": "Shadow Wisp", "level": 50, "spawn_mass": 0.03 },
+      { "wcid": 7128, "name": "Sufut Zefir", "level": 50, "spawn_mass": 0.03 },
+      { "wcid": 7978, "name": "Scrawed Grievver", "level": 50, "spawn_mass": 0.0735 },
+      { "wcid": 7979, "name": "Virulent Grievver", "level": 50, "spawn_mass": 0.055 },
+      { "wcid": 9251, "name": "Brutish Monouga", "level": 50, "spawn_mass": 0.03 },
+      { "wcid": 22010, "name": "Olthoi Servant", "level": 50, "spawn_mass": 0.047 },
+      { "wcid": 24940, "name": "Gotrok Gigas", "level": 50, "spawn_mass": 0.0025 },
+      { "wcid": 24959, "name": "Olthoi Needler", "level": 50, "spawn_mass": 0.02 },
+      { "wcid": 28878, "name": "Naughty Scarecrow", "level": 50, "spawn_mass": 0.005 },
+      { "wcid": 28879, "name": "Nefarious Scarecrow", "level": 50, "spawn_mass": 0.005 },
+      { "wcid": 1630, "name": "Lich Lord", "level": 60, "spawn_mass": 0.002 },
+      { "wcid": 1757, "name": "Shadow Lieutenant", "level": 60, "spawn_mass": 0.0018 },
+      { "wcid": 9253, "name": "Wily Monouga", "level": 60, "spawn_mass": 0.03 },
+      { "wcid": 34102, "name": "Old Zombie", "level": 60, "spawn_mass": 0.02 },
+      { "wcid": 1610, "name": "Drudge Ravener", "level": 80, "spawn_mass": 0.0016 },
+      { "wcid": 4253, "name": "Panumbris Shadow", "level": 80, "spawn_mass": 0.0012 }
+    ],
+    "acquire_radius_m": 60,
+    "cell_cap": 33,
+    "expected_yield_per_spot": 0.34236
+  }
+}

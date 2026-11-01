@@ -422,4 +422,25 @@ public sealed class PathPlannerTests(ITestOutputHelper output)
         Assert.Equal(2f, route.DistanceFrom(off), 4);
         Assert.Equal(10f, route.ArcLengthAt(1));
     }
+
+    /// <summary>
+    /// D134: the runner's forward-only progress. A U route (east 10 m, north 2 m, west 10 m) whose legs pass 2 m apart: a body at the second leg's end, swung
+    /// wide towards the first leg, is nearest the first leg anywhere, but within the window ahead of its progress it stays on the third; and a route that passes
+    /// over its own start a storey up (the first leg at z 0, the last at z 4) answers by the body's storey.
+    /// </summary>
+    [Fact]
+    public void A_routes_window_keeps_progress_forward_and_on_the_bodys_storey()
+    {
+        var u = new NavRoute([new Vector2(1000f, 1000f), new Vector2(1010f, 1000f), new Vector2(1010f, 1002f), new Vector2(1000f, 1002f)], [0f, 0f, 0f, 0f], 4);
+        var swung = NavPoint.FromGlobal(new Vector2(1004f, 1000.8f), 0f);
+        Assert.Equal(4f, u.NearestArcLength(swung), 3); // anywhere: back on the first leg
+        var (arc, distance) = u.NearestInWindow(swung, 13f, 0f, 8f, 1.5f);
+        Assert.Equal(18f, arc, 3); // within the window: the third leg, 1.2 m off
+        Assert.Equal(1.2f, distance, 3);
+
+        var over = new NavRoute([new Vector2(1000f, 1000f), new Vector2(1010f, 1000f), new Vector2(1010f, 1000f), new Vector2(1000f, 1000.5f)], [0f, 0f, 4f, 4f], 4);
+        var upstairs = NavPoint.FromGlobal(new Vector2(1005f, 1000.1f), 4f);
+        Assert.Equal(5f, over.NearestArcLength(upstairs), 3); // flat: the leg below
+        Assert.InRange(over.NearestInWindow(upstairs, 0f, 0f, over.ArcLength, 1.5f).Arc, 14.5f, 15.5f); // by storey: the leg it stands on
+    }
 }

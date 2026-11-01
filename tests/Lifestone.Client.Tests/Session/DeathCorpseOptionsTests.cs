@@ -58,19 +58,6 @@ public sealed class DeathCorpseOptionsTests
     }
 
     [Fact]
-    public void The_corpse_stage_is_between_the_death_and_the_regear_in_all_and_in_the_stage_list()
-    {
-        Assert.Equal(128, (int)DeathStages.Corpse);
-        Assert.True(DeathStages.All.HasFlag(DeathStages.Corpse));
-        Assert.Equal(DeathStages.Death | DeathStages.Corpse | DeathStages.Regear, DeathOptions.ParseStages("death,corpse,regear", out var problem));
-        Assert.Null(problem);
-        Assert.Equal(DeathStages.All, DeathOptions.ParseStages("all", out _));
-        Assert.Equal(DeathStages.Gear | DeathStages.Bind | DeathStages.Den | DeathStages.Death | DeathStages.Regear | DeathStages.Vitae | DeathStages.Rebuff | DeathStages.Fight, DeathStages.All & ~DeathStages.Corpse); // D37 (M4 P5b): the unbuff suicide is not in All
-        DeathOptions.ParseStages("trip", out var bad);
-        Assert.Contains("corpse", bad, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void M4_2_2_fix2_R11_the_login_check_help_names_all_four_corpse_looted_values()
     {
         var loginCheck = Assert.Single(OptionCatalog.Play().Options, o => o.Name == "--login-check");
@@ -91,5 +78,18 @@ public sealed class DeathCorpseOptionsTests
         var health = Assert.Single(group.Options, o => o.Name == "--death-recover-min-health");
         Assert.Equal("PCT", health.Value);
         Assert.Contains("default 60", health.Help, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_corpse_stage_is_between_the_death_and_the_rebuff_in_all_and_in_the_stage_list()
+    {
+        Assert.Equal(128, (int)DeathStages.Corpse);
+        Assert.True(DeathStages.All.HasFlag(DeathStages.Corpse));
+        Assert.Equal(DeathStages.Death | DeathStages.Corpse, DeathOptions.ParseStages("death,corpse", out var problem));
+        Assert.Null(problem);
+        Assert.Equal(DeathStages.All, DeathOptions.ParseStages("all", out _));
+        Assert.Equal(DeathStages.Gear | DeathStages.Bind | DeathStages.Den | DeathStages.Death | DeathStages.Rebuff | DeathStages.Fight, DeathStages.All & ~DeathStages.Corpse); // D37 (M4 P5b): the unbuff suicide is not in All; M5 3 d2: no regear and no vitae stage
+        DeathOptions.ParseStages("trip", out var bad);
+        Assert.Contains("corpse", bad, StringComparison.Ordinal);
     }
 }

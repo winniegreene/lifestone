@@ -78,6 +78,7 @@ internal sealed class LoginRig : IDisposable
                 Strings = new UiStringsSource(new UiStrings(new UiStringTables(fixture.Dats)), UiLanguageInfo.Load(fixture.Dats)),
                 Images = wrapImages is null ? _images : wrapImages(_images),
                 EnumMaps = fixture.Dats.EnumMaps,
+                EnumNames = new Lifestone.Data.Dat.EnumMapperNames(fixture.Dats),
                 Log = Log,
                 RetailGlitches = glitches,
                 ExamineIcon = examineIcon,

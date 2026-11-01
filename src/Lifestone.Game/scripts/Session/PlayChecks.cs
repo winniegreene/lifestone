@@ -46,6 +46,26 @@ public sealed partial class PlayChecks : Node
     /// <summary>The Academy's start position in <see cref="AcademyCell"/> (ACE's start location for a new character; <c>InteriorLocations</c>).</summary>
     public static System.Numerics.Vector3 AcademyOrigin { get; } = new(12.3199f, -28.482f, 0.005f);
 
+    /// <summary>M5 1 K2 fixture: how often (seconds) the checks' player is topped up with mana, from <see cref="ManaTopUpFirstSeconds"/> after the unhide.</summary>
+    private const double ManaTopUpEverySeconds = 6.0;
+
+    /// <summary>M5 1 K2 fixture: the first mana top-up, after the unhide (past the vitals checks, which read the description's own mana).</summary>
+    private const double ManaTopUpFirstSeconds = 12.0;
+
+    /// <summary>M5 1 K2 fixture: the mana the checks' player is topped up to (the recorded character's own 100; the stand-in's description has 75 of 100).</summary>
+    private const uint ManaTopUpTo = 100;
+
+    /// <summary>M5 1 K2 fixture: how many top-ups (about four minutes after the unhide, longer than a run).</summary>
+    private const int ManaTopUpCount = 40;
+
+    /// <summary>
+    /// The stand-in charges the mana of a cast now (<c>TODO(m3-standin-cast-mana)</c> closed) and does not regenerate it, so the checks' player, who casts a dozen spells in a run (the buff, the Revitalize Self VI wind-up, the bolts, the panel's casts, the fizzle),
+    /// would run dry and be refused (UseDone 0x0401). A live server regenerates the vital and tells the client with PrivateUpdateAttribute2ndLevel; the stand-in's visit does the same: the mana is set to <see cref="ManaTopUpTo"/> every
+    /// <see cref="ManaTopUpEverySeconds"/> seconds from <see cref="ManaTopUpFirstSeconds"/> after the unhide. A named fixture value of the checks, not a stand-in rule.
+    /// </summary>
+    private static StandInVitalUpdate[] ManaTopUps() =>
+        [.. Enumerable.Range(0, ManaTopUpCount).Select(i => new StandInVitalUpdate(ManaTopUpFirstSeconds + (i * ManaTopUpEverySeconds), 6, ManaTopUpTo))];
+
     /// <summary>The visit the checks play: Holtburg, the unhide after portal space has had time to send LoginComplete, a teleport to the Academy, a logoff.</summary>
     public static StandInVisit Visit { get; } = new()
     {
@@ -72,7 +92,8 @@ public sealed partial class PlayChecks : Node
         Speech = [new StandInSpeech(1.0, "Stand-in Town Crier", 0x80000A03, "Hear ye: the portal to the Academy stands open.")], // a placeholder speaker for the chat window
         Scripts = [new StandInScript(1.2, 0, (uint)DatReaderWriter.Enums.PlayScript.LevelUp, 1f)], // M3 1.3 s0: one F755 on the player (the human table's LevelUp: 3 particle emitters and a sound hook), as ACE sends a level-up's effect
         Sounds = [new StandInSound(1.2, 0, (uint)DatReaderWriter.Enums.Sound.EnchantUp, 0.75f)], // M3 1.3 s0: one F750 on the player (a type the human SoundTable maps), right behind it
-        VitalUpdates = [new StandInVitalUpdate(2.0, 2, 41)], // g3a: the current health 52 of 75 becomes 41 (PrivateUpdateAttribute2ndLevel) two seconds after the unhide
+        VitalUpdates = [new StandInVitalUpdate(2.0, 2, 41), .. ManaTopUps()], // g3a: the current health 52 of 75 becomes 41 (PrivateUpdateAttribute2ndLevel) two seconds after the unhide; M5 1 K2: the mana top-ups (below)
+        Items = StandInServer.WithKey(), // M5 6 k1: Pyreal and the stand-in key (the chest row spawns it with the tools' item request)
         LogOffDelay = 6.0, // longer than retail's 3 s wait and the transition's collapse, so portal space's logoff tunnel is up before the character list returns
     };
 
@@ -970,6 +991,31 @@ public sealed partial class PlayChecks : Node
         await Frames(120);
         SaveReviewFrame("02-shell-arrival");
         Check("the-player-keys-are-on-the-ui-router", rig.Controller.Input is not null, $"input={(rig.Controller.Input is null ? "none" : "set")}");
+        // M5 8 build (report-only in its first gate): the player's build ran as four steps on four consecutive frames, in order, and nothing of the player existed before the last one.
+        if (_mode.LastPlayerBuild is { } built)
+        {
+            var frames = _mode.PlayerBuildFrames;
+            var consecutive = frames.Count == built.Count && Enumerable.Range(1, Math.Max(0, frames.Count - 1)).All(i => frames[i] > frames[i - 1] && frames[i] - frames[i - 1] <= 3);
+            var inOrder = built.Names.SequenceEqual([Lifestone.Game.Player.PlayerRig.AvatarOtherMeshesStep, Lifestone.Game.Player.PlayerRig.DrawnMeshesAndPhysicsStep, Lifestone.Game.Player.PlayerRig.WalkerStep, Lifestone.Game.Player.PlayerRig.ControllerAndCameraStep]);
+            Log.Info(
+                LogCategory,
+                "player build staged (report-only)",
+                [
+                    ("steps", $"{built.Done}/{built.Count}"),
+                    ("complete", built.IsComplete),
+                    ("in_order", inOrder),
+                    ("frames", string.Join('>', frames)),
+                    ("on_separate_consecutive_frames", consecutive),
+                    ("half_built_player_seen", _mode.PlayerSeenHalfBuilt),
+                    .. built.TimingFields(),
+                    ("max_step_ms", built.Timings.Count > 0 ? built.Timings.Max() : 0.0),
+                ]);
+        }
+        else
+        {
+            Log.Warn(LogCategory, "player build staged (report-only): the play mode built no player through the staged build");
+        }
+
         // --- M3 1.3 s1, fix B (R2): the player's walk fires its footstep hooks and they are handed to the sound player, and the server's sound reached it too. Judged: what the names say, and no more.
         // The player's own footsteps are counted apart from every object's (the avatars tell the router which body fired). "Handed" is a call to the sound player; "sounded" is a voice it started: the
         // human sound table 0x20000001 has no variant for the footstep types 55 and 56 and retail uses the object's own table only (no fallback), so the player's footsteps are handed over and
@@ -1120,10 +1166,34 @@ public sealed partial class PlayChecks : Node
                 await Frames(4);
                 SaveReviewFrame("07-options-side-by-side-vitals");
                 Check("the-side-by-side-option-swaps-the-vitals-window", optionsShown && !sideBeforePress && options.SideBySideVitals && shell.SideBySideVitals!.Visible && !shell.StackedVitals!.Visible, $"options_shown={optionsShown} before={sideBeforePress} now={options.SideBySideVitals} side_visible={shell.SideBySideVitals?.Visible} stacked_visible={shell.StackedVitals?.Visible}");
-                var ghostedBox = optionsPanel.Boxes.First(static b => b.Option is { Honoured: false });
-                var ghostedBefore = ghostedBox.Current;
-                await Press(ghostedBox);
-                Check("a-ghosted-option-does-not-change", ghostedBox.Current == ghostedBefore && options.ChangeCount == 1, $"option={ghostedBox.Option?.Name} before={ghostedBefore} now={ghostedBox.Current} changes={options.ChangeCount}");
+                // M5 6 u1 (D32) ended the ghosting: an option Lifestone builds no effect for is still settable, Apply sends both words, and the stand-in (M5 6 k1) stores them and answers nothing, as ACE does.
+                // The first option with no client effect that the open (Character) tab shows after scrolling to it.
+                Lifestone.Client.RetailUi.Options.UiOptionCheckbox? plainBox = null;
+                foreach (var candidate in optionsPanel.Boxes.Where(static b => b.Option is { Honoured: false }))
+                {
+                    optionsPanel.ScrollTo(candidate.Option!);
+                    await Frames(3);
+                    if (candidate.IsShown)
+                    {
+                        plainBox = candidate;
+                        break;
+                    }
+                }
+
+                plainBox ??= optionsPanel.Boxes.First(static b => b.Option is { Honoured: false });
+                var plainBefore = plainBox.Current;
+                await Press(plainBox);
+                var plainChanged = plainBox.Current != plainBefore;
+                if (optionsPanel.Apply is { } applyPlain)
+                {
+                    await Press(applyPlain);
+                }
+
+                await Frames(4);
+                var storedWords = _host.StandIn?.StoredOptions;
+                var heldWords = (session.State.Self.Qualities.CharacterOptions1, session.State.Self.Qualities.CharacterOptions2);
+                _r6OptionsApplied = storedWords;
+                Check("an-option-with-no-client-effect-is-settable-and-both-words-reach-the-stand-in", plainChanged && plainBox.Saved == plainBox.Current && options.ChangeCount == 2 && options.SendCount == 2 && storedWords == heldWords, $"option={plainBox.Option?.Name} before={plainBefore} now={plainBox.Current} saved={plainBox.Saved} changes={options.ChangeCount} sends={options.SendCount} stored={(storedWords is { } sw ? $"{sw.One:X8}/{sw.Two:X8}" : "none")} held={heldWords.Item1:X8}/{heldWords.Item2:X8}");
 
                 // The logout: the options panel's first tab has the button. It asks; No stays.
                 optionsPage?.OpenTab(0x1000020D);
@@ -1145,7 +1215,8 @@ public sealed partial class PlayChecks : Node
                     // Yes sends Actions.LogOff, the same call as retail's key (the visit has one log off, the key's below; GameShellG6Tests.Yes_logs_off covers Yes).
                 }
 
-                await Press(optionsButton); // closes the panel
+                // M5 6 k1: the page's own 'Report Abuse' button (the Gameplay Options tab) lies over the toolbar's options button once the page is open, so a press there reaches it (and its modal M2 message blocks every row after); the host closes the page.
+                await ClosePanelAsync(shell, 10);
             }
         }
         else
@@ -1196,6 +1267,7 @@ public sealed partial class PlayChecks : Node
         await PanelChecksAsync(shell);
         await ToolsPanelWhereAndXpAsync(session, ui); // G7 lane A: Where am I and Add XP through the panel, and its review frame
         await ThrowawayToolOpsAsync(session, ui); // p2: the throwaway leg's driver presses the same buttons (PlayChecks.Throwaway.cs)
+        await AutopilotDialAsync(session, ui); // M5 4 h3, after the where-am-i checks (a movement key moves the body, the stand-in server does not follow): the autopilot's dial (D145: /auto and /stop in the chat, the key lock, Num Lock's hint, the panel's button, the inspector's line, the keypad)
         // M4 4.1 t1 (D26, m4-standin-tusker-retire): the stand-in's fight and death checks are retired with the tuskers they fought (no stand-in creature appears in any drawn run; D23). Their behaviour is proved by the live
         // legs (bsd-fight, bsd-death, hunt), the scripted scenario unit tests and the trackers' unit tests. The smoke's --play-skip-scenarios, a no-op since then, is removed (M4 4.1 fix2b).
 
@@ -1284,6 +1356,11 @@ public sealed partial class PlayChecks : Node
         // M3 1.4 s0 (the line above): SpawnGear against the stand-in: the kit arrives in the pack (kit=n/n), a second run asks for nothing (kit_topup=0)
         await ContainerChecksAsync(session); // M4 2.1 s4a, 4.1 t1: the stand-in's chest opened, an item picked up and dropped, the loot rows (PlayChecks.Containers.cs; no creature, D23)
         await DragChecksAsync(session); // M4 2.2 s3: an item dragged from the pack to a side pack with the real router's mouse events (PlayChecks.Drag.cs)
+        await Retail6QuestionChecksAsync(session); // M5 6 k1: the server's Yes/No question, No closes it and sends 0x0275 (PlayChecks.Retail6.cs)
+        await Retail6TellCheckAsync(session); // M5 6 k1: the Selected focus sends a tell
+        await Retail6SpellBarChecksAsync(session); // M5 6 k1: a spell dragged onto a bar, a magic-mode number key casts; the edited-bar frame
+        await Retail6ChestChecksAsync(session); // M5 6 k1: a stand-in key on a locked stand-in chest (the key joins the pack, so it runs after the pack rows)
+        await Retail6MoveWindowAsync(); // M5 6 k1: the toolbar moved; the second entry reads it back
 
         // --- a boot by the server: the player is taken away and the retail disconnected screen has the button that reconnects (D43) ---
         var server = _host.StandIn ?? throw new InvalidOperationException("the stand-in session has no server levers");
@@ -1302,10 +1379,13 @@ public sealed partial class PlayChecks : Node
         Check("the-player-arrives-again-after-the-reconnect", again && _mode.Rig is { } second && !ReferenceEquals(second, rig) && _mode.Avatars is { Player: not null }, $"rig={(_mode.Rig is null ? "none" : "built")} stage={_mode.Flow.Stage}");
         var secondRig = _mode.Rig;
         await WaitFor(() => _mode.Flow.Stage == Lifestone.Client.Play.PlayStage.InWorld, 60.0);
+        await Retail6SecondEntryChecksAsync(session); // M5 6 k1: the option, the window and the bar come back with the second description (first in the session: it puts the toolbar back where the later rows expect it)
         await HealChecksAsync(session); // M4 3.1 s4: a potion, a kit and a potion at a full vital on the replay visit's player (PlayChecks.Heal.cs; no creature, D23)
         await HotbarChecksAsync(session); // M4 3.2 h2: a potion and a kit dragged onto the hotbar, key 1 drinks, a slot dragged off the bar is removed (PlayChecks.Hotbar.cs)
         await VendorChecksAsync(session); // M4 3.2 s4b: Thelnoth's shop: the vendor window opens, a kit is bought with its Buy button, a kit is sold from its sell list (PlayChecks.Vendor.cs; the stand-in's vendors are the only NPCs, D23)
         await ExamineChecksAsync(session); // M4 3.2 s4c: the replay visit's Handy Healing Kit examined, the Identify and the window's lines (PlayChecks.Examine.cs; no creature, D23)
+        await ExamineEverywhereChecksAsync(session); // M5 7 S6 (D136): a stand-in magic wand in a chest examined by a right click in its window, the toolbar's Examine target mode, and --examine-review-frames over it (PlayChecks.Examine.cs)
+        await Retail6CommandChecksAsync(session); // M5 6 k1: /e, /afk msg gone and /lifestone reach the stand-in (the recall moves the player, so it is the last row of the session)
         server.GoQuiet(0.2, "stand-in server went quiet");
         var silent = await WaitFor(() => _mode.Rig is null && ui?.Flow?.Flow.CurrentMode == UiModes.Disconnected, 15.0);
         Check("a-silent-server-shows-the-disconnected-screen", silent && session.State.FailureMessage is not null, $"rig={(_mode.Rig is null ? "none" : "built")} mode={(ui?.Flow is { } sf ? UiModes.NameOf(sf.Flow.CurrentMode) : "none")} status='{_mode.Flow.StatusText}'");

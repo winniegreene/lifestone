@@ -43,9 +43,18 @@ internal abstract class StatTracker(ActionHandle handle) : ActionTracker(handle,
             return false;
         }
 
-        Resolve(new ActionOutcome(ActionOutcomeKind.ServerError, 0, "the server refused: " + text));
+        Resolve(new ActionOutcome(ActionOutcomeKind.ServerError, 0, "the server refused: " + text, text.StartsWith(TrainFailedStart, StringComparison.Ordinal) ? ActionReason.AlreadyDone : ActionReason.None));
         return true;
     }
+
+    /// <summary>
+    /// M5 7 D141's before-check for a raise: the unspent experience covers <paramref name="xp"/> when the state knows it (ACE drops a raise beyond it, silently for an attribute or a skill, so without this
+    /// check it would time out), else null.
+    /// </summary>
+    protected string? XpShort(ActionApi api, uint xp) =>
+        api.State.Self.Qualities.TryGetInt64(PlayerQualities.AvailableExperienceProperty, out var available) && available < xp
+            ? Refuse(ActionReason.NotEnoughXp, "not enough experience: " + N(xp) + " to spend, " + N(available) + " unspent")
+            : null;
 
     /// <summary>True when a refusal line is the answer to this kind of action (a raise's line is not a train's).</summary>
     protected abstract bool RefusalFits(string text);
@@ -71,6 +80,9 @@ internal sealed class RaiseAttributeTracker(ActionHandle handle, uint attribute,
 
     /// <inheritdoc/>
     internal override string WouldSend => "GameAction 0x0045 RaiseAttribute " + attribute;
+
+    /// <inheritdoc/>
+    internal override string? Refusal(ActionApi api) => base.Refusal(api) ?? XpShort(api, xp);
 
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
@@ -114,6 +126,9 @@ internal sealed class RaiseVitalTracker(ActionHandle handle, uint vital, uint xp
     internal override string WouldSend => "GameAction 0x0044 RaiseVital " + vital;
 
     /// <inheritdoc/>
+    internal override string? Refusal(ActionApi api) => base.Refusal(api) ?? XpShort(api, xp);
+
+    /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
     {
         if (api.State.Self.Qualities.TryGetVital(vital, out var before))
@@ -153,6 +168,14 @@ internal sealed class RaiseSkillTracker(ActionHandle handle, uint skill, uint xp
 
     /// <inheritdoc/>
     internal override string WouldSend => "GameAction 0x0046 RaiseSkill " + skill;
+
+    /// <inheritdoc/>
+    /// <remarks>M5 7 D141: also the skill trained (ACE drops a raise of an untrained skill silently), when the state describes it.</remarks>
+    internal override string? Refusal(ActionApi api) =>
+        base.Refusal(api) ?? XpShort(api, xp) ??
+        (api.State.Self.Qualities.TryGetSkill(skill, out var now) && now.AdvancementClass < TrainSkillTracker.TrainedClass
+            ? Refuse(ActionReason.NotTrained, "the skill " + skill + " is not trained (advancement class " + now.AdvancementClass + ")")
+            : null);
 
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
@@ -200,6 +223,26 @@ internal sealed class TrainSkillTracker(ActionHandle handle, uint skill, int cre
 
     /// <inheritdoc/>
     internal override string WouldSend => "GameAction 0x0047 TrainSkill " + skill;
+
+    /// <inheritdoc/>
+    /// <remarks>M5 7 D141: the skill not trained yet, and the credits held (ACE drops more credits than the character has silently), when the state describes them.</remarks>
+    internal override string? Refusal(ActionApi api)
+    {
+        if (base.Refusal(api) is { } refusal)
+        {
+            return refusal;
+        }
+
+        var q = api.State.Self.Qualities;
+        if (q.TryGetSkill(skill, out var now) && now.AdvancementClass >= TrainedClass)
+        {
+            return Refuse(ActionReason.AlreadyDone, "the skill " + skill + " is already trained (advancement class " + now.AdvancementClass + ")");
+        }
+
+        return q.TryGetInt(PlayerQualities.AvailableSkillCreditsProperty, out var held) && held < credits
+            ? Refuse(ActionReason.NotEnoughCredits, "not enough skill credits: " + N(credits) + " to spend, " + N(held) + " held")
+            : null;
+    }
 
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)

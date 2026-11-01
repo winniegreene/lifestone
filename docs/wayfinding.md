@@ -3,7 +3,7 @@
 The wayfinder is how a character walks a planned route over the world's real collision: an A* over a per-landblock
 navigation map, a room graph for the buildings, a runner that presses the movement keys through `IActionApi.Move`, and a
 streamer that keeps the collision and the map loaded ahead of the body. It is Lifestone's own design, not retail's: retail
-has no such layer. The older scripted walks use `RouteDriver`, which is kept for them. The principle is **the map proposes,
+has no such layer. The scripted walks (`RoutePlay` and the other scripted walks) use `RouteDriver`, which is kept for them; since M5 item 2 the fight's walks and the journeys' den walk run on `NavRunner` over the ground's room graph (docs/session.md, section 52). The principle is **the map proposes,
 the physics confirms.** The planner works on a tile that was built from the collision, so a route is what the map says is
 open; before any movement key is pressed the route is checked against the collision (`RouteConfirmer`), and while the body
 walks the runner watches where it actually is.
@@ -165,6 +165,8 @@ probe refuses the crossing at 142 (139.40, 13.35). Unconfirmed, the walker climb
 from the lifestone, reached in 0 rungs. The room graph does not yet learn sills (TODO(room-steps)): a doorway whose sill lies
 over the step-up above the floor before it should not be passable, and the runner already goes round at run time.
 
+**Creatures.** `RoomGraph.Creatures` (a run's `NavCreatures`, set by the runner at each plan; null for a run without a feed) raises the cost of every straight walk of the search (start to approach, approach to push, push to the goal) by its exposure to the discs, with the outdoor weights. `Plan(fromCell, from, toCell, to, ignoreCreature)` leaves the goal's own creature out (`RoomPathSource` passes the goal's guid). Without a layer, or with an empty one, every plan is today's (`IndoorCreatureLayerTests`). A source with a room graph (`RoomPathSource`, `IndoorOutdoorPathSource`) is an `INavRoomSource`: the runner gives its graph the creature layer and runs straight through its rooms.
+
 ## The runner
 
 `NavRunner` (`Movement/Wayfinding/NavRunner.cs`) acts only through `IActionApi.Move` (Command forward, back and turn;
@@ -186,6 +188,8 @@ Within max(3 m, 0.4 s of running) of its aimed vertex it aims at the next one wh
 corner. No turn key is pressed within 6 degrees of the aim's bearing (`HeadingDeadBandDegrees`), so the body runs straight and
 turns at the corners.
 
+**Indoors** (nav-indoor-steering, M5 item 2), over a room path with the body in a room: the same straight run. The body aims at the farthest room vertex, up to the first past the look-ahead, that it may run straight to. Every skipped doorway vertex lies within 0.5 m of the line (`DoorwayPassMetres`, the room graph's push tolerance), so the body still goes through each doorway. The line, at the body's radius (0.48 m: the centre and both sides every 0.5 m, 1 m above the floor), stays inside the body's cell and the cells the route enters between (retail's `CEnvCell::point_in_cell`, as `LandblockCellSet.Contains` tests it). With a `RouteConfirmer`, it runs no further than the physics' sweep reached at plan time (a 0.48 m sphere, 1 m up, from each room vertex to each later one until one is stopped: `PhysicsWorld.SweepViewer`, the confirmer's wall-check transition), and it takes no more of the creature layer than the route does. The turn rules are the outdoor run's (the 6 degree dead-band, the release rule, tracking past 1 m off), and a press also waits while the heading's line passes the aimed vertex within its tolerance (0.5 m; 0.25 m for the goal), since near a vertex a few centimetres off are many degrees. Outdoors towards a doorway it is P5a's pursuit, as before. **Through a doorway at a run** (M5 item 2 fix F6, D47): on a room graph every cell-to-cell portal is a doorway vertex, and the thin-doorway walk within 3 m of each (`WalkNearDoorwayMetres`) made the live round-2 mage walk 52 m of a den leg with no creature near. Indoors the body now runs through a doorway between two rooms (`NavRunner.RunsThroughDoorway`) and walks near it only where the route turns more than 60 degrees there (`WalkSharpTurnDegrees`, the turn-in-place angle) or the physics' sweep from the vertex before it does not reach the vertex after it; the building's door (a neighbour vertex outdoors) keeps the thin-doorway walk. Measured on the dats, 12 legs from the arrival: the den 94 % of the metres walked at 2.56 m/s before, 4 % at 6.03 m/s after; Tusker Temple 97 % at 2.42 m/s before, 10 % at 5.18 m/s after, with no frame of wall contact and no rung (`IndoorRunThroughDatTests`; `IndoorSteeringTests.Doorways_between_rooms_are_run_through_not_walked_near`, `A_sharp_turn_at_a_doorway_is_walked_and_the_doorway_after_it_is_run`). The track passes a doorway vertex up to 1.4 m off at a run (0.5 m walking): the live watch looks for a jamb clipped at a corner.
+
 **Tracking.** A heading is good only to half a physics step (below), about 3.4 degrees, which drifts about 6 m in 100 m, and
 the physics confirmed the route's line, not the drift: the confirmer's placements allow only 0.5 m sideways. So while it aims at
 the next vertex the body tracks back onto the route: past 1 m off (`CrossTrackMetres`) it aims at the route's point 2.5 s ahead
@@ -203,7 +207,7 @@ press waits 0.2 s after the last change unless the error is past 60 degrees. P5a
 press overshot the 5 degree tolerance into the other side's key, 9 to 11 key changes a second round a corner. Forward is held
 within 60 degrees of error, otherwise the body turns in place.
 
-**The pursuit** (towards a doorway vertex and indoors: P5a's). Pure pursuit with a lead of max(2 m, 0.6 times the speed) in arc
+**The pursuit** (outdoors towards a doorway vertex: P5a's). Pure pursuit with a lead of max(2 m, 0.6 times the speed) in arc
 length, never past the next doorway vertex; outdoors the lead is clamped to the farthest route vertex the lattice can see. A
 press needs 5 degrees of error. The body walks within 2 m of a stop and within 3 m of a doorway vertex. Keys are sent only on
 change: `KeyChanges`, `MaxKeysPerSecond`, `Turns` (turn keys pressed) and `KeyChangesPerMinute` report the rate.
@@ -215,7 +219,7 @@ refusal outdoors scars the sample (1.5 m); a refusal indoors leaves out the cell
 row** (no path confirmed between them) end the run Blocked. P5a counted them over the whole run, and the 2 km forest run meets
 two at its start (small statics the tile under-stamps, TODO(nav-static-footprint)), so one more anywhere ended it.
 
-**The ladder.** Progress is arc length (in the last 2 m: the arc minus the distance to the end). If progress stays under
+**The ladder.** Progress is arc length (in the last 2 m: the arc minus the distance to the end). A `Blocked` run is one leg's failure: the fight's and the journeys' den walks recover it (`LegRecovery`; three in a row end the walk; section 52). If progress stays under
 0.25 m for 1.5 s with forward held and the body on the ground (or 6 s whatever the keys), that is a rung:
 
 1. back 1 m;
@@ -269,6 +273,8 @@ and threw every frame (the last gate's melee journey wrote 8,642 traces).
 returned no waypoints)`, a named failure, not an exception. `Steer` repeats the check and ends Blocked with `empty-path (Steer was given
 no waypoints)`; that is unreachable today.
 
+**Indoors, measured.** The den's 12 tour legs (the explore-mode walker at the fighter's run rate, physics confirming; `IndoorSteeringDatTests`): P5a's pursuit makes 205 turns over 305.8 m (0.670 a metre, one every 1.5 m); the straight run makes 40 turns over 294.6 m (0.136 a metre, one every 7.4 m), every leg at most 0.25 a metre, with 0 rungs. A den leg on the runner over the dats (`GroundWalkRecoverTests.A_den_leg_of_the_walk_arrives_on_the_runner_with_its_turns_a_metre_logged`: the first six legs of the den's tour from the arrival, fighter run skill 230) arrives on every leg, with 0 rungs, 82 turns over 647.7 m (0.127 a metre; legs 0.100 to 0.140).
+
 ## The creature layer (nav-creature-avoid)
 
 The owner, 2026-10-24: the characters "seem unaware of the enemies and run right into them". `NavCreatures`
@@ -286,8 +292,7 @@ and never written into a tile (as the scars are not).
   property, so `CreatureAwareness` pins it for the 74 classes of the two hunt grounds' tables (a read-only SELECT of the
   bundled world database, 2026-10-24: 8 m for a Blood Shreth to 35 m for a Shadow Wisp, every one of them set). Any other
   creature takes ACE's default, 18 m (`VisualAwarenessRange_Default`, Monster_Awareness.cs:377, "the most common value from
-  retail"). The disc's radius is the awareness plus the player's 0.48 m plus the creature's own radius. That is assumed 1 m:
-  the creature's Setup radius is not read yet (TODO(nav-creature-radius)).
+  retail"). The disc's radius is the awareness plus the player's 0.48 m plus the creature's own radius. Its radius is the creature's Setup radius (retail `CSetup::radius`) times its scale (the physics description's ObjScale), as the physics object's is (`HostileCreatureFeed.SetupRadii(dats)`, cached per Setup). A creature whose Setup cannot be read is assumed 1 m, logged once; a host that gives the feed no Setup lookup logs one warning and every aggro disc assumes 1 m (every host passes one; section 52).
 - **The cost.** The planner stamps the layer per plan (`PathPlanner.Creatures`, which the runner sets at each plan). A step into
   a disc costs 1 more a metre at its edge, rising linearly to 5 at the creature, and overlapping discs add. Going round a disc
   in open ground is at most pi/2 of the chord, so the planner always goes round when it can, and a creature in a gap costs the
@@ -297,23 +302,33 @@ and never written into a tile (as the scars are not).
   refreshes the layer every 0.5 s within 120 m. It replans, at most once every 2 s, when a creature the last plan did not know
   there (new, or moved over 3 m) has a disc that meets the route's next 60 m. A creature whose disc already holds the body is not
   a reason: it has noticed the body.
-- **Indoors.** The room graph has no lattice, so the den's walks and the shops' rooms have no creature layer
-  (TODO(nav-creatures-indoor)); the den fight is a fight on purpose.
+- **Indoors** (nav-creatures-indoor, closed in M5 item 2). Over a room source the runner refreshes the layer as outdoors (0.5 s within 120 m), gives it to the room graph at each plan, and replans for a creature walking onto the route ahead (at most once every 2 s); the goal's own creature is left out. Indoors, going round is another doorway sequence, taken when its extra length is less than the exposure it saves. Measured on the den's dats: the leg 0x0320 to 0x0303 with a creature of the default 18 m awareness in 0x0308 goes round through 0x031B to 0x0300 (28.2 m, 2 turns, 0 rungs), the creature's centre never nearer than 6.0 m.
+- **The storey band** (M5 item 2, fix F2; review 2-R6). A creature has a height, `NavCreature.Z`: its feet's z in the landblock's frame, NaN when unknown (a creature of unknown height counts at every height). Indoors a creature counts for a route only within half a storey of the route's height: `NavCreatures.StoreyBandMetres` (3 m) either side, half of `StoreyHeightMetres` (6 m, the stacked storeys of the den and the Tusker Temple), so a creature a storey above or below costs nothing and never forces a replan (`NavCreatures.SameStorey`). `RoomGraph.Exposure` and `CostAt(Vector2, float, uint)` apply the band at each sample's height, interpolated along a ramp, so a ramp's lower end sees a creature on the lower storey. The replan test (`NavRunner.RouteMeets`) applies it to a segment between two indoor waypoints; any other segment, outdoor or the doorway between, keeps the flat disc. Outdoors nothing changes: `PathPlanner` and `CanRunStraightTo` use the overloads that take no height. Not changed: `NavCreatures.Nearest` and the report-only `creature_min_m` still measure in 2D, and `Refresh` and `Fill` still list the creatures of every storey (`creatures_max` counts them). The band is Lifestone's own soft-cost choice, not ACE's: ACE measures awareness between the two cylinders in three dimensions (`PhysicsObj.cs:2519` @95ef426d), so by ACE's arithmetic a creature 6 m below an 18 m awareness would notice through the floor. It stays UNCERTAIN until the live turns-per-metre measure says whether it helps. Tests: `IndoorCreatureLayerTests.The_room_graph_costs_a_creature_only_on_the_routes_storey`, `IndoorCreatureLayerTests.The_exposure_of_a_walk_counts_the_creatures_within_the_band_at_each_samples_height` (with a ramp), `IndoorCreatureLayerTests.The_runner_replans_for_a_creature_on_the_routes_storey_not_for_one_above_or_below`, `NavCreatureTests.The_feed_gives_each_creature_its_height_for_a_room_routes_storey_band`.
 
-Tests: `NavCreatureTests`: the cost, a route going round a creature it would have crossed, the goal creature left out, a creature in
+Tests: `IndoorCreatureLayerTests` (no layer: today's plans; a route round a creature; a creature in the only doorway; the goal creature left out; one replan over the rooms; a warm indoor runner with a layer allocating nothing), `IndoorCreatureLayerDatTests` (the den leg round a tusker; the Setup radii from the dats), `IndoorSteeringTests` and `IndoorSteeringDatTests` (the corridor with a bend, the leaning plazas at lean 0.3, the den's legs), `NavCreatureTests`: the cost, a route going round a creature it would have crossed, the goal creature left out, a creature in
 the only gap, the feed's rule, the pinned awareness, a creature walking onto the route ahead (one replan, the body outside its disc),
 no replan for a creature the plan knew, and a warm runner with a layer allocating nothing a step.
 
 ## The confirmer
 
 `RouteConfirmer` (`Movement/Wayfinding/RouteConfirmer.cs`) checks every path against the collision before the runner presses
-a key. Every metre it asks `PhysicsWorld.TryGroundZ` with the body's foot sphere, from the previous sample's z (the step rule
+a key. Since M5 item 5 F3 it checks the fixed world only (`PhysicsObj.FixedWorldOnly`, `PhysicsWorld.TryFixedGroundZ`): server objects in the player's world (doors, NPCs, creatures) are met by the runner while it walks, not by the planner (docs/session.md §55). Every metre it asks `PhysicsWorld.TryGroundZ` with the body's foot sphere, from the previous sample's z (the step rule
 is `CTransition::step_down`'s 0.6 m up and 0.6 m down window). A miss tries the half sample (a walkable slope steeper than 0.6 m
 a metre), then a probe lowered 1.2 m (a ledge up to 1.8 m). Every 2 m it places the player's `Setup`
 (`PhysicsObj.SetPosition(Placement)`, the `TryStand` pattern), 0.05 m above the ground found, at most 0.5 m sideways. Outdoor
 samples take the land cell under them; indoor segments take the nearer end's cell. The probe body is a non-player-killer
 that is never blocked by the player, and it leaves the world after every call. The goal's last `StopTolerance` is not
 confirmed (the floor centre of Thelnoth's cellar is not standable, and the body stops 0.4 m short of it).
+
+**Stop points and statics (M5 item 7, `m5-renald-shop-floor`, D120).** A profile's vendor `stop_point` must stand where the confirmer's probes stand: on
+the cell's floor through its statics, at the point and over the whole stop tolerance round it, because the body stops anywhere within that ring.
+A floor polygon under the point is not enough: Renald's first stop (135.6, 15.8) lay on a floor polygon of his front room 0xA9B4013F among three
+barrels (Setup 0x020000A5) beside his counter, and the ground probe refused the sample a metre before it, three plans in a row, while the mage stood
+at the lifestone (the soak of 2026-10-29). The stop moved to the clear floor by the door, (133.5, 15.5); `VendorStopConfirmDatTests` (Exhaustive) confirms
+the planned leg from the lifestone to every den vendor and the stop ring through the statics, and runs the same check over Holtburg's other vendors.
+A vendor's own point is the other case: since item 5 his body stands on it in the player's physics world, where the confirmer does not look (F3),
+so a point goal there with the 0.5 m tolerance jams against him and ends stuck (round 10, Thelnoth's cellar). The resupply station's point request
+to a same-cell vendor not yet in view stops `ShopLeg.UnseenVendorReachMetres` (1.6 m) short of his point; a vendor in view keeps his object goal.
 
 **Cost** (Debug, 2026-10-23): 150 m of flat ground takes 1.35 ms (9 microseconds a metre); Holtburg to the belt, 1,016 m, takes
 12.8 ms (12.6 microseconds a metre); the shops, 57 to 164 m, take 1.5 to 7.5 ms. Headless confirms at once (`ConfirmAll`,
@@ -363,7 +378,7 @@ One login as the account's fighter (test: Holtburg Hunter; test-melee: Holtburg 
 `--character` is ignored). The start is known: when `--from` is more than 5 m away, one server-mod `place loc` puts the
 character there (counted `teleports=1`). The client's own body (`OfflineWalker`) moves on a `HeadlessStreamer` world, with
 `Move` bound, a `NavRunner` over `OutdoorPathSource(PathPlanner(map))`, the corridor fed twice a second, a where-am-I at the
-start and the end of each leg, then logoff. The run is outdoors only (TODO(wayfind-indoor)).
+start and the end of each leg, then logoff. An end may be indoors (`--to`, `--from`, and the start the back leg runs to). An indoor end needs a position (`--to=0xA9B4013F@x,y,z`; the scenario does not guess a room's floor: `TODO(wayfind-indoor-default)`). The leg's path source is the journeys' own, `JourneyLegPlanner.SourceFor(bodyCell, goalCell, map)`: the outdoor planner when both ends are outdoors, the dungeon ground's room graph when an end is in one, else `IndoorOutdoorPathSource` over the landblock's room graph with its exit route out of a room. The goal is `NavGoal.ToPoint(point, cell)`, with the room as its cell when the end is indoors. A start in a room the graph cannot leave ends the leg Blocked, named `indoor-start-unreachable` (`TODO(room-steps)`: Renald's back room 0xA9B40141); the shop's goal is the front room 0xA9B4013F. A login indoors with no `--from` is no longer refused: the body is placed where the server has it and the leg plans from that cell.
 
 The lines:
 
@@ -374,7 +389,9 @@ The lines:
 - `wayfind done ok= legs=`.
 
 The default limit is 180 s plus, for each leg, 1.5 times the straight line at 4.8 m/s plus 300 s, counted from `--from` or the
-Holtburg lifestone; `--quit-after` overrides it.
+Holtburg lifestone; ``--quit-after`` overrides it.
+
+Indoors, measured (the scripted server over the dats, `WayfindScenarioTests.An_indoor_end_is_planned_through_the_room_graph_and_arrived_in_its_room_and_the_back_leg_leaves_by_the_door_M5_2_k1`): the Holtburg lifestone (0xA9B40019, at 84, 7.7, 94) to Renald's front room 0xA9B4013F at its room frame: out 56.2 m in 11.4 s, 0 rungs, 0 corrections, the server's last position on the shop floor (z 94); back with `--wayfind-back` 58.4 m in 14.7 s, 0 rungs, ending outdoors at the lifestone. The scripted body runs at the scenario's run skill (about 4.8 m/s), so its times are slower than the fighters' rate.
 
 ## The journeys' planner, the settle gate and the indoor exit (M4 P5b J5b, F1)
 
@@ -396,18 +413,37 @@ tiles come from (the Godot host feeds the nav tiles from the player's own Collis
   outdoor planner takes over (`IndoorOutdoorPathSource`). An outdoor point or object goal plans to its landblock id, so `SourceFor` gives the
   indoor-outdoor source over that landblock, which hands a goal with no room to the outdoor planner.
 
+## Doors on the routes (M5 item 5 d1, d2)
+
+A closed door on a route is a stop, not a wall. `DoorCrossings` (`Movement/Wayfinding/DoorCrossings.cs`) reads the doors of the session's object table: a `NavDoor` has the guid, the position, the extent (the Setup's selection sphere radius times the scale: 0.89 m for the Aluvian house door, Setup 0x020019FF, not the 1 m fallback), Open (the Ethereal bit of its PhysicsState) and Locked (from its property update).
+
+`DoorCrossings.Map` joins a door to the nearest sill within its extent: a tile lane, a room-graph exit, or a room-to-room portal that fits. `StepsOf` finds the first path segment that crosses the sill plane within the extent (`CrossArc`), and the runner stops at `CrossArc - DoorStandOffMetres` (1.3 m: the walker's radius plus 0.5 m, inside ACE's 2 m use radius).
+
+`NavRunner` takes the doors through `INavDoorFeed` (`SessionDoorFeed`), which `JourneyRunLeg`, the fight walks and `WayfindScenario` set on every leg's runner. At a door it logs `purpose=door`, stops, sends the Use and waits, keys released, for the door's Ethereal state, then walks on. One more Use follows after `DoorRetrySeconds` (2 s; a door still animating ignores the first); no open within `DoorOpenSeconds` (5 s) ends the run Blocked `door-closed-timeout`. A door that closes again mid-crossing is Used once more, then the same failure. A door the server says is locked is blocked at the plan (`door-locked`), and a refused Use (the kill switch, a dry run) is `door-use-refused`. With a feed the verdict gains `door_steps= door_uses= doors_opened= doors_found_open=`. `INavDoorFeed.Version` is a number that moves when the set of doors changes; a feed that never changes its doors leaves it 0 (`SessionDoorFeed.Version`, F2).
+
+Sight: an object goal whose sight line passes a closed door's doorway ends `ArrivedWithoutSight` ("closed door 0x.. stands between"). That closes the door half of `TODO(nav-sight-no-physics)`; the statics half stays open.
+
+Locks: a CreateObject carries no lock (ACE `WorldObject_Networking.cs:845-892` @95ef426d), so Locked is known only from a property update, and a door never appraised reads as unlocked (`TODO(door-locked-unknown)`). ACE opens a locked door used from behind (`Door.cs:104-107`), which the runner does not use (`TODO(door-locked-behind)`). A locked door is not routed round (`TODO(door-locked-replan)`).
+
+Extents: `DoorCrossings.SetupExtents(dats)` is built once per host (headless and game) and returned as `IJourneyLegBody.SetupExtent`, closing `TODO(door-extent-host)` (d2); the fight walks and the death leg's walk take it too (F2).
+
+Station line: the journey's `vendor` station and `VendorFactsRun` print `door_opened=yes|no` on the vendor line, after `vendor_frame_max_ms=`, report-only. It is yes only for a door the walk itself Used that then gained Ethereal while the watch was live (F2, 5-R2); a trip by place prints nothing.
+
+The den's two doors (0x70105004 and 0x70105005, impregnable and locked) sit in no-go cell 0x104 and map to no doorway, and Tusker Temple has no door (d1). Tests: `DoorHostTests`, `DoorFeedTests`, `WayfindScenarioTests`, `WindowFramesStationTests`.
+
 ## Open TODOs
 
 | TODO | What is open |
 |---|---|
-| `TODO(room-steps)` | the room graph does not learn sills: Renald's back room 0xA9B40141 is not walkable on foot; the shop goal is 0xA9B4013F; the runner logs it when it leaves a refused cell out |
+| `TODO(room-steps)` | the room graph does not learn sills: Renald's back room 0xA9B40141 is not walkable on foot; the shop goal is 0xA9B4013F; the runner logs it when it leaves a refused cell out. Doors do not change it (d1): the den's two doors map to no doorway, and the room-to-room test uses a placeholder door |
+| `TODO(wayfind-indoor-default)` | an indoor end of the `wayfind` scenario needs a position (`--to=<cell>@x,y,z`); the scenario does not guess a room's floor |
 | `TODO(placement-cell-edge)` | a placement on a land cell's edge is refused (Collided) on flat ground; not traced to retail or the port |
-| `TODO(nav-sight-no-physics)` | an object goal's sight is judged by the sweep only, not by physics |
-| `TODO(wayfind-indoor)` | the `wayfind` scenario is outdoors only |
+| `TODO(nav-sight-no-physics)` | an object goal's sight is judged by the sweep only, not by physics. The door half is closed (d1): a closed door in the sight line is `ArrivedWithoutSight`; the statics half is open |
+| `TODO(door-locked-unknown)` | a CreateObject carries no lock, so a door is read as unlocked until a property update says otherwise (ACE `WorldObject_Networking.cs:845-892`) |
+| `TODO(door-locked-behind)` | ACE opens a locked door used from behind (`Door.cs:104-107`); the runner does not use it |
+| `TODO(door-locked-replan)` | a locked door is blocked at the plan rather than routed round; the planner does not yet plan round a locked door |
 | `TODO(nav-water-corner)` | water is flagged per land cell (24 m), not per corner; the streamer logs it once per landblock that has water nodes |
 | `TODO(hunt-crossing-stall)` | the hunt follower waits for a landblock crossing at most `HuntFollow.CrossingWaitSeconds` while the net pump runs, then builds it at once and logs this |
 | `TODO(m4-caster-value)` | the caster's Value is not read |
 | `TODO(m4-harm-heal-resist)` | a drain-resistance enchantment above 1.0 scales a harm past its table range (the margin covers a small one) |
 | `TODO(nav-static-footprint)` | some small statics collide about a metre past their stamp (0x02000246 in 0xA3B4, 0x020005C9 in 0xA6B4 on the forest route): the confirmer refuses a line at clearance 1 beside them; the straightening keeps clearance 2 and refusals Block only three in a row |
-| `TODO(nav-creature-radius)` | a creature's own radius (its Setup's radius times its scale) is not read: the aggro disc assumes 1 m |
-| `TODO(nav-creatures-indoor)` | the room graph has no creature layer (the den's walks, the shops' rooms) |

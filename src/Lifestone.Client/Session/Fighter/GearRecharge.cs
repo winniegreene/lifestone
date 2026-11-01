@@ -21,6 +21,7 @@ namespace Lifestone.Client.Session.Fighter;
 /// re-cast a recharged item's spells by itself is unread; ACE's rule is followed.</para>
 /// <para><b>Report-only.</b> The step never fails the build (its fields are report-only in their first gate): an unread appraisal, no charge held or a refused use ends it with a warning and the reason in <c>recharged=</c>. Verdict:
 /// <c>gear_mana_min=&lt;percent&gt;|unread|not_entered recharged=&lt;charges used&gt;[:no-charge|:refused|:unread]</c>, the lowest piece's mana after the step.</para>
+/// <para><b>Source</b> (M5 1 fix B, review 1-R7): the charge's use and the take-off and wear-again are <see cref="ActionSource.Automation"/> (the kill switch and dry run stop them; a refusal ends the step report-only as <c>recharged=...:refused</c>); the appraisals stay <see cref="ActionSource.Host"/> (reads).</para>
 /// <para><b>Not retail:</b> the trigger and the kit's count are Lifestone's own sizing; the stone, its use and its effect are ACE's.</para>
 /// </remarks>
 public sealed class GearRecharge
@@ -262,7 +263,7 @@ public sealed class GearRecharge
         _label = string.Create(CultureInfo.InvariantCulture, $"use a mana charge (object 0x{stone.Guid:X8}, {stone.Mana} mana) on {(target == self ? "the player (every equipped item below its maximum)" : "the " + pack[0].Piece!.Name + " in the pack")}: {low} below {RechargeBelow * 100:0}%");
         _log.Info(_category, _label);
         _onSent?.Invoke(_label);
-        _pending = session.Actions.UseManaStone(stone.Guid, target, ActionSource.Host);
+        _pending = session.Actions.UseManaStone(stone.Guid, target, ActionSource.Automation);
         _phase = Phase.Charging;
         return ScenarioStatus.Running;
     }
@@ -330,7 +331,7 @@ public sealed class GearRecharge
             _label = string.Create(CultureInfo.InvariantCulture, $"take off the {piece.Name} (object 0x{read.Guid:X8}, {read.Mana}/{read.MaxMana} mana, none of its wearer spells active) to wear it again: ACE casts an item's spells only when it is wielded (TODO(m4-gear-mana-reactivate))");
             _log.Info(_category, _label);
             _onSent?.Invoke(_label);
-            _pending = session.Actions.Unwield(read.Guid, ActionSource.Host);
+            _pending = session.Actions.Unwield(read.Guid, ActionSource.Automation);
             _phase = Phase.TakingOff;
             return ScenarioStatus.Running;
         }
@@ -363,7 +364,7 @@ public sealed class GearRecharge
         _label = string.Create(CultureInfo.InvariantCulture, $"wear the {_swap.Piece.Name} again at 0x{_swap.Location:X}");
         _log.Info(_category, _label);
         _onSent?.Invoke(_label);
-        _pending = session.Actions.Wield(_swap.Guid, (EquipMask)_swap.Location, ActionSource.Host);
+        _pending = session.Actions.Wield(_swap.Guid, (EquipMask)_swap.Location, ActionSource.Automation);
         _phase = Phase.PuttingOn;
         return ScenarioStatus.Running;
     }

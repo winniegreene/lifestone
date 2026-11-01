@@ -427,7 +427,7 @@ M2: log in, create or select a character, enter the world at Holtburg, see objec
 | F7E0 | ServerMessage (system chat) | S→C | should (`@myloc` test hook) | `GameMessageSystemChat.cs` |
 | 02BB / 02BC / 01E0 / 01E2 | HearSpeech, HearRangedSpeech, EmoteText, SoulEmote | S→C | must (chat) | `GameMessageHearSpeech.cs`, `GameMessageHearRangedSpeech.cs`, `GameMessageEmoteText.cs`, `GameMessageSoulEmote.cs` |
 | 02CD / 02CF / 02DD / 02E3 / 02E7 / 02E9 | PrivateUpdatePropertyInt, …Int64, …Skill, …Attribute, …Vital, …Attribute2ndLevel | S→C | must (D16) | `GameMessagePrivateUpdate*.cs` |
-| (other 02CD–02E9) | the remaining Private updates and the Public updates | S→C | skip | `GameMessagePrivateUpdate*.cs`, `GameMessagePublicUpdate*.cs` |
+| (other 02CD–02E9) | the remaining Private and Public updates (0x02D3 and 0x02D5 are never sent by ACE; the rest that item 6 decodes are in §5.5) | S→C | skip | `GameMessagePrivateUpdate*.cs`, `GameMessagePublicUpdate*.cs` |
 | F750 / F755 | Sound / PlayEffect (a PlayScript on an object) | S→C | should (decoded) | `GameMessageSound.cs`, `GameMessageScript.cs` |
 | F754 | PlayScript | S→C | skip | — |
 | EA60 | AdminEnvirons (u32 environ id) | S→C | decoded and applied (M3 1.3 s2b: the sound options play from the UI sound table, the fog options are published and logged, the fog is not drawn: `TODO(m3-environs-fog)`; `TODO(m3-admin-environs)` is closed; docs/session.md section 15) | `GameMessageAdminEnvirons.cs` |
@@ -466,6 +466,8 @@ M2: log in, create or select a character, enter the world at Holtburg, see objec
 | F7B1 / 0x01E9 → GameEvent 0x01EA | PingRequest / PingResponse | C→S / S→C | skip | `GameActionPingRequest.cs`, `GameEventPingResponse.cs` |
 
 The field lists of the messages M2 added (chat, game events, the player's own updates, Use, QueryHealth, Tell, and the character delete and restore) are in the remarks of `src/Lifestone.Net/Messages/{Chat,Events,Self,Actions,Login}/*Codec.cs` and `*Codecs.cs`; each cites ACE's writer and the retail dispatcher.
+
+The item 6 rows (M5 6: the confirmations, the property updates, the three login notices and the actions) have their layouts in section 5.5.
 
 ### 5.2 Login-phase layouts
 
@@ -716,6 +718,57 @@ Running is forward = WalkForward plus current hold key = Run (2). ACE turns that
 - **0x005D Tell:** String16L message, then String16L target, both ASCII and the target non-empty (`CM_Communication::Event_TalkDirectByName`, 11.4186 0x006A4780, 11.6096 0x006A55A0).
 - Talk: its text is the last field, so it may be Windows-1252.
 - **The vendor and shortcut actions (M4 3.2 s0):** **GA 0x005F BuyItems** and **0x0060 SellItems**: u32 vendor, u32 count, then per item an i32 amount and a u32 guid, in that order, and nothing after the last item (ACE reads no alternate-currency word: it is commented out in `GameActionBuyItems.cs:29-32`); **0x00C8 IdentifyObject:** u32 guid (0 clears the appraisal target and gets no reply); **0x019C AddShortCut:** u32 index (0-based), u32 object, u16 spell, u16 layer; **0x019D RemoveShortCut:** u32 index. Retail senders `CM_Vendor::Event_Buy` 0x006AB050, `Event_Sell` 0x006AAF60, `CM_Item::Event_Appraise` 0x006A94A0, `CM_Character::Event_AddShortCut` 0x006A1CD0, `Event_RemoveShortCut` 0x006A25E0 (11.6096; bodies not read).
+
+### 5.5 Item 6 (M5 6): confirmations, property updates, login notices and actions
+
+Added by M5 item 6 (D31, D32). "Lifestone" says what the client does with the row: reduced into the game state (docs/session.md
+section 47), sent by the Action API (section 47, six actions), decoded and ignored by name (the login notices, logged once), or
+not decoded. ACE references are @95ef426d; retail addresses are 11.6096 ("unknown" where the symbol table lacks the function).
+
+**Server to client**
+
+| Opcode | Name | Layout (little-endian) | ACE | Retail handler | Lifestone |
+|---|---|---|---|---|---|
+| GE 0x0274 | CharacterConfirmationRequest | u32 ConfirmationType, u32 context, String16L text | `Network/GameEvent/Events/GameEventConfirmationRequest.cs:10-12` | `CM_Character::DispatchUI_ConfirmationRequest` 0x006A3BB0 | reduced: `GameState.PendingConfirmation` (`GameStateReducer.Confirmations.cs`) |
+| GE 0x0276 | CharacterConfirmationDone | u32 ConfirmationType, u32 context | `GameEventConfirmationDone.cs:10-11` | `CM_Character::DispatchUI_ConfirmationDone` 0x006A1C40 | reduced: closes the question (the same file) |
+| GE 0x0295 | SetTurbineChatChannels | ten u32: allegiance, General 2, Trade 3, LFG 4, Roleplay 5, Olthoi 10, society, Celestial Hand 7, Eldrytch Web 8, Radiant Blood 9 | `GameEventSetTurbineChatChannels.cs:10-19`; values `Entity/TurbineChatChannel.cs:5-18` | unknown | decoded and ignored (`LoginNoticeEvents.cs`) |
+| GE 0x0029 | CharacterTitle | u32 1 (marker), u32 current title id, u32 count, count x u32 title id | `GameEventCharacterTitle.cs:10-18` | unknown | decoded and ignored |
+| GE 0x0021 | FriendsListUpdate | u32 count; per friend: u32 id, u32 online, u32 0, String16L name, u32 n + n x u32, u32 n + n x u32; then u32 update type (0 FullList, 1 Added, 2 Removed, 4 StatusChanged) | `GameEventFriendsListUpdate.cs:12-19, 65-98` (ACE writes both inner lists empty: TODOs at lines 88 and 93) | unknown | decoded and ignored |
+| GM 0x02D0 | PublicUpdatePropertyInt64 | u8 sequence, u32 object, u32 key, i64 value | `Network/GameMessages/Messages/GameMessagePublicUpdatePropertyInt64.cs:19-22` | `CM_Qualities::DispatchUI_UpdateInt64` 0x006B0050 | reduced: `WorldObject.Properties` |
+| GM 0x02D1 | PrivateUpdatePropertyBool | u8 sequence, u32 key, u32 value | `GameMessagePrivateUpdatePropertyBool.cs:11-13` | `CM_Qualities::DispatchUI_PrivateUpdateBool` 0x006AF880 | reduced: `SelfState.Qualities` (Afk, key 110; ACE `Player_Networking.cs:438-443`) |
+| GM 0x02D2 | PublicUpdatePropertyBool | u8 sequence, u32 object, u32 key, u32 value | `GameMessagePublicUpdatePropertyBool.cs:20-23` | `CM_Qualities::DispatchUI_UpdateBool` 0x006AFF00 | reduced: `WorldObject.Properties`; key 3 (Locked) is `WorldObject.Locked` |
+| GM 0x02D3 | PrivateUpdatePropertyFloat | not decoded: ACE never sends it (no caller) | `GameMessagePrivateUpdatePropertyFloat.cs:11-13` | `CM_Qualities::DispatchUI_PrivateUpdateFloat` 0x006AF8C0 | not decoded |
+| GM 0x02D4 | PublicUpdatePropertyFloat | u8 sequence, u32 object, u32 key, f64 value | `GameMessagePublicUpdatePropertyFloat.cs:19-22` | `CM_Qualities::DispatchUI_UpdateFloat` 0x006AFF50 | reduced: `WorldObject.Properties` |
+| GM 0x02D5 | PrivateUpdatePropertyString | not decoded: ACE never sends it | `GameMessagePrivateUpdatePropertyString.cs:11-14` | unknown | not decoded |
+| GM 0x02D6 | PublicUpdatePropertyString | u8 sequence, u32 KEY, u32 OBJECT, Align (to 4 from the opcode), String16L. The key precedes the object, unlike every other public update | `GameMessagePublicUpdatePropertyString.cs:19-23` | unknown | reduced: `WorldObject.Properties` |
+| GM 0x02D7 | PrivateUpdatePropertyDataId | u8 sequence, u32 key, u32 value. ACE sends it for a player's MotionTable | `GameMessagePrivateUpdateDataID.cs`; sender `WorldObjects/Player_Character.cs:556-574` | `CM_Qualities::DispatchUI_PrivateUpdateDataID` 0x006B01F0 | reduced: `SelfState.Qualities` |
+| GM 0x02D8 | PublicUpdatePropertyDataId | u8 sequence, u32 object, u32 key, u32 value. ACE does send it (tailoring, core plating) | `GameMessagePublicUpdateDataID.cs`; sender `WorldObjects/Player_Properties.cs:1165` (callers `Entity/Tailoring.cs:589`, `Entity/CorePlating.cs:186`) | `CM_Qualities::DispatchUI_UpdateDataID` 0x006B02C0 | reduced: `WorldObject.Properties` |
+| GM 0x02D9 | PrivateUpdatePropertyInstanceId | u8 sequence, u32 key, u32 value (CurrentAttacker in a fight) | `GameMessagePrivateUpdateInstanceID.cs:11-13`; sender `Player_Combat.cs:207` | `CM_Qualities::DispatchUI_PrivateUpdateInstanceID` 0x006AF920 | reduced: `SelfState.Qualities` |
+| GM 0x02DB | PrivateUpdatePosition | u8 sequence, u32 position type, 32-byte position (cell, 3 x f32, W X Y Z) | `GameMessagePrivateUpdatePosition.cs:12-14`; `Entity/Position.cs:361-377` | `CM_Qualities::DispatchUI_PrivateUpdatePosition` 0x006B0230 | reduced: `SelfState.Qualities` (LastOutsideDeath, position type 14) |
+
+The string updates' retail handlers were not found in the table. Each public update keeps one sequence byte per object, kind
+and key (`GameMessagePublicUpdatePropertyBool.cs:20` and its siblings); an older one is dropped by retail's timestamper
+(`WTimeStamper::UpdateTS`, 11.6096 0x006B3CB0).
+
+**Client to server**
+
+| Opcode | Name | Layout | ACE | Retail sender (11.6096) | Lifestone |
+|---|---|---|---|---|---|
+| GA 0x0275 | ConfirmationResponse | i32 type, u32 context, i32 accepted (1 yes, 0 no) | `Network/GameAction/Actions/GameActionConfirmationResponse.cs:11-13` | `CM_Character::Event_ConfirmationResponse` 0x006A2030 | sent (`RespondToConfirmation`) |
+| GA 0x01A1 | SetCharacterOptions | flags u32, options1 i32, [0x1 shortcuts: u32 n, n x (i32 index, u32 object, u32 spell)], first spell bar (u32 n + ids), [0x4: 4 bars], [0x10: 6 bars], [0x400: 7 bars], [0x8 desired components: u32 (count \| buckets<<16), n x (u32 id, i32 amount)], [0x20 spellbook filters u32], [0x40 options2 i32], [0x80 timestamp String16L], [0x100 generic qualities, never written], [0x200 gameplay options: raw bytes to the end] | `GameActionSetCharacterOptions.cs:45-190` (ignored before FirstEnterWorldDone, lines 25-35; ACE stores only options1, options2 and the gameplay bytes) | `CM_Character::Event_CharacterOptionsEvent` 0x006A1EE0 | sent: both words, the filters, bars, shortcuts and components from the read model; no timestamp format and no gameplay options (`TODO(m5-options-block-gameplayoptions)`, `TODO(m5-options-block-genericqualities)`, `TODO(m5-options-block-flags)`) |
+| GA 0x0005 | SetSingleCharacterOption | u32 option (ACE `CharacterOption`), u32 value | `GameActionSetSingleCharacterOption.cs:11-12` | `CM_Character::Event_PlayerOptionChangedEvent` 0x006A2330 | written by the codec; no send method (no caller) |
+| GA 0x0063 | TeleToLifestone | none | `GameActionTeleToLifestone.cs` | `CM_Character::Event_TeleToLifestone` 0x006A29B0 | sent (`RecallLifestone`) |
+| GA 0x028D | TeleToMarketPlace | none | `GameActionTeleToMarketPlace.cs` | `CM_Character::Event_TeleToMarketplace` 0x006A2A40 | sent (`RecallMarketplace`) |
+| GA 0x01DF | Emote | String16L | `GameActionEmote.cs:10` | `CM_Communication::Event_Emote` 0x006A4F40 | sent (`Emote`) |
+| GA 0x000F | SetAfkMode | u32 (0 or 1) | `GameActionSetAfkMode.cs:10` | `CM_Communication::Event_SetAFKMode` 0x006A4D00 | sent (`SetAfk`) |
+| GA 0x0010 | SetAfkMessage | String16L | `GameActionSetAfkMessage.cs:10` | `CM_Communication::Event_SetAFKMessage` 0x006A5260 | sent (`SetAfk` with a message) |
+
+**Counts and login order.** Over the 470 recordings under `cache/` (measured by the dispatcher): GE 0x0021 469, GE 0x0029 469,
+GE 0x0295 2,667, GM 0x02D9 2,412, GM 0x02DB 1; every one decodes. Each login sends the PlayerDescription, then CharacterTitle, then
+the empty FriendsListUpdate, then the chat channels (three at login, three more about 32 s later). The capture found no recording holding GE 0x0274,
+0x0276, GM 0x02D0, 0x02D1, 0x02D2, 0x02D4 or 0x02D6, nor the client actions above; their layouts are ACE's writers'.
+Not in this section: 24 server frames that are all zero bytes (opcode 0, 36 to 48 bytes, SmartBox queue) in 14 recordings
+stay unknown (`TODO(m5-6-zero-messages)`).
 
 ---
 

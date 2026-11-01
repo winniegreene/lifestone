@@ -38,16 +38,16 @@ public sealed class WindowFramesStationTests
     }
 
     [Fact]
-    public void The_vendor_station_line_ends_with_the_vendor_window_and_prints_no_attack_or_loot_window()
+    public void The_vendor_station_line_ends_with_the_vendor_window_then_door_opened_and_prints_no_attack_or_loot_window()
     {
         var hunt = Hunt(HuntStages.Vendor);
 
         var fields = JourneyStations.VendorFields(hunt, Godot);
 
-        Assert.Equal(hunt.VerdictFields() + " " + hunt.VendorFields() + " vendor_frame_max_ms=41.3", fields);
+        Assert.Equal(hunt.VerdictFields() + " " + hunt.VendorFields() + " vendor_frame_max_ms=41.3 door_opened=no", fields); // M5 5 d2: no walk on foot, no door opened
         Assert.DoesNotContain("attack_frame_max_ms", fields, StringComparison.Ordinal);
         Assert.DoesNotContain(CombatModeWatch.FieldName, fields, StringComparison.Ordinal);
-        Assert.EndsWith(" vendor_frame_max_ms=n/a", JourneyStations.VendorFields(hunt, null), StringComparison.Ordinal);
+        Assert.EndsWith(" vendor_frame_max_ms=n/a door_opened=no", JourneyStations.VendorFields(hunt, null), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public sealed class WindowFramesStationTests
 
         var run = (VendorFactsRun)new VendorFactsStation().Start(context);
 
-        Assert.Equal("buy=no sellback=no refused=no sold=no problems=0 granted=0 vendor_frame_max_ms=41.3", run.VerdictFields());
+        Assert.Equal("buy=no sellback=no refused=no sold=no problems=0 granted=0 vendor_frame_max_ms=41.3 door_opened=no", run.VerdictFields());
         Assert.False(run.VendorWindow); // no open sent yet
     }
 

@@ -3,6 +3,7 @@ using DatReaderWriter.Enums;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement;
 using Lifestone.Client.Session.Actions;
+using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
@@ -50,6 +51,9 @@ internal sealed record C2Character
     /// <summary>True when the caster is held in the pack, not wielded (a fighter's kit, M4 P5a C1b): <see cref="Caster"/> is then false and the magic mode is still refused.</summary>
     public bool CasterInPack { get; init; }
 
+    /// <summary>The weenie class of the caster (the wielded one or the one in the pack): the retired loot wand 8552 by default (the fighters' caster), or the kit's vendor Wand 2472 (M5 3 w1).</summary>
+    public uint CasterWcid { get; init; } = GearKit.Wand.Wcid;
+
     /// <summary>The current health (the maximum is 200).</summary>
     public uint Health { get; init; } = 200;
 
@@ -70,6 +74,15 @@ internal sealed record C2Character
 
     /// <summary>The combat mode at the start.</summary>
     public int Mode { get; init; } = CombatModes.NonCombat;
+
+    /// <summary>
+    /// Mana Conversion's ranks (M5 3 m4, <c>m5-keeper-tries-rig</c>, review 1-R13): above 0 the character holds skill 16 trained, at (Focus 100 + Self 100) / 6 = 33 plus these ranks, and the rig rolls each cast's cost as ACE does
+    /// (<see cref="ManaConversionModel.RollCost"/>) instead of charging the base; 0 (the default) has no skill, every try floor is the ceiling and a cast costs its base, as every test before did.
+    /// </summary>
+    public ushort ManaConversionRanks { get; init; }
+
+    /// <summary>M5 4 G1: extra pack stacks by weenie class and size (the foci and spell components of a ground's kit), so the level floor (<c>LevelFloor</c>) judges the pack as ACE's foci formula does; none by default.</summary>
+    public (uint Wcid, int Stack)[] Pack { get; init; } = [];
 }
 
 /// <summary>
@@ -99,6 +112,7 @@ internal sealed class C2VitalsRig
 
     private readonly Dictionary<uint, byte> _sequence = [];
     private readonly Queue<bool> _kitRolls = new();
+    private readonly Random _rolls = new(0x2A1);
     private readonly Dictionary<uint, int> _fizzles = [];
     private int _seen;
     private byte _seq;
@@ -193,8 +207,26 @@ internal sealed class C2VitalsRig
     /// <summary>P5a fix F-abil (R6): how many potions a drink takes off the stack (1, as ACE does); another number breaks the script's stack-down-by-one check on purpose.</summary>
     public uint PotionsPerDrink { get; set; } = 1;
 
+    /// <summary>
+    /// M5 7 P7p: the health a creature's spell takes in a Potion of Healing's window (0: none): after the potion's own vital update, the server's Magic line "Gold Phyntos Wasp shocks you for N points with Lightning Bolt III."
+    /// and a second vital update, as the item-end gate's Archer saw (the potion +25, the wasp -39: 98 -> 84).
+    /// </summary>
+    public uint PotionWindowHit { get; set; }
+
+    /// <summary>M5 7 P7p: false makes a Potion of Healing restore nothing (the line says "restores 0 points", no vital update), as a drink at a full vital does.</summary>
+    public bool PotionRestores { get; set; } = true;
+
     /// <summary>Lane C3: the lowest health the rig held (0 would be a death: ACE clamps the vital there).</summary>
     public uint LowestHealth { get; private set; }
+
+    /// <summary>
+    /// The draws the next Mana Conversion cost rolls take, in ACE's order (the roll, the luck, then the second roll; M5 3 m4). 1.0 draws pay the whole base; 0.0 draws take the whole discount. With none queued the rolls come from a
+    /// seeded generator. Used only when the character holds Mana Conversion (<see cref="C2Character.ManaConversionRanks"/>).
+    /// </summary>
+    public Queue<double> ManaRolls { get; } = new();
+
+    /// <summary>The casts the rig refused 0x0401 because the rolled cost was over the mana held (M5 3 m4).</summary>
+    public int ManaRefused { get; private set; }
 
     /// <summary>The spells the rig answered, in order (true: fizzled).</summary>
     public List<(uint Spell, bool Fizzled)> Casts { get; } = [];
@@ -383,9 +415,20 @@ internal sealed class C2VitalsRig
         Used.Add("potion");
         PosturesAtUse.Add(Spy.Posture);
         var before = Health;
-        Health = Math.Min(Character.MaxHealth, Health + (uint)RecoveryRules.PotionPoints);
-        SendVital(HealthKey, Health);
-        Line($"The Potion of Healing restores {Health - before} points of your Health.");
+        if (PotionRestores)
+        {
+            Health = Math.Min(Character.MaxHealth, Health + (uint)RecoveryRules.PotionPoints);
+            SendVital(HealthKey, Health);
+        }
+
+        if (PotionWindowHit > 0)
+        {
+            R.H.ServerMessage($"Gold Phyntos Wasp shocks you for {PotionWindowHit} points with Lightning Bolt III.", 7);
+            Health = Health > PotionWindowHit ? Health - PotionWindowHit : 1;
+            SendVital(HealthKey, Health);
+        }
+
+        Line($"The Potion of Healing restores {(PotionRestores ? Math.Min(Character.MaxHealth, before + (uint)RecoveryRules.PotionPoints) - before : 0)} points of your Health.");
         Potions = Potions > PotionsPerDrink ? Potions - PotionsPerDrink : 0;
         if (Potions == 0)
         {
@@ -418,13 +461,20 @@ internal sealed class C2VitalsRig
         }
 
         Casts.Add((spellId, false));
-        if (Mana < info.BaseMana)
+        var cost = info.BaseMana;
+        if (ManaOrder.TryManaConversion(R.H.State.Self.Qualities, out var conversion) && conversion > 0)
         {
-            R.UseDone(0x0401);
+            cost = ManaConversionModel.RollCost(info.BaseMana, info.Power, conversion, NextRoll, (info.Flags & SpellFlags.IgnoresManaConversion) != 0); // ACE's Creature.CalculateManaUsage (Creature_Magic.cs 14-56 @95ef426d), the model the stand-in shares
+        }
+
+        if (Mana < cost)
+        {
+            ManaRefused++;
+            R.UseDone(0x0401); // nothing is charged
             return;
         }
 
-        Mana -= info.BaseMana;
+        Mana -= cost;
         SendVital(ManaKey, Mana);
         if (VitalsMeans.HealSelf.Contains(spellId))
         {
@@ -452,10 +502,13 @@ internal sealed class C2VitalsRig
             Mana += given;
             SendVital(StaminaKey, Stamina);
             SendVital(ManaKey, Mana);
+            R.H.ServerMessage($"You cast {Table[spellId].Name} on yourself and lose {drained} points of stamina and also gain {given} points of mana", 7); // ACE's transfer line on oneself (WorldObject_Magic.cs:835 @95ef426d), Magic chat: the dance's proof (M5 1 fix B, G5)
         }
 
         R.UseDone();
     }
+
+    private double NextRoll() => ManaRolls.Count > 0 ? ManaRolls.Dequeue() : _rolls.NextDouble();
 
     private void Regenerate(double now)
     {
@@ -561,11 +614,22 @@ internal sealed class C2VitalsRig
             pack.Add(new ContentDesc(StaminaPotion, 0));
         }
 
+        for (var i = 0; i < c.Pack.Length; i++)
+        {
+            var guid = 0x80000D00u + (uint)i;
+            var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), null, name: "Pack stack " + c.Pack[i].Wcid);
+            R.H.R.Reducer.OnCreateObject(
+                R.H.R.Context,
+                basis with { Weenie = basis.Weenie with { Header = WeenieHeaderFlags.Container, ContainerId = WorldActionRig.Player, WeenieClassId = c.Pack[i].Wcid, ItemType = 0x1000, StackSize = (ushort)c.Pack[i].Stack } },
+                isUpdate: false);
+            pack.Add(new ContentDesc(guid, 0));
+        }
+
         var equipped = new List<EquippedDesc>();
         if (c.Caster || c.CasterInPack)
         {
             var basis = ReducerHarness.Create(WandGuid, ReducerHarness.Stamps(), null, name: "Test Wand");
-            R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { ItemType = 0x8000, WeenieClassId = GearKit.Wand.Wcid } }, isUpdate: false);
+            R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { ItemType = 0x8000, WeenieClassId = c.CasterWcid } }, isUpdate: false);
             if (c.Caster)
             {
                 equipped.Add(new EquippedDesc(WandGuid, WorldActionRig.Wand, 0));
@@ -583,9 +647,15 @@ internal sealed class C2VitalsRig
         }
 
         // Healing (Focus + Coordination) / 3 = 66, plus 100 ranks; Life Magic (Focus + Self) / 4 = 50, plus the ranks.
-        var skills = ImmutableArray.Create(
-            new SkillDesc(RecoveryRules.HealingSkillId, 100, 1, c.HealingClass, 0, 0, 0, 0),
-            new SkillDesc(MageTemplate.LifeMagic, c.LifeMagicRanks, 1, c.LifeMagicClass, 0, 0, 0, 0));
+        var skillList = ImmutableArray.CreateBuilder<SkillDesc>();
+        skillList.Add(new SkillDesc(RecoveryRules.HealingSkillId, 100, 1, c.HealingClass, 0, 0, 0, 0));
+        skillList.Add(new SkillDesc(MageTemplate.LifeMagic, c.LifeMagicRanks, 1, c.LifeMagicClass, 0, 0, 0, 0));
+        if (c.ManaConversionRanks > 0)
+        {
+            skillList.Add(new SkillDesc(MageTemplate.ManaConversion, c.ManaConversionRanks, 1, 2, 0, 0, 0, 0)); // trained (advancement class 2): (Focus 100 + Self 100) / 6 plus the ranks
+        }
+
+        var skills = skillList.ToImmutable();
 
         // Maxima 200 each: health 150 ranks + Endurance 100 / 2, stamina 100 + Endurance 100, mana 100 + Self 100.
         var vitals = ImmutableArray.Create(

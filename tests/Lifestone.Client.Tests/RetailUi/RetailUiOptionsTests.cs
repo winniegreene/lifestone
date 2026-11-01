@@ -123,11 +123,30 @@ public sealed class RetailUiOptionsTests
     }
 
     [Fact]
+    public void The_set_details_are_off_by_default_as_retail_and_on_only_by_their_flag()
+    {
+        // M5 7 D137 (the lead's decision): retail writes "Set: name" alone; the pieces worn and the set's spells are an addition behind --examine-set-details on.
+        Assert.False(RetailUiOptions.Parse([]).ExamineSetDetails);
+        Assert.True(RetailUiOptions.Parse(["--examine-set-details=on"]).ExamineSetDetails);
+        Assert.False(RetailUiOptions.Parse(["--examine-set-details=off"]).ExamineSetDetails);
+        Assert.Contains("--examine-set-details", Assert.Single(RetailUiOptions.Parse(["--examine-set-details=maybe"]).Errors), StringComparison.Ordinal);
+        Assert.False(OptionCatalog.Registry.EndsRun(CommandLineArgument.ParseAll(["--examine-set-details=on"]), OptionScenes.Main));
+    }
+
+    [Fact]
     public void The_glitch_flag_restores_every_glitch_the_runtime_has()
     {
         var all = Enum.GetValues<UiRetailGlitches>().Where(g => g != UiRetailGlitches.None && g != UiRetailGlitches.All).Aggregate(UiRetailGlitches.None, (a, g) => a | g);
         Assert.Equal(UiRetailGlitches.All, all);
         Assert.Equal(UiRetailGlitches.All, RetailUiOptions.Parse(["--retail-ui-glitches"]).Glitches);
+    }
+
+    // M5 7 D132: --retail-stack-count restores retail's clipped stack count alone.
+    [Fact]
+    public void The_stack_count_flag_restores_retails_clipped_count_alone()
+    {
+        Assert.Equal(UiRetailGlitches.StackCountClip, RetailUiOptions.Parse(["--retail-stack-count"]).Glitches);
+        Assert.Equal(UiRetailGlitches.None, RetailUiOptions.Parse([]).Glitches & UiRetailGlitches.StackCountClip);
     }
 
     [Theory]
@@ -147,8 +166,19 @@ public sealed class RetailUiOptionsTests
         Assert.Empty(RetailUiOptions.Parse(["--start=arwic", "--walk", "--mute"]).Errors);
         var registered = OptionCatalog.RetailUi().Options.Select(o => o.Name).Order(StringComparer.Ordinal);
         Assert.Equal(
-            ["--examine-icon", "--retail-disconnect", "--retail-effects-stale-info", "--retail-ui", "--retail-ui-frames", "--retail-ui-glitches", "--retail-ui-only", "--retail-ui-start", "--ui-scale"],
+            ["--examine-icon", "--examine-set-details", "--layout-store", "--retail-confirm-slot", "--retail-disconnect", "--retail-effects-stale-info", "--retail-stack-count", "--retail-ui", "--retail-ui-frames", "--retail-ui-glitches", "--retail-ui-only", "--retail-ui-start", "--ui-scale"],
             registered);
+    }
+
+    [Fact]
+    public void The_layout_store_is_auto_by_default_and_takes_disk_or_memory_and_refuses_the_rest()
+    {
+        Assert.Equal(LayoutStoreKind.Auto, RetailUiOptions.Parse([]).LayoutStore);
+        Assert.Equal(LayoutStoreKind.Memory, RetailUiOptions.Parse(["--layout-store=memory"]).LayoutStore);
+        Assert.Equal(LayoutStoreKind.Disk, RetailUiOptions.Parse(["--layout-store=disk"]).LayoutStore);
+        var bad = RetailUiOptions.Parse(["--layout-store=cloud"]);
+        Assert.Equal(LayoutStoreKind.Auto, bad.LayoutStore);
+        Assert.Single(bad.Errors);
     }
 
     [Fact]

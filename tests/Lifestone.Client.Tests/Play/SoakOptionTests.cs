@@ -81,4 +81,28 @@ public sealed class SoakOptionTests
         Assert.Contains("TODO(m5-soak-tallies)", names["--soak-line-s"].Help, StringComparison.Ordinal);
         Assert.Contains("lifestone.log", names["--log-copies"].Help, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void The_log_keep_vitals_and_objects_options_default_parse_and_report_a_bad_value_by_name_M5_7_F17()
+    {
+        var none = PlayOptions.Parse([]);
+        Assert.Equal(1, none.LogKeep);
+        Assert.Equal(0.0, none.LogVitalsSeconds);
+        Assert.Equal(60.0, none.LogObjectsMetres);
+
+        var soak = PlayOptions.Parse(["--log-keep=0", "--log-vitals-s=10", "--log-objects-m=45.5"]);
+        Assert.Empty(soak.Errors);
+        Assert.Equal(0, soak.LogKeep);
+        Assert.Equal(10.0, soak.LogVitalsSeconds);
+        Assert.Equal(45.5, soak.LogObjectsMetres);
+        Assert.Equal(0.0, PlayOptions.Parse(["--log-objects-m=0"]).LogObjectsMetres);
+
+        var bad = PlayOptions.Parse(["--log-keep=-1", "--log-vitals-s=abc", "--log-objects-m=20000"]);
+        Assert.Equal(1, bad.LogKeep);
+        Assert.Equal(0.0, bad.LogVitalsSeconds);
+        Assert.Equal(60.0, bad.LogObjectsMetres);
+        Assert.Contains(bad.Errors, e => e.StartsWith("--log-keep: '-1' is not 0 to", StringComparison.Ordinal));
+        Assert.Contains(bad.Errors, e => e.StartsWith("--log-vitals-s: 'abc' is not a number", StringComparison.Ordinal));
+        Assert.Contains(bad.Errors, e => e.StartsWith("--log-objects-m: '20000' is not 0 to", StringComparison.Ordinal));
+    }
 }

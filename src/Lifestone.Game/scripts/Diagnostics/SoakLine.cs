@@ -4,6 +4,7 @@ using Godot;
 using Lifestone.Client.Avatars;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session;
+using Lifestone.Client.Session.Autopilot;
 using Lifestone.Game.Core;
 using Lifestone.Game.World.ServerObjects;
 
@@ -22,7 +23,7 @@ namespace Lifestone.Game.Diagnostics;
 /// counts, the string) happens once per interval, into one reused <see cref="StringBuilder"/> and <see cref="SoakSnapshot"/>.</para>
 /// <para>Play mode binds the session, the avatar set and the light table with <see cref="Bind"/>; until then (and in a scene without a session) their fields read
 /// <c>n/a</c>. An exception while sampling or logging is logged once as an error and never reaches the frame.</para>
-/// <para><c>kills</c>, <c>deaths</c> and <c>cycles</c> read <c>n/a</c> until item 4's driver reports them (<c>TODO(m5-soak-tallies)</c>, logged once at the start).</para>
+/// <para><c>kills</c>, <c>deaths</c> and <c>cycles</c> are the autopilot's (<see cref="BindAutopilot"/>, <see cref="SoakTallies"/>; M5 4 h1, <c>m5-soak-tallies</c>) and read <c>n/a</c> when none runs (logged once at the start).</para>
 /// </remarks>
 public partial class SoakLine : Node
 {
@@ -42,6 +43,9 @@ public partial class SoakLine : Node
     private GameSession? _session;
     private Func<AvatarSet?>? _avatars;
     private ObjectLightTable? _lightTable;
+    private AutopilotScenario? _autopilot;
+    private Lifestone.Client.Caching.IResourceCacheStats? _textures;
+    private Lifestone.Client.Caching.IResourceCacheStats? _meshes;
 
     /// <summary>The seconds between two lines (0 = none).</summary>
     public double IntervalSeconds => _intervalSeconds;
@@ -72,6 +76,19 @@ public partial class SoakLine : Node
         _session = session;
         _avatars = avatars;
         _lightTable = lightTable;
+    }
+
+    /// <summary>Gives the line the autopilot whose kills, deaths and cycles it reports (null: they read n/a). A host binds it when its autopilot starts; reading is three integer reads a sample.</summary>
+    /// <param name="autopilot">The running autopilot, or null.</param>
+    public void BindAutopilot(AutopilotScenario? autopilot) => _autopilot = autopilot;
+
+    /// <summary>M5 7 P7d (D139 row e): the render caches whose counts and bytes the line reports (null: n/a). Reading is a few property reads a sample.</summary>
+    /// <param name="textures">The texture cache's statistics.</param>
+    /// <param name="meshes">The mesh cache's statistics.</param>
+    public void BindCaches(Lifestone.Client.Caching.IResourceCacheStats? textures, Lifestone.Client.Caching.IResourceCacheStats? meshes)
+    {
+        _textures = textures;
+        _meshes = meshes;
     }
 
     public override void _Ready()
@@ -201,9 +218,14 @@ public partial class SoakLine : Node
         s.FrameP99Ms = _frames.P99();
         s.Over50 = _frames.Over50;
         s.Over75 = _frames.Over75;
-        s.Kills = null; // TODO(m5-soak-tallies): item 4's cycle driver
-        s.Deaths = null;
-        s.Cycles = null;
+        SoakTallies.Read(s, _autopilot); // M5 4 h1: n/a unless an autopilot is bound
+        s.TexCacheCount = _textures?.Count; // M5 7 P7d (D139 rows e, f): the render caches, the arrival trims and the orphans
+        s.TexCacheMb = _textures is { } textures ? textures.TotalBytes / Mb : null;
+        s.TexIdleMb = _textures is { } idle ? idle.IdleBytes / Mb : null;
+        s.MeshCacheCount = _meshes?.Count;
+        s.MeshCacheMb = _meshes is { } meshes ? meshes.TotalBytes / Mb : null;
+        s.CacheTrims = Lifestone.Client.Rendering.ArrivalCacheTrim.Trims;
+        s.OrphansDropped = session?.Cull.OrphansDropped;
         s.GodotErrors = GodotErrorLogger.Installed ? GodotErrorLogger.Count : null;
         s.LogBytes = Log.FileLength();
 

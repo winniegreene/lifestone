@@ -1,0 +1,556 @@
+{
+  "key": "tusker-temple-fort-tethana",
+  "name": "Tusker Temple (Fort Tethana)",
+  "kind": "dungeon",
+  "sources": {
+    "landblocks": "the dats: landblock 0x5C4A, the Tusker Temple; the dungeon of the portal 'Tusker Temple' (weenie 22696) in the wilderness at Fort Tethana (cache/m5/2/research.md section 3, M3); one landblock, 514 cells",
+    "arrival": "the pinned world SQL v0.9.296 through GroundDraft.World (M5 item 2 g2): weenie 22696 (portaltuskertempledirelands)'s Destination (weenie_properties_position, PositionType 2) is cell 0x5C4A02F9 at (160, -130, 0.005), w 1 z 0; the generator below also stands in that cell",
+    "walk": "the doorway lean 0.3, the den's: GroundDraft at lean 0, 0.05, 0.1 and 0.2 reaches 3 of the landblock's cells from the arrival and no slot, at 0.3 it reaches all 489 cells that have a floor and every slot (the least lean between 0.2 and 0.3 was not narrowed); the leg's stop rules are the den's defaults, stop within 1.0 m, dwell 0.25 s, a leg at most 90 s, not measured on this ground (it is not played in M5)",
+    "storeys": "the dats through GroundDraft.Cells (M5 item 2 g2), as drafted: every cell the arrival 0x5C4A02F9 reaches over the doorways RoomGraph.IsPassable accepts at lean 0.3, grouped by origin z into four bands (z 0 57, z -6 84, z -12 205, z -18 143 cells: 489 of the landblock's 514; 25 floorless and 0 unreached pocket cells left out)",
+    "no_go": "3 cells. GroundDraft.World finds no exit portal in the landblock (its instances are the one generator and its 145 creatures), so the unwanted exit is the Tusker Shrine Statue (wcid 22641, level 171), whose Use emote casts spell 2936 (the pinned world SQL v0.9.296: weenie_properties_emote category 7, which ACE's EmoteCategory names Use, 3 being Death, so using the statue, not killing it, takes the player out: the first draft of this section said death; action type 19, CastSpellInstant, spell_Id 2936, a spell with a destination cell, found again by GroundDraft's exits by emote, M5 item 2 g8; cache/m5/2/research.md section 3, M3: the statue teleports to Oolutanga's Refuge): its slot cell 0x5C4A017F is no-go, as the den keeps off its avoided creatures' cells; and the 2 walkable cells that cell cuts off from the arrival (GroundDraft.CutOff), 0x5C4A0179 and 0x5C4A0189 behind it, each holding a Tusker Guard slot that is left standing (the no-go set wins over a target's slot, as in the den)",
+    "targets": "the pinned world SQL v0.9.296 through GroundDraft.World: the five weenies of the generator's slots with their Name and Level; the roles are by hand: the Tusker Slave 1628 and Tusker Guard 1629 are targets as in the den; both Tusker Worshippers are targets too (22516 casts 16 spells, 22515 none; 59 of the 144 creature slots, in every storey, each worth 30,000 XP like a Guard, Fire resist 0.4 against the tuskers' 1.0): the loop cannot avoid them, they stand in the walkable cells of all four storeys and attack anyway, and the profile has no 'kill first' role (cache/m5/2/research.md section 4 row 5, m6-ground-fields); the statue is avoid (its death is the exit)",
+    "level_band": "the pinned world SQL v0.9.296: the four target creatures are level 80 (the avoided statue's 171 is not a target's)",
+    "portal": "the pinned world SQL v0.9.296: weenie 22696's landblock_instance row, guid 0x72A80000, in landblock 0x2A80 at (57.7292, 64.9681, 70.005), which is 0.7N 68.1W; the row's cell is 0x2A800000 and the cell is the outdoor cell the point lies in, 0x2A800013 (x/24 * 8 + y/24 + 1 with whole divisions, the rule that gives the den portal's measured 0x1B90002C from its row); PortalBitmask 1 and min level 40 (int 86), the den portal's bitmask with min level 20; the origin is the row's own point; the tie point (front_point, front_cell) is derived the way the den's W0 stand reads against its row (that stand lies 3 m along the row's facing to within 5 cm): 3 m along the portal's facing, the facing being the row's quaternion (w 0.999794, z -0.02029: yaw -2.32 degrees, the +Y axis turned by it, so the portal faces north, (+0.0406, +0.9992)), which puts the point at (57.8509, 67.9656) with the row's z 70.005 to the centimetre, 70.01 (the den's row z 30.005 stands at 30.01), in the outdoor cell that point lies in by the same x/24 * 8 + y/24 + 1 rule, 0x2A800013; Primary Portal Tie 47 and Recall 48 are the global spell ids the den uses; not measured live (TODO(m6-ground-live-facts))",
+    "home": "the pinned world SQL v0.9.296: the only lifestone (weenie 509) within five landblocks of Fort Tethana's vendors, landblock_instance guid 0x72780000 in landblock 0x2780 at (18.7945, 137.695, 144.005), which is 1.02N 70.67W (the wiki's nearest lifestone 1.0N 70.7W, cache/m5/2/research.md section 3, M3); its cell is the outdoor cell its point lies in, 0x27800006 (the portal's rule); the point is the lifestone's own, not a standing point measured beside it as Holtburg's is (TODO(m6-ground-live-facts))",
+    "vendors": "the pinned world SQL v0.9.296 (GroundDraft's reader): Fort Tethana's shopkeeper Yoshi Deshi 2317, blacksmith Magarith 2315 and mage Zisaha bint Jaidka 2314, each from its landblock_instance row (guid, cell, origin) and int property 74 (MerchandiseItemTypes); the wares are the plan's components and the Mana Potion, from the vendors' create-list rows with destination 4 (the shop), at max(1, ceil(m x Value - 0.1)) in float arithmetic as VendorStock.PriceToBuy with each vendor's own sell multiplier (float property 38: 1.8 for Yoshi Deshi and Zisaha and 1.7 for Magarith, who sells none of the kit; the den's Cindrue is 1.35) and the items' Value (int 19): Pyreal Scarab 1000, Platinum Scarab 10000, Prismatic Taper 22, Mana Potion 170; Zisaha sells all three components (research section 3 M3 says Copper and Gold scarabs and no taper: the dump's create list says otherwise); a stop cell is the vendor's own cell, not walked (TODO(m6-ground-live-facts)); M5 3 m0 added Zisaha's Dho War Master Robe 5910 (14,400) and Wand 2472 (360), the kit of the supplies section, which lists every ware a vendor sells here (a vendor lists only supply lines)",
+    "spell_plan": "m5-plan.md D41 (after D26), the den's rule: Flame Bolt VI below character level 100, VII from 100; 275 is ACE's highest character level; the targets take Fire 1.0 (Tusker Slave and Guard) and 0.4 (the Worshippers), the pinned world SQL v0.9.296, float property 16",
+    "components": "the kit code, as the den's: GearKit.FociFormulaCounts over SpellFormulaRules.ScarabOnlyFormula (the level's scarab, then 4 Prismatic Tapers for a power 6 or power 8 scarab) and ComponentWeenies for the wcids: Pyreal Scarab 690 for VI, Platinum Scarab 8897 for VII (D26; m5-first-dungeon.md section 5.7)",
+    "supplies": "m5-plan.md D48 and D49, the den's lines over Fort Tethana's vendors (the pinned world SQL v0.9.296 through GroundDraft's town half, parsed read-only: Zisaha bint Jaidka the Mage 2314 and Shopkeeper Yoshi Deshi 2317, both at SellPrice 1.8, price max(1, ceil(1.8 x Value - 0.1))). This ground is not played in M5, so the burn rates are the den's and not measured here (TODO(m6-tethana-supplies)): 1.4 Prismatic Tapers a kill, 11 a buff cycle, 224 kills an hour, 0.012 Platinum Scarabs a kill and 0.09 a cycle. Prismatic Taper 20631 (Zisaha, 40) and Mana Potion 379 (Yoshi Deshi, 306): the den's keep, trip_under and stop_under (1,000, 200, 12 and 30, 5, 0). Zisaha sells the Pyreal Scarab 690 (1,800) and the Platinum Scarab 8897 (18,000) in her CreateList, so the scarabs are BOUGHT here, not carried (the den's D8 carry does not apply): keep 40 each (12 hours of the Platinum burn: 224 x 12 x 0.012 + 24 x 0.09 = 34.4), trip_under 12 (about 4 hours left), stop_under 3 (D8). Kit from Zisaha's CreateList: the Wand 2472 (Value 200, 360 pyreals) wielded, as the den's, and the Dho War Master Robe 5910 (Value 8,000, 14,400 pyreals) worn, the dearest War robe she lists (she sells no apprentice robe); its Arcane Lore difficulty is 158 against BSD Mage's 144, so its spells may not activate until the lore or the Item Magic buff covers it (TODO(m6-tethana-supplies)). burden_trip_percent 90. Purse: the day's spend at these prices, 5,376 kills x (1.4 x 40 + 0.012 x 18,000 = 272) + 48 buff cycles x (11 x 40 + 0.09 x 18,000 = 2,060) = 1,561,152 pyreals, so 1.6 million: coin 50,000 is one refill of tapers and potions (1,000 x 40 + 30 x 306 = 49,180), the other 1,550,000 is in the largest trade notes Zisaha sells (six Trade Note 250,000 wcid 20630 and one Trade Note 50,000 wcid 2626; Values from her CreateList); no gate plays this ground, so nothing grants or spends it yet (TODO(m6-tethana-supplies)) M5 3 m1 (the mage kit's foci check): the four travel spells (Lifestone Recall and Tie, Primary Portal Tie and Recall) burn one Copper Scarab 686 on the foci formula (Copper, level III; Cindrue and Zisaha sell it, Value 100 at the vendor's sell price), a travel cast is a few a trip: keep 20 (80 burden), trip_under 5, stop_under 2 (a cast needs 1).",
+    "hold_spots": "none: the loop walks the tour and holds no spot",
+    "respawn": "the pinned world SQL v0.9.296 through GroundDraft.World, as drafted: the one generator 0x75C4A091 (wcid 7924) in the arrival cell 0x5C4A02F9, delay 300 s from its first profile row and tick 60 s from RegenerationInterval; the slots are its 145 link children (cell, wcid): 36 Tusker Slaves, 49 Tusker Guards, 40 Tusker Worshippers 22516, 19 Tusker Worshippers 22515 and the Tusker Shrine Statue; 142 target slots are in walkable cells, 2 in no-go cells and the statue is avoided",
+    "tour": "a first draft (GroundDraft.FirstTour, M5 item 2 g2): the 100 cells of the target slots in walkable cells, storey by storey from z 0 down, nearest first by cell origin from the arrival; the tour's own logic is item 2 g6's",
+    "outdoor": "none: a dungeon"
+  },
+  "landblocks": [
+    "0x5C4A"
+  ],
+  "arrival": {
+    "cell": "0x5C4A02F9",
+    "origin": { "x": 160, "y": -130, "z": 0.005 },
+    "heading": {
+      "w": 1,
+      "z": 0
+    }
+  },
+  "walk": {
+    "doorway_lean": 0.3,
+    "stop_within_m": 1.0,
+    "stop_dwell_s": 0.25,
+    "leg_s": 90
+  },
+  "storeys": [
+    {
+      "name": "z 0",
+      "z_min": 0,
+      "z_max": 0,
+      "cells": [
+        "0x5C4A02C2", "0x5C4A02C3", "0x5C4A02C4", "0x5C4A02C5", "0x5C4A02C6", "0x5C4A02C7", "0x5C4A02C8", "0x5C4A02C9",
+        "0x5C4A02CA", "0x5C4A02CB", "0x5C4A02CC", "0x5C4A02CD", "0x5C4A02CE", "0x5C4A02CF", "0x5C4A02D0", "0x5C4A02D1",
+        "0x5C4A02D2", "0x5C4A02D3", "0x5C4A02D4", "0x5C4A02D5", "0x5C4A02D6", "0x5C4A02D7", "0x5C4A02D8", "0x5C4A02D9",
+        "0x5C4A02DA", "0x5C4A02DB", "0x5C4A02DC", "0x5C4A02DD", "0x5C4A02DE", "0x5C4A02DF", "0x5C4A02E0", "0x5C4A02E1",
+        "0x5C4A02E2", "0x5C4A02E3", "0x5C4A02E4", "0x5C4A02E5", "0x5C4A02E6", "0x5C4A02E7", "0x5C4A02E8", "0x5C4A02E9",
+        "0x5C4A02EA", "0x5C4A02EB", "0x5C4A02EC", "0x5C4A02ED", "0x5C4A02EE", "0x5C4A02EF", "0x5C4A02F0", "0x5C4A02F1",
+        "0x5C4A02F2", "0x5C4A02F3", "0x5C4A02F4", "0x5C4A02F5", "0x5C4A02F6", "0x5C4A02F7", "0x5C4A02F8", "0x5C4A02F9",
+        "0x5C4A02FB"
+      ]
+    },
+    {
+      "name": "z -6",
+      "z_min": -6,
+      "z_max": -6,
+      "cells": [
+        "0x5C4A0268", "0x5C4A0269", "0x5C4A026A", "0x5C4A026B", "0x5C4A026C", "0x5C4A026D", "0x5C4A026E", "0x5C4A026F",
+        "0x5C4A0270", "0x5C4A0271", "0x5C4A0272", "0x5C4A0273", "0x5C4A0274", "0x5C4A0275", "0x5C4A0276", "0x5C4A0277",
+        "0x5C4A0278", "0x5C4A0279", "0x5C4A027A", "0x5C4A027B", "0x5C4A027C", "0x5C4A027D", "0x5C4A027E", "0x5C4A027F",
+        "0x5C4A0280", "0x5C4A0281", "0x5C4A0282", "0x5C4A0283", "0x5C4A0284", "0x5C4A0285", "0x5C4A0286", "0x5C4A0287",
+        "0x5C4A0288", "0x5C4A0289", "0x5C4A028A", "0x5C4A028B", "0x5C4A028C", "0x5C4A028D", "0x5C4A028E", "0x5C4A028F",
+        "0x5C4A0290", "0x5C4A0291", "0x5C4A0292", "0x5C4A0293", "0x5C4A0294", "0x5C4A0295", "0x5C4A0296", "0x5C4A0297",
+        "0x5C4A0298", "0x5C4A0299", "0x5C4A029A", "0x5C4A029B", "0x5C4A029C", "0x5C4A029D", "0x5C4A029E", "0x5C4A029F",
+        "0x5C4A02A0", "0x5C4A02A1", "0x5C4A02A2", "0x5C4A02A3", "0x5C4A02A4", "0x5C4A02A5", "0x5C4A02A6", "0x5C4A02A7",
+        "0x5C4A02A8", "0x5C4A02A9", "0x5C4A02AA", "0x5C4A02AB", "0x5C4A02AC", "0x5C4A02AD", "0x5C4A02AE", "0x5C4A02AF",
+        "0x5C4A02B0", "0x5C4A02B1", "0x5C4A02B2", "0x5C4A02B3", "0x5C4A02B4", "0x5C4A02B5", "0x5C4A02B6", "0x5C4A02B7",
+        "0x5C4A02B8", "0x5C4A02B9", "0x5C4A02BA", "0x5C4A02BB"
+      ]
+    },
+    {
+      "name": "z -12",
+      "z_min": -12,
+      "z_max": -12,
+      "cells": [
+        "0x5C4A0192", "0x5C4A0193", "0x5C4A0194", "0x5C4A0195", "0x5C4A0196", "0x5C4A0197", "0x5C4A0198", "0x5C4A0199",
+        "0x5C4A019A", "0x5C4A019B", "0x5C4A019C", "0x5C4A019D", "0x5C4A019E", "0x5C4A019F", "0x5C4A01A0", "0x5C4A01A1",
+        "0x5C4A01A2", "0x5C4A01A3", "0x5C4A01A4", "0x5C4A01A5", "0x5C4A01A6", "0x5C4A01A7", "0x5C4A01A8", "0x5C4A01A9",
+        "0x5C4A01AA", "0x5C4A01AB", "0x5C4A01AC", "0x5C4A01AD", "0x5C4A01AE", "0x5C4A01AF", "0x5C4A01B0", "0x5C4A01B1",
+        "0x5C4A01B2", "0x5C4A01B3", "0x5C4A01B4", "0x5C4A01B5", "0x5C4A01B6", "0x5C4A01B7", "0x5C4A01B8", "0x5C4A01B9",
+        "0x5C4A01BA", "0x5C4A01BB", "0x5C4A01BC", "0x5C4A01BD", "0x5C4A01BE", "0x5C4A01BF", "0x5C4A01C0", "0x5C4A01C1",
+        "0x5C4A01C2", "0x5C4A01C3", "0x5C4A01C4", "0x5C4A01C5", "0x5C4A01C6", "0x5C4A01C7", "0x5C4A01C8", "0x5C4A01C9",
+        "0x5C4A01CA", "0x5C4A01CB", "0x5C4A01CC", "0x5C4A01CD", "0x5C4A01CE", "0x5C4A01CF", "0x5C4A01D0", "0x5C4A01D1",
+        "0x5C4A01D2", "0x5C4A01D3", "0x5C4A01D4", "0x5C4A01D5", "0x5C4A01D6", "0x5C4A01D7", "0x5C4A01D8", "0x5C4A01D9",
+        "0x5C4A01DA", "0x5C4A01DB", "0x5C4A01DC", "0x5C4A01DD", "0x5C4A01DE", "0x5C4A01DF", "0x5C4A01E0", "0x5C4A01E1",
+        "0x5C4A01E2", "0x5C4A01E3", "0x5C4A01E4", "0x5C4A01E5", "0x5C4A01E6", "0x5C4A01E7", "0x5C4A01E8", "0x5C4A01E9",
+        "0x5C4A01EA", "0x5C4A01EB", "0x5C4A01EC", "0x5C4A01ED", "0x5C4A01EE", "0x5C4A01EF", "0x5C4A01F0", "0x5C4A01F1",
+        "0x5C4A01F2", "0x5C4A01F3", "0x5C4A01F4", "0x5C4A01F5", "0x5C4A01F6", "0x5C4A01F7", "0x5C4A01F8", "0x5C4A01F9",
+        "0x5C4A01FA", "0x5C4A01FC", "0x5C4A01FD", "0x5C4A01FE", "0x5C4A01FF", "0x5C4A0200", "0x5C4A0201", "0x5C4A0202",
+        "0x5C4A0203", "0x5C4A0204", "0x5C4A0205", "0x5C4A0206", "0x5C4A0208", "0x5C4A020A", "0x5C4A020B", "0x5C4A020C",
+        "0x5C4A020D", "0x5C4A020E", "0x5C4A020F", "0x5C4A0210", "0x5C4A0211", "0x5C4A0212", "0x5C4A0213", "0x5C4A0214",
+        "0x5C4A0215", "0x5C4A0216", "0x5C4A0217", "0x5C4A0218", "0x5C4A0219", "0x5C4A021A", "0x5C4A021B", "0x5C4A021C",
+        "0x5C4A021D", "0x5C4A021E", "0x5C4A021F", "0x5C4A0220", "0x5C4A0221", "0x5C4A0222", "0x5C4A0223", "0x5C4A0224",
+        "0x5C4A0225", "0x5C4A0226", "0x5C4A0227", "0x5C4A022B", "0x5C4A022C", "0x5C4A022D", "0x5C4A022E", "0x5C4A022F",
+        "0x5C4A0230", "0x5C4A0231", "0x5C4A0232", "0x5C4A0233", "0x5C4A0234", "0x5C4A0235", "0x5C4A0236", "0x5C4A0237",
+        "0x5C4A0238", "0x5C4A0239", "0x5C4A023A", "0x5C4A023B", "0x5C4A023C", "0x5C4A023D", "0x5C4A023E", "0x5C4A023F",
+        "0x5C4A0240", "0x5C4A0241", "0x5C4A0242", "0x5C4A0243", "0x5C4A0244", "0x5C4A0245", "0x5C4A0246", "0x5C4A0247",
+        "0x5C4A0248", "0x5C4A0249", "0x5C4A024A", "0x5C4A024B", "0x5C4A024C", "0x5C4A024D", "0x5C4A024E", "0x5C4A024F",
+        "0x5C4A0250", "0x5C4A0254", "0x5C4A0255", "0x5C4A0256", "0x5C4A0257", "0x5C4A0258", "0x5C4A0259", "0x5C4A025A",
+        "0x5C4A025B", "0x5C4A025C", "0x5C4A025D", "0x5C4A025E", "0x5C4A025F", "0x5C4A0260", "0x5C4A0261", "0x5C4A0262",
+        "0x5C4A0263", "0x5C4A0264", "0x5C4A0265", "0x5C4A0266", "0x5C4A0267"
+      ]
+    },
+    {
+      "name": "z -18",
+      "z_min": -18,
+      "z_max": -18,
+      "cells": [
+        "0x5C4A0100", "0x5C4A0101", "0x5C4A0102", "0x5C4A0103", "0x5C4A0104", "0x5C4A0105", "0x5C4A0106", "0x5C4A0107",
+        "0x5C4A0108", "0x5C4A0109", "0x5C4A010A", "0x5C4A010B", "0x5C4A010C", "0x5C4A010D", "0x5C4A010E", "0x5C4A010F",
+        "0x5C4A0110", "0x5C4A0111", "0x5C4A0112", "0x5C4A0113", "0x5C4A0114", "0x5C4A0115", "0x5C4A0116", "0x5C4A0117",
+        "0x5C4A0118", "0x5C4A0119", "0x5C4A011A", "0x5C4A011B", "0x5C4A011C", "0x5C4A011D", "0x5C4A011E", "0x5C4A011F",
+        "0x5C4A0120", "0x5C4A0121", "0x5C4A0122", "0x5C4A0123", "0x5C4A0124", "0x5C4A0125", "0x5C4A0126", "0x5C4A0127",
+        "0x5C4A0128", "0x5C4A0129", "0x5C4A012A", "0x5C4A012B", "0x5C4A012C", "0x5C4A012D", "0x5C4A012E", "0x5C4A012F",
+        "0x5C4A0130", "0x5C4A0131", "0x5C4A0132", "0x5C4A0133", "0x5C4A0134", "0x5C4A0135", "0x5C4A0136", "0x5C4A0137",
+        "0x5C4A0138", "0x5C4A0139", "0x5C4A013A", "0x5C4A013B", "0x5C4A013C", "0x5C4A013D", "0x5C4A013E", "0x5C4A013F",
+        "0x5C4A0140", "0x5C4A0141", "0x5C4A0142", "0x5C4A0143", "0x5C4A0144", "0x5C4A0145", "0x5C4A0146", "0x5C4A0147",
+        "0x5C4A0148", "0x5C4A0149", "0x5C4A014A", "0x5C4A014B", "0x5C4A014C", "0x5C4A014D", "0x5C4A014E", "0x5C4A014F",
+        "0x5C4A0150", "0x5C4A0151", "0x5C4A0152", "0x5C4A0153", "0x5C4A0154", "0x5C4A0155", "0x5C4A0156", "0x5C4A0157",
+        "0x5C4A0158", "0x5C4A0159", "0x5C4A015A", "0x5C4A015B", "0x5C4A015C", "0x5C4A015D", "0x5C4A015E", "0x5C4A015F",
+        "0x5C4A0160", "0x5C4A0161", "0x5C4A0162", "0x5C4A0163", "0x5C4A0164", "0x5C4A0165", "0x5C4A0166", "0x5C4A0167",
+        "0x5C4A0168", "0x5C4A0169", "0x5C4A016A", "0x5C4A016B", "0x5C4A016C", "0x5C4A016D", "0x5C4A016E", "0x5C4A016F",
+        "0x5C4A0170", "0x5C4A0171", "0x5C4A0172", "0x5C4A0173", "0x5C4A0174", "0x5C4A0175", "0x5C4A0176", "0x5C4A0177",
+        "0x5C4A0178", "0x5C4A0179", "0x5C4A017A", "0x5C4A017B", "0x5C4A017C", "0x5C4A017D", "0x5C4A017E", "0x5C4A017F",
+        "0x5C4A0180", "0x5C4A0181", "0x5C4A0182", "0x5C4A0183", "0x5C4A0184", "0x5C4A0185", "0x5C4A0186", "0x5C4A0187",
+        "0x5C4A0188", "0x5C4A0189", "0x5C4A018A", "0x5C4A018B", "0x5C4A018C", "0x5C4A018D", "0x5C4A018E"
+      ]
+    }
+  ],
+  "no_go": [
+    "0x5C4A0179", "0x5C4A017F", "0x5C4A0189"
+  ],
+  "targets": [
+    {
+      "wcid": 1628,
+      "name": "Tusker Slave",
+      "level": 80,
+      "role": "target"
+    },
+    {
+      "wcid": 1629,
+      "name": "Tusker Guard",
+      "level": 80,
+      "role": "target"
+    },
+    {
+      "wcid": 22515,
+      "name": "Tusker Worshipper",
+      "level": 80,
+      "role": "target"
+    },
+    {
+      "wcid": 22516,
+      "name": "Tusker Worshipper",
+      "level": 80,
+      "role": "target"
+    },
+    {
+      "wcid": 22641,
+      "name": "Tusker Shrine Statue",
+      "level": 171,
+      "role": "avoid"
+    }
+  ],
+  "level_band": {
+    "min": 80,
+    "max": 80
+  },
+  "portal": {
+    "guid": "0x72A80000",
+    "cell": "0x2A800013",
+    "tie_spell": 47,
+    "recall_spell": 48,
+    "wcid": 22696,
+    "origin": { "x": 57.7292, "y": 64.9681, "z": 70.005 },
+    "front_cell": "0x2A800013",
+    "front_point": { "x": 57.8509, "y": 67.9656, "z": 70.01 }
+  },
+  "home": {
+    "town": "Fort Tethana",
+    "lifestone_cell": "0x27800006",
+    "lifestone_point": {
+      "x": 18.7945,
+      "y": 137.695,
+      "z": 144.005
+    }
+  },
+  "vendors": [
+    {
+      "name": "Shopkeeper Yoshi Deshi",
+      "wcid": 2317,
+      "guid": "0x72581010",
+      "cell": "0x25810144",
+      "point": {
+        "x": 157.688,
+        "y": 61.4069,
+        "z": 220.005
+      },
+      "stop_cell": "0x25810144",
+      "buys_item_types": "0x48046FAF",
+      "sells": [
+        {
+          "wcid": 379,
+          "name": "Mana Potion",
+          "price": 306
+        }
+      ]
+    },
+    {
+      "name": "Blacksmith Magarith",
+      "wcid": 2315,
+      "guid": "0x72581012",
+      "cell": "0x25810159",
+      "point": {
+        "x": 90.543,
+        "y": 56.6056,
+        "z": 220.005
+      },
+      "stop_cell": "0x25810159",
+      "buys_item_types": "0x40040787",
+      "sells": []
+    },
+    {
+      "name": "Zisaha bint Jaidka the Mage",
+      "wcid": 2314,
+      "guid": "0x72481001",
+      "cell": "0x24810102",
+      "point": {
+        "x": 85.0908,
+        "y": 132.949,
+        "z": 219.245
+      },
+      "stop_cell": "0x24810102",
+      "buys_item_types": "0x000CB000",
+      "sells": [
+        {
+          "wcid": 690,
+          "name": "Pyreal Scarab",
+          "price": 1800
+        },
+        {
+          "wcid": 8897,
+          "name": "Platinum Scarab",
+          "price": 18000
+        },
+        {
+          "wcid": 20631,
+          "name": "Prismatic Taper",
+          "price": 40
+        },
+        {
+          "wcid": 686,
+          "name": "Copper Scarab",
+          "price": 180
+        },
+        {
+          "wcid": 5910,
+          "name": "Dho War Master Robe",
+          "price": 14400
+        },
+        {
+          "wcid": 2472,
+          "name": "Wand",
+          "price": 360
+        }
+      ]
+    }
+  ],
+  "spell_plan": [
+    {
+      "min_level": 1,
+      "max_level": 99,
+      "family": "Flame Bolt",
+      "spell_level": 6
+    },
+    {
+      "min_level": 100,
+      "max_level": 275,
+      "family": "Flame Bolt",
+      "spell_level": 7
+    }
+  ],
+  "components": [
+    {
+      "wcid": 690,
+      "name": "Pyreal Scarab",
+      "spell_level": 6,
+      "per_cast": 1
+    },
+    {
+      "wcid": 20631,
+      "name": "Prismatic Taper",
+      "spell_level": 6,
+      "per_cast": 4
+    },
+    {
+      "wcid": 8897,
+      "name": "Platinum Scarab",
+      "spell_level": 7,
+      "per_cast": 1
+    },
+    {
+      "wcid": 20631,
+      "name": "Prismatic Taper",
+      "spell_level": 7,
+      "per_cast": 4
+    }
+  ],
+  "supplies": {
+    "stock": [
+      {
+        "wcid": 20631,
+        "name": "Prismatic Taper",
+        "keep": 1000,
+        "trip_under": 200,
+        "stop_under": 12
+      },
+      {
+        "wcid": 379,
+        "name": "Mana Potion",
+        "keep": 30,
+        "trip_under": 5,
+        "stop_under": 0
+      },
+      {
+        "wcid": 690,
+        "name": "Pyreal Scarab",
+        "keep": 40,
+        "trip_under": 12,
+        "stop_under": 3
+      },
+      {
+        "wcid": 8897,
+        "name": "Platinum Scarab",
+        "keep": 40,
+        "trip_under": 12,
+        "stop_under": 3
+      },
+      {
+        "wcid": 686,
+        "name": "Copper Scarab",
+        "keep": 20,
+        "trip_under": 5,
+        "stop_under": 2
+      }
+    ],
+    "kit": [
+      {
+        "wcid": 5910,
+        "name": "Dho War Master Robe",
+        "slot": "worn"
+      },
+      {
+        "wcid": 2472,
+        "name": "Wand",
+        "slot": "wielded"
+      }
+    ],
+    "burden_trip_percent": 90,
+    "purse": {
+      "coin": 50000,
+      "notes": [
+        {
+          "wcid": 20630,
+          "name": "Trade Note (250,000)",
+          "value": 250000,
+          "count": 6
+        },
+        {
+          "wcid": 2626,
+          "name": "Trade Note (50,000)",
+          "value": 50000,
+          "count": 1
+        }
+      ]
+    }
+  },
+  "hold_spots": [],
+  "respawn": {
+    "generators": [
+      {
+        "guid": "0x75C4A091",
+        "cell": "0x5C4A02F9",
+        "delay_s": 300,
+        "tick_s": 60
+      }
+    ],
+    "slots": [
+      { "generator": "0x75C4A091", "cell": "0x5C4A0100", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0101", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0101", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0101", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0102", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0103", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0105", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0106", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0108", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A010D", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0116", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A011D", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0138", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0138", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0138", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0142", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0142", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0142", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A015C", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0165", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A016C", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0170", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0172", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0173", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0175", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0176", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0177", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0177", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0177", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0178", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0179", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A017A", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A017B", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A017C", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A017D", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A017E", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A017F", "wcid": 22641 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0180", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0180", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0180", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0181", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0181", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0181", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0188", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0188", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0188", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0189", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A018B", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A018C", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A018D", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A018E", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0193", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0197", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A019A", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A019D", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01A5", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01A8", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01AF", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01BA", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01BF", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01CB", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01D0", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01D6", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01DD", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01E0", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01E1", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01E2", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01E4", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01E4", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01E4", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01EA", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01EA", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01EA", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01F1", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01F1", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01F1", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01F8", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01F9", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A01FA", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0205", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0205", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0205", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0205", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0208", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0208", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0208", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A020B", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0212", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0217", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0217", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0217", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A021A", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A021A", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A021A", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A021F", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0226", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0234", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0234", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0234", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0249", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0249", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0249", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0255", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A025C", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A025F", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0266", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0268", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0269", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A026A", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0270", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0270", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0270", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A027C", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A027E", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0281", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0282", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0283", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A028A", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0293", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0296", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A0299", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02A1", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02AA", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02AA", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02AA", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02B1", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02B9", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02CC", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02D1", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02D4", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02D8", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02DA", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02DE", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02E1", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02E4", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02EC", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02EE", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02EE", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02EF", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02EF", "wcid": 1628 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02F0", "wcid": 22516 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02F0", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02F2", "wcid": 22515 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02F2", "wcid": 1629 },
+      { "generator": "0x75C4A091", "cell": "0x5C4A02F2", "wcid": 1629 }
+    ]
+  },
+  "tour": [
+        "0x5C4A02F0", "0x5C4A02EC", "0x5C4A02E1", "0x5C4A02D4", "0x5C4A02D1", "0x5C4A02CC", "0x5C4A02D8", "0x5C4A02DA",
+        "0x5C4A02DE", "0x5C4A02E4", "0x5C4A02EE", "0x5C4A02EF", "0x5C4A02F2", "0x5C4A02B9", "0x5C4A02AA", "0x5C4A0299",
+        "0x5C4A02A1", "0x5C4A0293", "0x5C4A028A", "0x5C4A027C", "0x5C4A027E", "0x5C4A0296", "0x5C4A0283", "0x5C4A0282",
+        "0x5C4A0281", "0x5C4A0270", "0x5C4A0268", "0x5C4A0269", "0x5C4A026A", "0x5C4A02B1", "0x5C4A01F1", "0x5C4A01E4",
+        "0x5C4A0205", "0x5C4A0208", "0x5C4A0217", "0x5C4A0212", "0x5C4A0234", "0x5C4A020B", "0x5C4A0255", "0x5C4A025C",
+        "0x5C4A021A", "0x5C4A021F", "0x5C4A0249", "0x5C4A0226", "0x5C4A0266", "0x5C4A025F", "0x5C4A01F8", "0x5C4A01F9",
+        "0x5C4A01FA", "0x5C4A01EA", "0x5C4A01E2", "0x5C4A01E1", "0x5C4A01E0", "0x5C4A01D6", "0x5C4A01CB", "0x5C4A01BA",
+        "0x5C4A01BF", "0x5C4A01AF", "0x5C4A01A8", "0x5C4A01A5", "0x5C4A019A", "0x5C4A0197", "0x5C4A0193", "0x5C4A019D",
+        "0x5C4A01D0", "0x5C4A01DD", "0x5C4A0142", "0x5C4A0165", "0x5C4A015C", "0x5C4A0170", "0x5C4A0173", "0x5C4A0176",
+        "0x5C4A0177", "0x5C4A0178", "0x5C4A0175", "0x5C4A0172", "0x5C4A016C", "0x5C4A017E", "0x5C4A017D", "0x5C4A017C",
+        "0x5C4A018C", "0x5C4A018D", "0x5C4A018E", "0x5C4A0188", "0x5C4A0138", "0x5C4A0116", "0x5C4A010D", "0x5C4A0106",
+        "0x5C4A0103", "0x5C4A0100", "0x5C4A0101", "0x5C4A0102", "0x5C4A0105", "0x5C4A0108", "0x5C4A011D", "0x5C4A017B",
+        "0x5C4A017A", "0x5C4A0180", "0x5C4A0181", "0x5C4A018B"
+  ],
+  "outdoor": null
+}

@@ -404,9 +404,9 @@ public sealed partial class PhysicsObj
     /// spheres, the path from its cell, the stationary-fall count carried in the transient state) and finds the valid
     /// position. A velocity the transition killed (<c>OBJECTINFO::kill_velocity</c>) is zeroed at once, as retail does.
     /// </summary>
-    private bool RunTransition(Transition transition, in CellFrame from, in CellFrame to, bool admin)
+    private bool RunTransition(Transition transition, in CellFrame from, in CellFrame to, bool admin, bool? carriedContact = null)
     {
-        InitObject(transition, admin);
+        InitObject(transition, admin, carriedContact);
         transition.InitPath(Cell, from, to);
         if ((TransientState & TransientState.StationaryStuck) != 0)
         {
@@ -424,6 +424,72 @@ public sealed partial class PhysicsObj
         var found = transition.FindValidPosition();
         ApplyKilledVelocity(transition);
         return found;
+    }
+
+    /// <summary>
+    /// A transition run from outside the object's own step (M5 item 5, D71: additive), for a server object the avatars
+    /// track moves (D24) and the server-object host keeps: what <see cref="UpdateObjectInternal"/> does with a moved origin,
+    /// retail <c>CPhysicsObj::transition</c> (11.4186 0x00512DC0, 11.6096 0x005138C0) from <see cref="Position"/> to
+    /// <paramref name="to"/>, then, when a valid position is found, <c>SetPositionInternal(transit)</c> (11.4186
+    /// 0x00515330, 11.6096 0x00515E30): the cell, frame, contact plane, Contact, OnWalkable, sliding normal, collisions and
+    /// shadows. The cached velocity is not set (the caller has no quantum; nothing of a server object reads it).
+    /// </summary>
+    /// <param name="to">The requested position, as <see cref="UpdateObjectInternal"/> asks it: the object's cell with the
+    /// new frame.</param>
+    /// <param name="carriedContact">Null: the object's own contact (as its own step); true or false: the contact the
+    /// caller holds for it (M5 D72: a server object's contact is the server's Grounded flag), see <see cref="InitObject"/>.</param>
+    /// <returns>True when the object moved to the transition's position; false when it is outside a cell or no
+    /// position is valid (retail then only turns the object; the caller does that).</returns>
+    public bool TryTransitionTo(in CellFrame to, bool? carriedContact = null)
+    {
+        if (Cell is null)
+        {
+            return false;
+        }
+
+        var transition = World.Transitions.Rent();
+        try
+        {
+            if (!RunTransition(transition, Position, to, admin: false, carriedContact))
+            {
+                LastTransitionObstacle = ObstacleOf(transition);
+                return false;
+            }
+
+            SetPositionInternal(transition);
+            LastTransitionObstacle = ObstacleOf(transition);
+            return true;
+        }
+        finally
+        {
+            World.Transitions.Return(transition);
+        }
+    }
+
+    /// <summary>
+    /// What stopped the last transition <see cref="TryTransitionTo"/> ran (Lifestone's diagnostic; M5 item 5 F4): the last object that stopped it, else the
+    /// environment (a collision or sliding normal, or a collision with no contact), else a refused step or edge. The transition's records are
+    /// reset when the pool hands it out again, so the answer is taken before it goes back. A value; nothing allocates.
+    /// </summary>
+    public TransitionObstacle LastTransitionObstacle { get; private set; }
+
+    private TransitionObstacle ObstacleOf(Transition transition)
+    {
+        var collisions = transition.CollisionInfo;
+        var stepRefused = collisions.StepRefused || collisions.EdgeRefused;
+        var cell = Position.CellId;
+        var met = collisions.LastCollidedObject ?? (collisions.CollideObjectCount > 0 ? collisions.CollideObjectAt(collisions.CollideObjectCount - 1) : null);
+        if (met is { } obstacle)
+        {
+            return new TransitionObstacle(TransitionObstacleKind.Object, obstacle, cell, stepRefused);
+        }
+
+        if (collisions.CollidedWithEnvironment || collisions.SlidingNormalValid || collisions.CollisionNormalValid)
+        {
+            return new TransitionObstacle(TransitionObstacleKind.Environment, null, cell, stepRefused);
+        }
+
+        return new TransitionObstacle(stepRefused ? TransitionObstacleKind.Step : TransitionObstacleKind.None, null, cell, stepRefused);
     }
 
     /// <summary>Retail <c>OBJECTINFO::kill_velocity</c>'s <c>set_velocity(0)</c>, which Lifestone's transition records.</summary>

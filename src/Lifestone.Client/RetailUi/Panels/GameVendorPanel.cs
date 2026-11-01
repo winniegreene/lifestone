@@ -1156,7 +1156,8 @@ public sealed class GameVendorPanel : UiElement
         RedrawTexts();
     }
 
-    private static UiItemIcon IconOf(VendorStockEntry entry, int stack)
+    /// <summary>The icon of a vendor's row with <paramref name="stack"/> shown (0: none); the examine window draws a row's icon with it too (M5 7 S6).</summary>
+    internal static UiItemIcon IconOf(VendorStockEntry entry, int stack)
     {
         var f = entry.ItemFields();
         return new UiItemIcon(f.IconId, f.UnderlayId, f.OverlayId, entry.ItemType, f.UiEffects, stack, entry.Name, f.PluralName);

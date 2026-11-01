@@ -231,7 +231,7 @@ public sealed class FighterKit
     /// <summary>
     /// The fighters' caster (M4 P5a C1b): the mage's wand weenie, <see cref="GearKit.Wand"/> 8552 "The Healer's Heart" (a Caster, ItemType 0x8000, held in the hand, burden 50, no wield requirement), granted into the pack and never wielded by the build.
     /// ACE puts a player in the magic mode only with a wielded caster (<c>Player_Combat.cs:872-880</c>, <c>Creature_Equipment.cs:141-144</c>, ACE 95ef426d), and a Held item needs the main hand free (<c>CheckWeaponCollision</c>, <c>Player_Inventory.cs:1979-1997</c>, ACE 95ef426d), so
-    /// <see cref="Lifestone.Client.Session.Fighter.CasterSwap"/> wields it for a pass and puts the weapon back. Its Value is not read: <c>TODO(m4-caster-value)</c> (0 here; nothing reads it).
+    /// <see cref="Lifestone.Client.Session.Fighter.CasterSwap"/> wields it for a pass and puts the weapon back. Its Value is not read here (0; nothing reads it). <c>TODO(m4-caster-value)</c> is closed for the mage's vendor wand: its Value is read from the pinned world SQL (weenie 2472, PropertyInt 19 = 200, <c>GearKit.SupplyWeenies</c>, pinned by <c>SupplyWeenieSqlTests</c>); the Healer's Heart stays unread (review 3-R17).
     /// </summary>
     private static FighterItem Caster { get; } = new(new GearItem(GearKit.Wand.Wcid, GearKit.Wand.Name, GearKind.Wand, GearKit.Wand.WeenieType, GearKit.Wand.ItemType, GearKit.Wand.ValidLocations, 1, null, GearKit.Wand.Burden), FighterRole.Caster, 0, false);
 

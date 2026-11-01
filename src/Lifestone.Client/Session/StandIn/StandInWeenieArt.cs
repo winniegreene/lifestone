@@ -33,6 +33,15 @@ internal static class StandInWeenieArt
         new(1, 0x02000001, 0x06001036, 0, 0, 0), // human
         // the wand and the leather set (GearKit)
         new(8552, 0x020009AD, 0x06001EED, 0, 0, 0), // orbhealer
+        // M5 3 m1: the mage kit's vendor items and the purse's notes (GearKit.SupplyWeenies; the pinned world SQL v0.9.296 weenie_properties_d_i_d type 1 Setup and type 8 Icon)
+        new(2472, 0x0200017C, 0x06001578, 0, 0, 0), // wand
+        new(6071, 0x020001A6, 0x06001B98, 0, 0, 0), // robesuckwaraluvian
+        new(5910, 0x020001A6, 0x06001BA3, 0, 0, 0), // robewargharundim
+        new(5851, 0x020001A6, 0x06001B92, 0, 0, 0), // robealuvianhood (M5 7 F13: the hooded robe of the kit)
+        new(56, 0x020000D8, 0x06000FCC, 0, 0, 0), // gauntletsleather (M5 7 F13: the gloves of the kit)
+        new(2625, 0x02000155, 0x060016C9, 0, 0, 0), // tradenote10000
+        new(2626, 0x02000155, 0x060016CA, 0, 0, 0), // tradenote50000
+        new(20630, 0x02000155, 0x06002761, 0, 0, 0), // tradenote250000
         new(3715, 0x020000DA, 0x06000FCF, 0, 0, 0), // helmolthoi
         new(6600, 0x020001A6, 0x06001BE3, 0, 0, 0), // coatamullianshadowgreater
         new(6606, 0x020001A8, 0x06001BEB, 0, 0, 0), // leggingsamullianshadowgreater
@@ -75,15 +84,6 @@ internal static class StandInWeenieArt
         new(143, 0x0200007C, 0x06001022, 0, 0, 0), // chest
         new(715, 0x02000001, 0x06001036, 0, 0, 0), // holtburghealer
         new(718, 0x02000001, 0x06001036, 0, 0, 0), // holtburgshopkeep
-        // the death model's decoys (DecoyKit)
-        new(27329, 0x020004B9, 0x06003333, 0, 0, 0), // manastonemassive
-        new(9295, 0x0200012E, 0x06001FC4, 0, 0, 0), // toolpyramidquest
-        new(41396, 0x020009E1, 0x06006B23, 0, 0, 0), // ace41396-handlemold
-        new(22565, 0x020001C3, 0x06002926, 0, 0, 0), // shirttuskeremporium
-        new(25522, 0x02000FDF, 0x06002D89, 0, 0, 0), // capskulldark
-        new(11007, 0x02000AEF, 0x06002179, 0, 0, 0), // scalpelvirindi-xp
-        new(11129, 0x020002F9, 0x06002111, 0, 0, 0), // cakehealingchocolateolthoi-xp
-        new(27771, 0x02001113, 0x0600341A, 0, 0, 0), // gemportalsunkenmeremid
         // the spell components (ComponentWeenies.All)
         new(691, 0x0200030B, 0x060013E7, 0, 0, 0), // scarablead
         new(689, 0x0200030B, 0x060013E6, 0, 0, 0), // scarabiron

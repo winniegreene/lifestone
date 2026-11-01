@@ -46,4 +46,53 @@ internal static class ChatActionCodecs
         writer.WriteAsciiString16L(text, "Tell text");
         writer.WriteAsciiString16L(target, "Tell target");
     }
+
+    /// <summary>
+    /// Writes F7B1 {<paramref name="sequence"/>, 0x01DF, text}: the emote text is one String16L, read by ACE's <c>GameActionEmote</c>
+    /// (<c>ReadString16L</c>, <c>GameActionEmote.cs:10</c>, @95ef426d); retail's sender is <c>CM_Communication::Event_Emote</c> (11.6096
+    /// 0x006A4F40). Like Talk it is the last field, so it stays CP1252.
+    /// </summary>
+    /// <exception cref="ArgumentException">A character has no CP1252 byte, or the text is too long; nothing is written.</exception>
+    public static void WriteEmote(PacketWriter writer, uint sequence, ReadOnlySpan<char> text)
+    {
+        _ = PacketWriter.String16LSize(text, "Emote text");
+        GameActionEnvelope.WriteHeader(writer, sequence, GameActionTypes.Emote);
+        writer.WriteString16L(text, "Emote text");
+    }
+
+    /// <summary>
+    /// Writes F7B1 {<paramref name="sequence"/>, 0x00BF, item, inscription} (M5 7 D137): retail <c>CM_Writing::Event_SetInscription</c> (11.6096 0x006AA810); ACE's <c>GameActionSetInscription</c> reads the item's guid, then
+    /// <c>ReadString16L</c> (@95ef426d). The inscription is the last field, so it stays CP1252 as Talk's text; an empty one clears the inscription.
+    /// </summary>
+    /// <exception cref="ArgumentException">A character has no CP1252 byte, or the text is too long; nothing is written.</exception>
+    public static void WriteSetInscription(PacketWriter writer, uint sequence, uint item, ReadOnlySpan<char> inscription)
+    {
+        _ = PacketWriter.String16LSize(inscription, "Inscription");
+        GameActionEnvelope.WriteHeader(writer, sequence, GameActionTypes.SetInscription);
+        writer.WriteUInt32(item);
+        writer.WriteString16L(inscription, "Inscription");
+    }
+
+    /// <summary>
+    /// Writes F7B1 {<paramref name="sequence"/>, 0x000F, afk}: ACE reads <c>Convert.ToBoolean(ReadUInt32())</c>
+    /// (<c>GameActionSetAfkMode.cs:10</c>, @95ef426d); retail's sender is <c>CM_Communication::Event_SetAFKMode</c> (11.6096 0x006A4D00).
+    /// </summary>
+    public static void WriteSetAfkMode(PacketWriter writer, uint sequence, bool afk)
+    {
+        GameActionEnvelope.WriteHeader(writer, sequence, GameActionTypes.SetAfkMode);
+        writer.WriteUInt32(afk ? 1u : 0u);
+    }
+
+    /// <summary>
+    /// Writes F7B1 {<paramref name="sequence"/>, 0x0010, message}: one String16L, read by ACE's <c>GameActionSetAFKMessage</c>
+    /// (<c>GameActionSetAfkMessage.cs:10</c>, @95ef426d); retail's sender is <c>CM_Communication::Event_SetAFKMessage</c> (11.6096
+    /// 0x006A5260). The last field, so CP1252.
+    /// </summary>
+    /// <exception cref="ArgumentException">A character has no CP1252 byte, or the text is too long; nothing is written.</exception>
+    public static void WriteSetAfkMessage(PacketWriter writer, uint sequence, ReadOnlySpan<char> message)
+    {
+        _ = PacketWriter.String16LSize(message, "AFK message");
+        GameActionEnvelope.WriteHeader(writer, sequence, GameActionTypes.SetAfkMessage);
+        writer.WriteString16L(message, "AFK message");
+    }
 }

@@ -2,6 +2,7 @@ using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Actions;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.Magic;
 
@@ -10,7 +11,7 @@ namespace Lifestone.Client.Session.Mage;
 /// <summary>What sort of thing a kit item is.</summary>
 public enum GearKind
 {
-    /// <summary>The held caster the mage wields (<see cref="GearKit.Wand"/>: The Healer's Heart since M3 4.2 P7).</summary>
+    /// <summary>The held caster the mage wields: the kit's wielded line (<see cref="KitSlot.Wielded"/>, the ground's vendor wand: weenie 2472 "Wand" in both dungeon profiles). <see cref="GearKit.Wand"/> (The Healer's Heart) is only the M3 loot kit's single-weenie property and the fighters' caster.</summary>
     Wand,
 
     /// <summary>A piece of the classic armour the mage wears (<see cref="GearKit.Armour"/>).</summary>
@@ -19,11 +20,11 @@ public enum GearKind
     /// <summary>A spell component a cast burns.</summary>
     Component,
 
-    /// <summary>
-    /// M4 3.1 d0 (D20): a death-loop decoy (<see cref="DecoyItem"/>): an ordinary, light, expensive item the mage only carries, so a death drops it and not its gear. One item, no valid location, never wielded; the kit's <c>item</c> top-up spawns a missing one
-    /// (counted by weenie class, one each). Only <see cref="GearKit.WithDecoys(IReadOnlyList{DecoyItem})"/> and <see cref="GearKit.ForDeathLoop"/> put one in a kit.
-    /// </summary>
-    Decoy,
+    /// <summary>M5 item 3 m1 (D8): one of the four foci (<see cref="GearKit.MageFociWcids"/>), an item the mage only carries so that ACE casts a school with the foci formula; never worn or wielded.</summary>
+    Focus,
+
+    /// <summary>M5 7 G3: a side pack (weenie 136) the mage carries, <see cref="GearItem.Stack"/> of them, each its own item (<see cref="GearItem.MaxStack"/> 1); a container slot, not a main-pack item slot (<see cref="GearKit.Slots"/> leaves it out).</summary>
+    Pack,
 }
 
 /// <summary>
@@ -57,6 +58,9 @@ public sealed record GearItem(uint Wcid, string Name, GearKind Kind, uint Weenie
 {
     /// <summary>The burden of the whole stack.</summary>
     public int Burden => UnitBurden * Stack;
+
+    /// <summary>True for a line the kit counts by units (a component, a pack): it is whole when the pack holds <see cref="Stack"/> of it; any other line is whole at one.</summary>
+    public bool Counted => Kind is GearKind.Component or GearKind.Pack;
 }
 
 /// <summary>
@@ -64,6 +68,7 @@ public sealed record GearItem(uint Wcid, string Name, GearKind Kind, uint Weenie
 /// weenies ACE spawns for the <c>item</c> verb. Built once for an account from the SpellTable (<see cref="Build"/>).
 /// </summary>
 /// <remarks>
+/// <para><b>M5 item 3 m1 (D8, D46, D48): the kit is the ground's supplies now.</b> <see cref="Build"/> builds the vendor kit lines, the four foci and the stock lines of a <see cref="HuntingGround"/> (<see cref="KitPlan"/> adds the purse and the load); the paragraphs below describe the M3 loot kit (the Healer's Heart, the classic armour, the account's customised formulas) it replaced, and stay for the constants and the rules the fighters' kit (<see cref="Fighter.FighterComponents"/>) still shares.</para>
 /// <para><b>The components.</b> The union of every component of every spell of <see cref="ArenaProfile"/> in <em>the formula the account casts</em>: ACE's <c>SpellFormula.GetPlayerFormula</c> (Entity/SpellFormula.cs:224) asks
 /// <c>SpellTable.GetSpellFormula(table, id, player.Session.Account)</c>, which rewrites taper slots 1, 3 and 6 from the hash of the account name (<see cref="SpellFormulaRules.CustomizeForAccount"/>). The hash is over the
 /// name as <c>Session.Account</c> holds it, the stored account name, which ACE creates in lower case (<c>AuthenticationHandler.cs:83</c>, <c>loginRequest.Account.ToLower()</c>), so <see cref="Build"/> lower-cases the name it is given
@@ -145,13 +150,15 @@ public sealed class GearKit
     /// <summary>The fight spells beyond the profile's lines whose components the kit carries (M4 P5b J7): Cassius' Ring of Fire 1785, the hero video's cast (the mage lacked 110, 19 and 58).</summary>
     public static IReadOnlyList<uint> KitFightSpells { get; } = [ArenaProfile.RingOfFireId];
 
-    private static bool IsKitFightLine(ProfileLine line) => line.Spells.Any(s => KitFightSpells.Contains(s.Id)); // sized as a travel line: a few casts a hero journey, the mage's burden has little headroom
 
     /// <summary>The burden of one component: the SELECT of the world database gives 4 to every component weenie in the kit (the Prismatic Taper, 20631, has 6, <see cref="PrismaticTaperBurden"/>).</summary>
     public const int ComponentBurden = 4;
 
     /// <summary>The Prismatic Taper's weenie class id (component 188; maximum stack 1,000): the foci formula's taper, in the kit.</summary>
     public const uint PrismaticTaperWcid = 20631;
+
+    /// <summary>The Platinum Scarab (level VII's scarab), whose low stack is the named stop <c>m5-platinum-stock</c> (D8).</summary>
+    public const uint PlatinumScarabWcid = 8897;
 
     /// <summary>The burden of one Prismatic Taper (a read-only SELECT of the world database, 2026-10-16: 6, where every other component of the kit has <see cref="ComponentBurden"/>).</summary>
     public const int PrismaticTaperBurden = 6;
@@ -161,6 +168,9 @@ public sealed class GearKit
 
     /// <summary>The items a player's main pack holds (the human weenie's ItemCapacity; the stand-in's <c>PackCapacity</c>).</summary>
     public const int PackCapacity = 102;
+
+    /// <summary>The side packs a player can carry (the human weenie's ContainersCapacity, 7: ACE Container.cs @95ef426d refuses an eighth with a container-full error; the pack lines of a profile's kit are checked against it).</summary>
+    public const int ContainerCapacity = 7;
 
     /// <summary>
     /// The weenie class ids of ACE's five focus items (<c>Player.FociWCIDs</c>, Player_Spells.cs:451-457: Enchantment 15268, Artifice 15269, Verdancy 15270, Strife 15271, Shadow 43173). A character that holds one casts that school with the foci
@@ -211,7 +221,7 @@ public sealed class GearKit
     public IReadOnlyList<uint> CustomisedComponentIds { get; }
 
     /// <summary>The wand's line.</summary>
-    public GearItem WandItem => Items[0];
+    public GearItem WandItem => Items.First(i => i.Kind == GearKind.Wand);
 
     /// <summary>The components' lines.</summary>
     public IEnumerable<GearItem> Components => Items.Where(i => i.Kind == GearKind.Component);
@@ -219,28 +229,27 @@ public sealed class GearKit
     /// <summary>The armour's lines.</summary>
     public IEnumerable<GearItem> ArmourItems => Items.Where(i => i.Kind == GearKind.Armour);
 
-    /// <summary>The decoys' lines (M4 3.1 d0; none in a plain kit).</summary>
-    public IEnumerable<GearItem> DecoyItems => Items.Where(i => i.Kind == GearKind.Decoy);
+    /// <summary>The pack slots the kit takes: one for each line, and one more for each further stack a line holds past its weenie's maximum (M5 7 F3, D87: a stock line may keep more than one stack, <see cref="StackSizes"/>).</summary>
+    public int Slots => Items.Where(i => i.Kind != GearKind.Pack).Sum(i => StackSizes(i.Stack, i.MaxStack).Count);
 
-    /// <summary>True when the kit carries decoys (<see cref="WithDecoys(IReadOnlyList{DecoyItem})"/>); a plain kit never does.</summary>
-    public bool HasDecoys
+    /// <summary>
+    /// M5 7 F3 (D87): how <paramref name="total"/> units are granted as stacks of at most <paramref name="max"/> (one stack when the weenie has no maximum): the full stacks first, then the rest. The server mod clamps one
+    /// <c>item</c> request to the weenie's maximum stack (<c>ItemCreateRules.ResolveStack</c>), so a stock line that keeps more than a stack is asked for in several requests.
+    /// </summary>
+    /// <param name="total">The units wanted.</param>
+    /// <param name="max">The weenie's maximum stack, or null.</param>
+    internal static IReadOnlyList<int> StackSizes(int total, int? max)
     {
-        get
+        var stacks = new List<int>();
+        for (var left = total; left > 0;)
         {
-            for (var i = 0; i < Items.Count; i++)
-            {
-                if (Items[i].Kind == GearKind.Decoy)
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            var one = Math.Min(left, max ?? left);
+            stacks.Add(one);
+            left -= one;
         }
-    }
 
-    /// <summary>The pack slots the kit takes (each line is one stack, so one slot; a stack never exceeds its weenie's maximum).</summary>
-    public int Slots => Items.Count;
+        return stacks.Count == 0 ? [Math.Max(total, 0)] : stacks;
+    }
 
     /// <summary>The burden of the whole kit (exact).</summary>
     public int Burden => Items.Sum(i => i.Burden);
@@ -260,175 +269,409 @@ public sealed class GearKit
     }
 
     /// <summary>
-    /// The kit for an account: the wand, the armour and the components of <see cref="ArenaProfile"/>'s spells as <paramref name="accountName"/> casts them (see the type's remarks for the rule).
+    /// The mage's kit on a hunting ground (M5 item 3 m1, D8, D46, D48): the ground's <c>supplies</c> section as items. The vendor kit lines (the den's: a worn robe and a wielded wand, bought from the ground's home vendor), the four foci of
+    /// <see cref="MageFociWcids"/> and one stack of every stock line to its <c>keep</c> (the tapers, the potions and the carried scarabs). Every school's cast then uses the foci formula, so the components of every spell the mage casts
+    /// (<see cref="CastBurns"/>) are exactly stock lines: a component that is not one fails the build by name (<c>ground-plan-gap</c>, a profile gap and not a code fix). The M3 loot kit (the Healer's Heart, the classic armour and the 38
+    /// component ids of the account's customised formulas) is retired; the foci formula is the same for every account, so the account name is no longer hashed.
     /// </summary>
     /// <param name="spells">The SpellTable's spells (<see cref="SpellTableData.Spells"/>).</param>
-    /// <param name="accountName">The account's name; hashed lower-cased, never stored.</param>
-    /// <returns>The kit.</returns>
-    /// <exception cref="KeyNotFoundException">A profile spell is not in <paramref name="spells"/>.</exception>
-    /// <exception cref="InvalidOperationException">A formula holds a component the pinned map (<see cref="ComponentWeenies"/>) does not.</exception>
-    /// <param name="heroRing">True only for the hero mage's gear station (M4 P5b fix FB, P5b-R12): the kit also carries <see cref="KitFightSpells"/>' components (Cassius' Ring of Fire). False (every other mage kit, the gate's): the ring's burden is left out.</param>
-    public static GearKit Build(IReadOnlyDictionary<uint, SpellInfo> spells, string accountName, bool heroRing = false)
+    /// <param name="accountName">The account's name; checked, never stored, logged or printed (kept for the callers: the foci formula does not depend on it).</param>
+    /// <param name="heroRing">True only for the hero mage's gear station (M4 P5b fix FB, P5b-R12): the cast spells also hold <see cref="KitFightSpells"/> (Cassius' Ring of Fire).</param>
+    /// <param name="ground">The ground whose supplies the kit is (the fight's <c>--fight-ground</c>); null: the default ground (<see cref="FightOptions.DefaultGround"/>).</param>
+    /// <returns>The kit: the wielded line first, then the worn lines, the four foci, the stock lines in the profile's order.</returns>
+    /// <exception cref="KeyNotFoundException">A cast spell is not in <paramref name="spells"/>.</exception>
+    /// <exception cref="InvalidOperationException">The ground has no kit or no stock; a component of a cast is not a stock line; a line names a weenie this table does not know (<c>TODO(m6-kit-weenie)</c>); a keep passes one stack.</exception>
+    public static GearKit Build(IReadOnlyDictionary<uint, SpellInfo> spells, string accountName, bool heroRing = false, HuntingGround? ground = null)
     {
         ArgumentNullException.ThrowIfNull(spells);
         ArgumentException.ThrowIfNullOrEmpty(accountName);
-        var account = accountName.ToLowerInvariant();
-
-        var union = new SortedSet<uint>();
-        var used = new SortedSet<uint>(); // the account's formulas and the foci formula's components
-        var otherThanTravel = new HashSet<uint>(); // the components some non-travel line casts (they keep the MinimumStack; a travel-only component is sized by its few casts: the mage's burden has little headroom)
-        var buffBurn = new Dictionary<uint, double>();
-        var manaBurn = new Dictionary<uint, double>();
-        var warBurn = new Dictionary<uint, double>();
-        var travelBurn = new Dictionary<uint, double>();
-        var perSpell = new Dictionary<uint, int>();
-        var counts = new Dictionary<uint, int>();
-        foreach (var line in ArenaProfile.Lines.Concat(ArenaProfile.Extras.Where(l => (l.Role == ProfileRole.Travel && l.Spells.Any(s => KitTravelSpells.Contains(s.Id))) || (heroRing && l.Spells.Any(s => KitFightSpells.Contains(s.Id))))))
+        var home = ground ?? GroundCatalog.Get(FightOptions.DefaultGround);
+        var supplies = home.Supplies;
+        if (supplies.Kit.Count == 0 || supplies.Stock.Count == 0)
         {
-            var lineBurn = new Dictionary<uint, double>();
-            foreach (var profileSpell in line.Spells)
+            throw new InvalidOperationException($"ground-plan-gap: {home.Name} has no vendor kit or no stock lines in its supplies section, so there is no mage kit to build (an outdoor ground shops at the journey's own stations)");
+        }
+
+        var burns = CastBurns(home, spells, heroRing);
+        var items = new List<GearItem>();
+        foreach (var slot in new[] { KitSlot.Wielded, KitSlot.Worn })
+        {
+            foreach (var line in supplies.Kit.Where(k => k.Slot == slot))
             {
-                var info = spells.TryGetValue(profileSpell.Id, out var found)
-                    ? found
-                    : throw new KeyNotFoundException($"profile spell {profileSpell.Id} ({profileSpell.Name}) is not in the SpellTable");
-                counts.Clear();
-                foreach (var id in SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, account))
+                var w = SupplyWeenieOf(line.Wcid, home, "kit");
+                if (slot == KitSlot.Wielded ? w.ItemType != ItemTypeCaster : w.ItemType is not (ItemTypeArmor or ItemTypeClothing))
                 {
-                    if (id == 0)
-                    {
-                        continue;
-                    }
-
-                    if (!ComponentWeenies.TryGetByComponent(id, out _))
-                    {
-                        throw new InvalidOperationException($"spell {profileSpell.Id} ({profileSpell.Name}) needs component {id}, which the component map does not hold");
-                    }
-
-                    union.Add(id);
-                    used.Add(id);
-                    if (line.Role != ProfileRole.Travel && !IsKitFightLine(line))
-                    {
-                        otherThanTravel.Add(id);
-                    }
-                    counts[id] = counts.GetValueOrDefault(id) + 1;
+                    throw new InvalidOperationException($"ground-plan-gap: the kit line {line.Name} ({line.Wcid}) of {home.Name} is {slot} but the weenie's item type is 0x{w.ItemType:X}");
                 }
 
-                // The foci formula (ACE GetFociFormula): used instead when the school's focus item is held, so the kit carries its components too; a cast burns one formula or the other, so each id counts the larger of the two.
-                foreach (var (id, n) in FociFormulaCounts(info.Formula))
-                {
-                    if (!ComponentWeenies.TryGetByComponent(id, out _))
-                    {
-                        throw new InvalidOperationException($"spell {profileSpell.Id} ({profileSpell.Name}) needs component {id} in the foci formula, which the component map does not hold");
-                    }
-
-                    used.Add(id);
-                    counts[id] = Math.Max(counts.GetValueOrDefault(id), n);
-                }
-
-                foreach (var (id, n) in counts)
-                {
-                    ComponentWeenies.TryGetByComponent(id, out var weenie);
-                    var burn = n * info.ComponentLoss * (double)weenie.Cdm;
-                    lineBurn[id] = Math.Max(lineBurn.GetValueOrDefault(id), burn);
-                    perSpell[id] = Math.Max(perSpell.GetValueOrDefault(id), n);
-                }
-            }
-
-            foreach (var (id, burn) in lineBurn)
-            {
-                // Buff lines add up (a cycle casts every line); war lines are alternatives (the loops fight with one).
-                if (line.IsBuff)
-                {
-                    buffBurn[id] = buffBurn.GetValueOrDefault(id) + burn;
-                }
-                else if (line.Role == ProfileRole.Travel || IsKitFightLine(line))
-                {
-                    // The travel lines (M4 P5b J3b): a recall or a tie is cast a few times a gate (a journey, its fizzles).
-                    travelBurn[id] = travelBurn.GetValueOrDefault(id) + burn;
-                }
-                else if (line.IsManaLine)
-                {
-                    // The mana lines (D24) are cast ManaCastsPerLine times a cycle, each cast at its worst spell.
-                    manaBurn[id] = manaBurn.GetValueOrDefault(id) + (burn * ManaCastsPerLine);
-                }
-                else
-                {
-                    warBurn[id] = Math.Max(warBurn.GetValueOrDefault(id), burn);
-                }
+                items.Add(new GearItem(w.Wcid, line.Name, slot == KitSlot.Wielded ? GearKind.Wand : GearKind.Armour, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.UnitBurden));
             }
         }
 
-        var items = new List<GearItem> { ItemOf(Wand) };
-        foreach (var piece in Armour)
+        foreach (var line in supplies.Kit.Where(k => k.Slot == KitSlot.Pack))
         {
-            items.Add(ItemOf(piece));
-        }
-
-        var ids = new SortedSet<uint>(used);
-        for (var taper = SpellFormulaRules.LowestTaperId; taper < SpellFormulaRules.LowestTaperId + 12; taper++)
-        {
-            ids.Add(taper);
-        }
-
-        foreach (var id in ids)
-        {
-            ComponentWeenies.TryGetByComponent(id, out var weenie);
-            var wanted = SpareTaperStack;
-            if (used.Contains(id))
+            var w = SupplyWeenieOf(line.Wcid, home, "kit");
+            if ((w.ItemType & Lifestone.Client.Session.Fighter.FighterKit.ItemTypeContainer) == 0)
             {
-                var expected = (BuffCycles * (buffBurn.GetValueOrDefault(id) + manaBurn.GetValueOrDefault(id))) + (FightCasts * warBurn.GetValueOrDefault(id)) + (TravelCasts * travelBurn.GetValueOrDefault(id));
-                wanted = Math.Max(Math.Max(otherThanTravel.Contains(id) ? MinimumStack : TravelMinimumStack, perSpell[id]), (int)Math.Ceiling(Safety * expected));
+                throw new InvalidOperationException($"ground-plan-gap: the kit line {line.Name} ({line.Wcid}) of {home.Name} is a pack but the weenie's item type is 0x{w.ItemType:X}");
             }
 
-            items.Add(new GearItem(
-                weenie.Wcid, weenie.Name, GearKind.Component, WeenieTypeSpellComponent, ItemTypeSpellComponents, EquipMask.None, Math.Min(wanted, weenie.MaxStack), weenie.MaxStack, weenie.Wcid == PrismaticTaperWcid ? PrismaticTaperBurden : ComponentBurden));
+            items.Add(new GearItem(w.Wcid, line.Name, GearKind.Pack, w.WeenieType, w.ItemType, EquipMask.None, line.Count, 1, w.UnitBurden));
         }
 
-        return new GearKit(items, [.. union]);
+        foreach (var focus in MageFociWcids)
+        {
+            var w = SupplyWeenieOf(focus, home, "focus");
+            items.Add(new GearItem(focus, w.Name, GearKind.Focus, w.WeenieType, w.ItemType, EquipMask.None, 1, null, w.UnitBurden));
+        }
+
+        foreach (var line in supplies.Stock)
+        {
+            var w = SupplyWeenieOf(line.Wcid, home, "stock");
+            items.Add(new GearItem(w.Wcid, line.Name, GearKind.Component, w.WeenieType, w.ItemType, EquipMask.None, line.Keep, w.MaxStack, w.UnitBurden));
+        }
+
+        return new GearKit(items, [.. burns.Select(b => b.ComponentId).Distinct().Order()]);
     }
 
     /// <summary>
-    /// The death loop's kit (M4 3.1 d0, D20): this kit's lines, then <paramref name="decoys"/> as <see cref="GearKind.Decoy"/> lines (stack 1, no valid location, never wielded). A kit that already has decoys has them replaced, so the call is idempotent. The burden
-    /// and the slots include the decoys; this kit is not changed, and a plain kit (<see cref="Build"/>, <see cref="Of"/>) stays what it was: the buff, fight and login legs never see a decoy.
+    /// The counts read at the fight's start (M5 item 3 m1, D8, D48): the stop, if any, before the first cast. A focus the mage does not hold is <c>m5-mage-foci</c> (its school would cast the full formula, which no stock line covers); every CARRIED stock line
+    /// (<see cref="HuntingGround.IsCarried"/>: no home vendor sells it) the kit holds whose count is under its <c>stop_under</c> is <c>m5-platinum-stock</c> (the Platinum Scarab) or <c>m5-carried-stock</c>, named with the vendors' town; a sold line under its
+    /// <c>trip_under</c> is only reported through <paramref name="info"/> (the counters are m4's). Null when the kit has no foci (a test's hand-made kit) or every line holds.
     /// </summary>
-    /// <param name="decoys">The decoys (<see cref="DecoyKit.For"/> for a level, <see cref="DecoyKit.All"/> for all eight).</param>
-    public GearKit WithDecoys(IReadOnlyList<DecoyItem> decoys)
+    /// <param name="ground">The ground (its supplies, its home town).</param>
+    /// <param name="kit">The kit the mage was built with.</param>
+    /// <param name="held">What the pack holds, by weenie class id.</param>
+    /// <param name="info">Where the trip-line notes go.</param>
+    internal static string? FightStartStop(HuntingGround ground, GearKit kit, IReadOnlyDictionary<uint, int> held, Action<string> info)
     {
-        ArgumentNullException.ThrowIfNull(decoys);
-        var items = new List<GearItem>(Items.Count + decoys.Count);
-        foreach (var item in Items)
+        if (kit.ItemOf(MageFociWcids[0]) is null)
         {
-            if (item.Kind != GearKind.Decoy)
+            return null;
+        }
+
+        foreach (var focus in MageFociWcids)
+        {
+            if (!held.ContainsKey(focus))
             {
-                items.Add(item);
+                return string.Create(CultureInfo.InvariantCulture, $"m5-mage-foci: the mage holds no {FociName(focus)} (weenie {focus}); its school would cast the full formula, which the stock does not hold (D8)");
             }
         }
 
-        foreach (var decoy in decoys)
+        foreach (var line in ground.Supplies.Stock)
         {
-            items.Add(decoy.ToGearItem());
+            if (kit.ItemOf(line.Wcid) is null)
+            {
+                continue;
+            }
+
+            var count = held.GetValueOrDefault(line.Wcid);
+            if (ground.IsCarried(line.Wcid) && count < line.StopUnder)
+            {
+                var tag = line.Wcid == PlatinumScarabWcid ? "m5-platinum-stock" : "m5-carried-stock";
+                return string.Create(CultureInfo.InvariantCulture, $"{tag}: the {line.Name} stack is {count}, under its stop line {line.StopUnder}; {ground.Home.Town} sells none (D8)");
+            }
+
+            if (count < line.TripUnder)
+            {
+                info(string.Create(CultureInfo.InvariantCulture, $"stock: the {line.Name} stack is {count}, under its trip line {line.TripUnder} (a trip is due; the counters are m4's)"));
+            }
         }
 
-        return new GearKit(items, CustomisedComponentIds);
+        return null;
     }
 
-    /// <summary><see cref="WithDecoys(IReadOnlyList{DecoyItem})"/> with the decoys <see cref="DecoyKit.CountFor"/> asks for at <paramref name="level"/>.</summary>
-    /// <param name="level">The character's level.</param>
-    public GearKit WithDecoys(int level) => WithDecoys(DecoyKit.For(level));
+    /// <summary>The weenie class ids of the four foci the mage holds (D8): Enchantment 15268 (Creature), Artifice 15269 (Item), Verdancy 15270 (Life) and Strife 15271 (War). Shadow (Void) is not cast.</summary>
+    public static IReadOnlyList<uint> MageFociWcids { get; } = [15268, 15269, 15270, 15271];
+
+    /// <summary>The mage's keeper-cast spells outside the profile lines: Heal Self VII (Adja's Intervention, the last of <c>VitalsMeans.HealSelf</c>), which the vitals keeper casts for health.</summary>
+    public static IReadOnlyList<uint> KitKeeperSpells { get; } = [2073];
+
+    /// <summary>The coin weenie (pyreals) the purse is granted in (the pinned world SQL v0.9.296: WeenieType Coin, MaxStackSize 25,000).</summary>
+    public const uint PyrealWcid = 273;
+
+    /// <summary>ACE's <c>ItemType.Clothing</c> (0x4): a robe.</summary>
+    public const uint ItemTypeClothing = 0x4;
+
+    /// <summary>One component one spell's cast burns on the foci formula, as a stock line must hold it.</summary>
+    /// <param name="SpellId">The spell.</param>
+    /// <param name="Spell">The spell's name.</param>
+    /// <param name="ComponentId">The component's id in the SpellComponentTable.</param>
+    /// <param name="Wcid">The component's weenie class id.</param>
+    /// <param name="Name">The component's name.</param>
+    /// <param name="PerCast">How many of it one cast needs in the pack.</param>
+    public sealed record CastBurn(uint SpellId, string Spell, uint ComponentId, uint Wcid, string Name, int PerCast);
+
+    /// <summary>M5 7 F16 (D91, the owner's components rule): Drain Health Other I (id 1237), which the fight's emergency drain always casts, so its Lead Scarab and tapers are in the kit although the spell plan casts no level under VI.</summary>
+    internal const uint EmergencyDrainSpellId = 1237;
+
+    /// <summary>The Lead Scarab (wcid 691), the level I scarab: a ground whose supplies hold this line casts the emergency drain and the kit carries its components; a ground without it names the gap at the fight (TODO(f16-drain-one-supplies)).</summary>
+    internal const uint EmergencyDrainScarabWcid = 691;
 
     /// <summary>
-    /// The kit the death loop spawns (M4 3.1 d0, D20): with <see cref="DeathOptions.Decoys"/> on (<c>--death-decoys</c>, the default) <see cref="Build"/>'s kit with the decoys of <see cref="DecoyKit.For"/> at <paramref name="level"/>; off, the plain kit (M3's loop exactly).
-    /// The death scenario calls this; the buff, fight and login legs call <see cref="Build"/>.
+    /// The spells the mage casts on <paramref name="ground"/> and the components each burns on the foci formula (<see cref="FociFormulaCounts"/>): every profile line the cycle, the keeper and the fight cast (the buffs, the
+    /// two mana lines, the war bolt) and the two travel lines (<see cref="KitTravelSpells"/>), the ring with <paramref name="heroRing"/> (<see cref="KitFightSpells"/>) and <see cref="KitKeeperSpells"/>; of a line of
+    /// seven or more levels, the levels the ground's spell plan casts (D26, D41: the plan's lowest to its highest <c>spell_level</c>, the den's VI and VII; the Incantation and the levels below VI are cast by no plan and
+    /// need scarabs no stock line holds), of a shorter line every spell. A component that is no stock line of the ground, or a stock line smaller than one cast needs, fails by name (<c>ground-plan-gap</c>).
     /// </summary>
-    /// <param name="spells">The SpellTable's spells (<see cref="SpellTableData.Spells"/>).</param>
-    /// <param name="accountName">The account's name (see <see cref="Build"/>).</param>
-    /// <param name="options">The death loop's options.</param>
-    /// <param name="level">The level the decoys are counted for (default <see cref="MageTemplate.TargetLevel"/>, BSD Mage's).</param>
-    public static GearKit ForDeathLoop(IReadOnlyDictionary<uint, SpellInfo> spells, string accountName, DeathOptions options, int level = MageTemplate.TargetLevel)
+    /// <param name="ground">The ground.</param>
+    /// <param name="spells">The SpellTable's spells.</param>
+    /// <param name="heroRing">True: the Ring of Fire is cast.</param>
+    internal static IReadOnlyList<CastBurn> CastBurns(HuntingGround ground, IReadOnlyDictionary<uint, SpellInfo> spells, bool heroRing)
     {
-        ArgumentNullException.ThrowIfNull(options);
-        var kit = Build(spells, accountName);
-        return options.Decoys ? kit.WithDecoys(level) : kit;
+        var low = ground.SpellPlan.Count == 0 ? 1 : ground.SpellPlan.Min(p => p.SpellLevel);
+        var high = ground.SpellPlan.Count == 0 ? 7 : ground.SpellPlan.Max(p => p.SpellLevel);
+        var cast = new List<(string Line, ProfileSpell Spell)>();
+        foreach (var line in ArenaProfile.Lines.Concat(ArenaProfile.Extras))
+        {
+            var wanted = line.Role switch
+            {
+                ProfileRole.WarOption => heroRing && line.Spells.Any(s => KitFightSpells.Contains(s.Id)),
+                ProfileRole.Travel => line.Spells.Any(s => KitTravelSpells.Contains(s.Id)),
+                ProfileRole.HarmSelf or ProfileRole.HealSelf => false,
+                _ => true,
+            };
+            if (!wanted)
+            {
+                continue;
+            }
+
+            for (var i = 0; i < line.Spells.Count; i++)
+            {
+                if (line.ByPlay)
+                {
+                    // M5 7 P7j (D143): of a line learned by play, only the levels the ground's learn list teaches are cast (the levels not learned need no component)
+                    if (ground.Learn.Any(l => l.SpellId == line.Spells[i].Id))
+                    {
+                        cast.Add((line.Name, line.Spells[i]));
+                    }
+
+                    continue;
+                }
+
+                if (line.Spells.Count < 7 || (i + 1 >= low && i + 1 <= high) || (line.Role == ProfileRole.LifeDrain && line.Spells[i].Id == EmergencyDrainSpellId && ground.Supplies.StockOf(EmergencyDrainScarabWcid) is not null))
+                {
+                    cast.Add((line.Name, line.Spells[i]));
+                }
+            }
+        }
+
+        foreach (var id in KitKeeperSpells)
+        {
+            cast.Add(("Heal Self", new ProfileSpell(7, id, "Adja's Intervention", 300, 0)));
+        }
+
+        var burns = new List<CastBurn>();
+        foreach (var (line, spell) in cast)
+        {
+            var info = spells.TryGetValue(spell.Id, out var found)
+                ? found
+                : throw new KeyNotFoundException($"profile spell {spell.Id} ({spell.Name}) is not in the SpellTable");
+            foreach (var (component, n) in FociFormulaCounts(info.Formula))
+            {
+                if (!ComponentWeenies.TryGetByComponent(component, out var weenie))
+                {
+                    throw new InvalidOperationException($"spell {spell.Id} ({spell.Name}) needs component {component} in the foci formula, which the component map does not hold");
+                }
+
+                var stock = ground.Supplies.StockOf(weenie.Wcid)
+                    ?? throw new InvalidOperationException($"ground-plan-gap: {line} ({spell.Name}, spell {spell.Id}) burns {weenie.Name} (wcid {weenie.Wcid}) on the foci formula, which is not a stock line of {ground.Name}; add the line to the profile's supplies");
+                if (stock.StopUnder < n)
+                {
+                    throw new InvalidOperationException($"ground-plan-gap: {spell.Name} (spell {spell.Id}) needs {n} {weenie.Name} a cast but the stock line of {ground.Name} stops under {stock.StopUnder}");
+                }
+
+                burns.Add(new CastBurn(spell.Id, spell.Name, component, weenie.Wcid, weenie.Name, n));
+            }
+        }
+
+        return burns;
+    }
+
+    /// <summary>A weenie of the supplies as the pinned world SQL v0.9.296 holds it (a read-only parse of the zip, 2026-10-27): what the build needs to grant, count and weigh it.</summary>
+    /// <param name="Wcid">The weenie class id.</param>
+    /// <param name="Name">The weenie's name.</param>
+    /// <param name="WeenieType">ACE's WeenieType.</param>
+    /// <param name="ItemType">ACE's ItemType.</param>
+    /// <param name="ValidLocations">The EquipMask bits it can occupy (0: not worn).</param>
+    /// <param name="UnitBurden">The burden of one (PropertyInt 5).</param>
+    /// <param name="MaxStack">The most one stack holds (PropertyInt 11), or null.</param>
+    /// <param name="ItemDifficulty">The Arcane Lore the weenie needs (PropertyInt 109), or 0.</param>
+    /// <param name="Value">The weenie's Value (PropertyInt 19): what a vendor's rates multiply (review 3-R17: the vendor wand's value, read).</param>
+    public sealed record SupplyWeenie(uint Wcid, string Name, uint WeenieType, uint ItemType, EquipMask ValidLocations, int UnitBurden, int? MaxStack, int ItemDifficulty = 0, int Value = 0);
+
+    /// <summary>
+    /// The weenies the profiles' supplies name beyond the spell components (<see cref="ComponentWeenies"/>): the vendor robes and wand, the four foci, the Mana Potion, the pyreal coin and the three trade notes; a profile naming another one fails
+    /// by name (<c>TODO(m6-kit-weenie)</c>: read the weenie from the pinned world SQL and add it here). The robes cover chest, abdomen, arms, legs and feet (0x7F00).
+    /// <para><b>Sources</b> (review 3-R12; the pinned world SQL ACE-World-16PY-Patches v0.9.296, read-only, 2026-10-27; <c>SupplyWeenieSqlTests</c> re-reads every field of every row against it when the zip is present): each row's
+    /// weenie is the <c>weenie</c> table's <c>class_Id</c> (the WeenieType is its <c>type</c>), the ItemType is <c>weenie_properties_int</c> type 1, the burden type 5 (EncumbranceVal), the ValidLocations type 9 (absent: not worn), the
+    /// MaxStack type 11 (MaxStackSize), the Arcane Lore type 109 (ItemDifficulty), the Value type 19. 6071 robesuckwaraluvian, 5910 robewargharundim (ValidLocations 32512 = 0x7F00), 2472 wand (ValidLocations 16777216 = 0x01000000,
+    /// Held; Value 200, the vendor wand: Cindrue sells it at 270, a 1.35 sell rate, so <c>TODO(m4-caster-value)</c> is read for this wand), 15268-15271 packcreatureessence, packitemessence, packlifeessence, packwaressence (the foci,
+    /// ValidLocations 0), 379 manapotion, 273 coinstack, 20630, 2625 and 2626 the 250,000, 10,000 and 50,000 trade notes.</para>
+    /// </summary>
+    public static IReadOnlyList<SupplyWeenie> SupplyWeenies { get; } =
+    [
+        new(6071, "Faran War Apprentice Robe", WeenieTypeClothing, ItemTypeClothing, (EquipMask)0x7F00, 200, null, 20, 1120),
+        new(5910, "Dho War Master Robe", WeenieTypeClothing, ItemTypeClothing, (EquipMask)0x7F00, 200, null, 158, 8000),
+        // M5 7 F13 (D87, the kit: a hooded robe and gloves): 5851 robealuvianhood sets ClothingPriority 98048 = 0x17F00 (upper and lower legs, chest, abdomen, upper and lower arms, HEAD 0x4000, feet) and ValidLocations 32513 = 0x7F01 (the robe's 0x7F00 and HeadWear); 56 gauntletsleather sets ClothingPriority 32768 = 0x8000 (hands), ValidLocations 32 (HandWear), ArmorLevel 130
+        new(5851, "Faran Robe with Hood", WeenieTypeClothing, ItemTypeClothing, (EquipMask)0x7F01, 200, null, 0, 50),
+        new(56, "Leather Gauntlets", WeenieTypeClothing, ItemTypeArmor, EquipMask.HandWear, 270, null, 0, 1100),
+        new(2472, "Wand", WeenieTypeCaster, ItemTypeCaster, EquipMask.Held, 50, null, 0, 200),
+        new(15268, "Foci of Enchantment", 1, 0x80, EquipMask.None, 400, null, 0, 500),
+        new(15269, "Foci of Artifice", 1, 0x80, EquipMask.None, 400, null, 0, 500),
+        new(15270, "Foci of Verdancy", 1, 0x80, EquipMask.None, 400, null, 0, 500),
+        new(15271, "Foci of Strife", 1, 0x80, EquipMask.None, 400, null, 0, 500),
+        // M5 7 G3: 136 pack (Container 21, ItemType 0x200, burden 15, Value 65, ItemsCapacity 24: the ace_world row FighterKit.SidePackWcid cites); Renald the Elder sells it
+        new(136, "Pack", Lifestone.Client.Session.Fighter.FighterKit.WeenieTypeContainer, Lifestone.Client.Session.Fighter.FighterKit.ItemTypeContainer, EquipMask.None, 15, null, 0, 65),
+        new(379, "Mana Potion", 18, 0x80, EquipMask.None, 15, 100, 0, 170),
+        new(PyrealWcid, "Pyreal", 9, 0x40, EquipMask.None, 0, 25_000, 0, 1),
+        new(20630, "Trade Note (250,000)", 51, 0x40000, EquipMask.None, 1, 250, 0, 250_000),
+        new(2625, "Trade Note (10,000)", 51, 0x40000, EquipMask.None, 1, 250, 0, 10_000),
+        new(2626, "Trade Note (50,000)", 51, 0x40000, EquipMask.None, 1, 250, 0, 50_000),
+    ];
+
+    /// <summary>The supply weenie <paramref name="wcid"/>: <see cref="SupplyWeenies"/>, else a spell component; else a named failure.</summary>
+    internal static SupplyWeenie SupplyWeenieOf(uint wcid, HuntingGround ground, string what)
+    {
+        foreach (var w in SupplyWeenies)
+        {
+            if (w.Wcid == wcid)
+            {
+                return w;
+            }
+        }
+
+        if (ComponentWeenies.TryGetByWcid(wcid, out var c))
+        {
+            return new SupplyWeenie(c.Wcid, c.Name, WeenieTypeSpellComponent, ItemTypeSpellComponents, EquipMask.None, c.Wcid == PrismaticTaperWcid ? PrismaticTaperBurden : ComponentBurden, c.MaxStack);
+        }
+
+        throw new InvalidOperationException($"TODO(m6-kit-weenie): the {what} weenie {wcid} of {ground.Name} is in neither the component map nor GearKit.SupplyWeenies; read it from the pinned world SQL and add it");
+    }
+
+    /// <summary>
+    /// The kit, the purse and the load of a ground's mage in one (M5 item 3 m1, D49): <see cref="For"/> builds the kit, checks that its load (the kit's burden plus the purse's) is under the supplies' burden line and the pack has room, and
+    /// names the wielded or worn lines the mage cannot use yet. The build grants it; play grants nothing (the owner's cheat layer, the spec section 5.6).
+    /// </summary>
+    public sealed class KitPlan
+    {
+        private KitPlan(HuntingGround ground, GearKit kit, IReadOnlyList<PurseGrant> purse, int load, int capacity)
+        {
+            Ground = ground;
+            Kit = kit;
+            Purse = purse;
+            Load = load;
+            Capacity = capacity;
+        }
+
+        /// <summary>The ground whose supplies this is.</summary>
+        public HuntingGround Ground { get; }
+
+        /// <summary>The kit (<see cref="Build"/>).</summary>
+        public GearKit Kit { get; }
+
+        /// <summary>The purse as grants: the coin in stacks of at most the pyreal stack size, then the notes.</summary>
+        public IReadOnlyList<PurseGrant> Purse { get; }
+
+        /// <summary>The burden of the kit and the purse.</summary>
+        public int Load { get; }
+
+        /// <summary>The capacity the load is judged against (<see cref="EncumbranceCapacity"/> of <see cref="CapacityStrength"/>).</summary>
+        public int Capacity { get; }
+
+        /// <summary>The line <c>load: &lt;burden&gt; of &lt;capacity&gt;</c> the build logs.</summary>
+        public string LoadLine => string.Create(CultureInfo.InvariantCulture, $"load: {Load} of {Capacity}");
+
+        /// <summary>The purse's pack slots (a coin stack or a note stack each).</summary>
+        public int PurseSlots => Purse.Sum(p => p.Stacks.Count);
+
+        /// <summary>
+        /// The plan of the ground: the kit (<see cref="Build"/>), the purse, and the load check: the load must be at most the supplies' <c>burden_trip_percent</c> of the capacity and the kit and purse must fit the pack's slots, else
+        /// the build fails by name (<c>ground-plan-gap</c>).
+        /// </summary>
+        /// <param name="ground">The ground.</param>
+        /// <param name="spells">The SpellTable's spells.</param>
+        /// <param name="account">The account name (<see cref="Build"/>).</param>
+        /// <param name="heroRing">True: the Ring of Fire is cast.</param>
+        /// <param name="capacityStrength">M5 7 F3 (D87): the Strength the load is judged at, as <see cref="CapacityStrength"/> is (the plan's Strength ranks, conservative by the creation value): the default is level 126's 131; a build at another level (<c>--mage-level</c>) passes its plan's.</param>
+        public static KitPlan For(HuntingGround ground, IReadOnlyDictionary<uint, SpellInfo> spells, string account, bool heroRing = false, int capacityStrength = CapacityStrength)
+        {
+            ArgumentNullException.ThrowIfNull(ground);
+            var kit = GearKit.Build(spells, account, heroRing, ground);
+            var purse = new List<PurseGrant>();
+            var coin = ground.Supplies.Purse.Coin;
+            if (coin > 0)
+            {
+                var coinWeenie = SupplyWeenieOf(PyrealWcid, ground, "purse coin");
+                var stacks = new List<int>();
+                for (var left = coin; left > 0;)
+                {
+                    var one = Math.Min(left, coinWeenie.MaxStack ?? left);
+                    stacks.Add(one);
+                    left -= one;
+                }
+
+                purse.Add(new PurseGrant(PyrealWcid, coinWeenie.Name, stacks, coinWeenie.UnitBurden));
+            }
+
+            foreach (var note in ground.Supplies.Purse.Notes)
+            {
+                var w = SupplyWeenieOf(note.Wcid, ground, "purse note");
+                if (w.MaxStack is { } max && note.Count > max)
+                {
+                    throw new InvalidOperationException($"ground-plan-gap: the purse of {ground.Name} holds {note.Count} {note.Name}, more than one stack ({max})");
+                }
+
+                purse.Add(new PurseGrant(note.Wcid, note.Name, [note.Count], w.UnitBurden));
+            }
+
+            var capacity = EncumbranceCapacity(capacityStrength);
+            var load = kit.Burden + purse.Sum(p => p.Burden);
+            var line = (long)capacity * ground.Supplies.BurdenTripPercent / 100;
+            var plan = new KitPlan(ground, kit, purse, load, capacity);
+            if (load > line)
+            {
+                throw new InvalidOperationException($"ground-plan-gap: {plan.LoadLine} is over the supplies' burden line of {ground.Supplies.BurdenTripPercent}% ({line}) for {ground.Name}; the kit and the purse leave no room for loot");
+            }
+
+            if (kit.Slots + plan.PurseSlots > PackCapacity)
+            {
+                throw new InvalidOperationException($"ground-plan-gap: the kit ({kit.Slots} slots) and the purse ({plan.PurseSlots}) of {ground.Name} do not fit the pack's {PackCapacity} slots");
+            }
+
+            return plan;
+        }
+
+        /// <summary>The Arcane Lore each worn or wielded kit line needs that <paramref name="arcaneLore"/> does not reach, as <c>TODO(m6-tethana-supplies)</c> lines (empty when the mage can use the whole kit).</summary>
+        /// <param name="arcaneLore">The mage's Arcane Lore skill (BSD Mage's: 144).</param>
+        public IReadOnlyList<string> WieldShortfalls(int arcaneLore)
+        {
+            var shorts = new List<string>();
+            foreach (var line in Ground.Supplies.Kit)
+            {
+                var w = SupplyWeenieOf(line.Wcid, Ground, "kit");
+                if (w.ItemDifficulty > arcaneLore)
+                {
+                    shorts.Add(string.Create(CultureInfo.InvariantCulture, $"TODO(m6-tethana-supplies): the kit line {line.Name} ({line.Wcid}) of {Ground.Name} needs Arcane Lore {w.ItemDifficulty}, the mage has {arcaneLore}; it cannot be worn or wielded until the mage trains it or the profile picks another"));
+                }
+            }
+
+            return shorts;
+        }
+    }
+
+    /// <summary>One line of the purse: <see cref="Stacks"/> items of weenie <see cref="Wcid"/>, each of the given stack size (the coin split by the pyreal stack size, a note line one stack of its count).</summary>
+    /// <param name="Wcid">The weenie class id.</param>
+    /// <param name="Name">The name.</param>
+    /// <param name="Stacks">The stack size of each item to grant.</param>
+    /// <param name="UnitBurden">The burden of one unit.</param>
+    public sealed record PurseGrant(uint Wcid, string Name, IReadOnlyList<int> Stacks, int UnitBurden)
+    {
+        /// <summary>The units in all the stacks.</summary>
+        public int Total => Stacks.Sum();
+
+        /// <summary>The burden of all the stacks.</summary>
+        public int Burden => Total * UnitBurden;
     }
 
     /// <summary>The name and school of a focus item, for the log line.</summary>
@@ -482,7 +725,7 @@ public sealed class GearKit
     public string Describe() =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"items={Items.Count} components={Items.Count(i => i.Kind == GearKind.Component)} customised_components={CustomisedComponentIds.Count} slots={Slots}/{PackCapacity} burden={Burden}/{EncumbranceCapacity(CapacityStrength)}{(HasDecoys ? " decoys=" + DecoyItems.Count() : string.Empty)}");
+            $"items={Items.Count} components={Items.Count(i => i.Kind == GearKind.Component)} customised_components={CustomisedComponentIds.Count} slots={Slots}/{PackCapacity} burden={Burden}/{EncumbranceCapacity(CapacityStrength)}");
 
     private static GearItem ItemOf(GearWeenie w) =>
         new(w.Wcid, w.Name, w.Wcid == Wand.Wcid ? GearKind.Wand : GearKind.Armour, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.Burden, w.Palette, w.Shade);
@@ -870,6 +1113,27 @@ internal static class GearInventory
         {
             into.Add(equipped[i].Guid);
         }
+    }
+
+    /// <summary>
+    /// A caster (ItemType's Caster bit: a wand, a staff or an orb) the player holds in the pack or a side pack and has not wielded, or 0. The one place for it (M5 3 F5): the portal tie wields it before the magic mode (a fresh build's mage
+    /// holds its kit unwielded) and the death handler's rearm wields it when the wielded caster went to the corpse; ACE refuses the magic mode with no caster in the held slot (<c>Player_Combat.cs</c> 872-880, <c>GetEquippedWand</c>
+    /// <c>Creature_Equipment.cs</c> 141-144 @95ef426d; <see cref="CombatModeGuard"/> answers <see cref="CombatModeProblem.MagicWithoutCaster"/>).
+    /// </summary>
+    /// <param name="state">The read model.</param>
+    /// <param name="scratch">A list to collect into (cleared first), so a caller that polls allocates nothing.</param>
+    internal static uint PackCaster(GameState state, List<uint> scratch)
+    {
+        Collect(state, scratch);
+        foreach (var guid in scratch)
+        {
+            if (state.Objects.TryGet(guid, out var item) && (item.ItemType & CombatModeGuard.ItemTypeCaster) != 0 && state.Self.Inventory.Find(guid).Kind != InventoryPlaceKind.Equipped)
+            {
+                return guid;
+            }
+        }
+
+        return 0;
     }
 
     /// <summary>The stack of a held item: the server's last SetStackSize, else the weenie description's, else 1.</summary>

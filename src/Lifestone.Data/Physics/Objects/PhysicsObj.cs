@@ -180,6 +180,14 @@ public sealed partial class PhysicsObj : IMotionInterpHost, IMoveToHost
     /// </summary>
     public bool PlacementPending { get; private set; }
 
+    /// <summary>
+    /// True for a probe body whose transitions meet the fixed world only and pass every other moving object (doors, creatures, NPCs,
+    /// the player): the route planner's placement probes (<c>RouteConfirmer</c>, <c>RouteLibrary</c>), which judge the world the route is
+    /// built in while the runner meets server objects at walk time (M5 item 5 fix F3; <see cref="Transitions.ObjectInfo.FixedWorldOnly"/>).
+    /// Not retail: Lifestone's own planner switch, false for the player, the avatars and the server objects.
+    /// </summary>
+    public bool FixedWorldOnly { get; set; }
+
     /// <summary>Retail transient Contact.</summary>
     public bool HasContact => (TransientState & TransientState.Contact) != 0;
 
@@ -431,7 +439,13 @@ public sealed partial class PhysicsObj : IMotionInterpHost, IMoveToHost
     /// free heading; PathClipped for a missile; the weenie's Impenetrable, Player, PK and PK-lite), then the object, its
     /// scale and step heights.
     /// </summary>
-    private void InitObject(Transition transition, bool admin)
+    /// <param name="transition">The transition to fill.</param>
+    /// <param name="admin">An admin move: no carried contact or sliding normal.</param>
+    /// <param name="carriedContact">Null (every retail caller): the object's own contact. For a server object moved
+    /// from outside (<see cref="TryTransitionTo"/>, M5 D72): false carries no contact; true carries the object's own
+    /// contact plane when it has one, else the Contact and OnWalkable flags without a plane, so the transition steps
+    /// the object down onto the ground as it does for a grounded object.</param>
+    private void InitObject(Transition transition, bool admin, bool? carriedContact = null)
     {
         var flags = ObjectInfoState.None;
         if ((State & PhysicsState.EdgeSlide) != 0)
@@ -441,7 +455,11 @@ public sealed partial class PhysicsObj : IMotionInterpHost, IMoveToHost
 
         if (!admin)
         {
-            if (HasContact)
+            if (carriedContact is true && !HasContact)
+            {
+                flags |= ObjectInfoState.Contact | ObjectInfoState.OnWalkable;
+            }
+            else if (HasContact && carriedContact is not false)
             {
                 var isWater = (TransientState & TransientState.WaterContact) != 0;
                 if (CheckContact(true))
@@ -508,6 +526,7 @@ public sealed partial class PhysicsObj : IMotionInterpHost, IMoveToHost
         }
 
         transition.InitObject(this, flags, State, Scale, GetStepUpHeight(), GetStepDownHeight());
+        transition.ObjectInfo.FixedWorldOnly = FixedWorldOnly;
         var spheres = TransitionSpheres(out var scale);
         transition.InitSphere(spheres, scale);
     }

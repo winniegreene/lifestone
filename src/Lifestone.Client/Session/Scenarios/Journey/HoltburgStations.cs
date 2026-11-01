@@ -33,12 +33,20 @@ public abstract class StationLeg : ScriptLeg
     /// <summary>The journey's context.</summary>
     protected JourneyContext Context { get; }
 
+    /// <summary>The reason the last <see cref="TravelTo"/> failed when it was optional, else null (reset at each call).</summary>
+    protected string? LastTravelFailure { get; private set; }
+
     /// <summary>
     /// Travels to <paramref name="request"/> through the journey's travel seam and, for a place, waits out the end of the teleport as <see cref="ScriptLeg.PlaceAndSettle"/> does (the teleport seen, Present, the post-teleport LoginComplete
     /// confirmed, a 3 s settle); for a run, a recall or nothing the arrival is authoritative (a 1 s settle). A failed travel is a failed check and ends the leg Failed with the travel's reason.
     /// </summary>
-    protected IEnumerable<ActionHandle?> TravelTo(TravelRequest request, string what)
+    /// <remarks>
+    /// With <paramref name="optional"/> a failed travel is not a failed check and does not throw: it logs a WARN line naming the destination and the travel's reason, sets <see cref="LastTravelFailure"/> (null again at every call) and ends,
+    /// so the caller can skip the stop (M5 7: the restock walk to a vendor the physics refused must not fail the whole trip).
+    /// </remarks>
+    protected IEnumerable<ActionHandle?> TravelTo(TravelRequest request, string what, bool optional = false)
     {
+        LastTravelFailure = null;
         var mark = S.ActionLog.Total;
         using var leg = Context.Travel.GoTo(S, request, S.Clock.Now);
         Log($"travel to {what}: {request.Purpose}{(request.ObjectGuid == 0 ? string.Empty : $" to object {request.ObjectGuid:X8} within {request.Range:0.0} m")}");
@@ -47,6 +55,13 @@ public abstract class StationLeg : ScriptLeg
         {
             yield return null;
             status = leg.Step(S, S.Clock.Now);
+        }
+
+        if (status == TravelStatus.Failed && optional)
+        {
+            LastTravelFailure = leg.Failure ?? "failed";
+            Context.Log.Warn("station", $"[live {Name}] travel to {what}: failed, the stop is skipped: {LastTravelFailure}");
+            yield break;
         }
 
         if (status == TravelStatus.Failed)

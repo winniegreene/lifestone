@@ -69,7 +69,8 @@ public static class VitalsMeans
     /// <param name="spells">The SpellTable's spells.</param>
     /// <param name="line">The line.</param>
     /// <param name="chance">The chosen level's chance (NaN when none).</param>
-    public static SpellInfo? PickBestChance(PlayerQualities q, Spellbook book, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsLine line, out double chance)
+    /// <param name="held">M5 4 G1: what the pack holds when the level floor applies (<see cref="LevelFloor.HeldFor"/>); a level whose foci-formula components it lacks is passed over. Null: no floor.</param>
+    public static SpellInfo? PickBestChance(PlayerQualities q, Spellbook book, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsLine line, out double chance, IReadOnlyDictionary<uint, int>? held = null)
     {
         ArgumentNullException.ThrowIfNull(q);
         ArgumentNullException.ThrowIfNull(book);
@@ -82,6 +83,11 @@ public static class VitalsMeans
             if (!book.Knows(ids[i]) || !spells.TryGetValue(ids[i], out var info) || !GearCasts.TryCurrentSkill(q, GearCasts.SkillOf(info.School), out var skill, out _))
             {
                 continue;
+            }
+
+            if (held is not null && LevelFloor.ShortOf(held, info, out _))
+            {
+                continue; // M5 4 G1: the level floor
             }
 
             var c = GearCasts.Chance(skill, info.Power);
@@ -121,7 +127,8 @@ public static class VitalsMeans
     /// <param name="line">The line.</param>
     /// <param name="threshold">The least chance.</param>
     /// <param name="why">Why there is none (empty when one was found).</param>
-    public static SpellInfo? Pick(PlayerQualities q, Spellbook book, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsLine line, double threshold, out string why)
+    /// <param name="held">M5 4 G1: what the pack holds when the level floor applies (<see cref="LevelFloor.HeldFor"/>); a level whose foci-formula components it lacks is passed over. Null: no floor.</param>
+    public static SpellInfo? Pick(PlayerQualities q, Spellbook book, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsLine line, double threshold, out string why, IReadOnlyDictionary<uint, int>? held = null)
     {
         ArgumentNullException.ThrowIfNull(q);
         ArgumentNullException.ThrowIfNull(book);
@@ -156,6 +163,12 @@ public static class VitalsMeans
 
             if (GearCasts.Chance(skill, info.Power) >= threshold)
             {
+                if (held is not null && LevelFloor.ShortOf(held, info, out var need))
+                {
+                    why = NameOf(line) + ": no level the pack can pay for (" + info.Name + " needs " + need + ")";
+                    continue;
+                }
+
                 why = string.Empty;
                 return info;
             }

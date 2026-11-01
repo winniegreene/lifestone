@@ -68,7 +68,7 @@ public sealed class MageSpellBarsTests
     {
         // Tab I: Focus, Willpower, Creature Enchantment Mastery at VI, then the 24 buff lines at VII in the buff cycle's order (Focus, Willpower, Creature Enchantment Mastery among them).
         var expected = new List<uint> { 1426, 1450, 562 };
-        expected.AddRange(BuffCycle.OrderedLines.Select(l => l.Spells[6].Id));
+        expected.AddRange(BuffCycle.OrderedLines.Where(l => !l.ByPlay).Select(l => l.Spells[6].Id)); // M5 7 P7j: Spirit Drinker, learned by play, is not on the bars
         Assert.Equal(expected, MageSpellBars.BuffTab);
         Assert.Equal(27, MageSpellBars.BuffTab.Count);
         Assert.Equal(27, MageSpellBars.BuffTab.Distinct().Count());
@@ -92,7 +92,7 @@ public sealed class MageSpellBarsTests
     [Fact]
     public void Todays_bars_the_profile_on_bar_1_and_the_bolts_on_bar_2_are_cleared_from_tabs_I_and_II_and_tab_III_stays()
     {
-        var profile = ArenaProfile.Lines.Select(l => l.Spells[6].Id).ToArray(); // the earlier plan's bar 1 (a line per spell, spec order)
+        var profile = ArenaProfile.Lines.Where(l => !l.ByPlay).Select(l => l.Spells[6].Id).ToArray(); // the earlier plan's bar 1 (a line per spell, spec order)
         var bolts = new uint[] { 27, 81, 82, 83, 84, 85, 2128 };
         var start = Bars([], profile, bolts);
         var plan = MageSpellBars.Plan(BookWith(Everything(), start));

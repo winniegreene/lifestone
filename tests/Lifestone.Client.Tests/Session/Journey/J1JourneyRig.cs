@@ -33,6 +33,7 @@ internal sealed class J1JourneyRig
     private byte _vital = 60;
     private int _deaths;
     private int _suicidesSeen;
+    private int _toolsSeen;
     private double? _castAt;
     private uint _castSpell;
     private double? _teleportAt;
@@ -47,9 +48,22 @@ internal sealed class J1JourneyRig
         View = new J1View(R);
         R.Server((p, seq) => AceM3Writers.MagicUpdateSpell(p, seq, 1635));
         R.Server((p, seq) => AceM3Writers.MagicUpdateSpell(p, seq, 48));
+        R.Server((p, seq) => AceM3Writers.MagicUpdateSpell(p, seq, 47));
         Caster.CastHook = spell =>
         {
             if (spell is not (1635 or 48))
+            {
+                return false;
+            }
+
+            Casts.Add(spell);
+            _castAt = Now;
+            _castSpell = spell;
+            return true;
+        };
+        Caster.TargetedCastHook = (spell, _) =>
+        {
+            if (spell != 47)
             {
                 return false;
             }
@@ -101,8 +115,21 @@ internal sealed class J1JourneyRig
     /// <summary>False: ACE answers Primary Portal Recall with 0x04A3 (no portal tied).</summary>
     public bool PortalTied { get; set; } = true;
 
+    /// <summary>Nonzero: ACE answers Primary Portal Tie with this WeenieError instead of the link text.</summary>
+    public uint TieRefusal { get; set; }
+
+    /// <summary>Creates the portal object <paramref name="guid"/> (weenie class <paramref name="wcid"/>) in view, in <paramref name="cell"/>.</summary>
+    public void CreatePortal(uint guid, uint wcid, uint cell)
+    {
+        var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), ReducerHarness.Position(cell, 122, 87, 30), name: "Portal");
+        R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { Name = "Portal", WeenieClassId = wcid } }, isUpdate: false);
+    }
+
     /// <summary>The recall spells cast, in order.</summary>
     public List<uint> Casts { get; } = [];
+
+    /// <summary>The cells of the places made straight through the session's tools (not the journey's seam), in order (M5 3 p1: the build's tie leg).</summary>
+    public List<uint> PlacedCells { get; } = [];
 
     /// <summary>The places' destinations, in order.</summary>
     public List<string> PlacesTo { get; } = [];
@@ -213,6 +240,18 @@ internal sealed class J1JourneyRig
             {
                 R.WeenieError(0x04A3);
             }
+            else if (_castSpell == 47)
+            {
+                // Primary Portal Tie at a portal (M5 3 p1): ACE's text, or the scripted refusal; the player does not move.
+                if (TieRefusal != 0)
+                {
+                    R.WeenieError(TieRefusal);
+                }
+                else
+                {
+                    R.Raw(AceWireWriters.ServerMessage("You have successfully linked with the portal.", 0));
+                }
+            }
             else
             {
                 _teleportAt = Now + 2.0;
@@ -236,6 +275,25 @@ internal sealed class J1JourneyRig
             R.H.ServerMessage(ToolsWire.Reply(ToolReply.Success("a" + handle.Id.ToString(CultureInfo.InvariantCulture), ToolVerbs.Place, data), data.Describe()));
             _teleportAt = Now + 1.0;
             _teleportCell = p.CellId;
+        }
+
+        // M5 3 p1: places made straight through the session's Tools (the build's tie leg, not the journey's seam) are answered the same way; the seam's own were recorded above.
+        var requests = R.H.Net.ToolRequests();
+        while (_toolsSeen < requests.Count)
+        {
+            var text = requests[_toolsSeen++];
+            if (text is null || !text.StartsWith("@lifestone place ", StringComparison.Ordinal) || !ToolsWire.TryParseRequest(text["@lifestone ".Length..], out var request, out _) || request is not PlaceLocRequest loc
+                || _places.Exists(p => "a" + p.Handle.Id.ToString(CultureInfo.InvariantCulture) == request.Id))
+            {
+                continue;
+            }
+
+            var at = loc.At;
+            PlacedCells.Add(at.Cell);
+            var placed = new PlaceData("loc", null, ToolsWire.FormatCell(at.Cell), at.X, at.Y, at.Z, at.Qw, at.Qx, at.Qy, at.Qz);
+            R.H.ServerMessage(ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Place, placed), placed.Describe()));
+            _teleportAt = Now + 1.0;
+            _teleportCell = at.Cell;
         }
 
         if (R.H.Net.Of(FakeSendKind.Suicide).Count > _suicidesSeen)

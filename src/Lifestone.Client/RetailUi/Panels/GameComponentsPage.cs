@@ -2,6 +2,7 @@ using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.RetailUi.Core;
 using Lifestone.Client.RetailUi.Dialogs;
+using Lifestone.Client.RetailUi.Rendering;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Text;
 using Lifestone.Client.RetailUi.Widgets;
@@ -93,6 +94,7 @@ public sealed class GameComponentsPage : IGamePanel, IUiElementListener, IDispos
     private readonly IDisposable[] _subscriptions;
     private readonly List<Line> _lines = new(80);
     private readonly List<Built> _built = new(80);
+    private readonly List<(UiElement Icon, uint Did)> _pendingIcons = [];
     private bool _pageShown;
     private bool _dirty = true;
     private bool _building;
@@ -194,6 +196,11 @@ public sealed class GameComponentsPage : IGamePanel, IUiElementListener, IDispos
             return;
         }
 
+        if (_pendingIcons.Count > 0)
+        {
+            RetryIcons();
+        }
+
         if (_dirty)
         {
             Refresh();
@@ -224,6 +231,7 @@ public sealed class GameComponentsPage : IGamePanel, IUiElementListener, IDispos
         // The rows differ: start again (UpdateComponents adds and removes rows as the tracker changes; here the list is rebuilt).
         _list.Flush();
         _built.Clear();
+        _pendingIcons.Clear(); // the rows waiting for a picture are gone
         _buildIndex = 0;
         _building = true;
         Rebuilds++;
@@ -417,7 +425,7 @@ public sealed class GameComponentsPage : IGamePanel, IUiElementListener, IDispos
                 _context.Manager.Services.Log.Warn("retailui", $"TODO(m3-component-icon): the component class {wcid} ({obj.Name}) has no SpellComponentTable icon to read (the session gives none); the row draws the pack object's own icon in its place");
             }
 
-            _lines.Add(new Line(false, category, componentId, wcid, obj.Name, tableIcon != 0 ? tableIcon : fields.IconId, count, book.DesiredComponentAmount(wcid)));
+            _lines.Add(new Line(false, category, componentId, wcid, obj.Name, tableIcon != 0 ? tableIcon : fields.IconId, count, book.DesiredComponentAmount(wcid), tableIcon != 0));
         }
     }
 
@@ -488,12 +496,50 @@ public sealed class GameComponentsPage : IGamePanel, IUiElementListener, IDispos
         var name = row.GetChildRecursive(RowNameId) as UiTextElement;
         name?.SetText(line.Name);
         var icon = row.GetChildRecursive(RowIconId);
-        if (line.IconId != 0)
+        if (line.IconId != 0 && icon is not null)
         {
-            icon?.SetImageByDid(line.IconId, UiDrawMode.AlphaBlend); // MakeIcon (0x0048A250)
+            if (line.TableIcon)
+            {
+                ShowComponentIcon(icon, line.IconId); // MakeIcon (0x0048A250)
+            }
+            else
+            {
+                icon.SetImageByDid(line.IconId, UiDrawMode.AlphaBlend); // the stand-in of TODO(m3-component-icon): the pack object's own icon, not composed
+            }
         }
 
         return new Built(row, line.Wcid, line.Category, name, row.GetChildRecursive(RowCountId) as UiTextElement, row.GetChildRecursive(RowBuyRateId) as UiTextElement, null, -1, -1);
+    }
+
+    /// <summary>
+    /// <c>gmSpellComponentUI::MakeIcon</c> (11.6096 0x0048A250): the component's composed picture (<c>ClientMagicSystem::GetSpellComponentIcon</c> 0x00569A50 over <c>CompositeSpellComponentIcon</c> 0x005684C0: the
+    /// SpellComponentTable icon with its pure white pixels made black; <see cref="UiSpellIcons"/>, M5 D147) drawn with three-channel alpha. A picture still decoding is drawn on a later frame.
+    /// </summary>
+    private void ShowComponentIcon(UiElement icon, uint did)
+    {
+        switch (_context.Manager.SpellIcons.TryGetComponent(did, out var picture))
+        {
+            case UiImageLookup.Ready:
+                icon.SetBlitMode(UiBlitMode.ThreeChannelAlpha);
+                icon.SetGeneratedImage(picture!);
+                break;
+            case UiImageLookup.Pending:
+                _pendingIcons.Add((icon, did));
+                break;
+            default:
+                _context.Manager.LogOnce("components:no-images", LogSeverity.Warning, "gmSpellComponentUI::MakeIcon: no image services; the component rows draw no icon");
+                break;
+        }
+    }
+
+    private void RetryIcons()
+    {
+        var pending = _pendingIcons.ToArray();
+        _pendingIcons.Clear();
+        foreach (var (icon, did) in pending)
+        {
+            ShowComponentIcon(icon, did);
+        }
     }
 
     private string TitleOf(int category)
@@ -544,7 +590,7 @@ public sealed class GameComponentsPage : IGamePanel, IUiElementListener, IDispos
     private void OnSpellbookChanged(in SpellbookChanged change) => _dirty = true;
 
     /// <summary>A line of the plan: a category title (<see cref="IsTitle"/>) or a component class with its summed count and desired amount.</summary>
-    private readonly record struct Line(bool IsTitle, int Category, uint ComponentId, uint Wcid, string Name, uint IconId, int Count, int Desired)
+    private readonly record struct Line(bool IsTitle, int Category, uint ComponentId, uint Wcid, string Name, uint IconId, int Count, int Desired, bool TableIcon = false)
     {
         public static Line Title(int category) => new(true, category, 0, 0, string.Empty, 0, 0, 0);
 

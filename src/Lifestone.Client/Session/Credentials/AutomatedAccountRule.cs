@@ -109,6 +109,18 @@ public static class AutomatedAccountRule
     /// <returns>True when the run may go on.</returns>
     public static bool TryLoginCheck(string? account, Lifestone.Client.Play.LoginCheckKind kind, out string? refusal)
     {
+        if (kind == Lifestone.Client.Play.LoginCheckKind.Keep)
+        {
+            // M5 6 k2: the keep check enters Lifestone Throwaway (created when absent) twice, so it runs on the tools account and nowhere else, as the throwaway check does.
+            if (!string.Equals(account, TestAccounts.Tools, StringComparison.Ordinal))
+            {
+                refusal = "the keep login check enters Lifestone Throwaway, which lives on the tools test account only (M4 D39): give the tools account (see TestAccounts.Tools)";
+                return false;
+            }
+
+            return TryCharacters(account, ThrowawayCharacter, ThrowawayCharacter, out refusal);
+        }
+
         if (kind == Lifestone.Client.Play.LoginCheckKind.Throwaway)
         {
             // M4 D39: Lifestone Throwaway lives on test-tools, so the throwaway login check runs there and nowhere else.

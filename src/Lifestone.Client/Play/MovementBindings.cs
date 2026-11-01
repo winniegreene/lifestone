@@ -1,5 +1,6 @@
 using Lifestone.Client.Movement;
 using Lifestone.Client.RetailUi.Input;
+using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.Animation;
 
 namespace Lifestone.Client.Play;
@@ -127,9 +128,20 @@ public sealed class MovementBindings : IInputActionSink
         _ => "0x" + actionId.ToString("X", System.Globalization.CultureInfo.InvariantCulture),
     };
 
+    /// <summary>
+    /// M5 7 D145: the movement keys' lock while the autopilot runs (the session's <c>MoveIntents.KeyLock</c>, set by the play host), or null for none. Every action of the movement map is asked about first; a swallowed one reaches
+    /// nothing (no intent, no <see cref="HumanKey"/>) and is reported handled, so it goes nowhere else either.
+    /// </summary>
+    public HumanKeyLock? Lock { get; set; }
+
     /// <inheritdoc/>
     public bool OnInputAction(uint inputMapId, uint actionId, RetailActivation activation)
     {
+        if (inputMapId == UiInputRouter.MovementMap && Handles(actionId) && Lock is { } gate && gate.Swallow(actionId, NameOf(actionId), activation.Start, _now()))
+        {
+            return true;
+        }
+
         if (!Dispatch(inputMapId, actionId, activation))
         {
             return false;

@@ -64,6 +64,54 @@ public sealed class RenderResourceCachesTests
     }
 
     [Fact]
+    public void An_arrival_trim_frees_what_no_place_since_the_last_arrival_used_and_logs_before_and_after()
+    {
+        // M5 7 P7d (D139 row e): the den, a town trip, the den again; budgets far above the totals (768 MB in the game), so only the arrivals trim.
+        var host = new FakeHost();
+        var caches = new RenderResourceCaches<FakeTexture, FakeMaterial, FakeMesh>(host, textureBudgetBytes: 1L << 40, materialBudget: 100_000, meshBudgetBytes: 1L << 40);
+        var log = new RecordingLogSink();
+        var trim = new ArrivalCacheTrim(caches, log);
+        var trimsBefore = ArrivalCacheTrim.Trims;
+
+        AcquireMesh(caches, host, "den", [1, 2]);
+        Assert.Null(trim.OnArrival()); // the login's arrival in the den: a mark only
+        Assert.Single(log.Entries, e => e.Message.StartsWith("render caches: first arrival marked", StringComparison.Ordinal));
+
+        // To town: the den is released on the way, the town's townsfolk (new dress each visit) are attached.
+        caches.ReleaseMesh("den");
+        AcquireMesh(caches, host, "town-visit-1", [3, 4]);
+        var first = trim.OnArrival()!.Value;
+        Assert.Equal(0, first.Textures.Evicted); // the den was used after the den's mark: kept for the way back
+        Assert.Equal(4, caches.Textures.Count);
+
+        // Back to the den: the town is released on the way and the den taken again; nothing idle predates the town's arrival mark, so nothing goes.
+        caches.ReleaseMesh("town-visit-1");
+        AcquireMesh(caches, host, "den", [1, 2]);
+        Assert.Equal(0, trim.OnArrival()!.Value.Textures.Evicted);
+
+        // A second town trip with new townsfolk: the first visit's townsfolk were last used before the den's arrival mark: they go now.
+        caches.ReleaseMesh("den");
+        AcquireMesh(caches, host, "town-visit-2", [5, 6]);
+        var third = trim.OnArrival()!.Value;
+
+        Assert.Equal(1, third.Meshes.Evicted);
+        Assert.Equal(2, third.Textures.Evicted);
+        Assert.Equal(6, third.Textures.CountBefore);
+        Assert.Equal(4, third.Textures.CountAfter);
+        Assert.Equal(host.Textures.Where(t => t.Key == TexKey(3) || t.Key == TexKey(4)).Sum(t => t.Bytes), third.Textures.BytesFreed);
+        Assert.False(caches.ContainsMesh("town-visit-1"));
+        Assert.True(caches.ContainsMesh("den")); // idle, used since the last mark: kept for the way back
+        Assert.True(caches.ContainsMesh("town-visit-2")); // in use: never trimmed
+        Assert.All(host.Textures.Where(t => t.Key == TexKey(3) || t.Key == TexKey(4)), t => Assert.True(t.Freed));
+        Assert.All(host.Textures.Where(t => t.Key == TexKey(5) || t.Key == TexKey(6)), t => Assert.True(t.BoundBy > 0 && !t.Freed));
+        Assert.Equal(3, ArrivalCacheTrim.Trims - trimsBefore);
+        var line = log.Entries.Last(e => e.Message.StartsWith("render caches trimmed on arrival", StringComparison.Ordinal));
+        Assert.Equal(ArrivalCacheTrim.Category, line.Category);
+        Assert.Contains("tex_n=6->4", line.Line, StringComparison.Ordinal);
+        Assert.Contains("mesh_n=3->2", line.Line, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_failing_texture_callback_leaves_the_material_unheld_and_unbound()
     {
         var host = new FakeHost();

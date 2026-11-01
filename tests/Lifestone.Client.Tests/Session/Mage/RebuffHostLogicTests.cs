@@ -293,6 +293,32 @@ public sealed class RebuffHostLogicTests
     }
 
     [Fact]
+    public void While_the_autopilot_owns_the_buffs_the_driver_stands_down_once_and_goes_on_after_4_r4()
+    {
+        var t = new HostRig(auto: true);
+        t.BuildBuffs();
+        var owned = true;
+        t.Logic.StandDownWhile = () => owned;
+        t.R.Tick(t.Logic.Cycle!.MinRemainingSeconds(t.Now) - 8); // a line is inside the margin: the driver would start a pass
+
+        for (var i = 0; i < 40; i++)
+        {
+            t.Frame();
+        }
+
+        Assert.True(t.Logic.StandingDown);
+        Assert.Equal(0, t.Logic.Driver!.Passes);
+        Assert.False(t.Logic.Driver.Enabled);
+        Assert.True(t.Logic.On); // the switch is the person's: it stays on
+        Assert.Equal(1, t.R.H.Log.Lines.Count(l => l.Contains(RebuffHostLogic.StandDownLine, StringComparison.Ordinal))); // logged once, not per frame
+
+        owned = false; // an interrupt or Done
+        Assert.True(t.RunUntil(() => t.Logic.Driver.Passes >= 1, 300));
+        Assert.False(t.Logic.StandingDown);
+        Assert.Contains(t.R.H.Log.Lines, static l => l.Contains(RebuffHostLogic.ResumeLine, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Leaving_the_world_saves_the_ledger_under_the_guid_and_stops_the_driver()
     {
         var t = new HostRig(auto: true);

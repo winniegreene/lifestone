@@ -19,6 +19,10 @@ public sealed class J7HeroShotsTests
     {
         Assert.Equal(["mage", "melee", "archer"], JourneyPlans.All.Select(p => p.Name));
         Assert.Equal(["hero-archer", "hero-brawler", "hero-mage"], JourneyPlans.Hero.Select(p => p.Name));
+        Assert.Equal(["mage-corpses"], JourneyPlans.Tools.Select(p => p.Name)); // M5 7 lead: the one-off clean-up
+        Assert.Same(JourneyPlans.MageCorpses, JourneyPlans.ForName("mage-corpses"));
+        Assert.Equal(["buff", "den-travel", "corpses", "recall-home"], JourneyPlans.MageCorpses.Stations.Select(s => s.Name));
+        Assert.True(JourneyPlans.MageCorpses.Stations[2].Arguments.ContainsKey(JourneyPlans.NoItemWaitArgument));
         Assert.Equal(["test-archer", "test-melee", "test"], JourneyPlans.Hero.Select(p => p.Account));
         Assert.Equal(["Holtburg Archer", "Holtburg Brawler", "BSD Mage"], JourneyPlans.Hero.Select(p => p.Character));
         Assert.Equal([StationWhere.Forest, StationWhere.Belt, StationWhere.Den], JourneyPlans.Hero.Select(p => p.Ground));
@@ -225,7 +229,7 @@ public sealed class J7HeroShotsTests
     {
         Assert.Equal(["c1-combat", "c1-powerbar", "meter", "corpse", "heal", "potion", "vendor"], HuntUiShotPlan.Names);
         Assert.Equal(["bolt", "hit", "kill", "viewer", "first"], FightShotPlan.Names);
-        Assert.Equal(["hit", "dead", "corpse", "lifestone", "corpse-open", "decoys"], DeathShotPlan.Names);
+        Assert.Equal(["hit", "dead", "corpse", "lifestone", "corpse-open"], DeathShotPlan.Names);
         Assert.Equal("cache/x/shot-c1-combat.png", HuntUiShotPlan.ShotPath("cache/x/shot.png", 0).Replace(Path.DirectorySeparatorChar, (char)47));
         Assert.Equal("cache/x/shot-kill.png", FightShotPlan.ShotPath("cache/x/shot.png", 2).Replace(Path.DirectorySeparatorChar, '/'));
         Assert.Equal("cache/x/shot-corpse.png", DeathShotPlan.ShotPath("cache/x/shot.png", 2).Replace(Path.DirectorySeparatorChar, '/'));

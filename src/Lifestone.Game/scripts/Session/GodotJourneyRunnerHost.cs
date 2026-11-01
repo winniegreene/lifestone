@@ -1,9 +1,11 @@
 using System.Globalization;
+using Lifestone.Client.Avatars;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Scheduling;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Client.World;
@@ -45,9 +47,13 @@ public sealed class GodotJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalks, 
     private readonly PlayMode _mode;
     private readonly WorkerPool _workers;
     private readonly Task<RoomGraph>? _den;
+    private readonly HuntingGround _ground;
     private readonly ILogSink _log;
+    private readonly Func<uint, float?> _setupRadius;
+    private readonly Func<uint, float?> _setupExtent;
     private readonly JourneyLegPlanner _planner;
     private readonly LegBody _body;
+    private readonly JourneyGroundTours _tours;
     private NavMap? _map;
     private HeadlessStreamer? _streamer;
     private RouteConfirmer? _confirmer;
@@ -59,17 +65,22 @@ public sealed class GodotJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalks, 
     /// <param name="mode">Play mode (its rig holds the player's controller, collision world and streamer).</param>
     /// <param name="services">The game services (the worker pool).</param>
     /// <param name="dats">The dats.</param>
-    /// <param name="den">The den's room graph being built on a worker, or null when the journey has no den station.</param>
+    /// <param name="den">The fight ground's room graph being built on a worker, or null when the journey has no dungeon station.</param>
+    /// <param name="ground">The fight ground (<c>--fight-ground</c>) the worker's graph is of.</param>
     /// <param name="log">The log.</param>
-    public GodotJourneyRunnerHost(PlayMode mode, GameServices services, DatSet dats, Task<RoomGraph>? den, ILogSink log)
+    public GodotJourneyRunnerHost(PlayMode mode, GameServices services, DatSet dats, Task<RoomGraph>? den, HuntingGround ground, ILogSink log)
     {
         ArgumentNullException.ThrowIfNull(mode);
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(dats);
+        ArgumentNullException.ThrowIfNull(ground);
         ArgumentNullException.ThrowIfNull(log);
-        (_mode, _workers, _den, _log) = (mode, services.Workers, den, log);
-        _planner = new JourneyLegPlanner(dats, services.CellStructures, () => _den?.Result ?? throw new InvalidOperationException("the journey built no den room graph (TODO(m4-journey-den-graph): the plan has no den station)"));
+        (_mode, _workers, _den, _ground, _log) = (mode, services.Workers, den, ground, log);
+        _setupRadius = HostileCreatureFeed.SetupRadii(dats); // each creature's own radius for the runner's creature layer (nav-creature-radius-host)
+        _setupExtent = DoorCrossings.SetupExtents(dats); // M5 5 d2 (closes TODO(door-extent-host)): built once per host, every leg's door feed and the fight walk read the doors' own sizes
+        _planner = new JourneyLegPlanner(dats, services.CellStructures, g => g.Key == _ground.Key ? _den?.Result ?? throw new InvalidOperationException("the journey built no room graph for its ground (TODO(m4-journey-den-graph): the plan has no dungeon station)") : null, ground: _ground); // M5 3 p1: the journey's own ground (2-R12)
         _body = new LegBody(this);
+        _tours = new JourneyGroundTours(log, LogCategory);
     }
 
     /// <summary>The nav tile feeder's figures for the journey's end line, or empty before the first leg.</summary>
@@ -106,17 +117,29 @@ public sealed class GodotJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalks, 
     }
 
     /// <inheritdoc />
-    /// <remarks>The M3 Godot fight leg's walk over the player (<see cref="GameFightWalk"/>), on the den's graph built on the loading worker; null (the station's own fallback) when the plan has no den.</remarks>
-    public IFightWalk? DenWalk(JourneyContext context) =>
-        _den is { IsCompletedSuccessfully: true } den ? new GameFightWalk(new RoutePlayHost(() => _mode.Rig?.Controller.Walker, () => _mode.MovementGate?.Held ?? 0), den.Result, _log) : null;
+    /// <remarks>
+    /// The M3 Godot fight leg's walk over the player (<see cref="GameFightWalk"/>), on the ground's graph built on the loading worker; null (the station's own fallback) when the plan has no dungeon station or the fight's ground is not the one the worker built.
+    /// M5 7 P7v: every walk takes the ground's one tour for the journey (<see cref="JourneyGroundTours"/>), so the death station's wait and the corpse trip's fight know the den fight's kills and their due times.
+    /// </remarks>
+    public IFightWalk? FightWalk(JourneyContext context, HuntingGround ground) =>
+        _den is { IsCompletedSuccessfully: true } den && ground.Key == _ground.Key ? new GameFightWalk(new RoutePlayHost(() => _mode.Rig?.Controller.Walker, () => _mode.MovementGate?.Held ?? 0), den.Result, ground, _log, _setupRadius, _tours.For(ground, () => GroundTour.For(ground, den.Result, _log)), _setupExtent) : null;
 
     /// <inheritdoc />
     /// <remarks>The play's hook-sound router, counted as the retired login-buff leg did (<c>AudioService.ReadSources</c>'s server count); null when the router does not count sounded voices.</remarks>
     public int? ServerSounds => AudioService.ReadSources(_mode.HookSounds, null, null).Server;
 
     /// <inheritdoc />
-    /// <remarks>None: the hunt station reads the player from the session in the game, as before J5b.</remarks>
+    /// <remarks>None: the hunt station reads the player from the session in the game, as before J5b. The recall-home station's view of the body is <see cref="BodyPosition"/>.</remarks>
     public IHuntFollow? HuntFollow(JourneyContext context) => null;
+
+    /// <inheritdoc />
+    /// <remarks>The player's walker (the rig's controller), once placed: the hunt leg's view of it (a placement pending, or no cell yet, is not a position). M5 item 5 c1, closes <c>TODO(m5-godot-body-position)</c>.</remarks>
+    public CellFrame? BodyPosition(JourneyContext context) =>
+        _mode.Rig?.Controller.Walker is { } walker && !walker.Physics.PlacementPending && walker.Physics.Cell is not null ? walker.Position : null;
+
+    /// <inheritdoc />
+    /// <remarks>The play's avatar set's physics cost and jump counts (<c>PlayMode.Avatars</c>, read only); null before the set exists.</remarks>
+    public AvatarPhysicsCost? PhysicsCost => _mode.Avatars?.Stats.PhysicsCost;
 
     /// <inheritdoc />
     public void Dispose()
@@ -146,6 +169,8 @@ public sealed class GodotJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalks, 
         public double WaitSeconds => SettleSeconds;
 
         public double CorridorSeconds => GodotJourneyRunnerHost.CorridorSeconds;
+
+        public Func<uint, float?>? SetupExtent => host._setupExtent;
 
         public NavMap? Map => host._map;
 
@@ -190,7 +215,7 @@ public sealed class GodotJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalks, 
                 null,
                 new NavRunnerOptions { Name = name, ConfirmBudgetMilliseconds = ConfirmBudgetMilliseconds },
                 host._log,
-                new HostileCreatureFeed(session.State.Objects, session.State.Self.Guid, host._log)); // the run's creature layer (nav-creature-avoid)
+                new HostileCreatureFeed(session.State.Objects, session.State.Self.Guid, host._log, host._setupRadius)); // the run's creature layer (nav-creature-avoid), each creature's own radius
         }
 
         public void FollowRoute(NavRunner runner)

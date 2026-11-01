@@ -601,4 +601,50 @@ public sealed class ItemMoveTrackerTests
         r.R.Tick(0.2);
         Assert.Equal(ActionOutcomeKind.TimedOut, give.Outcome!.Value.Kind);
     }
+
+    // ---- M5 7 D141: the pick-up's typed before-check -----------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void M5_7_D141_a_pick_up_of_an_item_seen_when_asked_and_gone_at_its_turn_is_refused_TargetGone_and_nothing_is_sent()
+    {
+        var r = new Rig();
+        r.GroundItem(Ground);
+        var pick = r.Api.PickUp(Ground, 0, 0, ActionSource.Automation);
+        r.R.H.R.Reducer.OnDeleteObject(r.R.H.R.Context, new DeleteObjectMsg(Ground, 1)); // another took it, or it rotted, before the lane's turn
+        r.R.Tick();
+
+        Assert.Equal((ActionOutcomeKind.Refused, ActionReason.TargetGone), (pick.Outcome!.Value.Kind, pick.Outcome.Value.Reason));
+        Assert.Contains("is gone", pick.Outcome.Value.Detail, StringComparison.Ordinal);
+        Assert.Equal(0, r.Sent(FakeSendKind.PutItemInContainer));
+
+        // An item in the viewed container only (its CreateObject not here) is seen too; one never seen is left to the server.
+        r.OpenCorpse();
+        var fromCorpse = r.Api.PickUp(CorpseItem, 0, 0, ActionSource.Automation);
+        r.R.Tick();
+        Assert.Equal(1, r.Sent(FakeSendKind.PutItemInContainer));
+        Assert.False(fromCorpse.IsCompleted);
+    }
+
+    [Fact]
+    public void M5_7_D141_a_pick_up_with_every_pack_slot_taken_is_refused_NoFreeSlot_and_nothing_is_sent()
+    {
+        var r = new WorldActionRig();
+        var full = Enumerable.Range(0, 102).Select(i => new ContentDesc(0x80001000u + (uint)i, 0)).ToArray(); // the main pack's 102 slots (ACE's player capacity), no side pack
+        r.Describe(full, []);
+        r.Create(Ground, 1f, missile: false);
+        var pick = r.Api.PickUp(Ground, 0, 0, ActionSource.Automation);
+        r.Tick();
+
+        Assert.Equal((ActionOutcomeKind.Refused, ActionReason.NoFreeSlot), (pick.Outcome!.Value.Kind, pick.Outcome.Value.Reason));
+        Assert.Contains("no free pack slot", pick.Outcome.Value.Detail, StringComparison.Ordinal);
+        Assert.Empty(r.H.Net.Of(FakeSendKind.PutItemInContainer));
+
+        var room = new WorldActionRig();
+        room.Describe(full[..101], []);
+        room.Create(Ground, 1f, missile: false);
+        var fits = room.Api.PickUp(Ground, 0, 0, ActionSource.Automation);
+        room.Tick();
+        Assert.Single(room.H.Net.Of(FakeSendKind.PutItemInContainer)); // one slot free: sent
+        Assert.False(fits.IsCompleted);
+    }
 }

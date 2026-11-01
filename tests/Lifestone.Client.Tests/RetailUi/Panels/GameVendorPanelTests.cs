@@ -108,6 +108,16 @@ public sealed class GameVendorPanelTests(DatSetFixture fixture) : IClassFixture<
 
         public UiButton Button(uint id) => Assert.IsAssignableFrom<UiButton>(Window.GetChildRecursive(id));
 
+        public GameExaminePanel Examine => Assert.IsType<GameExaminePanel>(screen.PanelHost!.Examine);
+
+        public void RightClick(UiElement element)
+        {
+            var (x, y) = Center(element);
+            rig.Manager.Input.MouseMove(x, y);
+            rig.Manager.Input.MouseButton(UiMouseButton.Right, down: true);
+            rig.Manager.Input.MouseButton(UiMouseButton.Right, down: false);
+        }
+
         public void Dispose() => rig.Dispose();
     }
 
@@ -240,6 +250,32 @@ public sealed class GameVendorPanelTests(DatSetFixture fixture) : IClassFixture<
         Assert.Equal("Buying 0 items worth 0p", window.BuyText);
         Assert.Equal("You have 10,000p", window.BuyPurseText);
         Assert.Equal("Selling 0 items worth 0p", window.SellText);
+    }
+
+    [RequiresLocalDatsFact]
+    public void A_right_click_on_a_shop_row_examines_it_with_the_rows_name_and_no_not_built_dialog_S6()
+    {
+        // M5 7 S6 (D136): retail's item list examines on a right click in every list, a vendor's too (UIElement_ItemList::ListenToElementMessage 0x004E59E0 has no vendor exception; ACE's
+        // HandleActionIdentifyObject finds a row for sale through the last opened vendor). A row is no world object, so the window names it from the vendor's list until the answer.
+        using var g = Enter();
+        var potion = g.Window.ShopRow!.FindItem(PotionRow)!;
+        g.RightClick(potion);
+        g.Frames(1);
+        var examine = g.Examine;
+        Assert.True(examine.IsOpen);
+        Assert.Equal(PotionRow, examine.ShownGuid);
+        Assert.Equal("Potion of Healing", examine.Title);
+        Assert.Equal(PotionRow, g.Window.ShopRow!.SelectedItemId); // the right click selects the row too
+        Assert.Equal(ActionKind.Identify, Assert.IsAssignableFrom<IdentifyHandle>(examine.LastIdentify).Kind);
+        Assert.Empty(g.Rig.Manager.Dialogs.OpenDialogs); // not the old "The examine panel is built in M4 3.2"
+        Assert.DoesNotContain(g.Rig.Log.Lines, static l => l.Contains("TODO(m4-itemlist-examine)", StringComparison.Ordinal));
+
+        g.Feed(AceVendorWriters.IdentifyResponse(Player, 900, PotionRow, new AceAppraisal { Success = true, Ints = new Dictionary<uint, int> { [AppraisalIds.Value] = 170 } }));
+        g.Frames(1);
+        Assert.False(examine.Pending);
+        Assert.Equal("Potion of Healing", examine.Title); // the answer carries no name: the row's stays
+        Assert.Contains("Value: 170", examine.Lines);
+        examine.Close();
     }
 
     [RequiresLocalDatsFact]

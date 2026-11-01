@@ -63,14 +63,19 @@ public enum TalkFocus : uint
 /// (<see cref="ChatLineText"/>) and shown by each window whose mask has its type; type 26 goes to the spew box; the mod's <c>#lifestone/1</c> lines are never shown.
 /// </para>
 /// <para>
-/// <b>Entry.</b> <c>ClientCommunicationSystem::OnChatCommand</c> (11.4186 0x00581320, 11.6096 0x005821A0) parses the line; this slice sends plain text and
-/// <c>@</c> server commands as <see cref="IActionApi.Talk"/> (<c>DoSay</c>, 11.6096 0x005820C0, ends in <c>CM_Communication::Event_Talk</c>, 11.6096 0x006A53E0) and
-/// answers <c>/</c> commands with a labelled line (<c>TODO(g4-chat-commands)</c>). A line the action layer refuses (offline, not in the world) is reported in the chat.
+/// <b>Entry.</b> <c>ClientCommunicationSystem::OnChatCommand</c> (11.4186 0x00581320, 11.6096 0x005821A0) parses the line. A <c>/</c> line goes to
+/// <see cref="ChatCommands"/> (tell, reply, say, emote, AFK, the two recalls; the channels and the rest of retail's table are answered by name:
+/// <c>TODO(g4-chat-channels)</c>, <c>TODO(g4-chat-commands-rest)</c>); an <c>@</c> line is sent as <see cref="IActionApi.Talk"/> as it is (<c>TODO(g4-chat-at-commands)</c>);
+/// plain text goes by the talk focus (<see cref="ChatCommands.Say"/>). A Talk is <c>DoSay</c> (11.6096 0x005820C0), ending in <c>CM_Communication::Event_Talk</c>
+/// (11.6096 0x006A53E0). An action the action layer refuses or the server fails (offline, not in the world, a recall ACE refuses) is reported in the chat.
 /// </para>
 /// <para>
 /// <b>Talk focus.</b> Retail has no channel tabs: the main chat's popup menu 0x10000014 (<c>gmMainChatUI::InitTalkFocusMenu</c>, 11.4186 0x004CDC50, 11.6096
-/// 0x004CE8C0) holds one row per focus, each with its value in property 0x1000000B. M2 honours <see cref="TalkFocus.All"/> only; choosing another answers
-/// <see cref="NotInM2"/> and keeps All (<c>TODO(g4-chat-focus)</c>; the channels and tells need the gameplay milestone).
+/// 0x004CE8C0) holds one row per focus, each with its value in property 0x1000000B. <see cref="TalkFocus.All"/> is local speech; <see cref="TalkFocus.Selected"/> sends plain
+/// text as a tell to the last creature selected (<c>OnChatCommand</c>'s case 2 sends <c>Event_TalkDirect</c> to <c>GetLastSpeakableTarget</c>; the target is kept as
+/// <c>gmMainChatUI::RecvNotice_SelectionChanged</c>, 11.6096 0x004CECC0, does: a selected object whose item type is creature, other than the player, becomes the target and
+/// stays it). Choosing a channel answers <see cref="NotInM2"/> and keeps the previous focus (<c>TODO(g4-chat-channels)</c>, M6). The text swap of the Selected row
+/// (<c>gmMainChatUI::SetSelected</c>, 11.6096 0x004CE3A0) is not built (<c>TODO(g4-chat-focus-row)</c>).
 /// </para>
 /// </remarks>
 public sealed class GameChat : IDisposable
@@ -83,11 +88,18 @@ public sealed class GameChat : IDisposable
 
     private const uint StringTableEnum = 0x10000001;
 
+    /// <summary>ITEM_TYPE creature: what <c>PublicWeenieDesc::IsTalkable</c> (11.4186) accepts.</summary>
+    private const uint CreatureItemType = 0x10;
+
     private readonly UiLoginContext _context;
     private readonly List<GameChatWindow> _windows = [];
     private readonly FanOut _sink;
     private readonly IDisposable _subscription;
-    private readonly List<ActionHandle> _sending = [];
+    private readonly List<(ActionHandle Handle, ChatCommandResult Result)> _sending = [];
+    private readonly ChatCommands _commands;
+    private string? _lastTeller;
+    private uint _speakableGuid;
+    private string? _speakableName;
     private readonly UiMenu? _menu;
     private readonly UiElement? _allRow;
     private bool _disposed;
@@ -126,8 +138,10 @@ public sealed class GameChat : IDisposable
             menu.RegisterForElementMessages(new MenuListener(this));
         }
 
+        _commands = new ChatCommands(context.Session.Actions, () => _lastTeller, () => context.Session.State.Self.Qualities.Afk);
         foreach (var line in EntryLines(context.Session.State.Chat))
         {
+            NoteTeller(line);
             Show(line);
         }
 
@@ -146,30 +160,53 @@ public sealed class GameChat : IDisposable
     /// <summary>The chat windows as the router's chat sink.</summary>
     public IUiNoticeSink ChatSink => _sink;
 
-    /// <summary>The talk focus (always <see cref="TalkFocus.All"/> in M2).</summary>
+    /// <summary>The talk focus: <see cref="TalkFocus.All"/> or <see cref="TalkFocus.Selected"/> (the channels answer <see cref="NotInM2"/> and are not kept).</summary>
     public TalkFocus Focus { get; private set; } = TalkFocus.All;
+
+    /// <summary>
+    /// The selected object's id, 0 for none (<c>ACCWeenieObject::selectedID</c>); the play mode gives its <c>ObjectSelection</c>. Read each <see cref="Update"/> to keep the
+    /// Selected focus's target. Null leaves the Selected focus without a target.
+    /// </summary>
+    public Func<uint>? SelectedProvider { get; set; }
+
+    /// <summary>The Selected focus's target (retail's last speakable target) as its id, 0 for none.</summary>
+    public uint SpeakableTarget => _speakableGuid;
+
+    /// <summary>The name of the last player who sent a tell (retail's last teller), or null.</summary>
+    public string? LastTeller => _lastTeller;
+
+    /// <summary>M5 7 D145: the autopilot's controls for <c>/stop</c> and <c>/auto</c> (<see cref="ChatCommands.Autopilot"/>; the play host's autopilot wires them), or null for none.</summary>
+    public IAutopilotChatControls? Autopilot
+    {
+        get => _commands.Autopilot;
+        set => _commands.Autopilot = value;
+    }
 
     /// <summary>The talk-focus menu, or null.</summary>
     public UiMenu? FocusMenu => _menu;
 
-    /// <summary>Lines handed to <see cref="IActionApi.Talk"/> so far.</summary>
+    /// <summary>Lines handed to <see cref="IActionApi.Talk"/> so far (plain speech, '@' lines, and '/' lines the server is left to answer).</summary>
     public int TalkSent { get; private set; }
 
     /// <summary>The last Talk handle, or null.</summary>
     public ActionHandle? LastTalk { get; private set; }
 
-    /// <summary>The talk-focus choices that answered <see cref="NotInM2"/> so far.</summary>
+    /// <summary>The talk-focus choices (channels) that answered <see cref="NotInM2"/> so far.</summary>
     public int FocusRefusals { get; private set; }
 
-    /// <summary>The chat commands (a line starting with '/') answered with the labelled line so far.</summary>
+    /// <summary>The '/' commands run so far (each answered by an action or a line).</summary>
+    public int CommandsRun { get; private set; }
+
+    /// <summary>The '/' commands answered with a line alone (a channel, a command not built, a usage line) so far.</summary>
     public int CommandsDeclined { get; private set; }
 
-    /// <summary>Reports a Talk the action layer refused, once it completes.</summary>
+    /// <summary>Follows the selection and reports an action the action layer refused, the server failed or timed out, once it completes (a confirmed recall or AFK change says so).</summary>
     public void Update()
     {
+        NoteSelection();
         for (var i = _sending.Count - 1; i >= 0; i--)
         {
-            var handle = _sending[i];
+            var (handle, result) = _sending[i];
             if (!handle.IsCompleted)
             {
                 continue;
@@ -178,7 +215,11 @@ public sealed class GameChat : IDisposable
             _sending.RemoveAt(i);
             if (handle.Outcome is { Kind: ActionOutcomeKind.Refused or ActionOutcomeKind.ServerError or ActionOutcomeKind.TimedOut } outcome)
             {
-                Local($"Lifestone: your message was not sent ({outcome.Detail ?? outcome.Kind.ToString()}).");
+                Local(ChatCommands.FailureLine(result.FailurePrefix, outcome));
+            }
+            else if (handle.Outcome is { Kind: ActionOutcomeKind.Confirmed } && result.SuccessLine is { } done)
+            {
+                Local(done);
             }
         }
     }
@@ -187,52 +228,84 @@ public sealed class GameChat : IDisposable
     public void Local(string text) => Show(ChatTextTypes.System, text);
 
     /// <summary>
-    /// Sends what was typed: plain text and '@' server commands as Talk, a '/' command as a labelled line, anything else the focus does not allow as
-    /// <see cref="NotInM2"/>.
+    /// Sends what was typed: a '/' line through <see cref="ChatCommands"/>, an '@' line as Talk, plain text by the talk focus
+    /// (<see cref="ChatCommands.Say"/>: All is Talk, Selected a tell to the selected creature).
     /// </summary>
     public void Submit(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
-        if (text.TrimStart().StartsWith('/'))
+        NoteSelection();
+        ChatCommandResult result;
+        if (ChatCommands.IsCommand(text))
         {
-            CommandsDeclined++;
-            _context.Manager.LogOnce(
-                "chat:commands",
-                LogSeverity.Warning,
-                "TODO(g4-chat-commands): chat commands ('/...') are not built; only plain speech and '@' server commands are sent (what was typed is not logged)");
-            Local($"Lifestone: chat commands are not built yet ({text.Trim().Split(' ')[0]}); only speech and @ server commands are sent (TODO(g4-chat-commands)).");
-            return;
+            CommandsRun++;
+            result = _commands.Run(text);
+            if (result.Handle is null && result.Lines.Count > 0 && !result.ClientHandled)
+            {
+                CommandsDeclined++;
+            }
+        }
+        else if (text.TrimStart().StartsWith('@'))
+        {
+            result = _commands.Say(TalkFocus.All, text, null);
+        }
+        else
+        {
+            result = _commands.Say(Focus, text, SpeakableName());
         }
 
-        if (Focus != TalkFocus.All)
+        if (result.TodoKey is { } key && result.TodoMessage is { } message)
         {
-            NotInM2.Show(_context.Manager.Dialogs, _context.Manager.Services.Log, "Chat to " + Focus);
-            return;
+            _context.Manager.LogOnce(key, LogSeverity.Warning, message);
         }
 
-        TalkSent++;
-        var handle = _context.Session.Actions.Talk(text, ActionSource.Ui);
-        LastTalk = handle;
-        _sending.Add(handle);
+        foreach (var line in result.Lines)
+        {
+            Show(line.Type, line.Text);
+        }
+
+        if (result.Handle is { } handle)
+        {
+            if (result.IsTalk)
+            {
+                TalkSent++;
+                LastTalk = handle;
+            }
+
+            _sending.Add((handle, result));
+        }
     }
 
     /// <summary>
-    /// The main chat's menu choice (<c>gmMainChatUI::HandleSelection</c>, 11.4186 0x004CD540): only <see cref="TalkFocus.All"/> is honoured; another focus
-    /// answers <see cref="NotInM2"/> and the menu goes back to All.
+    /// The main chat's menu choice (<c>gmMainChatUI::HandleSelection</c>, 11.4186 0x004CD540): <see cref="TalkFocus.All"/> and <see cref="TalkFocus.Selected"/> are
+    /// honoured; a channel answers <see cref="NotInM2"/> and the menu goes back to the focus it had (<c>TODO(g4-chat-channels)</c>).
     /// </summary>
     public void SelectFocus(TalkFocus focus)
     {
-        if (focus == TalkFocus.All)
+        if (focus is TalkFocus.All or TalkFocus.Selected)
         {
-            Focus = TalkFocus.All;
+            Focus = focus;
             return;
         }
 
         FocusRefusals++;
-        NotInM2.Show(_context.Manager.Dialogs, _context.Manager.Services.Log, "Chat to " + focus + " (the channels, tells and allegiance chat)");
-        if (_menu is not null && _allRow is not null)
+        NotInM2.Show(_context.Manager.Dialogs, _context.Manager.Services.Log, "Chat to " + focus + " (the channels, tells and allegiance chat; TODO(g4-chat-channels))");
+        var back = Focus == TalkFocus.Selected ? GetRow(TalkFocus.Selected) : _allRow;
+        if (_menu is not null && back is not null)
         {
-            _menu.SetSelectedItem(_allRow, false);
+            _menu.SetSelectedItem(back, false);
+        }
+    }
+
+    // The squelch toggle row (gmMainChatUI::ToggleSquelchOnCurrentSpeakableTarget, 11.6096 0x004CDEA0): not built (TODO(g4-chat-squelch)); the menu goes back.
+    private void SquelchRowChosen()
+    {
+        FocusRefusals++;
+        NotInM2.Show(_context.Manager.Dialogs, _context.Manager.Services.Log, "Squelch the selected player (TODO(g4-chat-squelch))");
+        var back = Focus == TalkFocus.Selected ? GetRow(TalkFocus.Selected) : _allRow;
+        if (_menu is not null && back is not null)
+        {
+            _menu.SetSelectedItem(back, false);
         }
     }
 
@@ -284,7 +357,60 @@ public sealed class GameChat : IDisposable
         }
     }
 
-    private void OnChat(in ChatReceived e) => Show(e.Line);
+    private void OnChat(in ChatReceived e)
+    {
+        NoteTeller(e.Line);
+        Show(e.Line);
+    }
+
+    // gmCCommunicationSystem::GetLastTeller: the last player who sent this one a tell.
+    private void NoteTeller(in ChatLine line)
+    {
+        if (line.Kind == ChatKind.Tell && !string.IsNullOrEmpty(line.Sender) && line.SenderGuid != _context.Session.State.Self.Guid)
+        {
+            _lastTeller = line.Sender;
+        }
+    }
+
+    // gmMainChatUI::RecvNotice_SelectionChanged: a selected creature (PublicWeenieDesc::IsTalkable is item type 0x10), other than the player, becomes the target and stays it.
+    private void NoteSelection()
+    {
+        var selected = SelectedProvider?.Invoke() ?? 0;
+        var state = _context.Session.State;
+        if (selected != 0 && selected != state.Self.Guid && state.Objects.TryGet(selected, out var obj) && obj.ItemType == CreatureItemType)
+        {
+            _speakableGuid = selected;
+            _speakableName = obj.Name;
+        }
+    }
+
+    private string? SpeakableName()
+    {
+        if (_speakableGuid != 0 && _context.Session.State.Objects.TryGet(_speakableGuid, out var obj) && !string.IsNullOrEmpty(obj.Name))
+        {
+            return obj.Name;
+        }
+
+        return _speakableName;
+    }
+
+    private UiElement? GetRow(TalkFocus focus)
+    {
+        if (_menu is null)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < _menu.ItemCount; i++)
+        {
+            if (_menu.GetItem(i) is { } row && row.InqProperty(TalkFocusProperty, out var value) && value is UiEnumProperty { Value: var v } && v == (uint)focus)
+            {
+                return row;
+            }
+        }
+
+        return null;
+    }
 
     private void Show(in ChatLine line)
     {
@@ -378,7 +504,7 @@ public sealed class GameChat : IDisposable
                 }
                 else
                 {
-                    owner.SelectFocus(TalkFocus.Selected); // the squelch toggle row: not built either
+                    owner.SquelchRowChosen(); // the squelch toggle row: not built
                 }
             }
 

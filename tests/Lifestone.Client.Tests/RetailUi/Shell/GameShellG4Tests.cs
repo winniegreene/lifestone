@@ -40,11 +40,6 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
         { 0x1000019A, "Map" },
     };
 
-    public static TheoryData<uint, string> ActionButtons => new()
-    {
-        { 0x100001A5, "Examination" },
-    };
-
     [RequiresLocalDatsFact]
     public void The_panel_host_is_hidden_at_login_with_every_page_hidden()
     {
@@ -87,27 +82,6 @@ public sealed class GameShellG4Tests(DatSetFixture fixture) : IClassFixture<DatS
         Assert.Equal(NotInM3.Prefix + panel, TextOf(OnlyDialog(rig)));
         Assert.False(screen.PanelHost!.IsOpen); // the page never shows: the message says it is not built
         Assert.Contains(rig.Log.Lines, l => l.Contains("placeholder", StringComparison.Ordinal) && l.Contains(panel, StringComparison.Ordinal));
-    }
-
-    [RequiresLocalDatsTheory]
-    [MemberData(nameof(ActionButtons))]
-    public void The_examine_button_opens_the_NotInM3_message(uint buttonId, string feature)
-    {
-        using var rig = new LoginRig(fixture, liveGame: true);
-        var screen = EnterGame(rig);
-        var button = Assert.IsAssignableFrom<UiButton>(screen.Root!.GetChildRecursive(buttonId));
-        if (!button.Visible || button.State == UiStateIds.Ghosted)
-        {
-            // The layout shows one combat button for the current mode and ghosts Use until something is selected: press the message path directly.
-            button.BroadcastElementMessage(UiMessageIds.ButtonClick);
-        }
-        else
-        {
-            Assert.True(rig.Click(button));
-        }
-
-        rig.Frame();
-        Assert.Equal(NotInM3.Prefix + feature, TextOf(OnlyDialog(rig)));
     }
 
     /// <summary>

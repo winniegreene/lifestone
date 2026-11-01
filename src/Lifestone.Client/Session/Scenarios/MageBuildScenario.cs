@@ -1,8 +1,13 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
+using System.Numerics;
 using Lifestone.Client.Navigation;
+using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Client.Session.Tools;
 using Lifestone.Data.CharacterCreation;
 using Lifestone.Data.World.Data;
@@ -29,8 +34,11 @@ namespace Lifestone.Client.Session.Scenarios;
 /// the old copies of the name (<see cref="FreshPurge"/>), so a failed build leaves the old copy restorable; a re-created character whose old copy was not purged fails the run. A fresh character starts outside Holtburg, so <c>placing</c> then teleports it to Holtburg's point of interest
 /// (as the fighter build does) before the log off. The verdict gains <c>fresh=recreated|created purged=&lt;n&gt; refill=none|level-up:&lt;a&gt;-&gt;&lt;b&gt;|failed</c> (the gate's judge reads <c>fresh=</c> and <c>purged=</c> on the same line). The refill is one level-up: <b>a fresh mage ends one level above the template's
 /// (127), its extra experience unspent</b> (owner decisions D44, D45; the template's level check is <c>&gt;=</c>, so the journey's embedded build-verify accepts it). Only the session-ending (headless) build takes it.</para>
+/// <para><b>Grants only for a fresh build</b> (M5 3 F2, closes 3-R4; D38, D49, D50): with a kit plan the build grants the ground's kit, foci, stock and purse once (stage <c>granting</c>) and then ties the first portal (the session-ending build only), but only when
+/// <see cref="DecideGrant"/> finds a fresh build, by what the character holds: a re-created character, one the build had to raise (experience, a train or a raise sent), or one whose pack lacks a worn, wielded or focus line of the kit. A ready mage is only verified
+/// (<see cref="Grant"/> <c>ready</c>): nothing is topped up, each stock line under its keep is named and left for the resupply, and no tie is made. The decision is logged (<c>build: fresh (...)</c> or <c>build: ready (...)</c>).</para>
 /// <para><b>Building</b>, in this order, each only if still needed: (a) the mod's <c>xp</c> for exactly
-/// <see cref="XpTableData.XpForLevel"/>(126) minus <see cref="PlayerQualities.TotalExperience"/> (never when the mage is at or past it:
+/// <see cref="XpTableData.XpForLevel"/>(the run's level, 126 or <c>--mage-level</c>, M5 7 F3 D87) minus <see cref="PlayerQualities.TotalExperience"/> (never when the mage is at or past it:
 /// the loops' kills may have taken it further); (b) <see cref="IActionApi.TrainSkill"/> for each of <see cref="MageTemplate.TrainedLater"/>
 /// not yet trained, with <see cref="MageTemplate.TrainCredits"/> (ACE refuses any other number); (c) for each of
 /// <see cref="MageTemplate.Targets"/> in plan order below its target ranks, the raise action of its kind with
@@ -59,6 +67,9 @@ public sealed class MageBuildScenario : IScenario
     /// <summary>How long the teleport to Holtburg may take, in seconds on the session clock (M4 fresh B1: the fresh character's placing).</summary>
     public const double PlaceSeconds = 30;
 
+    /// <summary>How long the kit and purse grants may take, in seconds on the session clock (the tools lane sends two requests a second, so about twenty requests take ten seconds).</summary>
+    public const double GrantSeconds = 120;
+
     /// <summary>The mod verbs the build uses (the experience grant and the spellbook), which the status stage requires the mod to report.</summary>
     internal static readonly string[] RequiredVerbs = [ToolVerbs.Xp, ToolVerbs.Spell + " " + ToolVerbs.SpellLearn];
 
@@ -66,7 +77,19 @@ public sealed class MageBuildScenario : IScenario
     public const int SpellChunk = PlayerTools.MaxSpellIds;
 
     private readonly bool _endSession;
+    private readonly GearKit.KitPlan? _kitPlan;
+    private bool _kitGranted;
+    private bool? _freshBuild;
+    private bool _tieDone;
+    private PortalTieLeg? _tieLeg;
+    private LifestoneBindLeg? _bindLeg;
+    private bool _bindDone;
+    private int _grantStep;
+    private double _grantStart = double.NaN;
+    private GearSpawn? _kitSpawn;
+    private List<GearGrant>? _purseGrants;
     private readonly XpTableData _table;
+    private readonly MageLevelPlan _plan;
     private readonly IReadOnlyList<uint> _retailClasses;
     private readonly ILogSink _log;
     private readonly HashSet<string> _sent = [];
@@ -101,9 +124,12 @@ public sealed class MageBuildScenario : IScenario
     /// <param name="log">Where the scenario logs.</param>
     /// <param name="arrivalSeconds">The limit on the arrival.</param>
     /// <param name="endSession">True (the headless host's): log in, build, log off and quit. False (M4 P5b J3b, the journey's <c>build-verify</c> station): the session already holds the character in the world, so the scenario skips the login, never logs off and ends at <c>done</c> in the world, as the hunt does.</param>
+    /// <param name="kitPlan">M5 item 3 m1 (D8, D38, D46, D49): the ground's kit, the four foci, the stock lines and the purse (<see cref="GearKit.KitPlan.For"/>), granted by the build once the template is met (stage <c>granting</c>: <see cref="PlayerTools.SpawnGear"/> for the kit, then the purse as pyreal stacks and trade notes; the load logged as <c>load: &lt;burden&gt; of &lt;capacity&gt;</c>); null: no grant (the journey's embedded build-verify and the older tests). The build may grant; play may not (the spec section 5.6).</param>
     /// <param name="freshCharacter">M4 fresh B1 (owner decisions D44, D45): delete the BSD Mage's live character from the character list (never entering it), create the template's and build it, purge the old copies of the name with the mod, then place it in Holtburg; the verdict gains <c>fresh=recreated|created purged=&lt;n&gt; refill=none|level-up:&lt;a&gt;-&gt;&lt;b&gt;|failed</c> (M4 fresh F1: one level-up refills the vitals before the purge, so the mage ends at level 127). Only with <paramref name="endSession"/>.</param>
-    public MageBuildScenario(XpTableData table, IReadOnlyList<uint> retailClasses, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, bool freshCharacter = false)
+    /// <param name="level">M5 7 F3 (D87): the level the build reaches (<c>--mage-level</c>, default <see cref="MageTemplate.TargetLevel"/>); the plan is <see cref="MageTemplate.PlanAt"/> at it. A level whose credits cannot train all four later skills trains what fits and logs the rest (<c>TODO(m5-mage-level-credits)</c>).</param>
+    public MageBuildScenario(XpTableData table, IReadOnlyList<uint> retailClasses, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, bool freshCharacter = false, GearKit.KitPlan? kitPlan = null, int level = MageTemplate.TargetLevel)
     {
+        _kitPlan = kitPlan;
         _endSession = endSession;
         _fresh = freshCharacter;
         if (freshCharacter && !endSession)
@@ -115,14 +141,25 @@ public sealed class MageBuildScenario : IScenario
         ArgumentNullException.ThrowIfNull(retailClasses);
         ArgumentNullException.ThrowIfNull(log);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(arrivalSeconds);
-        if (table.CharacterLevelXpList.Count <= MageTemplate.TargetLevel)
+        if (level < 2 || level > MageTemplate.TargetLevel)
         {
-            throw new ArgumentException($"TODO(m3-xp-table): the XpTable ends before level {MageTemplate.TargetLevel}", nameof(table));
+            throw new ArgumentOutOfRangeException(nameof(level), level, $"the mage build's level is 2 to {MageTemplate.TargetLevel}");
+        }
+
+        if (table.CharacterLevelXpList.Count <= level)
+        {
+            throw new ArgumentException($"TODO(m3-xp-table): the XpTable ends before level {level}", nameof(table));
         }
 
         _table = table;
+        _plan = MageTemplate.PlanAt(table, level);
         _retailClasses = [.. retailClasses];
         _log = log;
+        if (_plan.LeftOutLine.Length > 0)
+        {
+            log.Warn(LogCategory, _plan.LeftOutLine);
+        }
+
         ArrivalSeconds = arrivalSeconds;
         _holtburg = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
         _holtburgLandblock = _holtburg.Location.Position.CellId >> 16;
@@ -145,6 +182,9 @@ public sealed class MageBuildScenario : IScenario
     /// <summary>The limit on the arrival, in seconds.</summary>
     public double ArrivalSeconds { get; }
 
+    /// <summary>M5 7 F3 (D87): the build's plan (<see cref="MageTemplate.PlanAt"/> at the run's level).</summary>
+    public MageLevelPlan Plan => _plan;
+
     /// <summary>The character entered (its guid), or 0.</summary>
     public uint EnteredGuid { get; private set; }
 
@@ -153,6 +193,17 @@ public sealed class MageBuildScenario : IScenario
 
     /// <summary>The steps sent, in order (<c>xp</c>, <c>train</c>, <c>raise</c> and <c>learn</c> lines, as logged), for the run's record and the tests.</summary>
     public IReadOnlyList<string> SentSteps => _steps;
+
+    /// <summary>
+    /// M5 3 p1 (D50): how the build's first tie ended, <c>none</c> (not reached, or an embedded build, which is play and ties nothing), <c>tied</c> (the portal tie linked and the character is back home) or <c>skipped</c> (the ground has no portal record, named). Not in the verdict line.
+    /// </summary>
+    public string Tie { get; private set; } = "none";
+
+    /// <summary>
+    /// M5 3 F2 (closes 3-R4, D38, D49): what the build decided about its grants, <c>none</c> (no kit plan, or not reached), <c>fresh</c> (the kit, the foci, the stock and the purse are granted once, then the first tie) or <c>ready</c> (the mage already holds its kit's lines: nothing is granted
+    /// and no tie is made, a stock line under its keep is named and left for the resupply). <see cref="DecideGrant"/> decides it from what the character holds.
+    /// </summary>
+    public string Grant { get; private set; } = "none";
 
     /// <summary>The steps counted in the verdict's <c>built_steps</c>.</summary>
     public int BuiltSteps { get; private set; }
@@ -358,6 +409,12 @@ public sealed class MageBuildScenario : IScenario
             case "building":
                 return Build(session);
 
+            case "granting":
+                return Granting(session);
+
+            case "tie":
+                return Tying(session, now);
+
             case "refilling":
                 return Refilling(session);
 
@@ -366,6 +423,9 @@ public sealed class MageBuildScenario : IScenario
 
             case "placing":
                 return Placing(session);
+
+            case "bind":
+                return Binding(session, now);
 
             case "logging-off":
                 if (Settled(out var loggedOff))
@@ -458,7 +518,7 @@ public sealed class MageBuildScenario : IScenario
         }
 
         _log.Info(LogCategory, "absent; creating " + MageTemplate.CharacterName + " with the template's creation intent");
-        _pending = session.Actions.CreateCharacter(MageTemplate.CreationIntent(MageTemplate.CharacterName, _retailClasses), ActionSource.Host);
+        _pending = session.Actions.CreateCharacter(MageTemplate.CreationIntent(MageTemplate.CharacterName, _retailClasses, _plan.Build), ActionSource.Host);
         return Go("creating");
     }
 
@@ -495,17 +555,17 @@ public sealed class MageBuildScenario : IScenario
 
         var actions = session.Actions;
 
-        // (a) experience to level 126, once.
-        var wanted = _table.XpForLevel(MageTemplate.TargetLevel);
+        // (a) experience to the run's level (126, or --mage-level), once.
+        var wanted = _plan.TotalXp;
         var total = (ulong)Math.Max(0, q.TotalExperience);
         if (total < wanted)
         {
             if (_xpSent)
             {
-                return Waiting(session, string.Create(CultureInfo.InvariantCulture, $"total experience is {total:N0}, below level {MageTemplate.TargetLevel}'s {wanted:N0} after the xp verb"));
+                return Waiting(session, string.Create(CultureInfo.InvariantCulture, $"total experience is {total:N0}, below level {_plan.Level}'s {wanted:N0} after the xp verb"));
             }
 
-            if (q.Level < 1 || q.Level >= MageTemplate.TargetLevel || _table.XpForLevel(q.Level) > total || total >= _table.XpForLevel(q.Level + 1))
+            if (q.Level < 1 || q.Level >= _plan.Level || _table.XpForLevel(q.Level) > total || total >= _table.XpForLevel(q.Level + 1))
             {
                 return Fail(
                     session,
@@ -515,18 +575,18 @@ public sealed class MageBuildScenario : IScenario
             _xpSent = true;
             var amount = wanted - total;
             return Send(
-                string.Create(CultureInfo.InvariantCulture, $"xp {amount:N0} (to {wanted:N0}, level {MageTemplate.TargetLevel}; has {total:N0})"),
+                string.Create(CultureInfo.InvariantCulture, $"xp {amount:N0} (to {wanted:N0}, level {_plan.Level}; has {total:N0})"),
                 session.Tools.AddXp((long)amount, ActionSource.Host),
                 counted: true);
         }
 
-        if (q.Level < MageTemplate.TargetLevel)
+        if (q.Level < _plan.Level)
         {
-            return Waiting(session, $"the level is {q.Level}, below {MageTemplate.TargetLevel} with {total:N0} experience");
+            return Waiting(session, $"the level is {q.Level}, below {_plan.Level} with {total:N0} experience");
         }
 
         // (b) the four magic skills not yet trained, with the SkillTable's credits.
-        foreach (var skill in MageTemplate.TrainedLater)
+        foreach (var skill in _plan.Trained)
         {
             if (!q.TryGetSkill(skill, out var desc))
             {
@@ -557,7 +617,7 @@ public sealed class MageBuildScenario : IScenario
         }
 
         // (c) the plan's raises, in order, each to its target ranks.
-        foreach (var target in MageTemplate.Targets)
+        foreach (var target in _plan.Targets)
         {
             if (!Read(q, target, out var ranks, out var spent, out var untrained))
             {
@@ -621,6 +681,36 @@ public sealed class MageBuildScenario : IScenario
             return Fail(session, "the build ended short of the template: " + check.Summary);
         }
 
+        if (_kitPlan is not null && !_kitGranted && _freshBuild is not false)
+        {
+            if (_freshBuild is null && DecideFresh(session) is { } undecided)
+            {
+                return undecided;
+            }
+
+            if (_freshBuild is true)
+            {
+                _log.Info(LogCategory, "the build ended met; granting the kit, the four foci, the stock and the purse of " + _kitPlan.Ground.Name + " (" + _kitPlan.LoadLine + ")");
+                return Go("granting");
+            }
+        }
+
+        if (_kitGranted && !_tieDone && TieIntent(_kitPlan, _endSession) is var intent && intent != "none")
+        {
+            // M5 3 p1 (D50): the first tie, at build time (the owner's cheat layer, the spec section 5.6): after the kit (the tie spell burns a scarab on the foci formula), before the refill and the purge.
+            if (intent == "skipped")
+            {
+                _tieDone = true;
+                Tie = "skipped";
+                _log.Warn(LogCategory, "the tie is skipped: the ground '" + _kitPlan!.Ground.Key + "' has no portal record, so there is no portal to tie to (TODO(m6-ground-fields)); a journey of this ground's mage finds its portal untied");
+            }
+            else
+            {
+                _log.Info(LogCategory, "the kit is granted; tying the mage to the portal of " + _kitPlan!.Ground.Name + ": one place to the portal's front, the tie spell, one place back to " + _kitPlan.Ground.Home.Town);
+                return Go("tie");
+            }
+        }
+
         if (_purge is not null && !_purged)
         {
             // M4 fresh B1 (D45): the old copies are purged only once the build has ended met, so a failed build leaves the old copy restorable. M4 fresh F1: the vitals are refilled first (the build's raises lifted the maxima over the current values).
@@ -629,6 +719,254 @@ public sealed class MageBuildScenario : IScenario
         }
 
         return Finish(session);
+    }
+
+    /// <summary>
+    /// M5 3 F2 (closes 3-R4): decides, once, whether this build grants (<see cref="Grant"/>): the pack must be countable first (a wait with a bound, then a named failure), then <see cref="DecideGrant"/> reads what the character holds. The decision and its reason are logged.
+    /// </summary>
+    /// <returns>A status while the pack cannot be counted, or null once decided.</returns>
+    private ScenarioStatus? DecideFresh(IGameSessionView session)
+    {
+        var plan = _kitPlan!;
+        var belowTarget = _xpSent || _sent.Count > 0; // the build sent experience, a train or a raise: the character was below its target
+        var held = new Dictionary<uint, int>();
+        if (!_fresh && !belowTarget)
+        {
+            if (!session.State.Self.Inventory.IsKnown)
+            {
+                return Waiting(session, "the pack is not known yet");
+            }
+
+            held = GearInventory.CountAll(session.State, out var unsettled);
+            if (unsettled > 0)
+            {
+                return Waiting(session, string.Create(CultureInfo.InvariantCulture, $"{unsettled} held items have no world object yet"));
+            }
+        }
+
+        var decision = DecideGrant(plan, _fresh, belowTarget, held);
+        _freshBuild = decision.Fresh;
+        Grant = decision.Fresh ? "fresh" : "ready";
+        if (decision.Fresh)
+        {
+            _log.Info(LogCategory, "build: fresh (" + decision.Reason + "): the kit, the foci, the stock and the purse are granted once, then the first tie (build time, D38, D50)");
+        }
+        else
+        {
+            _log.Info(LogCategory, "build: ready (" + decision.Reason + "): nothing is granted and no tie is made; play does not top it up (M5 DoD 6)");
+            foreach (var line in decision.StockShort)
+            {
+                _log.Warn(LogCategory, line);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The build's grant decision (<see cref="DecideGrant"/>).</summary>
+    /// <param name="Fresh">True: the build grants the kit and the purse once and ties; false: it verifies only.</param>
+    /// <param name="Reason">What decided it, for the log (no character name).</param>
+    /// <param name="StockShort">For a ready mage, one sentence per stock line held under its keep (<c>build: &lt;line&gt; is &lt;n&gt; under its keep; play does not top it up (M5 DoD 6)</c>); empty for a fresh build.</param>
+    internal sealed record GrantDecision(bool Fresh, string Reason, IReadOnlyList<string> StockShort);
+
+    /// <summary>
+    /// M5 3 F2 (closes 3-R4, D38, D49): the build's grants are for a fresh build, decided by what the character holds, never by the call. A build grants (the kit, the foci, the stock and the purse once, then the first tie) when the character is a re-created one
+    /// (<paramref name="freshCharacter"/>), when it was below its target (<paramref name="belowTarget"/>: the build had to send experience, a train or a raise), or when its pack lacks a line of the kit that is no stock line (the vendor robe and wand, a focus: a mage with no kit);
+    /// otherwise the mage is ready and the build only verifies: each stock line held under its keep is named (<see cref="GrantDecision.StockShort"/>) and left for the resupply, and the purse is not topped up (the coin spent and the scarabs burned are play, the economy DoD 6 judges).
+    /// An interrupted build that granted the kit but not the purse is repaired by re-creating the mage (the gate's flow), not by a top-up here.
+    /// </summary>
+    /// <param name="plan">The kit plan.</param>
+    /// <param name="freshCharacter">True for the live gate's re-created character.</param>
+    /// <param name="belowTarget">True when the build sent experience, a train or a raise.</param>
+    /// <param name="held">What the pack holds, by weenie (<c>GearInventory.CountAll</c>); not read for a re-created or below-target character.</param>
+    internal static GrantDecision DecideGrant(GearKit.KitPlan plan, bool freshCharacter, bool belowTarget, IReadOnlyDictionary<uint, int> held)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(held);
+        if (freshCharacter)
+        {
+            return new GrantDecision(true, "a re-created character", []);
+        }
+
+        if (belowTarget)
+        {
+            return new GrantDecision(true, "the character was below its target: the build sent experience, a train or a raise", []);
+        }
+
+        var missing = plan.Kit.Items.Where(i => i.Kind != GearKind.Component && held.GetValueOrDefault(i.Wcid) == 0).Select(i => i.Name).ToList();
+        if (missing.Count > 0)
+        {
+            return new GrantDecision(true, "the pack holds no " + string.Join(", ", missing) + ": the kit is missing", []);
+        }
+
+        var shorts = new List<string>();
+        foreach (var item in plan.Kit.Items)
+        {
+            var have = held.GetValueOrDefault(item.Wcid);
+            if (item.Counted && have < item.Stack)
+            {
+                shorts.Add(string.Create(CultureInfo.InvariantCulture, $"build: {item.Name} is {item.Stack - have} under its keep; play does not top it up (M5 DoD 6)"));
+            }
+        }
+
+        return new GrantDecision(false, string.Create(CultureInfo.InvariantCulture, $"the template is met and the pack holds the kit's {plan.Kit.Items.Count(i => i.Kind != GearKind.Component)} worn, wielded and focus lines; {shorts.Count} stock lines are under their keep"), shorts);
+    }
+
+    /// <summary>
+    /// M5 item 3 m1 (D8, D38, D49): the build's grants, after the template is met and only for a fresh build (<see cref="DecideGrant"/>). Step 0 asks the mod for the kit (<see cref="PlayerTools.SpawnGear"/>: idempotent, a top-up to each stock line's keep); step 1, once the kit has arrived, asks for each purse line the
+    /// character does not hold (the coin in stacks of at most the pyreal stack size, the notes); step 2 waits for every grant and fails by name on a refusal, then logs <c>load: &lt;burden&gt; of &lt;capacity&gt;</c> (the plan checked it against the supplies' burden line). The name check comes first, as in the other stages.
+    /// </summary>
+    private ScenarioStatus Granting(IGameSessionView session)
+    {
+        var plan = _kitPlan!;
+        if (session.State.Self.Name is not { } name)
+        {
+            return Waiting(session, "the entered character's name is not known");
+        }
+
+        if (!string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+        {
+            return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+        }
+
+        var clock = session.Clock.Now;
+        if (double.IsNaN(_grantStart))
+        {
+            _grantStart = clock;
+            _log.Info(LogCategory, "kit of " + plan.Ground.Key + ": " + plan.Kit.Describe() + "; " + plan.LoadLine + " (the burden line is " + plan.Ground.Supplies.BurdenTripPercent.ToString(CultureInfo.InvariantCulture) + "%)");
+            foreach (var shortfall in plan.WieldShortfalls(session.State.Self.Qualities.TryGetSkill(MageTemplate.ArcaneLore, out var lore) ? (int)(lore.Init + lore.Ranks) : 0))
+            {
+                _log.Warn(LogCategory, shortfall);
+            }
+        }
+
+        if (clock - _grantStart > GrantSeconds)
+        {
+            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"granting: the kit and purse grants did not finish in {GrantSeconds:0} s (step {_grantStep})"));
+        }
+
+        switch (_grantStep)
+        {
+            case 0:
+                if (!session.State.Self.Inventory.IsKnown)
+                {
+                    return Waiting(session, "the pack is not known yet");
+                }
+
+                _kitSpawn = session.Tools.SpawnGear(plan.Kit, ActionSource.Host);
+                _grantStep = 1;
+                return ScenarioStatus.Running;
+
+            case 1:
+                if (!_kitSpawn!.IsDone)
+                {
+                    return ScenarioStatus.Running;
+                }
+
+                if (!_kitSpawn.Succeeded)
+                {
+                    return Fail(session, "granting: the kit grant failed: " + _kitSpawn.Describe());
+                }
+
+                var held = GearInventory.CountAll(session.State, out var unsettled);
+                if (unsettled > 0)
+                {
+                    return Waiting(session, string.Create(CultureInfo.InvariantCulture, $"{unsettled} held items have no world object yet"));
+                }
+
+                _purseGrants = [];
+                foreach (var line in plan.Purse)
+                {
+                    var have = held.GetValueOrDefault(line.Wcid);
+                    if (have >= line.Total)
+                    {
+                        continue;
+                    }
+
+                    var weenie = GearKit.SupplyWeenieOf(line.Wcid, plan.Ground, "purse");
+                    foreach (var size in have == 0 ? line.Stacks : Split(line.Total - have, weenie.MaxStack))
+                    {
+                        var item = new GearItem(line.Wcid, line.Name, GearKind.Component, weenie.WeenieType, weenie.ItemType, weenie.ValidLocations, size, weenie.MaxStack, line.UnitBurden);
+                        _purseGrants.Add(new GearGrant(item, size, session.Tools.SpawnItem(line.Wcid, size, ActionSource.Host)));
+                    }
+                }
+
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"purse of {plan.Ground.Key}: {_purseGrants.Count} grants asked ({plan.Ground.Supplies.Purse.Coin:N0} pyreals in coin, {plan.Ground.Supplies.Purse.NotesValue:N0} in notes)"));
+                _grantStep = 2;
+                return ScenarioStatus.Running;
+
+            default:
+                foreach (var grant in _purseGrants!)
+                {
+                    if (!grant.Handle.IsCompleted)
+                    {
+                        return ScenarioStatus.Running;
+                    }
+
+                    if (grant.Refusal is { } refusal)
+                    {
+                        return Fail(session, "granting: the purse grant was refused: " + refusal);
+                    }
+                }
+
+                _kitGranted = true;
+                _steps.Add("kit " + plan.Ground.Key);
+                _log.Info(LogCategory, "the kit and the purse are granted (" + plan.LoadLine + ", " + _kitSpawn!.Describe() + ")");
+                return Go("building");
+        }
+    }
+
+    /// <summary>
+    /// What the build does about the first tie (M5 3 p1, D50): <c>none</c> without a kit plan or in an embedded build (a journey's build-verify is play: it ties nothing and places nothing), <c>skipped</c> when the plan's ground has no portal record (named, <c>TODO(m6-ground-fields)</c>),
+    /// else <c>tie</c>.
+    /// </summary>
+    /// <param name="plan">The kit plan, or null.</param>
+    /// <param name="endSession">True for the session-ending (headless) build.</param>
+    public static string TieIntent(GearKit.KitPlan? plan, bool endSession) => plan is null || !endSession ? "none" : plan.Ground.Portal is null ? "skipped" : "tie";
+
+    /// <summary>
+    /// M5 3 p1 (D50, spec section 5.6): the first tie, the build's one place beyond its own start. <see cref="PortalTieLeg"/> places the mage at the ground's portal front, casts the ground's tie spell through the cast policy, checks the link, and places the mage back at the ground's home; a failure
+    /// is named and fails the build (the mage is then still brought home first). Build time only: a journey makes no place (<see cref="Journey.JourneyPlans.MageTeleportBudget"/> 0) and reaches the ground by Primary Portal Recall.
+    /// </summary>
+    private ScenarioStatus Tying(IGameSessionView session, double now)
+    {
+        if (session.State.Self.Name is not { } name)
+        {
+            return Waiting(session, "the entered character's name is not known");
+        }
+
+        if (!string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+        {
+            return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+        }
+
+        _tieLeg ??= new PortalTieLeg(_kitPlan!.Ground, _log);
+        switch (_tieLeg.Step(session, now))
+        {
+            case ScenarioStatus.Failed:
+                return Fail(session, "tie: " + (_tieLeg.Failure ?? "the tie leg failed"));
+            case ScenarioStatus.Succeeded:
+                _tieDone = true;
+                Tie = "tied";
+                _steps.Add("tie " + _kitPlan!.Ground.Key);
+                _log.Info(LogCategory, "the mage is tied to the portal of " + _kitPlan.Ground.Name + " (" + _tieLeg.Evidence + ") and stands at home again");
+                return Go("building");
+            default:
+                return ScenarioStatus.Running;
+        }
+    }
+
+    private static List<int> Split(int total, int? max)
+    {
+        var stacks = new List<int>();
+        for (var left = total; left > 0;)
+        {
+            var one = Math.Min(left, max ?? left);
+            stacks.Add(one);
+            left -= one;
+        }
+
+        return stacks;
     }
 
     private ScenarioStatus Finish(IGameSessionView session)
@@ -716,7 +1054,53 @@ public sealed class MageBuildScenario : IScenario
                     return Go("placing");
                 }
 
+                return AfterPlaced(session);
+        }
+    }
+
+    /// <summary>
+    /// M5 7 F30: the bind is the last step of a fresh session-ending build with a kit plan (a re-created or created character is bound to no lifestone, and a recall home is refused 0x049E): <see cref="LifestoneBindLeg"/>. A ready mage and an embedded build bind nothing.
+    /// </summary>
+    /// <param name="plan">The kit plan, or null.</param>
+    /// <param name="endSession">True for the session-ending (headless) build.</param>
+    /// <param name="freshHow">The fresh character's how (<c>recreated</c> or <c>created</c>), or null.</param>
+    public static bool BindIntent(GearKit.KitPlan? plan, bool endSession, string? freshHow) => plan is not null && endSession && freshHow is not null;
+
+    private ScenarioStatus AfterPlaced(IGameSessionView session)
+    {
+        if (!_bindDone && BindIntent(_kitPlan, _endSession, _freshHow))
+        {
+            _log.Info(LogCategory, "the last step: binding the fresh character at the lifestone of " + _kitPlan!.Ground.Home.Town + " (Use, then Lifestone Tie), so a recall home works before any run (F30)");
+            return Go("bind");
+        }
+
+        return Finish(session);
+    }
+
+    private ScenarioStatus Binding(IGameSessionView session, double now)
+    {
+        if (session.State.Self.Name is not { } name)
+        {
+            return Waiting(session, "the entered character's name is not known");
+        }
+
+        if (!string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+        {
+            return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+        }
+
+        _bindLeg ??= new LifestoneBindLeg(_kitPlan!.Ground, _log);
+        switch (_bindLeg.Step(session, now))
+        {
+            case ScenarioStatus.Failed:
+                return Fail(session, "bind: " + (_bindLeg.Failure ?? "the bind leg failed"));
+            case ScenarioStatus.Succeeded:
+                _bindDone = true;
+                _steps.Add("bind " + _kitPlan!.Ground.Home.Town);
+                _log.Info(LogCategory, "the mage is bound to the lifestone of " + _kitPlan.Ground.Home.Town + " (attuned " + (_bindLeg.Bound ? "yes" : "no") + ", linked " + (_bindLeg.Linked ? "yes" : "no") + ")");
                 return Finish(session);
+            default:
+                return ScenarioStatus.Running;
         }
     }
 
@@ -734,7 +1118,7 @@ public sealed class MageBuildScenario : IScenario
         if (_pending is null && session.State.Self.Travel == SelfTravel.Present && InHoltburg(session))
         {
             _log.Info(LogCategory, "the mage stands in Holtburg");
-            return Finish(session);
+            return AfterPlaced(session);
         }
 
         return session.Clock.Now - _placeStart > PlaceSeconds
@@ -827,7 +1211,7 @@ public sealed class MageBuildScenario : IScenario
         if (q.IsKnown)
         {
             _level = q.Level;
-            _check = MageTemplate.IsMet(q);
+            _check = MageTemplate.IsMet(q, _plan);
         }
     }
 
@@ -898,5 +1282,227 @@ internal sealed class ReasonTimer(double seconds)
     {
         _since = double.NaN;
         _reason = null;
+    }
+}
+
+/// <summary>
+/// M5 3 p1 (D50): the build's first tie as a script (<see cref="ScriptLeg"/>, the stations' own machine): <c>tie-place</c> (a place to the ground's portal front, <see cref="GroundPortal.FrontCell"/> and <see cref="GroundPortal.Front"/>, waited out as every place is), <c>tie-find</c> (the portal object,
+/// by guid then by weenie class, <see cref="GroundPortal.Guid"/> and <see cref="GroundPortal.Wcid"/>), <c>tie-cast</c> (the magic mode, then the ground's <see cref="GroundPortal.TieSpell"/> at the portal through the cast policy, <see cref="CastRules.Travel(int)"/>, as a host action), <c>tie-link</c> (ACE's
+/// "You have successfully linked with the portal." or its refusal, named) and <c>tie-home</c> (a place back to the ground's <see cref="GroundHome"/>, <see cref="GroundHome.LifestoneCell"/> and <see cref="GroundHome.LifestonePoint"/>, run whether the link failed or not, so a failed build leaves the mage at home).
+/// Every fact is the ground profile's; none is a constant here (D46).
+/// </summary>
+public sealed class PortalTieLeg : ScriptLeg
+{
+    /// <summary>The leg's name.</summary>
+    public const string LegName = "portal-tie";
+
+    /// <summary>The text ACE sends when Primary Portal Tie linked (<c>WorldObject_Magic.cs</c>:1105-1175 at 95ef426d, as the den-travel station reads it).</summary>
+    public const string LinkedText = "linked with the portal";
+
+    /// <summary>Seconds the portal is looked for after the place.</summary>
+    public const double FindSeconds = 12;
+
+    /// <summary>Seconds ACE's text is waited for after the cast.</summary>
+    public const double TextSeconds = 5;
+
+    /// <summary>Seconds the magic mode may take.</summary>
+    public const double ModeSeconds = 10;
+
+    /// <summary>The same-level fizzle retries of the tie cast (the stations' own).</summary>
+    public const int MaxFizzles = 3;
+
+    private readonly HuntingGround _ground;
+    private readonly ILogSink _sink;
+    private readonly IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? _spells;
+    private readonly List<(ChatKind Kind, uint Type, string Text)> _chat = [];
+
+    /// <summary>A tie of <paramref name="ground"/>'s portal (its <see cref="HuntingGround.Portal"/> must be present).</summary>
+    /// <param name="ground">The ground.</param>
+    /// <param name="log">Where the leg logs (the build's <c>[mage]</c> category).</param>
+    /// <param name="spells">The SpellTable's spells (the names in the cast lines), or null.</param>
+    public PortalTieLeg(HuntingGround ground, ILogSink log, IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? spells = null)
+        : base(LegName, text => (log ?? throw new ArgumentNullException(nameof(log))).Info(MageBuildScenario.LogCategory, text))
+    {
+        _ground = ground ?? throw new ArgumentNullException(nameof(ground));
+        _ = ground.Portal ?? throw new ArgumentException("the ground has no portal record: the build skips the tie (TODO(m6-ground-fields))", nameof(ground));
+        _sink = log;
+        _spells = spells;
+    }
+
+    /// <summary>True once ACE's link text was seen.</summary>
+    public bool Linked { get; private set; }
+
+    /// <summary>What proved the link (the chat line), or empty.</summary>
+    public string Evidence { get; private set; } = string.Empty;
+
+    /// <inheritdoc />
+    protected override IEnumerable<ActionHandle?> Script()
+    {
+        var portal = _ground.Portal!;
+        var front = Destination(_ground.Name + " portal front", portal.FrontCell, portal.Front);
+        var home = Destination(_ground.Home.Town + " home", _ground.Home.LifestoneCell, _ground.Home.LifestonePoint);
+
+        Stage = "tie-place";
+        foreach (var h in PlaceAndSettle(front, "to the " + _ground.Key + " portal's front"))
+        {
+            yield return h;
+        }
+
+        Require(Problems.Count == 0, "tie: the place to the portal's front failed: " + string.Join("; ", Problems));
+
+        string? failure = null;
+        using (S.Events.Subscribe<ChatReceived>((in ChatReceived e) => _chat.Add((e.Line.Kind, e.Line.ChatType, e.Line.Text))))
+        {
+            Stage = "tie-find";
+            var guid = 0u;
+            foreach (var h in Until(() => (guid = FindPortal(portal)) != 0, FindSeconds))
+            {
+                yield return h;
+            }
+
+            if (guid == 0)
+            {
+                failure = $"no object of weenie {portal.Wcid} (the portal) within {FindSeconds:0} s of the place";
+            }
+            else
+            {
+                Stage = "tie-cast";
+                if (CombatModeGuard.Read(S.State).Caster is null)
+                {
+                    // M5 3 gate round 1: a fresh build grants the kit and wields none of it (the journey's gear station wields it), and the magic mode is refused with nothing in hand
+                    // (CombatModeGuard, MagicWithoutCaster), so the tie first wields the pack's caster in the held slot.
+                    var caster = GearInventory.PackCaster(S.State, new List<uint>());
+                    if (caster == 0)
+                    {
+                        failure = "no caster (a wand, a staff or an orb) in hand or in the pack for the magic mode";
+                    }
+                    else
+                    {
+                        Log($"tie: no caster in hand; wielding the pack's caster 0x{caster:X8} for the magic mode");
+                        var wield = S.Actions.Wield(caster, EquipMask.Held, ActionSource.Host);
+                        foreach (var h in Until(() => wield.IsCompleted && CombatModeGuard.Read(S.State).Caster is not null, ModeSeconds))
+                        {
+                            yield return h;
+                        }
+
+                        if (CombatModeGuard.Read(S.State).Caster is null)
+                        {
+                            failure = $"the pack's caster 0x{caster:X8} was not wielded within {ModeSeconds:0} s ({Describe(wield)})";
+                        }
+                    }
+                }
+
+                if (failure is null && S.State.Self.Qualities.CombatMode != CombatModes.Magic)
+                {
+                    var mode = S.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
+                    foreach (var h in Until(() => mode.IsCompleted && S.State.Self.Qualities.CombatMode == CombatModes.Magic, ModeSeconds))
+                    {
+                        yield return h;
+                    }
+                }
+
+                if (failure is null && S.State.Self.Qualities.CombatMode != CombatModes.Magic)
+                {
+                    failure = $"the magic mode was not reached within {ModeSeconds:0} s";
+                }
+                else if (failure is null)
+                {
+                    var mark = _chat.Count;
+                    var attempt = new CastAttempt(S.Actions, S.State, _sink, _spells);
+                    var ids = new[] { portal.TieSpell };
+                    var end = attempt.Start(new CastRequest { Levels = ids, Rules = CastRules.Travel(MaxFizzles), Purpose = "portal tie", Target = guid, Source = ActionSource.Host }, S.Clock.Now);
+                    while (end == CastEnd.Running)
+                    {
+                        yield return null;
+                        end = attempt.Step(S.Clock.Now);
+                    }
+
+                    Stage = "tie-link";
+                    var handle = attempt.Handle;
+                    if (handle is null)
+                    {
+                        failure = $"the tie cast {portal.TieSpell} was not sent: {end.Name()} ({attempt.Report.Why})";
+                    }
+                    else
+                    {
+                        foreach (var h in Until(() => TextSince(mark, LinkedText) || RefusalSince(mark) != 0 || handle.Outcome is { Kind: ActionOutcomeKind.ServerError }, TextSeconds))
+                        {
+                            yield return h;
+                        }
+
+                        var refusal = RefusalSince(mark) is not 0 and var code ? code : handle.Outcome is { Kind: ActionOutcomeKind.ServerError, Code: var server } ? server : 0u;
+                        if (TextSince(mark, LinkedText))
+                        {
+                            Linked = true;
+                            Evidence = "ACE's text: You have successfully " + LinkedText + ".";
+                        }
+                        else
+                        {
+                            failure = refusal != 0
+                                ? $"Primary Portal Tie {portal.TieSpell} was refused: {RecallHome.NameOfRefusal(refusal) ?? $"WeenieError 0x{refusal:X4}"}"
+                                : $"Primary Portal Tie {portal.TieSpell} did not link: no \"{LinkedText}\" text within {TextSeconds:0} s (cast ended {end.Name()}, {Describe(handle)})";
+                        }
+                    }
+                }
+            }
+        }
+
+        if (failure is not null)
+        {
+            Log("the tie failed: " + failure + "; placing the mage back home before the build fails");
+        }
+
+        Stage = "tie-home";
+        foreach (var h in PlaceAndSettle(home, "back to " + _ground.Home.Town))
+        {
+            yield return h;
+        }
+
+        Require(failure is null, "tie: " + failure);
+        Require(Problems.Count == 0, "tie: the place back home failed: " + string.Join("; ", Problems));
+    }
+
+    private uint FindPortal(GroundPortal portal)
+    {
+        if (portal.Guid != 0 && S.State.Objects.TryGet(portal.Guid, out _))
+        {
+            return portal.Guid;
+        }
+
+        foreach (var o in S.State.Objects.All)
+        {
+            if (o.Weenie.WeenieClassId == portal.Wcid)
+            {
+                return o.Guid;
+            }
+        }
+
+        return 0;
+    }
+
+    private bool TextSince(int mark, string needle)
+    {
+        for (var i = mark; i < _chat.Count; i++)
+        {
+            if (_chat[i].Text.Contains(needle, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private uint RefusalSince(int mark)
+    {
+        for (var i = mark; i < _chat.Count; i++)
+        {
+            if (_chat[i].Kind == ChatKind.WeenieError)
+            {
+                return _chat[i].Type;
+            }
+        }
+
+        return 0;
     }
 }

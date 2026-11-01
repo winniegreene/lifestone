@@ -10,7 +10,7 @@ namespace Lifestone.Client.Session.Actions.Trackers;
 /// ACE (<c>ManaStone.HandleActionUseOnTarget</c>, ACE 95ef426d <c>ManaStone.cs:59-233</c>) answers in one step with no motion: the F7E0 line "The Mana Stone gives N points of mana to ..." (ChatMessageType Broadcast), the stone's destroy roll
 /// ("The Mana Stone is destroyed." and 0x0024 for a retail charge, whose ManaStoneDestroyChance is 1), then GameEvent 0x01C7 UseDone. A refusal is a line and a UseDone with a code ("You have no items equipped that need mana.", 0x0036), or, for an item
 /// already full, the line "The X is already full of mana." and a UseDone 0.
-/// <para>Confirmed iff the UseDone 0 came and the "gives" line was read or the stone was removed; the detail is the line's numbers. Lane <see cref="ActionLane.Heal"/> (one use with a UseDone at a time); it holds nothing after its UseDone (ACE runs no chain for it).</para>
+/// <para>Confirmed iff the UseDone 0 came and the "gives" line (or, M5 7 S2c, an empty stone's "drains" line) was read or the stone was removed; the detail is the line's numbers. Lane <see cref="ActionLane.Heal"/> (one use with a UseDone at a time); it holds nothing after its UseDone (ACE runs no chain for it).</para>
 /// </summary>
 internal sealed partial class ManaStoneTracker(ActionHandle handle, uint stone, uint target) : ActionTracker(handle, ActionLane.Heal, ActionPolicy.HealSeconds)
 {
@@ -35,7 +35,27 @@ internal sealed partial class ManaStoneTracker(ActionHandle handle, uint stone, 
     internal override bool ConsumesUseDone => true;
 
     /// <inheritdoc/>
-    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api);
+    /// <remarks>
+    /// M5 7 D141's before-check: in the world, the stone held by the player, and the target the player (a charge for the worn items) or an item the player holds (ACE answers YouDoNotOwnThatItem 0x04BE for
+    /// any other, <c>ManaStone.cs</c> 59-233 @95ef426d).
+    /// </remarks>
+    internal override string? Refusal(ActionApi api)
+    {
+        if (WorldTrackers.NotInWorld(api) is { } notInWorld)
+        {
+            return notInWorld;
+        }
+
+        var inventory = api.State.Self.Inventory;
+        if (!inventory.Find(stone).Held)
+        {
+            return Refuse(ActionReason.NotHeld, "the mana stone " + ActionText.Hex(stone) + " is not held by the player");
+        }
+
+        return target == api.State.Self.Guid || inventory.Find(target).Held
+            ? null
+            : Refuse(ActionReason.NotHeld, "the stone's target " + ActionText.Hex(target) + " is neither the player nor an item the player holds");
+    }
 
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
@@ -98,7 +118,7 @@ internal sealed partial class ManaStoneTracker(ActionHandle handle, uint stone, 
     {
         if (code != 0)
         {
-            return new ActionOutcome(ActionOutcomeKind.ServerError, code, "the server refused the mana stone (" + Describe(code) + (_refusal is null ? string.Empty : ": " + _refusal) + ")");
+            return new ActionOutcome(ActionOutcomeKind.ServerError, code, "the server refused the mana stone (" + Describe(code) + (_refusal is null ? string.Empty : ": " + _refusal) + ")", ReasonOf(code, _refusal));
         }
 
         if (_line is { } line)
@@ -108,12 +128,31 @@ internal sealed partial class ManaStoneTracker(ActionHandle handle, uint stone, 
 
         if (_refusal is not null)
         {
-            return new ActionOutcome(ActionOutcomeKind.ServerError, 0, "the server refused the mana stone (" + _refusal + "); nothing was given");
+            return new ActionOutcome(ActionOutcomeKind.ServerError, 0, "the server refused the mana stone (" + _refusal + "); nothing was given", ReasonOf(0, _refusal));
         }
 
         return _removed
             ? new ActionOutcome(ActionOutcomeKind.Confirmed, 0, "the stone was consumed; the mana line was not read")
-            : new ActionOutcome(ActionOutcomeKind.ServerError, 0, "nothing happened: UseDone 0, but no mana line, no refusal line and the stone was not removed (the stone not held, or no target?)");
+            : new ActionOutcome(ActionOutcomeKind.ServerError, 0, "nothing happened: UseDone 0, but no mana line, no refusal line and the stone was not removed (the stone not held, or no target?)", ActionReason.NoEffect);
+    }
+
+    /// <summary>
+    /// M5 7 D141: the typed reason of a stone's refusal: an item already full, or nothing equipped that needs mana (<see cref="ActionReason.AlreadyDone"/>), an empty stone on an item with no mana
+    /// (<see cref="ActionReason.NotEnoughMana"/>), a target the player does not own (<see cref="ActionReason.NotHeld"/>), else the code's own meaning.
+    /// </summary>
+    internal static ActionReason ReasonOf(uint code, string? line)
+    {
+        if (line is not null && (line.StartsWith(NoItemsLine, StringComparison.Ordinal) || AlreadyFull().IsMatch(line)))
+        {
+            return ActionReason.AlreadyDone;
+        }
+
+        return code switch
+        {
+            NotEnoughManaCode => ActionReason.NotEnoughMana,
+            NotOwnedCode => ActionReason.NotHeld,
+            _ => ActionReasons.FromCode(code),
+        };
     }
 
     private static string Describe(uint code)
@@ -142,12 +181,20 @@ internal sealed partial class ManaStoneTracker(ActionHandle handle, uint stone, 
 /// <param name="Given">The mana the stone gave.</param>
 /// <param name="Items">The items named (one for a use on an item).</param>
 /// <param name="StillNeeded">The mana the equipped items still lack after the use (the "You need M more" line), 0 when "Your items are fully charged." or for a use on an item.</param>
-internal sealed partial record ManaStoneLine(int Given, IReadOnlyList<string> Items, int StillNeeded)
+/// <param name="Drained">M5 7 S2c: true for an empty stone's capture line, "The Mana Stone drains N points of mana from the X.\nThe X is destroyed." (ManaStone.cs:108-110): <see cref="Given"/> is then the mana the stone took (its efficiency times the item's mana, :108) and the item is gone.</param>
+internal sealed partial record ManaStoneLine(int Given, IReadOnlyList<string> Items, int StillNeeded, bool Drained = false)
 {
     /// <summary>Reads the line, or false when it is not a mana stone's "gives" line.</summary>
     internal static bool TryParse(string text, out ManaStoneLine line)
     {
         line = null!;
+        var drain = Drains().Match(text);
+        if (drain.Success && int.TryParse(drain.Groups["n"].Value, NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var drained))
+        {
+            line = new ManaStoneLine(drained, [drain.Groups["one"].Value], 0, Drained: true); // M5 7 S2c: the capture's line, read as the success it is
+            return true;
+        }
+
         var m = Gives().Match(text);
         if (!m.Success || !int.TryParse(m.Groups["n"].Value, NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var given))
         {
@@ -167,11 +214,16 @@ internal sealed partial record ManaStoneLine(int Given, IReadOnlyList<string> It
     }
 
     /// <summary>The outcome's detail: <c>gave 5000 mana to 13 items; fully charged</c>.</summary>
-    internal string Describe() =>
-        "gave " + ActionText.Count(Given) + " mana to " + (Items.Count == 1 ? "the " + Items[0] : ActionText.Count(Items.Count) + " items") + (StillNeeded > 0 ? "; " + ActionText.Count(StillNeeded) + " more needed" : "; fully charged");
+    internal string Describe() => Drained
+        ? "drained " + ActionText.Count(Given) + " mana from the " + Items[0] + " into the stone; the " + Items[0] + " is destroyed"
+        : "gave " + ActionText.Count(Given) + " mana to " + (Items.Count == 1 ? "the " + Items[0] : ActionText.Count(Items.Count) + " items") + (StillNeeded > 0 ? "; " + ActionText.Count(StillNeeded) + " more needed" : "; fully charged");
 
     [GeneratedRegex(@"^The Mana Stone gives (?<n>[\d,]+) points of mana to (?:the following items: (?<list>.+?)\.(?:\n|$)|the (?<one>.+?)\.$)", RegexOptions.CultureInvariant | RegexOptions.Singleline)]
     private static partial Regex Gives();
+
+    /// <summary>ACE's capture line (ManaStone.cs:110): "The Mana Stone drains {N:N0} points of mana from the {X}.\nThe {X} is destroyed.", the line end as sent (a space once the chat log has cleaned it).</summary>
+    [GeneratedRegex(@"^The Mana Stone drains (?<n>[\d,]+) points of mana from the (?<one>.+?)\.(?:\s+The .+ is destroyed\.)?$", RegexOptions.CultureInvariant | RegexOptions.Singleline)]
+    private static partial Regex Drains();
 
     [GeneratedRegex(@"You need (?<m>[\d,]+) more mana", RegexOptions.CultureInvariant)]
     private static partial Regex MoreNeeded();

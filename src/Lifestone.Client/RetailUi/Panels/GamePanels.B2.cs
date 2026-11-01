@@ -15,6 +15,19 @@ public sealed partial class GamePanels
     // The paperdoll (gmPaperDollUI, inside the inventory page 7): a second controller of that page, built when the shell is wired; it draws when the page first shows.
     private partial void QueueB2()
     {
-        Queue(static p => GamePaperDoll.Create(p.Context, p.Host));
+        Queue(static p =>
+        {
+            var doll = GamePaperDoll.Create(p.Context, p.Host);
+            if (doll is not null)
+            {
+                doll.SelectRequester = guid => p.Screen.SelectionUi?.SelectRequester?.Invoke(guid); // the figure's left click (M5 7 D122)
+                if (p.Screen.Chat is { } chat)
+                {
+                    doll.FigureDrop.Notice = chat.Local; // "You can't put that item there"
+                }
+            }
+
+            return doll;
+        });
     }
 }

@@ -43,7 +43,7 @@ public enum CorpseLoot
 /// </summary>
 /// <param name="Died">The deaths by the tuskers: the victim notices (<c>died</c>, judged == 1; a suicide sends none).</param>
 /// <param name="Suicides">The suicides the scenario sent and saw complete (<c>suicides</c>, report-only).</param>
-/// <param name="Deaths">The NumDeaths delta, suicides included (<c>deaths</c>, report-only).</param>
+/// <param name="Deaths">The NumDeaths delta, suicides included (<c>respawn_deaths</c>, report-only; the handler's own <c>deaths=</c> is a different field, 3-R2).</param>
 /// <param name="VitaePercent">The vitae after the death (<c>vitae</c>, report-only: D35, it climbs to ACE's 40% cap).</param>
 /// <param name="Respawn">Where the player arrived (<c>respawn</c>, judged == lifestone).</param>
 /// <param name="Corpses">The player's corpses seen (<c>corpse</c>, report-only).</param>
@@ -67,18 +67,13 @@ public enum CorpseLoot
 /// <param name="TripSeconds">The seconds from the trip's teleport to the corpse until it ended (<c>trip_s</c>, report-only), or null when no trip was made.</param>
 /// <param name="TripAbort">The reason the trip aborted (<c>trip_abort</c>, report-only), or <see cref="DeathLegVerdict.TripAbortNone"/>.</param>
 /// <param name="Protection">How the lifestone protection ended, <c>dispelled</c>, <c>expired</c> or <c>none</c> (<c>protection</c>, report-only: ACE dispels it on every teleport, so <c>protected</c> stays 0 live; review R2).</param>
-/// <param name="Rebuffed">M4 3.1 d1: <c>yes</c> when the rebuff stage's buff cycle ended with every profile line up, <c>no</c> when it failed or ended with a line down, <c>skipped</c> when the stage is off or never ran (<c>rebuffed</c>, report-only).</param>
+/// <param name="Rebuffed">M4 3.1 d1 (<c>stage_rebuffed=</c> on the line, 3-R2): <c>yes</c> when the rebuff stage's buff cycle ended with every profile line up, <c>no</c> when it failed or ended with a line down, <c>skipped</c> when the stage is off or never ran (<c>stage_rebuffed</c>, report-only).</param>
 /// <param name="DenKills">M4 3.1 d1: the kills of the fight stage's inner scenario (<c>den_kills</c>, report-only; 0 when the stage did not run).</param>
-/// <param name="Decoys">M4 3.1 d1: the decoys the pack held when the wait among the tuskers began (<c>decoys</c>, report-only), or null (<c>n/a</c>: <c>--death-decoys off</c>).</param>
-/// <param name="DecoySafe">M4 3.1 d1: the gear stage's <see cref="Lifestone.Client.Session.Mage.DecoyCheck.Field"/> (<c>yes</c> only when the check was made and the needed items cannot drop), or <c>n/a</c> (<c>--death-decoys off</c>, or no gear stage: no check was made) (<c>decoy_safe</c>, report-only).</param>
-/// <param name="DecoysDropped">M4 3.1 d1: the decoys the corpse's own listing held (<c>decoys_dropped</c>, report-only), or null (<c>n/a</c>: decoys off, or the trip never read a listing).</param>
-/// <param name="GearDropped">M4 3.1 d1: the listed entries the loops need (<see cref="Lifestone.Client.Session.Mage.DeathDropModel.IsNeeded"/>) (<c>gear_dropped</c>, report-only), or null (<c>n/a</c>).</param>
-/// <param name="DecoysRecovered">M4 3.1 d1: the listed decoys that are in the pack after the trip (<c>decoys_recovered</c>, report-only), or null (<c>n/a</c>).</param>
 /// <param name="PretripHeals">M4 3.1 d1 follow-up F1: the Heal Self casts of the pre-trip recovery (<c>pretrip_heals</c>, report-only; 0 when it did not run).</param>
 /// <param name="Undressed">D37 (M4 P5b): the worn pieces the undress moved to the pack before the wait (<c>undressed</c>, report-only), or null when it did not run (the suffix is then left off the line).</param>
 /// <param name="LieDown">D37: <c>sent</c>, <c>refused:&lt;why&gt;</c> or <c>n/a</c> (<c>lie_down</c>, report-only).</param>
 /// <param name="LieEcho">D37: <c>yes</c>, <c>no</c> or <c>n/a</c>: the server's motion for the player showed Sleeping after the lie-down (<c>lie_echo</c>, report-only).</param>
-/// <param name="GearLeft">M4 3.1 fix (review R2): the listed items the loops need that the trip did not take from the corpse (<c>gear_left</c>, report-only in its first gate: a duplicate, since the regear ran before the trip), or null (<c>n/a</c>: no listing was read).</param>
+/// <param name="GearLeft">M4 3.1 fix (review R2): the listed items the loops need that the trip did not take from the corpse (<c>gear_left</c>, report-only in its first gate: a loss under D51, which spawns nothing in its place), or null (<c>n/a</c>: no listing was read).</param>
 public readonly record struct DeathLegMeasures(
     int Died,
     int Suicides,
@@ -108,11 +103,6 @@ public readonly record struct DeathLegMeasures(
     string TripAbort = DeathLegVerdict.TripAbortNone,
     string Rebuffed = DeathLegVerdict.RebuffedSkipped,
     int DenKills = 0,
-    int? Decoys = null,
-    string DecoySafe = DeathLegVerdict.NotApplicable,
-    int? DecoysDropped = null,
-    int? GearDropped = null,
-    int? DecoysRecovered = null,
     int PretripHeals = 0,
     int? GearLeft = null,
     int? Undressed = null,
@@ -122,13 +112,12 @@ public readonly record struct DeathLegMeasures(
 /// <summary>
 /// The death leg's verdict (<c>--login-check=bsd-death</c>, M3 3.2 s0), composed from the scenario's failure (or null) and the measures, so it is built and tested without Godot. The line is
 /// <c>bsd-death done ok=&lt;true|false&gt; died= suicides= vitae= respawn=lifestone|elsewhere|none corpse= purged= protected= vitals_pct= gear_restored=yes|no worn= hits_taken= damage_taken= evades= health_min_pct= death_s=
-/// death_frame_max_ms= fight_frame_max_ms= deaths= corpses_stale= protection=dispelled|expired|none vitae_paid= vitae_after= corpse_looted=yes|partial|no|skipped items_recovered= trip_s= trip_abort= rebuffed=yes|no|skipped den_kills= decoys= decoy_safe=yes|no|n/a
-/// decoys_dropped= gear_dropped= decoys_recovered= pretrip_heals= gear_left=[ frame_over_50=yes]</c> (no name, no account), logged under the <c>logincheck</c> category. The fields are additive: a new one goes at the end (before the optional <c>frame_over_50=yes</c>); the game's leg line inserts <c>mode_mismatch=</c> there as well (<c>DeathLegRunner.LegLine</c>, review R21), as the hunt leg's line does.
+/// death_frame_max_ms= fight_frame_max_ms= respawn_deaths= corpses_stale= protection=dispelled|expired|none vitae_paid= vitae_after= corpse_looted=yes|partial|no|skipped items_recovered= trip_s= trip_abort= stage_rebuffed=yes|no|skipped den_kills= pretrip_heals= gear_left=[ frame_over_50=yes]</c> (no name, no account), logged under the <c>logincheck</c> category. The fields are additive: a new one goes at the end (before the optional <c>frame_over_50=yes</c>); the game's leg line inserts <c>mode_mismatch=</c> there as well (<c>DeathLegRunner.LegLine</c>, review R21), as the hunt leg's line does.
 /// </summary>
 /// <remarks>
 /// <para><b>Judged</b> (<c>ok=</c>; m3-plan section 4.8, D33 to D36): no failure, <c>died == 1</c> (exactly one death by the tuskers: the victim notices; the suicide that purges the buffs sends none), <c>respawn=lifestone</c>
 /// (D34), <c>gear_restored=yes</c>, and DoD 9's <c>damage_taken &gt; 0</c> and <c>hits_taken &gt;= 1</c> (D36: judged here, in the unbuffed leg, and report-only in <c>bsd-fight</c>). Everything else is report-only in this gate
-/// (a new judge is report-only in its first gate; M4 3.1 d1's <c>rebuffed= den_kills= decoys= decoy_safe= decoys_dropped= gear_dropped= decoys_recovered= pretrip_heals= gear_left=</c> are report-only; a gear item left on the corpse is a Warn and <c>gear_left=</c>, never a failure (review R2); a death in the rebuff or the fight still fails the run through the failure); <c>vitae=</c> is printed, not judged (D35: BSD Mage's vitae climbs to the cap and stays there). Since M3 4.1 lane c <c>death_frame_max_ms</c> is judged as the fight's frames are (section 5): over <see cref="FrameFailMs"/> fails the run, over
+/// (a new judge is report-only in its first gate; M4 3.1 d1's <c>stage_rebuffed= den_kills= pretrip_heals= gear_left=</c> (the decoy columns <c>decoys= decoy_safe= decoys_dropped= gear_dropped= decoys_recovered=</c> were removed with the decoys, M5 3 d3, D51) are report-only; a gear item left on the corpse is a Warn and <c>gear_left=</c>, never a failure (review R2); a death in the rebuff or the fight still fails the run through the failure); <c>vitae=</c> is printed, not judged (D35: BSD Mage's vitae climbs to the cap and stays there). Since M3 4.1 lane c <c>death_frame_max_ms</c> is judged as the fight's frames are (section 5): over <see cref="FrameFailMs"/> fails the run, over
 /// <see cref="FrameWarnMs"/> the line ends with <c>frame_over_50=yes</c> (the lead judges the worst of three runs). An unmeasured frame (n/a) is not judged.</para>
 /// </remarks>
 public static class DeathLegVerdict
@@ -145,7 +134,7 @@ public static class DeathLegVerdict
     /// <summary><c>rebuffed=</c> when the stage is off or never ran.</summary>
     public const string RebuffedSkipped = "skipped";
 
-    /// <summary>The text of a decoy field that does not apply (<c>--death-decoys off</c>) or was not measured.</summary>
+    /// <summary>The text of a field that does not apply or was not measured.</summary>
     public const string NotApplicable = "n/a";
 
     /// <summary>How near a lifestone object the arrival must be for <c>respawn=lifestone</c> (m3-plan section 4.8: within 15 m).</summary>
@@ -231,7 +220,7 @@ public static class DeathLegVerdict
         var ok = problems.Count == 0;
         var line = string.Create(
             inv,
-            $"bsd-death done ok={(ok ? "true" : "false")} died={measures.Died} suicides={measures.Suicides} vitae={measures.VitaePercent} respawn={RespawnText(measures.Respawn)} corpse={measures.Corpses} purged={measures.Purges} protected={measures.Protected} vitals_pct={Pct(measures.VitalsPercent)} gear_restored={(measures.GearRestored ? "yes" : "no")} worn={measures.Worn} hits_taken={measures.HitsTaken} damage_taken={measures.DamageTaken} evades={measures.Evades} health_min_pct={Pct(measures.HealthMinPercent)} death_s={Seconds(measures.DeathSeconds)} death_frame_max_ms={Pct(measures.DeathFrameMaxMs)} fight_frame_max_ms={Pct(measures.FightFrameMaxMs)} deaths={measures.Deaths} corpses_stale={measures.CorpsesStale} protection={measures.Protection ?? DeathTally.ProtectionNone} vitae_paid={(measures.VitaePaid is { } paid ? paid.ToString(inv) : "n/a")} vitae_after={(measures.VitaeAfter is { } after ? after.ToString(inv) : "n/a")} corpse_looted={CorpseText(measures.CorpseLooted)} items_recovered={measures.ItemsRecovered} trip_s={Pct(measures.TripSeconds)} trip_abort={measures.TripAbort ?? TripAbortNone} rebuffed={measures.Rebuffed ?? RebuffedSkipped} den_kills={measures.DenKills} decoys={Count(measures.Decoys)} decoy_safe={measures.DecoySafe ?? NotApplicable} decoys_dropped={Count(measures.DecoysDropped)} gear_dropped={Count(measures.GearDropped)} decoys_recovered={Count(measures.DecoysRecovered)} pretrip_heals={measures.PretripHeals} gear_left={Count(measures.GearLeft)}{(measures.Undressed is { } undressed ? $" undressed={undressed} lie_down={measures.LieDown} lie_echo={measures.LieEcho}" : string.Empty)}{(measures.DeathFrameMaxMs is { } worst && !double.IsNaN(worst) && worst > FrameWarnMs ? FrameOver50Flag : string.Empty)}");
+            $"bsd-death done ok={(ok ? "true" : "false")} died={measures.Died} suicides={measures.Suicides} vitae={measures.VitaePercent} respawn={RespawnText(measures.Respawn)} corpse={measures.Corpses} purged={measures.Purges} protected={measures.Protected} vitals_pct={Pct(measures.VitalsPercent)} gear_restored={(measures.GearRestored ? "yes" : "no")} worn={measures.Worn} hits_taken={measures.HitsTaken} damage_taken={measures.DamageTaken} evades={measures.Evades} health_min_pct={Pct(measures.HealthMinPercent)} death_s={Seconds(measures.DeathSeconds)} death_frame_max_ms={Pct(measures.DeathFrameMaxMs)} fight_frame_max_ms={Pct(measures.FightFrameMaxMs)} respawn_deaths={measures.Deaths} corpses_stale={measures.CorpsesStale} protection={measures.Protection ?? DeathTally.ProtectionNone} vitae_paid={(measures.VitaePaid is { } paid ? paid.ToString(inv) : "n/a")} vitae_after={(measures.VitaeAfter is { } after ? after.ToString(inv) : "n/a")} corpse_looted={CorpseText(measures.CorpseLooted)} items_recovered={measures.ItemsRecovered} trip_s={Pct(measures.TripSeconds)} trip_abort={measures.TripAbort ?? TripAbortNone} stage_rebuffed={measures.Rebuffed ?? RebuffedSkipped} den_kills={measures.DenKills} pretrip_heals={measures.PretripHeals} gear_left={Count(measures.GearLeft)}{(measures.Undressed is { } undressed ? $" undressed={undressed} lie_down={measures.LieDown} lie_echo={measures.LieEcho}" : string.Empty)}{(measures.DeathFrameMaxMs is { } worst && !double.IsNaN(worst) && worst > FrameWarnMs ? FrameOver50Flag : string.Empty)}");
         return new DeathLegOutcome(ok, line, problems);
     }
 

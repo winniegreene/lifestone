@@ -1,5 +1,7 @@
 using System.Numerics;
+using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement.Wayfinding;
+using Lifestone.Client.Session.Hosting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Tests.Session;
 using Lifestone.Data.Animation;
@@ -114,6 +116,55 @@ public sealed class NavCreatureTests
     }
 
     [Fact]
+    public void The_feed_gives_each_creature_its_height_for_a_room_routes_storey_band()
+    {
+        var table = new WorldObjectTable();
+        var below = Make(1, 0x10, 0x10, 7, 10);
+        below.Position = new CellFrame(0x01050303, new AcFrame(new Vector3(10f, 0f, -6f), Quaternion.Identity)); // a storey down
+        table.Set(below);
+        table.Set(Make(2, 0x10, 0x10, 7, 12)); // z 0
+        var feed = new HostileCreatureFeed(table, self: 99);
+        var into = new List<NavCreature>();
+
+        feed.Fill(P(0, 0, 0x01050000).Global, 100f, into);
+
+        Assert.Equal(-6f, into.Single(c => c.Guid == 1).Z);
+        Assert.Equal(0f, into.Single(c => c.Guid == 2).Z);
+        Assert.True(float.IsNaN(new NavCreature(3, Vector2.Zero, 5f).Z), "a creature built without a height counts at every height");
+    }
+
+    [Fact]
+    public void The_feed_takes_a_creatures_own_radius_from_its_setup_times_its_scale_and_falls_back_to_1_m_logged_once()
+    {
+        var table = new WorldObjectTable();
+        table.Set(Make(1, 0x10, 0x10, 7, 10, setup: 0x02000A01, scale: 1.5f)); // a Setup of radius 2, scaled 1.5
+        table.Set(Make(2, 0x10, 0x10, 7, 12, setup: 0x02000A01)); // the same Setup, no scale sent: 1
+        table.Set(Make(3, 0x10, 0x10, 7, 14, setup: 0x02000A02)); // a Setup not in the dats
+        table.Set(Make(4, 0x10, 0x10, 7, 16)); // no Setup sent
+        var recorded = new RecordingLogSink();
+        var log = new CountingLogSink(recorded);
+        var feed = new HostileCreatureFeed(table, self: 99, log, id => id == 0x02000A01 ? 2f : null);
+        var into = new List<NavCreature>();
+
+        feed.Fill(P(0, 0, 0x01050000).Global, 100f, into);
+        feed.Fill(P(0, 0, 0x01050000).Global, 100f, into);
+
+        Assert.Equal(NavCreatures.AggroRadius(10f, 3f), into.Single(c => c.Guid == 1).Radius);
+        Assert.Equal(NavCreatures.AggroRadius(10f, 2f), into.Single(c => c.Guid == 2).Radius);
+        Assert.Equal(NavCreatures.AggroRadius(10f, NavCreatures.UnknownCreatureRadiusMetres), into.Single(c => c.Guid == 3).Radius);
+        Assert.Equal(NavCreatures.AggroRadius(10f, NavCreatures.UnknownCreatureRadiusMetres), into.Single(c => c.Guid == 4).Radius);
+        Assert.Equal(1, log.Warnings); // the fallback, once
+
+        var bare = new HostileCreatureFeed(table, self: 99, log); // no lookup: every Setup radius is unread and every disc assumes 1 m (logged once)
+        bare.Fill(P(0, 0, 0x01050000).Global, 100f, into);
+        Assert.All(into, c => Assert.Equal(NavCreatures.AggroRadius(10f), c.Radius));
+        Assert.Equal(2, log.Warnings);
+        var unread = recorded.Entries.Last(e => e.Severity == LogSeverity.Warning).Message;
+        Assert.Contains("unread Setup radius", unread, StringComparison.Ordinal); // M5 item 2 k1: named as what it is, not the closed TODO(nav-creature-radius-host) (every host passes SetupRadii since g5)
+        Assert.DoesNotContain("TODO(", unread, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_awareness_is_the_world_databases_for_the_hunt_grounds_creatures_and_aces_default_otherwise()
     {
         Assert.Equal(74, CreatureAwareness.Count);
@@ -193,7 +244,7 @@ public sealed class NavCreatureTests
 
     private static float MinDistance(NavRoute route, Vector2 point) => Samples(route, 0.25f).Min(p => Vector2.Distance(p.Global, point));
 
-    private static WorldObject Make(uint guid, uint itemType, uint flags, uint wcid, float x)
+    private static WorldObject Make(uint guid, uint itemType, uint flags, uint wcid, float x, uint? setup = null, float? scale = null)
     {
         var weenie = new WeenieDesc
         {
@@ -204,7 +255,7 @@ public sealed class NavCreatureTests
             ItemType = itemType,
             ObjectDescriptionFlags = flags,
         };
-        var physics = new PhysicsDesc { Flags = PhysicsDescFlags.None, State = PhysicsState.None, Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) };
+        var physics = new PhysicsDesc { Flags = PhysicsDescFlags.None, State = PhysicsState.None, Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1), SetupId = setup, Scale = scale };
         return new WorldObject(new CreateObjectMsg(guid, ModelData.Empty, physics, weenie), isSelf: false, createdAt: 0)
         {
             Position = new CellFrame(0x01050303, new AcFrame(new Vector3(x, 0f, 0f), Quaternion.Identity)),

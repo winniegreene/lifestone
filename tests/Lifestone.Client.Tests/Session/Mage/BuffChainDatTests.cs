@@ -34,7 +34,7 @@ public sealed class BuffChainDatTests(DatSetFixture fixture, ITestOutputHelper o
         }
 
         order.AddRange(ArenaProfile.Lines.Where(l => l.IsBuff && l.Name.EndsWith("Mastery Self", StringComparison.Ordinal) && !order.Contains(l)).ToArray());
-        order.AddRange(ArenaProfile.Lines.Where(l => l.IsBuff && !order.Contains(l)).ToArray());
+        order.AddRange(ArenaProfile.Lines.Where(l => l.IsBuff && !l.ByPlay && !order.Contains(l)).ToArray()); // M5 7 P7j: a line learned by play is not the build's (BuffCycleTests pins its gate)
         return order;
     }
 
@@ -117,7 +117,7 @@ public sealed class BuffChainDatTests(DatSetFixture fixture, ITestOutputHelper o
         Assert.Equal(24, casts.Count);
         Assert.Equal(["Focus Self", "Willpower Self", "Creature Enchantment Mastery Self"], casts.Take(3).Select(c => c.Line.Name));
         Assert.Equal(["War Magic Mastery Self", "Item Enchantment Mastery Self", "Life Magic Mastery Self", "Mana Mastery Self"], casts.Skip(3).Take(4).Select(c => c.Line.Name));
-        Assert.Equal(ArenaProfile.Lines.Where(l => l.IsBuff).Select(l => l.Name).Order(), casts.Select(c => c.Line.Name).Order());
+        Assert.Equal(ArenaProfile.Lines.Where(l => l.IsBuff && !l.ByPlay).Select(l => l.Name).Order(), casts.Select(c => c.Line.Name).Order());
         Assert.All(casts, c => Assert.True(c.Chance >= MinChance));
 
         // The starting point: 316 in the three enchantment schools (Focus 267 and Self 267 give 134, plus 182 ranks).

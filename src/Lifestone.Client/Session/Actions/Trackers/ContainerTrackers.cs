@@ -24,6 +24,7 @@ internal sealed class OpenContainerTracker(ActionHandle handle, uint container) 
     private bool _locked;
     private string? _text;
     private double _viewAt = double.NaN;
+    private bool _seen;
 
     /// <inheritdoc/>
     internal override string WouldSend => "GameAction 0x0036 Use (open) " + ActionText.Hex(container);
@@ -35,7 +36,14 @@ internal sealed class OpenContainerTracker(ActionHandle handle, uint container) 
     internal override bool HoldsLane => _opened && !_useDoneSeen;
 
     /// <inheritdoc/>
-    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api);
+    internal override void Accepted(ActionApi api) => _seen = api.State.Objects.TryGet(container, out _);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// M5 7 D141's before-check: in the world, and the container, seen when the open was asked, still in the object table (a corpse that rotted while the open waited its turn: ACE's NoObject). The range is not a
+    /// precondition (ACE walks the player to it) and a busy lane is a wait, not a refusal.
+    /// </remarks>
+    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api) ?? TargetGone(api, container, _seen, "container");
 
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
@@ -102,10 +110,12 @@ internal sealed class OpenContainerTracker(ActionHandle handle, uint container) 
         }
 
         var why = _locked ? "the container is locked (it played its sound 0x94; ACE sends no text)" : _text is not null ? _text : "no reason given";
+        var reason = _locked ? ActionReason.Locked : e.WeenieError != 0 ? ActionReasons.FromCode(e.WeenieError) : ActionReason.NoEffect; // M5 7 D141: the contrary result, typed
         Resolve(new ActionOutcome(
             ActionOutcomeKind.ServerError,
             e.WeenieError,
-            "the server did not open " + ActionText.Hex(container) + ": UseDone " + ActionText.Hex(e.WeenieError) + " with no 0196 ViewContents; " + why));
+            "the server did not open " + ActionText.Hex(container) + ": UseDone " + ActionText.Hex(e.WeenieError) + " with no 0196 ViewContents; " + why,
+            reason));
         return true;
     }
 

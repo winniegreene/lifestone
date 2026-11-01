@@ -178,6 +178,49 @@ internal abstract class ItemMoveTracker(ActionHandle handle, uint item, double t
 internal sealed class PickUpTracker(ActionHandle handle, uint item, uint container, int placement) : ItemMoveTracker(handle, item, ActionPolicy.PickUpSeconds)
 {
     private uint _target;
+    private bool _seen;
+
+    /// <inheritdoc/>
+    internal override void Accepted(ActionApi api) => _seen = Visible(api);
+
+    /// <summary>
+    /// M5 7 D141 ("check before"): an item seen when the pick-up was asked (in the object table or the viewed container) and in neither now is gone (a corpse that rotted, an item another took): <see cref="ActionReason.TargetGone"/>,
+    /// as ACE's NoObject would answer; an item never seen is left to the server. A pick-up of an item that is not a pack needs a free pack slot (ACE never joins a stack at pick-up, see the class remarks): none by the client's count
+    /// (<see cref="BuyTracker.FreeSlots"/>, ACE's <c>Container.GetFreeInventorySlots</c>) is <see cref="ActionReason.NoFreeSlot"/>.
+    /// </summary>
+    protected override string? Precondition(ActionApi api)
+    {
+        if (_seen && !Visible(api))
+        {
+            return Refuse(ActionReason.TargetGone, "the item " + ActionText.Hex(Item) + " is gone: it was in the object table or the viewed container when the pick-up was asked and is in neither now");
+        }
+
+        var isPack = api.State.Objects.TryGet(Item, out var o) && (o.ItemType & BuyTracker.ContainerItemType) != 0;
+        return !isPack && BuyTracker.FreeSlots(api.State) is { } free && free < 1
+            ? Refuse(ActionReason.NoFreeSlot, "no free pack slot: the pick-up of " + ActionText.Hex(Item) + " needs one and the packs have " + ActionText.Count(free) + " free")
+            : null;
+    }
+
+    private bool Visible(ActionApi api)
+    {
+        if (api.State.Objects.TryGet(Item, out _))
+        {
+            return true;
+        }
+
+        if (api.State.Containers.Viewed is { } view)
+        {
+            foreach (var entry in view.Entries)
+            {
+                if (entry.Guid == Item)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     /// <inheritdoc/>
     internal override string WouldSend => "GameAction 0x0019 PutItemInContainer (pick up) " + ActionText.Hex(Item) + " into " + ActionText.Hex(container) + " slot " + placement;

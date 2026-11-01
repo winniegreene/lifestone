@@ -25,7 +25,8 @@ public readonly record struct BuffLegMeasures(long CastScripts, long CastSounds,
 /// <param name="DriverOn">True when the run used the re-buff driver (<c>--buff-auto on</c>, M4 4.1 lane c): <paramref name="Driver"/> then takes the forced pass's place.</param>
 /// <param name="Driver">What the driver's pass left (<c>BuffScenario.DriverResult</c>), or null when it never ended.</param>
 /// <param name="RebuffSeconds">The session seconds from the cycle's end to the driver pass's end (<c>BuffScenario.DriverRebuffSeconds</c>), NaN when the pass never ended.</param>
-public sealed record BuffLegScenarioResult(bool ScenarioSucceeded, string? Failure, string GearFields, BuffResult? Cycle, BuffResult? Forced, bool DriverOn = false, BuffResult? Driver = null, double RebuffSeconds = double.NaN);
+/// <param name="UnattendedEnd">M5 7 F24: the autopilot's own station ended with the ordered cycle; no driver or forced pass is judged.</param>
+public sealed record BuffLegScenarioResult(bool ScenarioSucceeded, string? Failure, string GearFields, BuffResult? Cycle, BuffResult? Forced, bool DriverOn = false, BuffResult? Driver = null, double RebuffSeconds = double.NaN, bool UnattendedEnd = false);
 
 /// <summary>
 /// The buff leg's verdict (<c>--login-check=buff</c>, M3 2.1 s3; docs/session.md section 30): composed from the scenario's result and the game's measures, so it is built and tested without Godot. The line is
@@ -134,7 +135,8 @@ public static class BuffLegVerdict
             problems.Add(string.Create(CultureInfo.InvariantCulture, $"buffs={active}/{wanted} (every wanted line active expected)"));
         }
 
-        if (best?.Rebuffed != true)
+        // M5 7 lead (soak round 4): the autopilot's own station ends with the ordered cycle (F24): no driver and no forced pass run, so the lines being up is its verdict.
+        if (best?.Rebuffed != true && !scenario.UnattendedEnd)
         {
             problems.Add(scenario.DriverOn ? "rebuffed=no (the driver's pass was to recast a line while it was still active)" : "rebuffed=no (a recast while still active expected)");
         }
@@ -191,8 +193,42 @@ public static class BuffLegVerdict
         var ok = problems.Count == 0;
         var line = string.Create(
             inv,
-            $"buff done ok={(ok ? "true" : "false")} gear={gear} worn={worn} cast={cast} buffs={active}/{wanted} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(forcedLanded ? "yes" : "no")} min_remaining_s={min} levels={(best is null ? "n/a" : best.Levels)} cycle_s={Math.Floor(scenario.Cycle?.CycleSeconds ?? 0).ToString("0", inv)} cast_scripts={measures.CastScripts} cast_sounds={measures.CastSounds} cast_windows={measures.CastWindows} cast_frame_max_ms={(measures.CastFrameMaxMs is { } ms ? ms.ToString("0.0", inv) : "n/a")} sounds_server={(measures.SoundsServer is { } s ? s.ToString(inv) : "n/a")} fizzles={best?.Fizzles ?? 0} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={(scenario.Cycle?.Surpassed ?? 0) + (later?.Surpassed ?? 0)} cast_scripts_expected={(scenario.Cycle?.Cast ?? 0) + (later?.Cast ?? 0)}{(measures.CastFrameMaxMs is { } castMs && !double.IsNaN(castMs) && castMs > FrameWarnMs ? " frame_over_50=yes" : string.Empty)}{DriverFields(scenario)}");
+            $"buff done ok={(ok ? "true" : "false")} gear={gear} worn={worn} cast={cast} buffs={active}/{wanted} rebuffed={(best?.Rebuffed == true ? "yes" : "no")} forced={(forcedLanded ? "yes" : "no")} min_remaining_s={min} levels={(best is null ? "n/a" : best.Levels)} cycle_s={Math.Floor(scenario.Cycle?.CycleSeconds ?? 0).ToString("0", inv)} cast_scripts={measures.CastScripts} cast_sounds={measures.CastSounds} cast_windows={measures.CastWindows} cast_frame_max_ms={(measures.CastFrameMaxMs is { } ms ? ms.ToString("0.0", inv) : "n/a")} sounds_server={(measures.SoundsServer is { } s ? s.ToString(inv) : "n/a")} fizzles={best?.Fizzles ?? 0} misses={(misses.Count == 0 ? "none" : string.Join(';', misses))} surpassed={(scenario.Cycle?.Surpassed ?? 0) + (later?.Surpassed ?? 0)} cast_scripts_expected={(scenario.Cycle?.Cast ?? 0) + (later?.Cast ?? 0)} {CastFieldsOf(scenario.Cycle, later)}{(measures.CastFrameMaxMs is { } castMs && !double.IsNaN(castMs) && castMs > FrameWarnMs ? " frame_over_50=yes" : string.Empty)}{DriverFields(scenario)}");
         return new BuffLegOutcome(ok, cast, line, problems);
+    }
+
+    /// <summary>
+    /// The cast policy's fields over several passes (M5 1 fix B, G1; report-only): the sum of each pass's tally in <see cref="BuffResult.CastFields"/>'s own form
+    /// (<c>mana_tries= mana_refusals= mana_landed= busy= resists= proved=</c>, and the dance fields where one ran). A pass given twice counts once; null passes are skipped.
+    /// </summary>
+    /// <param name="passes">The passes of the run (the ordered cycle, the forced or the driver's pass).</param>
+    public static string CastFieldsOf(params BuffResult?[] passes)
+    {
+        ArgumentNullException.ThrowIfNull(passes);
+        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var sum = new BuffResult();
+        foreach (var pass in passes)
+        {
+            if (pass is null || !seen.Add(pass))
+            {
+                continue;
+            }
+
+            sum = sum with
+            {
+                ManaTries = sum.ManaTries + pass.ManaTries,
+                ManaRefusals = sum.ManaRefusals + pass.ManaRefusals,
+                ManaLanded = sum.ManaLanded + pass.ManaLanded,
+                Busy = sum.Busy + pass.Busy,
+                Resists = sum.Resists + pass.Resists,
+                Proved = sum.Proved + pass.Proved,
+                Dances = sum.Dances + pass.Dances,
+                DancesLanded = sum.DancesLanded + pass.DancesLanded,
+                DancePresses = sum.DancePresses + pass.DancePresses,
+            };
+        }
+
+        return sum.CastFields;
     }
 
     /// <summary>The trailing <c>driver=on rebuff_lines= rebuff_s=</c> fields of a driver run, or nothing.</summary>

@@ -52,6 +52,18 @@ internal static class SessionNotices
     /// </summary>
     internal const ushort DigestParts = 10;
 
+    /// <summary>
+    /// The player answered an open server question (M5 6 w2; <c>IActionApi.RespondToConfirmation</c>): <c>Value</c> is the type word and <c>Text</c> is
+    /// <c>context:answer</c> (<c>17:1</c> yes, <c>17:0</c> no). The question closes locally when the answer is sent; a replay closes it again.
+    /// </summary>
+    internal const ushort ConfirmationAnswered = 11;
+
+    /// <summary>
+    /// The player set both character option words (M5 6 w2, D32; <c>IActionApi.SetCharacterOptions</c>): <c>Value</c> is the first word and <c>Text</c> the second
+    /// in hexadecimal (eight digits). The reducer applies them at once, as retail's player module does, and GameAction 0x01A1 takes them to the server.
+    /// </summary>
+    internal const ushort CharacterOptionsSet = 12;
+
     /// <summary>The last code reserved for the reducer.</summary>
     internal const ushort LastReducerCode = 15;
 }

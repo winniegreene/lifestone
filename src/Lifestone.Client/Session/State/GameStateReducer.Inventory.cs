@@ -30,6 +30,9 @@ internal sealed partial class GameStateReducer
     private const uint ItemTypeContainer = 0x200;
 
     private readonly HashSet<uint> _inventoryNotedProperties = [];
+
+    /// <summary>M5 7 D139 (l): the equipped items whose 02DA Wielder 0 came (ACE's <c>TryDequipObjectWithNetworking</c>) with no 0022 or 0023 since: a 0x00A0 for one of them means ACE's silent fallback put it in the pack.</summary>
+    private readonly HashSet<uint> _dequipZeroed = [];
     private bool _heldDeleteNoted;
     private bool _adoptNoted;
 
@@ -43,6 +46,7 @@ internal sealed partial class GameStateReducer
         var inventory = self.Inventory;
         inventory.Bind(self.Qualities);
         inventory.Owner = self.Guid;
+        _dequipZeroed.Clear();
         inventory.Replace(
             message.Inventory.Select(c => new InventoryEntry(c.Guid, c.ContainerType)),
             message.Equipped.Select(e => new EquippedItem(e.Guid, e.Location, e.Priority)),
@@ -52,11 +56,62 @@ internal sealed partial class GameStateReducer
     }
 
     /// <summary>
-    /// GM 0x0024: the item is gone from the player's holdings (a component burnt, an item consumed or given). The model forgets it and leaves its world object (it clears the object's container and
-    /// wielder; whether retail destroys the object is <c>TODO(retail-handler-0024)</c>). An item the player does not hold is only logged.
+    /// GM 0x0024: the item is gone from the player's holdings (a component burnt, an item consumed, given or spent, a stack merged away). The model forgets it and its world object's
+    /// container and wielder are cleared; an item the player does not hold is only logged there. M5 7 P7d (D139 row f): then, as retail, the world object is queued to go
+    /// <see cref="ObjectCull.CullSeconds"/> later with what it holds (<see cref="DoomContained"/>; retail's handler is the 0x24 case of <c>UIQueueManager::ProcessNetBlobData</c>,
+    /// 11.6096 0x0055BCD0 predicted: <c>ServerSaysRemove</c>, <c>AddContentsToDestructionQueue</c>, <c>AddObjectToBeDestroyed</c>; this closes <c>TODO(retail-handler-0024)</c>'s
+    /// question of whether retail destroys it). ACE sends no F747 for it (<c>WorldObject.Destroy</c> deletes only an object on a landblock), so it was kept for good before.
     /// </summary>
-    public void OnInventoryRemoveObject(in InboundContext context, in InventoryRemoveObjectMsg message) =>
+    public void OnInventoryRemoveObject(in InboundContext context, in InventoryRemoveObjectMsg message)
+    {
         Leave(message.Guid, InventoryChangeKind.Removed, MessageOpcodes.InventoryRemoveObject);
+        DoomContained(message.Guid, MessageOpcodes.InventoryRemoveObject, 0);
+    }
+
+    /// <summary>
+    /// M5 7 P7d (D139 row f): retail's <c>AddObjectToBeDestroyed</c> for an object that left the player's holdings (GM 0x0024) or moved into a container that is neither the
+    /// player's nor the open ground container (GE 0x0022: a vendor's, a chest's, or one this client does not know); <c>CPlayerSystem::RecvNotice_ServerSaysMoveItem</c>
+    /// (11.6096 0x00564000) also exempts the trade partner's, and Lifestone has no trade. Into the open ground container it is taken off the queue instead. One INFO line per
+    /// decision (category <c>objects</c>).
+    /// </summary>
+    private void DoomContained(uint guid, uint code, uint into)
+    {
+        if (KeepsOrphans || guid == _state.Self.Guid || !_state.Objects.TryGet(guid, out var item))
+        {
+            return;
+        }
+
+        var viewed = _state.Containers.ViewedGuid;
+        if (into != 0 && viewed != 0 && into == viewed)
+        {
+            if (Cull.Restore(guid))
+            {
+                _log.Info(ObjectsLogCategory, "a doomed object moved into the open ground container: kept", new LogField("guid", guid.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)), new LogField("name", item.Name), new LogField("container", into.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)));
+            }
+
+            return;
+        }
+
+        Cull.Doom(guid, _clock.Now);
+        _log.Info(
+            ObjectsLogCategory,
+            "an object left the player's holdings: it goes in 25 s with what it holds, as retail",
+            new LogField("guid", guid.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)),
+            new LogField("name", item.Name),
+            new LogField("code", code.ToString("X4", System.Globalization.CultureInfo.InvariantCulture)),
+            new LogField("container", into.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)),
+            new LogField("known_container", into != 0 && _state.Objects.Contains(into)),
+            new LogField("doom_pending", Cull.DoomPending));
+    }
+
+    /// <summary>M5 7 P7d: retail's <c>RemoveObjectToBeDestroyed</c> for a doomed object that came back to the player (a 0022 into the player's holdings, a 0023 wield), logged when it was doomed.</summary>
+    private void RestoreDoomed(uint guid, uint code)
+    {
+        if (Cull.Restore(guid))
+        {
+            _log.Info(ObjectsLogCategory, "a doomed object came back to the player: kept", new LogField("guid", guid.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)), new LogField("code", code.ToString("X4", System.Globalization.CultureInfo.InvariantCulture)));
+        }
+    }
 
     /// <summary>GM 0x0197: a stack's size and value. Kept for a held item and written to its world object; a stale sequence is dropped.</summary>
     public void OnSetStackSize(in InboundContext context, in SetStackSizeMsg message)
@@ -165,6 +220,11 @@ internal sealed partial class GameStateReducer
 
         var known = _state.Objects.TryGet(message.Guid, out var item);
         uint? value = message.Value == 0 ? null : message.Value;
+        if (message.Property == WielderProperty)
+        {
+            NoteDequipZero(message.Guid, value);
+        }
+
         switch (message.Property)
         {
             case ContainerProperty when known:
@@ -200,6 +260,7 @@ internal sealed partial class GameStateReducer
         var self = _state.Self;
         var inventory = self.Inventory;
         inventory.Owner = self.Guid;
+        _dequipZeroed.Remove(message.Item);
         MoveInViewedContainer(message.Item, message.Container, (int)Math.Min(message.Placement, int.MaxValue));
         if (!inventory.IsKnownContainer(message.Container) && self.Guid != 0
             && _state.Objects.TryGet(message.Container, out var pack) && pack.ContainerId == self.Guid)
@@ -210,8 +271,11 @@ internal sealed partial class GameStateReducer
         if (!inventory.IsKnownContainer(message.Container))
         {
             Leave(message.Item, InventoryChangeKind.Removed, GameEventTypes.InventoryPutObjInContainer, message.Container);
+            DoomContained(message.Item, GameEventTypes.InventoryPutObjInContainer, message.Container); // M5 7 P7d: a vendor's, a chest's or an unknown container
             return;
         }
+
+        RestoreDoomed(message.Item, GameEventTypes.InventoryPutObjInContainer);
 
         var container = message.Container;
         var from = inventory.PutInContainer(message.Item, message.ContainerType, container, (int)Math.Min(message.Placement, int.MaxValue));
@@ -258,6 +322,8 @@ internal sealed partial class GameStateReducer
         var inventory = self.Inventory;
         inventory.Owner = self.Guid;
         var location = message.Location;
+        RestoreDoomed(message.Object, GameEventTypes.WieldObject); // M5 7 P7d
+        _dequipZeroed.Remove(message.Object);
         var known = _state.Objects.TryGet(message.Object, out var item);
         var from = inventory.Equip(message.Object, message.Location, known ? item!.Weenie.Priority ?? 0 : 0);
         if (known)
@@ -280,8 +346,8 @@ internal sealed partial class GameStateReducer
         Leave(message.Object, InventoryChangeKind.Dropped, GameEventTypes.InventoryPutObjectIn3D);
 
     /// <summary>
-    /// GE 0x00A0 (retail <c>CPlayerSystem::RecvNotice_ServerSaysAttemptFailed</c>): the server refused an inventory action. No state changes; <see cref="InventoryFailed"/> carries the item and the
-    /// WeenieError for a tracker.
+    /// GE 0x00A0 (retail <c>CPlayerSystem::RecvNotice_ServerSaysAttemptFailed</c>): the server refused an inventory action. <see cref="InventoryFailed"/> carries the item and the WeenieError for a tracker. As a rule no state
+    /// changes, with one exception (M5 7 D139 row l): a refused move of a WIELDED item to a pack that ACE had already unwielded (see <see cref="ApplyDequipFallback"/>).
     /// </summary>
     public void OnInventoryServerSaysFailed(in InboundContext context, in GameEventHeader header, in InventoryServerSaysFailedEvent message)
     {
@@ -291,7 +357,102 @@ internal sealed partial class GameStateReducer
         }
 
         Publish(new InventoryFailed(message.Item, message.Error));
+        if (_dequipZeroed.Remove(message.Item) && _state.Self.Inventory.Find(message.Item).Kind == InventoryPlaceKind.Equipped)
+        {
+            ApplyDequipFallback(message.Item);
+        }
     }
+
+    /// <summary>M5 7 D139 (l): an equipped item's 02DA Wielder came: 0 marks it dequipped by the server (until its 0022, 0023 or departure), any other value clears the mark.</summary>
+    private void NoteDequipZero(uint guid, uint? wielder)
+    {
+        if (wielder is null && _state.Self.Inventory.Find(guid).Kind == InventoryPlaceKind.Equipped)
+        {
+            _dequipZeroed.Add(guid);
+        }
+        else
+        {
+            _dequipZeroed.Remove(guid);
+        }
+    }
+
+    /// <summary>
+    /// M5 7 D139 (l): ACE's refused move of a wielded item, which the model must follow (round 13, 2026-10-30 03:06:37 UTC: the held Wand sent to a full kit pack). <c>DoHandleActionPutItemInContainer</c> (ACE 95ef426d
+    /// <c>Player_Inventory.cs</c> 1268-1340) first unwields it (<c>TryDequipObjectWithNetworking</c>, 396-405: 02DA Wielder 0, 02CE CurrentWieldedLocation 0, F74A PickupEvent, the unwield sound, and a stance swap out of a
+    /// combat mode that needs it), then the container's <c>TryAddToInventory</c> refuses (1320-1323: the transient "Unable to put X into container" and this 0x00A0), and then, with no message at all, puts the item back
+    /// through <c>itemRootOwner.TryAddToInventory(item)</c> (1335): the player's main pack at slot 0, or the first side pack with room when the main pack is full (<c>Container.TryAddToInventory</c> 499-541). Not back in the
+    /// hands. Without this the model kept the item equipped, so the combat-mode guard let a magic request go out with no caster held, and ACE answered it with peace. The model now puts it where ACE did, logs it and
+    /// publishes the <see cref="InventoryChangeKind.Unwielded"/> a 0022 would have.
+    /// </summary>
+    private void ApplyDequipFallback(uint guid)
+    {
+        var self = _state.Self;
+        var inventory = self.Inventory;
+        var into = FallbackContainer(out var why);
+        if (into == 0)
+        {
+            _log.Error(SessionLog.Category, "TODO(m5-dequip-fallback-full): the server refused the move of a wielded item it had unwielded, and no pack of the model has room for ACE's fallback (Player_Inventory.cs 1335 then logs an error): the item leaves the model", new LogField("item", guid));
+            Leave(guid, InventoryChangeKind.Removed, GameEventTypes.InventoryServerSaysFailed);
+            return;
+        }
+
+        var from = inventory.PutInContainer(guid, 0, into, 0);
+        if (_state.Objects.TryGet(guid, out var item))
+        {
+            Mirror(item, w => w with
+            {
+                ContainerId = into,
+                WielderId = null,
+                CurrentlyWieldedLocation = null,
+                Header = (w.Header | WeenieHeaderFlags.Container) & ~(WeenieHeaderFlags.Wielder | WeenieHeaderFlags.CurrentlyWieldedLocation),
+            });
+        }
+
+        _log.Info(
+            SessionLog.Category,
+            "inventory: the server refused the move of a wielded item after it had unwielded it (02DA Wielder 0, then 0x00A0): ACE puts it in " + why + " with no message (Player_Inventory.cs 1335), not back in the hands; the model follows",
+            new LogField("item", guid),
+            new LogField("location", from.Location),
+            new LogField("container", into));
+        Changed();
+        Publish(new InventoryChanged(InventoryChangeKind.Unwielded, guid, into, 0, 0, from.Container, from.Placement, from.Location));
+        if (into != self.Guid)
+        {
+            PublishSidePackChanged(into);
+        }
+    }
+
+    /// <summary>Where ACE's <c>Container.TryAddToInventory</c> (499-541) puts an item with no placement: the main pack while it has room, else the first side pack (by slot) with room; 0 when none has.</summary>
+    private uint FallbackContainer(out string why)
+    {
+        var self = _state.Self;
+        var inventory = self.Inventory;
+        var mainCapacity = _state.Objects.TryGet(self.Guid, out var player) && player.Weenie.ItemsCapacity is > 0 ? player.Weenie.ItemsCapacity.Value : MainPackCapacity;
+        if (inventory.Pack.Count < mainCapacity)
+        {
+            why = "the main pack";
+            return self.Guid;
+        }
+
+        foreach (var side in inventory.SidePacks)
+        {
+            var capacity = _state.Objects.TryGet(side.Guid, out var pack) && pack.Weenie.ItemsCapacity is > 0 ? pack.Weenie.ItemsCapacity.Value : SidePackCapacity;
+            if (side.ContainerType == 1 && inventory.ItemsIn(side.Guid).Count < capacity)
+            {
+                why = "the first side pack with room (the main pack is full)";
+                return side.Guid;
+            }
+        }
+
+        why = "nothing";
+        return 0;
+    }
+
+    /// <summary>The player's main pack's ItemsCapacity when the player's own description sent none (ACE's Player weenie: 102).</summary>
+    private const int MainPackCapacity = 102;
+
+    /// <summary>A side pack's ItemsCapacity when its description sent none (the Pack's and the Sack's: 24).</summary>
+    private const int SidePackCapacity = 24;
 
     /// <summary>
     /// A world object whose CreateObject says the player holds it (its container is the player or a known side pack, or the player wields it) and which the model does not list yet: ACE sends no 0022 for
@@ -362,6 +523,7 @@ internal sealed partial class GameStateReducer
         var self = _state.Self;
         var inventory = self.Inventory;
         inventory.Owner = self.Guid;
+        _dequipZeroed.Remove(guid);
         var from = inventory.Release(guid);
         EvictShortcuts(guid); // OpenAC #219: the item left, so its shortcut row leaves with it (M4 3.2 h1)
         var known = _state.Objects.TryGet(guid, out var item);

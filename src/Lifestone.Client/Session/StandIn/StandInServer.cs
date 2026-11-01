@@ -85,6 +85,22 @@ public sealed class StandInServer
         return at;
     }
 
+    /// <summary>
+    /// Stocks the placed chest <paramref name="chest"/> with one magic item (M5 7 S6, the offline review frame of the examination; a placeholder, <c>TODO(m5-standin-magic-item)</c>): weenie <paramref name="wcid"/>'s art under
+    /// <paramref name="name"/>, glowing magical, its appraisal carrying <paramref name="magic"/>. Returns the item's guid. Before the chest is opened.
+    /// </summary>
+    public uint StockMagicItem(uint chest, string name, uint wcid, StandInMagicItem magic)
+    {
+        var world = World();
+        var guid = world.NewContentGuid();
+        world.MarkMagic(guid, magic);
+        world.Stock(chest, new StandInPackEntry(guid, wcid, name, 1));
+        return guid;
+    }
+
+    /// <summary>The next appraisal of a creature (a stand-in vendor) fails as ACE's failed roll does: success 0, the profile's health alone (M5 7 D137, the offline frame of a failed roll; a placeholder, the stand-in rolls no skill).</summary>
+    public void FailNextCreatureAppraisal() => World().FailNextCreatureAppraisal = true;
+
     /// <summary>Spell projectiles the stand-in has launched with ACE's model (M3 3.1 fb).</summary>
     public int BoltsLaunched => World().BoltsLaunched;
 
@@ -97,6 +113,34 @@ public sealed class StandInServer
     /// <summary>Takes an object placed by <see cref="Place"/> out of the world (a check's clean-up).</summary>
     /// <param name="guid">The object's id.</param>
     public void Remove(uint guid) => World().RemoveObject(guid);
+
+    /// <summary>The server asks a Yes/No question now (M5 6 k1; ACE's ConfirmationManager.EnqueueSend): the context, or 0 when a question of the type is open.</summary>
+    public const string QuestionText = StandInWorld.StandInQuestionText;
+
+    /// <summary>Asks the stand-in's Yes/No question with <paramref name="text"/> (default <see cref="QuestionText"/>).</summary>
+    public uint AskQuestion(string text = QuestionText) => World().AskQuestion(StandInWorld.YesNoType, text);
+
+    /// <summary>The answers the client gave to the stand-in's questions: type, context, yes or no.</summary>
+    public IReadOnlyList<(uint Type, uint Context, bool Accepted)> QuestionAnswers => World().QuestionAnswers;
+
+    /// <summary>How many 0x0276 the stand-in sent (ACE sends one only when a question times out).</summary>
+    public int QuestionsClosed => World().QuestionsClosed.Count;
+
+    /// <summary>The option words the stand-in stored from the client's 0x01A1, or null before one.</summary>
+    public (uint One, uint Two)? StoredOptions => World().StoredOptions ?? Responder().StoredOptions;
+
+    /// <summary>The emotes, tells and recalls the stand-in took, and its AFK state and message (M5 6 k1).</summary>
+    public (IReadOnlyList<string> Emotes, IReadOnlyList<(string Target, string Text)> Tells, int LifestoneRecalls, int MarketplaceRecalls, bool Afk, string AfkMessage) ChatAnswers =>
+        (World().Emotes, World().Tells, World().Recalls.Lifestone, World().Recalls.Marketplace, World().Afk, World().AfkMessage);
+
+    /// <summary>Locks the placed chest <paramref name="chest"/> so a key of class id <see cref="KeyWcid"/> opens it (M5 6 k1; ACE's Chest lock): the client reads 0x02D2 Locked true.</summary>
+    public void LockChest(uint chest) => World().LockChest(chest, StandInWorld.StandInKeyWcid);
+
+    /// <summary>The class id of the stand-in's key; spawn it with the tools' item request (a visit's <c>Items</c> must name it: <see cref="WithKey"/>).</summary>
+    public static uint KeyWcid => StandInWorld.StandInKeyWcid;
+
+    /// <summary>A visit's item kinds plus the stand-in key.</summary>
+    public static IReadOnlyDictionary<uint, StandInItemKind> WithKey(IReadOnlyDictionary<uint, StandInItemKind>? kinds = null) => StandInWorld.WithStandInKey(kinds ?? StandInItemKind.Default);
 
     /// <summary>Deaths of the player the stand-in has played (a suicide counts).</summary>
     public int PlayerDeaths => World().PlayerDeaths;

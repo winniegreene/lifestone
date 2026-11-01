@@ -106,8 +106,14 @@ public static class PanelFramesPlan
     /// </summary>
     public const string VendorBuySellFrame = "vendor-buy-sell";
 
-    /// <summary>The offline frames of the vendor window (M4 3.2 s4b), in the order the play-checks take them.</summary>
-    public static IReadOnlyList<string> VendorContentFrames { get; } = [VendorBuySellFrame];
+    /// <summary>
+    /// The offline review frame of a shop row examined by a right click (M5 7 S6, D136): <c>examine-vendor-row-standin</c>, saved in the <c>extra</c> sub-folder by the play-checks' vendor rows once the answer filled the examination window.
+    /// <b>Placeholder content:</b> the stand-in's Thelnoth, his shop and its labelled subset of ACE's tables (<c>TODO(m4-standin-vendor-model)</c>, <c>TODO(m4-standin-appraise-tables)</c>).
+    /// </summary>
+    public const string ExamineVendorRowFrame = "examine-vendor-row-standin";
+
+    /// <summary>The offline frames of the vendor window (M4 3.2 s4b; M5 7 S6), in the order the play-checks take them.</summary>
+    public static IReadOnlyList<string> VendorContentFrames { get; } = [VendorBuySellFrame, ExamineVendorRowFrame];
 
     /// <summary>How near, in metres, a container object must be for <c>--play-panel-shots</c> to open it for the <see cref="ContainerWindowFrame"/> (M4 2.2 s4).</summary>
     public const double ContainerFrameMetres = 10.0;
@@ -139,8 +145,23 @@ public static class PanelFramesPlan
     /// <summary>The frames <c>--play-panel-shots</c> takes for the examine panel (after the container window's): <see cref="ExamineKitFrame"/>.</summary>
     public static IReadOnlyList<string> ExamineShotFrames { get; } = [ExamineKitFrame];
 
-    /// <summary>The offline frames the play-checks' examine rows take: <see cref="ExamineStandInFrame"/>.</summary>
-    public static IReadOnlyList<string> OfflineExamineFrames { get; } = [ExamineStandInFrame];
+    /// <summary>
+    /// The offline review frame of a magic item examined by a right click in a container window (M5 7 S6, D136): <c>examine-chest-magic-standin</c>, the chest's window with the item selected and its examination open, filled with its spells,
+    /// activation line, mana and workmanship. <b>Placeholder content:</b> a stand-in chest and a stand-in magic wand (a real weenie's art, the tables the check gives it: <c>TODO(m4-standin-chest)</c>, <c>TODO(m5-standin-magic-item)</c>).
+    /// </summary>
+    public const string ExamineChestItemFrame = "examine-chest-magic-standin";
+
+    /// <summary>The offline frame of the stand-in wand in the pack, its box saying "&lt;Inscribe here&gt;" and its wield lines (M5 7 D137). <b>Placeholder content:</b> the stand-in magic item's tables (<c>TODO(m5-standin-magic-item)</c>).</summary>
+    public const string ExamineInscribeHereFrame = "examine-inscribe-here-standin";
+
+    /// <summary>The offline frame of the same wand once its inscription was written and appraised again ("For the Den", signed with the character's name; M5 7 D137). <b>Placeholder content:</b> as <see cref="ExamineInscribeHereFrame"/>.</summary>
+    public const string ExamineInscribedFrame = "examine-inscribed-standin";
+
+    /// <summary>The offline frame of a failed creature roll on the stand-in vendor (health as a percentage, stamina and mana unknown; M5 7 D137). <b>Placeholder content:</b> the stand-in rolls no skill; a lever fails the roll.</summary>
+    public const string ExamineFailedRollFrame = "examine-failed-roll-standin";
+
+    /// <summary>The offline frames the play-checks' examine rows take, in order: <see cref="ExamineStandInFrame"/>, <see cref="ExamineChestItemFrame"/>, then the D137 three.</summary>
+    public static IReadOnlyList<string> OfflineExamineFrames { get; } = [ExamineStandInFrame, ExamineChestItemFrame, ExamineInscribeHereFrame, ExamineInscribedFrame, ExamineFailedRollFrame];
 
     /// <summary>The first object of the player's main pack whose name says it is a healing kit ("Handy Healing Kit", "Adept Healing Kit") or whose weenie class is one (628, 629), or 0 (M4 3.2 s4c).</summary>
     public static uint KitInPack(GameState state)

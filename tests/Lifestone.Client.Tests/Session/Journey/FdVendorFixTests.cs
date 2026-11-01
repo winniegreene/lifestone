@@ -96,7 +96,8 @@ public sealed class FdVendorFixTests
 
         Assert.NotNull(dir);
         var shop = File.ReadAllText(Path.Combine(dir!, "src", "Lifestone.Client", "Session", "Scenarios", "Journey", "ShopStations.cs"));
-        Assert.Contains("GoNear(\"Renald\", RenaldName, ", shop, StringComparison.Ordinal);
+        Assert.Contains("NearestContaining(RenaldName, 20)", shop, StringComparison.Ordinal); // M5 7 P7p: the walk to Renald is GoToRenaldStand's point goal, and it finds him by his full name
+        Assert.DoesNotContain("GoNear(\"Renald\"", shop, StringComparison.Ordinal);
         Assert.Equal(2, shop.Split("GoNear(\"Thelnoth\", ThelnothName, ").Length - 1); // the appraise-vendor station and the vendor-facts station
         Assert.DoesNotContain("NearestContaining(who,", shop, StringComparison.Ordinal);
     }

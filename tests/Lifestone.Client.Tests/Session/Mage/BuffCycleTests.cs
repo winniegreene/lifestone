@@ -81,10 +81,13 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
 
     private static string ShortOf(string line) => BuffCycle.ShortNameOf(line);
 
+    /// <summary>Today's ceiling order (<c>--cast-mana-tries 0</c>, M5 1 K5): the tests that pin the mana loop before the tries and the dance.</summary>
+    private static readonly BuffOptions CeilingOrder = new() { Mana = Lifestone.Client.Session.Vitals.ManaOrderOptions.Ceiling };
+
     [Fact]
     public void The_cycle_casts_the_owners_order_and_chooses_each_level_from_the_buffed_skill()
     {
-        var t = new Rig();
+        var t = new Rig(options: CeilingOrder); // M5 1 K5: the worst-case economy below pins the ceiling order (--cast-mana-tries 0)
         t.Caster.CeilingCost = true; // the worst-case economy (every cast at the ceiling): this test pins the order and the levels, and that the mana loop carries a cycle that needs it
         Assert.True(t.Cycle.Start(t.Now));
         Assert.Equal(BuffStatus.Done, t.Run());
@@ -104,7 +107,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         casts = casts.Take(24).ToList();
         Assert.Equal(["Focus Self", "Willpower Self", "Creature Enchantment Mastery Self", "War Magic Mastery Self", "Item Enchantment Mastery Self", "Life Magic Mastery Self", "Mana Mastery Self"], casts.Take(7).Select(c => c.Line));
         Assert.Equal(t.Cycle.LineOrder, casts.Select(c => c.Line));
-        Assert.Equal(ArenaProfile.Lines.Where(l => l.IsBuff).Select(l => l.Name).Order(StringComparer.Ordinal), casts.Select(c => c.Line).Order(StringComparer.Ordinal));
+        Assert.Equal(ArenaProfile.Lines.Where(l => l.IsBuff && !l.ByPlay).Select(l => l.Name).Order(StringComparer.Ordinal), casts.Select(c => c.Line).Order(StringComparer.Ordinal)); // M5 7 P7j: Spirit Drinker waits for the spellbook
         Assert.Equal(["Strength Self", "Endurance Self", "Coordination Self", "Quickness Self"], casts.Skip(7).Take(4).Select(c => c.Line));
 
         // The levels come from the skill the casts before left (s0a's chain, from skill 316): Focus VI, Willpower VI, then VII (Creature Enchantment Mastery already reaches VII at 91% from 333).
@@ -223,7 +226,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     public void At_the_ceiling_cost_and_the_live_regeneration_the_cycle_still_ends_with_every_buff_active_the_worst_case()
     {
         // The old economy, kept as the worst case: every cast charged GearCasts.ManaCeiling (no Mana Conversion), regeneration 0.2 a second. A long wait, but the cycle ends with every line active.
-        var t = new Rig();
+        var t = new Rig(options: CeilingOrder); // M5 1 K5: the ceiling order (--cast-mana-tries 0)
         t.Caster.ManaRegenPerSecond = 0.2;
         t.Caster.CeilingCost = true;
         var start = t.Now;
@@ -239,32 +242,42 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
-    public void A_fizzle_is_retried_once_one_level_down_and_a_second_fizzle_is_a_named_miss()
+    public void A_fizzle_is_retried_at_the_same_level_twice_then_one_level_down_once_then_a_named_miss()
     {
+        // M5 1 K3 (D14, the owner's fizzle rule): was "retried once one level down and a second fizzle is a named miss". Now: VI fizzles three times (the first try and two more), V is tried once, and a fizzle there is the miss.
         var focus = ArenaProfile.LineNamed("Focus Self")!;
         var t = new Rig();
-        t.Caster.FizzleNext(focus.Spells[5].Id, 1); // Focus Self VI fizzles once: V is cast
+        t.Caster.FizzleNext(focus.Spells[5].Id, 1); // Focus Self VI fizzles once: VI is cast again, at the same level
         Assert.True(t.Cycle.Start(t.Now));
         Assert.Equal(BuffStatus.Done, t.Run());
         var r = t.Cycle.Result!;
         Assert.Equal(1, r.Fizzles);
         Assert.Empty(r.Misses);
-        Assert.Equal("VII", t.Levels()[ShortOf("Focus Self")]); // V landed, then the upgrade pass cast VII
-        Assert.Equal([focus.Spells[5].Id, focus.Spells[4].Id], t.Caster.Answered.Take(2).Select(a => a.Spell));
-        Assert.Equal(2, r.Upgraded); // Focus (V to VII) and Willpower (VI to VII)
+        Assert.Equal("VII", t.Levels()[ShortOf("Focus Self")]); // VI landed on the second try, then the upgrade pass cast VII
+        Assert.Equal([focus.Spells[5].Id, focus.Spells[5].Id], t.Caster.Answered.Take(2).Select(a => a.Spell));
+        Assert.Equal(2, r.Upgraded); // Focus (VI to VII) and Willpower (VI to VII)
         Assert.Equal(24, r.Active);
 
+        var down = new Rig();
+        down.Caster.FizzleNext(focus.Spells[5].Id, 3); // VI fizzles on all three of its tries: V is cast once
+        Assert.True(down.Cycle.Start(down.Now));
+        Assert.Equal(BuffStatus.Done, down.Run());
+        Assert.Equal(3, down.Cycle.Result!.Fizzles);
+        Assert.Empty(down.Cycle.Result.Misses);
+        Assert.Equal([focus.Spells[5].Id, focus.Spells[5].Id, focus.Spells[5].Id, focus.Spells[4].Id], down.Caster.Answered.Take(4).Select(a => a.Spell));
+        Assert.Equal([true, true, true, false], down.Caster.Answered.Take(4).Select(a => a.Fizzled));
+
         var twice = new Rig();
-        twice.Caster.FizzleNext(s => s.Id == focus.Spells[5].Id || s.Id == focus.Spells[4].Id, 5); // VI, then V: both fizzle; no third try
+        twice.Caster.FizzleNext(s => s.Id == focus.Spells[5].Id || s.Id == focus.Spells[4].Id, 4); // VI three times, then V: all fizzle; no fifth try
         Assert.True(twice.Cycle.Start(twice.Now));
         Assert.Equal(BuffStatus.Done, twice.Run());
         var missed = twice.Cycle.Result!;
-        Assert.Equal(2, missed.Fizzles);
+        Assert.Equal(4, missed.Fizzles);
         Assert.Equal(["Focus:fizzled"], missed.Misses);
-        Assert.Contains("fizzled twice", Assert.Single(missed.MissDetails), StringComparison.Ordinal);
+        Assert.Contains("fizzled 4 times (2 more tries at the same level, then one level down)", Assert.Single(missed.MissDetails), StringComparison.Ordinal);
         Assert.Equal(23, missed.Active);
         Assert.Equal("-", twice.Levels()[ShortOf("Focus Self")]);
-        Assert.Equal(2, twice.Caster.Answered.Count(a => focus.Spells.Any(s => s.Id == a.Spell))); // never a third try
+        Assert.Equal(4, twice.Caster.Answered.Count(a => focus.Spells.Any(s => s.Id == a.Spell))); // never a fifth try
         Assert.Matches(Fields, missed.Fields);
         Assert.Contains("misses=Focus:fizzled", missed.Fields, StringComparison.Ordinal);
     }
@@ -279,10 +292,12 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         var bane = ArenaProfile.LineNamed("Bludgeon Bane")!.Spells[6];
         Assert.Equal(1, t.Caster.Answered.Count(a => a.Spell == impen.Id)); // one cast per line, not one per piece
         Assert.Equal(1, t.Caster.Answered.Count(a => a.Spell == bane.Id));
+        // Every buff line goes out as GameAction 0x004A at the caster's own guid: the two armour lines by D23, the 24 SelfTargeted ones as retail's ClientMagicSystem::CastSpell sends a self spell
+        // (m5-buff-effects-drawn: ACE plays the buff's effect on the player only for a cast that names a target).
         var sent = t.R.H.Net.Of(FakeSendKind.CastTargetedSpell);
-        Assert.Equal(2, sent.Count); // the two armour lines go out as GameAction 0x004A at the caster's own guid; every other line is untargeted
         Assert.All(sent, s => Assert.Equal(WorldActionRig.Player, s.Guid));
-        Assert.Equal(24, t.R.H.Net.Of(FakeSendKind.CastUntargetedSpell).Count(s => ArenaProfile.Lines.Any(l => l.IsBuff && l.Spells.Any(x => x.Id == s.Guid))));
+        Assert.Equal(26, sent.Count(s => ArenaProfile.Lines.Any(l => l.IsBuff && l.Spells.Any(x => x.Id == (uint)s.Index))));
+        Assert.DoesNotContain(t.R.H.Net.Of(FakeSendKind.CastUntargetedSpell), s => ArenaProfile.Lines.Any(l => l.IsBuff && l.Spells.Any(x => x.Id == s.Guid)));
         Assert.Equal("VII", t.Levels()[ShortOf("Impenetrability")]);
 
         // The expiry is the cast's UseDone time plus the SpellTable duration (3,600 s at VII): the line leaves the margin's list when it is more than the margin away, and joins it inside.
@@ -333,7 +348,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     [Fact]
     public void A_transfer_that_fizzles_twice_is_tried_again_until_it_fires()
     {
-        var t = new Rig(mana: 60);
+        var t = new Rig(mana: 60, options: CeilingOrder); // M5 1 K5: the ceiling order's transfer loop (--cast-mana-tries 0)
         t.Caster.FizzleNext(s => s.MetaSpellType == DatReaderWriter.Enums.SpellType.Transfer, 2);
         Assert.True(t.Cycle.Start(t.Now));
         Assert.Equal(BuffStatus.Done, t.Run());
@@ -351,7 +366,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     [Fact]
     public void The_transfer_tries_run_out_and_fail_the_cycle_loudly()
     {
-        var t = new Rig(mana: 60, options: new BuffOptions { TransferTries = 3 });
+        var t = new Rig(mana: 60, options: new BuffOptions { TransferTries = 3, Mana = Lifestone.Client.Session.Vitals.ManaOrderOptions.Ceiling });
         t.Caster.FizzleNext(s => s.MetaSpellType == DatReaderWriter.Enums.SpellType.Transfer, 100);
         Assert.True(t.Cycle.Start(t.Now));
         Assert.Equal(BuffStatus.Failed, t.Run());
@@ -365,7 +380,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     [Fact]
     public void Revitalize_is_cast_first_when_the_stamina_is_too_low_for_a_transfer_to_cover_the_shortfall()
     {
-        var t = new Rig(mana: 60, stamina: 10);
+        var t = new Rig(mana: 60, stamina: 10, options: CeilingOrder); // M5 1 K5: the ceiling order (--cast-mana-tries 0)
         Assert.True(t.Cycle.Start(t.Now));
         Assert.Equal(BuffStatus.Done, t.Run());
         var first = t.Caster.Table[t.Caster.Answered[0].Spell];
@@ -380,7 +395,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     public void The_regeneration_wait_is_named_and_bounded_and_fails_the_cycle_when_it_runs_out()
     {
         // Mana 5: below the cheapest transfer level (10), so neither mana line can be cast; with no regeneration the wait runs out.
-        var t = new Rig(mana: 5, options: new BuffOptions { ManaWaitSeconds = 30 });
+        var t = new Rig(mana: 5, options: new BuffOptions { ManaWaitSeconds = 30, Mana = Lifestone.Client.Session.Vitals.ManaOrderOptions.Ceiling });
         t.Caster.ManaRegenPerSecond = 0;
         Assert.True(t.Cycle.Start(t.Now));
         var status = BuffStatus.Running;
@@ -399,7 +414,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Empty(t.Caster.Answered);
 
         // With regeneration the same wait ends by itself: the cycle goes on once the mana reaches the cheapest level.
-        var regen = new Rig(mana: 5);
+        var regen = new Rig(mana: 5, options: CeilingOrder);
         Assert.True(regen.Cycle.Start(regen.Now));
         Assert.Equal(BuffStatus.Done, regen.Run());
         Assert.Equal(24, regen.Cycle.Result!.Active);
@@ -410,7 +425,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     public void A_re_buff_pass_casts_only_the_lines_inside_the_margin_and_a_forced_pass_casts_only_the_line_closest_to_expiry()
     {
         // A margin of 10 s keeps the lines apart: the cycle's casts span a few tens of seconds, so a clock that leaves the earliest line 5 s puts only the earliest ones inside it.
-        var t = new Rig(options: new BuffOptions { RebuffMarginSeconds = 10 });
+        var t = new Rig(options: new BuffOptions { RebuffMarginSeconds = 10, StartReserve = false }); // P7c: the spacing below is the pass of before's (no reserve dances)
         t.Caster.CeilingCost = true; // the margin test's timing is tuned to the worst-case economy's pace
         Assert.True(t.Cycle.Start(t.Now));
         Assert.Equal(BuffStatus.Done, t.Run());
@@ -515,6 +530,39 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.All(t.Levels().Values, l => Assert.Equal("VII", l));
     }
 
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData(BuffOptions.OneBuffCycleSeconds, 24)]
+    public void A_start_pass_with_one_buff_cycle_as_its_margin_recasts_every_line_and_the_rebuff_margin_none(double? startMargin, int recast)
+    {
+        // D126 (a), section 9's m5-start-pass-margin: 1,000 s after a full cycle every line has 1,700 s or more left. A start's pass at the re-buff margin (300 s) casts nothing, so the lines run on in the batch they were cast in;
+        // the autopilot's start pass (one buff cycle, 2,700 s) recasts them all, and no line left from before falls due on its own in the first fight.
+        var t = new Rig(options: new BuffOptions { StartMarginSeconds = startMargin });
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        t.R.Tick(1000);
+        var answered = t.Caster.Answered.Count;
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        output.WriteLine(t.Cycle.Result!.Fields);
+        Assert.Equal(recast, t.BuffCasts(answered).Select(c => c.Line).Distinct().Count());
+        Assert.Equal(24, t.Cycle.Result.Active);
+        Assert.Contains(t.R.H.Log.Lines, l => l.Contains($"cycle starts: 24 lines, margin {startMargin ?? 300:0} s", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_start_margin_is_a_registered_option_and_the_autopilots_start_station_names_its_pass()
+    {
+        Assert.Null(new BuffOptions().StartMarginSeconds);
+        var parsed = BuffOptions.FromArguments(CommandLineArgument.ParseAll(["--buff-start-margin-s=1800"]));
+        Assert.Empty(parsed.Errors);
+        Assert.Equal(1800, parsed.StartMarginSeconds);
+        Assert.NotEmpty(BuffOptions.FromArguments(CommandLineArgument.ParseAll(["--buff-start-margin-s=-1"])).Errors);
+        Assert.Contains(OptionCatalog.Buff().Options, x => x.Name == "--buff-start-margin-s");
+        Assert.True(Lifestone.Client.Session.Autopilot.AutopilotScenario.BuffSpec.Arguments.ContainsKey(Lifestone.Client.Session.Scenarios.Journey.JourneyStations.StartPassArgument));
+        Assert.False(Lifestone.Client.Session.Autopilot.AutopilotScenario.UpkeepSpec.Arguments.ContainsKey(Lifestone.Client.Session.Scenarios.Journey.JourneyStations.StartPassArgument)); // the upkeep keeps the re-buff margin
+    }
+
     [Fact]
     public void An_upgrade_that_fizzles_is_a_named_miss_and_is_not_retried()
     {
@@ -536,7 +584,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     public void A_long_regeneration_wait_is_spent_in_non_combat_and_the_cycle_returns_to_magic_before_the_next_cast()
     {
         // Mana 5 and half a point a second: the first wait (to the cheapest transfer's 10) lasts 10 s, so it goes past NonCombat's 5 s; a wait shorter than that stays in Magic.
-        var t = new Rig(mana: 5);
+        var t = new Rig(mana: 5, options: CeilingOrder); // M5 1 K5: the ceiling order's regeneration wait (--cast-mana-tries 0)
         t.Caster.ManaRegenPerSecond = 0.5;
         Assert.True(t.Cycle.Start(t.Now));
         Assert.Equal(BuffStatus.Done, t.Run(maxSeconds: 20000));
@@ -604,7 +652,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal(BuffCycle.StageCasting, t.Cycle.Stage);
 
         // The regeneration wait: mana below the cheapest level and no regeneration, steps across several re-evaluations (the clock advances, the wait's own look runs each second).
-        var w = new Rig(mana: 5);
+        var w = new Rig(mana: 5, options: CeilingOrder); // M5 1 K5: the ceiling order's regeneration wait (--cast-mana-tries 0)
         w.Caster.ManaRegenPerSecond = 0;
         Assert.True(w.Cycle.Start(w.Now));
         for (var i = 0; i < 12 && w.Cycle.Stage != BuffCycle.StageManaWait; i++)
@@ -761,5 +809,343 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         {
             Assert.Equal(OptionScenes.Main | OptionScenes.Headless, OptionCatalog.Registry.ScenesOf(name));
         }
+    }
+
+    // ------------------------------------------------------------------------------------------------ M5 1 K5: the mana order (D15, D27), the default
+
+    [Fact]
+    public void M5_7_a_pass_that_starts_under_its_first_buffs_cost_dances_first_then_casts_with_no_mana_try()
+    {
+        // Mana 12: under the first buff's cost (70) though over its try floor (5 at the scripted mage's Mana Conversion). Live, a fresh login's first cast at 15 mana was refused for mana. Now the pass dances first
+        // (Stamina to Mana pressed until it lands), logs one line for it, and casts the first buff with the mana in hand: no blind try.
+        foreach (var seed in new[] { 1, 2, 3, 4, 5, 6, 7, 8 })
+        {
+            var t = new Rig(mana: 12, manaSeed: seed);
+            Assert.True(t.Cycle.Start(t.Now));
+            Assert.Equal(BuffStatus.Done, t.Run());
+            var r = t.Cycle.Result!;
+            Assert.Equal(24, r.Active);
+            var answered = t.Caster.Answered;
+            var presses = answered.TakeWhile(a => t.Caster.Table[a.Spell].MetaSpellType == DatReaderWriter.Enums.SpellType.Transfer).Count();
+            Assert.True(presses >= 1, "the first thing sent is a Stamina to Mana press");
+            var firstBuff = answered.First(x => t.Caster.Table[x.Spell].MetaSpellType == DatReaderWriter.Enums.SpellType.Enchantment); // the stamina's Revitalize (D88) may stand between the dance and the buff
+            Assert.Equal(DatReaderWriter.Enums.SpellType.Enchantment, t.Caster.Table[firstBuff.Spell].MetaSpellType);
+            Assert.Equal(firstBuff.Spell, t.Caster.Charged.First(c => t.Caster.Table[c.Spell].MetaSpellType == DatReaderWriter.Enums.SpellType.Enchantment).Spell);
+            var danceLines = t.R.H.Log.Lines.Where(l => l.Contains("] pre-pass dance:", StringComparison.Ordinal)).ToList();
+            var line = Assert.Single(danceLines);
+            Assert.Contains("mana 12 -> ", line, StringComparison.Ordinal);
+            Assert.Contains($", {presses} press(es) (", line, StringComparison.Ordinal);
+            Assert.EndsWith(", landed, for " + t.Caster.Table[firstBuff.Spell].Name, line, StringComparison.Ordinal);
+            var firstTry = t.R.H.Log.Lines.First(l => l.Contains("try 1 " + t.Caster.Table[firstBuff.Spell].Name, StringComparison.Ordinal));
+            Assert.DoesNotContain("(a mana try)", firstTry, StringComparison.Ordinal);
+            Assert.True(r.Dances >= 1);
+        }
+    }
+
+    [Fact]
+    public void M5_7_a_pass_that_starts_with_enough_mana_does_not_dance_first()
+    {
+        var t = new Rig();
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        Assert.Equal(DatReaderWriter.Enums.SpellType.Enchantment, t.Caster.Table[t.Caster.Answered[0].Spell].MetaSpellType);
+        Assert.DoesNotContain(t.R.H.Log.Lines, l => l.Contains("] pre-pass dance:", StringComparison.Ordinal));
+        Assert.DoesNotContain(t.R.H.Log.Lines, l => l.Contains("Revitalize after the pre-pass dance", StringComparison.Ordinal)); // P7c: a later line's reserve dance may Revitalize after it, not the first
+    }
+
+    [Fact]
+    public void M5_7_P7c_a_start_pass_keeps_the_next_presss_mana_so_no_Stamina_to_Mana_press_is_a_mana_try_and_the_pass_ends_with_it_paid()
+    {
+        // D139 row a (m5-start-pass-dance): round 13's start pass spent the mana to 42 and the first Stamina to Mana press after it, Meditative Trance at 42 of up to 70, was refused "not enough mana" (0x0401). Now a start's
+        // pass keeps the reserve (the dearest payable press's base, 70) past every line: under a line's cost plus it, the pass dances while the press is sure, so no press is a mana try and none is refused, and the pass
+        // ends with the reserve in hand. Before P7c a pass that started with 200 mana ran it down and danced from under the press's ceiling (a mana try, as the round's refused press).
+        foreach (var seed in new[] { 1, 2, 3, 4, 5, 6, 7, 8 })
+        {
+            var t = new Rig(mana: 200, manaSeed: seed);
+            Assert.True(t.Cycle.Start(t.Now));
+            Assert.Equal(BuffStatus.Done, t.Run());
+            var r = t.Cycle.Result!;
+            Assert.Equal(24, r.Active);
+            var lines = t.R.H.Log.Lines.ToList();
+            Assert.DoesNotContain(lines, l => l.Contains("mana dance Stamina to Mana: try ", StringComparison.Ordinal) && l.Contains("(a mana try)", StringComparison.Ordinal));
+            Assert.Contains(lines, l => l.Contains("] reserve: mana ", StringComparison.Ordinal) && l.Contains("kept for the next Stamina to Mana press): the dance first, while a press is sure", StringComparison.Ordinal));
+            Assert.Contains(lines, l => l.Contains("] reserve dance: mana ", StringComparison.Ordinal) && l.Contains(", landed, for ", StringComparison.Ordinal));
+            var transfers = t.Caster.Answered.Where(a => t.Caster.Table[a.Spell].MetaSpellType == DatReaderWriter.Enums.SpellType.Transfer).ToList();
+            Assert.NotEmpty(transfers);
+            Assert.Equal(transfers.Count, r.DancePresses); // every press landed at once: none refused
+            Assert.True(t.Caster.Mana >= 70, $"seed {seed}: the pass ended with {t.Caster.Mana} mana, under the 70 the next press may cost");
+        }
+    }
+
+    [Fact]
+    public void M5_7_P7c_a_re_buff_pass_keeps_no_reserve()
+    {
+        // The reserve is a start's pass's (the autopilot's buff station, a person's start): a re-buff pass (the fight's refresh, the upkeep) looks only before its first line, as before.
+        var t = new Rig();
+        Assert.True(t.Cycle.StartRebuff(t.Now, forced: false));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        Assert.DoesNotContain(t.R.H.Log.Lines, l => l.Contains("] reserve", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void M5_7_the_pre_pass_dance_is_followed_by_Revitalize_when_the_stamina_is_under_the_share()
+    {
+        var t = new Rig(mana: 12);
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        var lines = t.R.H.Log.Lines.ToList();
+        var dance = lines.FindIndex(l => l.Contains("] pre-pass dance:", StringComparison.Ordinal));
+        var revive = lines.FindIndex(l => l.Contains("Revitalize after the pre-pass dance", StringComparison.Ordinal));
+        Assert.True(dance >= 0 && revive > dance, "the Revitalize follows the dance's line");
+        Assert.True(t.Cycle.Result!.Revitalizes >= 1);
+        Assert.True(t.Cycle.Result.Revitalizes <= BuffCycle.PassRevitalizeLimit);
+    }
+
+    [Fact]
+    public void A_mana_try_inside_a_pass_still_lands_when_no_dance_can_be_pressed_with_every_try_counted_K5()
+    {
+        // Mana 12 and no stamina to transfer: the pass cannot dance, so (as before M5 7) the first line is tried at once from its try floor; a 0x0401 inside the tries is expected. Over a few seeds of the scripted rolls at
+        // least one first line lands after a refusal; every run ends with every buff active.
+        var refusedThenLanded = 0;
+        foreach (var seed in new[] { 1, 2, 3, 4, 5, 6, 7, 8 })
+        {
+            var t = new Rig(mana: 12, stamina: 0, manaSeed: seed);
+            Assert.True(t.Cycle.Start(t.Now));
+            Assert.Equal(BuffStatus.Done, t.Run());
+            var r = t.Cycle.Result!;
+            Assert.Equal(24, r.Active);
+            Assert.True(r.ManaTries >= 1, r.CastFields);
+            Assert.DoesNotContain(t.R.H.Log.Lines, l => l.Contains("] pre-pass dance:", StringComparison.Ordinal));
+            var lead = t.Caster.Answered.TakeWhile(a => a.Spell == t.Caster.Answered[0].Spell && !a.Fizzled).Count();
+            if (lead <= 1)
+            {
+                continue;
+            }
+
+            refusedThenLanded++;
+            Assert.Contains(t.R.H.Log.Lines, l => l.Contains("(a mana try)", StringComparison.Ordinal));
+            Assert.True(r.ManaRefusals >= 1, r.CastFields);
+        }
+
+        Assert.True(refusedThenLanded >= 1, "no seed refused a first try");
+    }
+
+    [Fact]
+    public void Under_the_floor_the_dance_presses_Stamina_to_Mana_until_it_lands_and_every_press_is_counted_K5()
+    {
+        // Mana 2: under every try floor (5), so the pass dances first. Each press is a cast the scripted ACE answers (0x0401 with nothing charged, or the landing).
+        var seen = 0;
+        foreach (var seed in new[] { 1, 2, 3, 4, 5, 6, 7, 8 })
+        {
+            var t = new Rig(mana: 2, manaSeed: seed);
+            Assert.True(t.Cycle.Start(t.Now));
+            Assert.Equal(BuffStatus.Done, t.Run());
+            var r = t.Cycle.Result!;
+            Assert.Equal(24, r.Active);
+            Assert.True(r.Dances >= 1);
+            Assert.True(r.DancesLanded >= 1);
+            Assert.True(r.DancePresses >= r.Dances);
+            Assert.Contains($" mana_presses={r.DancePresses} dances={r.Dances} dances_landed={r.DancesLanded}", r.CastFields, StringComparison.Ordinal);
+
+            // The first dance: its presses are the transfer answers before the first buff answer, the last of them the landing.
+            var presses = t.Caster.Answered.TakeWhile(a => t.Caster.Table[a.Spell].MetaSpellType == DatReaderWriter.Enums.SpellType.Transfer).Count();
+            Assert.InRange(presses, 1, Lifestone.Client.Session.Vitals.ManaOrderOptions.DefaultDancePresses);
+            var line = t.R.H.Log.Lines.First(l => l.Contains("mana: the dance landed on press", StringComparison.Ordinal));
+            Assert.Contains($"on press {presses} (", line, StringComparison.Ordinal);
+            if (presses > 1)
+            {
+                seen++;
+            }
+        }
+
+        Assert.True(seen >= 1, "no seed refused a press before the landing");
+    }
+
+    [Fact]
+    public void A_landed_press_of_the_dance_is_proved_by_the_transfer_chat_line_and_counted_in_proved_and_mana_landed_M5_1_fix_B_G5()
+    {
+        // ACE's transfer on oneself says "You cast <spell> on yourself and lose N points of stamina and also gain M points of mana" (Magic chat, 0x07; WorldObject_Magic.cs:835 @95ef426d), which CastChatProof reads as Proved.
+        // The scripted caster writes that line with the transfer's UseDone 0, so a landing ends Landed (not Unproven) and counts as a proved cast and as a landed Mana Conversion try.
+        foreach (var seed in new[] { 1, 2, 3 })
+        {
+            var t = new Rig(mana: 2, manaSeed: seed);
+            Assert.True(t.Cycle.Start(t.Now));
+            Assert.Equal(BuffStatus.Done, t.Run());
+            var r = t.Cycle.Result!;
+            Assert.True(r.DancesLanded >= 1);
+            Assert.True(r.Proved >= r.DancesLanded, $"proved {r.Proved} dances landed {r.DancesLanded}: {r.CastFields}");
+            var sure = t.R.H.Log.Lines.Count(l => l.Contains("] reserve dance: ", StringComparison.Ordinal) && l.Contains(", landed, ", StringComparison.Ordinal));
+            Assert.True(r.ManaLanded >= r.DancesLanded - sure, r.CastFields); // P7c: a start pass's reserve dance is pressed at or over its ceiling, so it is no Mana Conversion try
+            Assert.Contains($" proved={r.Proved}", r.CastFields, StringComparison.Ordinal);
+            Assert.Contains(t.R.H.Log.Lines, l => l.Contains("mana dance Stamina to Mana: landed", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void A_pass_whose_mana_is_spent_dances_instead_of_todays_regeneration_wait_K5()
+    {
+        // Mana 5 and no regeneration: today's ceiling order waits and the wait runs out (the pinned The_regeneration_wait_is_named_and_bounded_...); the mana order dances and the pass ends with every buff.
+        var ceiling = new Rig(mana: 5, options: new BuffOptions { ManaWaitSeconds = 30, Mana = Lifestone.Client.Session.Vitals.ManaOrderOptions.Ceiling });
+        ceiling.Caster.ManaRegenPerSecond = 0;
+        Assert.True(ceiling.Cycle.Start(ceiling.Now));
+        Assert.Equal(BuffStatus.Failed, ceiling.Run(maxSeconds: 120, dt: 0.5));
+
+        var t = new Rig(mana: 5, options: new BuffOptions { ManaWaitSeconds = 30 });
+        t.Caster.ManaRegenPerSecond = 0;
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        var r = t.Cycle.Result!;
+        Assert.Equal(24, r.Active);
+        Assert.Empty(r.Misses);
+        Assert.True(r.Dances >= 1);
+        Assert.Contains(t.R.H.Log.Lines, l => l.Contains("] pre-pass dance:", StringComparison.Ordinal)); // M5 7: the pass starts with 5 mana, so it dances first
+        Assert.True(r.Revitalizes <= BuffCycle.PassRevitalizeLimit); // Revitalize is not cast for mana: only the pass's refill after the pre-pass dance (M5 7, D88)
+        Assert.DoesNotContain(t.R.H.Log.Lines, l => l.Contains("the mana wait ran out", StringComparison.Ordinal));
+        Assert.EndsWith(r.CastFields, t.R.H.Log.Lines.Last(l => l.Contains("pass done: ", StringComparison.Ordinal)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_mana_orders_wait_allocates_nothing_across_its_looks_K5()
+    {
+        // No mana at all and no regeneration: no press can land, so the order waits (its own look each second); the wait reads, sends nothing and allocates nothing.
+        var w = new Rig(mana: 0);
+        w.Caster.ManaRegenPerSecond = 0;
+        Assert.True(w.Cycle.Start(w.Now));
+        for (var i = 0; i < 12 && w.Cycle.Stage != BuffCycle.StageManaWait; i++)
+        {
+            Assert.Equal(BuffStatus.Running, w.Frame(0.25));
+        }
+
+        Assert.Equal(BuffCycle.StageManaWait, w.Cycle.Stage);
+        var now = w.Now;
+        w.Cycle.Step(now + 1.5);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 300; i++)
+        {
+            w.Cycle.Step(now + 1.5 + (i * 0.01));
+        }
+
+        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Equal(BuffCycle.StageManaWait, w.Cycle.Stage);
+        Assert.Empty(w.Caster.Answered);
+    }
+
+    [Fact]
+    public void A_buff_line_refused_for_mana_at_its_ceiling_after_its_tries_fails_the_cycle_named_and_is_not_sent_again_1_R14()
+    {
+        // M5 3 m4 (m5-buffcycle-ceiling-refusal, review 1-R14): the read model shows 426 mana, which covers every ceiling, while the scripted server holds 0 and says nothing (no regeneration, no vital update), so every cast is refused 0x0401
+        // though the mana shown is over the ceiling. The first attempt is sent from the try floor, its tries are spent, the mana step finds the ceiling covered and sends once more at the ceiling; that refusal is a named failure,
+        // not a resend for as long as the two disagree. The bound is the cycle's own: two attempts, each at most the tries (the default 8), no more.
+        var t = new Rig(mana: 426);
+        t.Caster.ManaRegenPerSecond = 0;
+        t.Caster.Mana = 0; // the server's mana, changed without a word to the session
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Failed, t.Run(maxSeconds: 600));
+        Assert.Equal(BuffCycle.StageFailed, t.Cycle.Stage);
+        var r = t.Cycle.Result!;
+        Assert.Contains("refused for mana (0x0401) again at its ceiling of", r.Failure, StringComparison.Ordinal);
+        Assert.Contains("the read model's mana is not the server's", r.Failure, StringComparison.Ordinal);
+        Assert.InRange(t.Caster.Answered.Count, 2, 2 * Lifestone.Client.Session.Vitals.ManaOrderOptions.DefaultTries);
+        Assert.All(t.Caster.Answered, a => Assert.False(a.Fizzled));
+        Assert.Empty(t.Caster.Charged); // nothing was charged: every answer was a refusal
+        Assert.Equal(1, BuffCycle.CeilingAttemptsPerLine);
+    }
+
+    /// <summary>The lines the soak's fight leans on (M5 7 F12, D90 point 3): the war mastery and the other masteries, the three regenerations, the protection and the bane that match the tuskers' bludgeoning (the Tusker Slave 1628 and Guard 1629 rows of the pinned world SQL v0.9.296 hit with damage type 4, bludgeoning, on every body part, and cast no spell), the armour lines and the wand's two.</summary>
+    private static readonly string[] FightKeyLines =
+    [
+        "War Magic Mastery Self", "Creature Enchantment Mastery Self", "Item Enchantment Mastery Self", "Life Magic Mastery Self", "Mana Mastery Self", "Focus Self", "Willpower Self",
+        "Regeneration Self", "Rejuvenation Self", "Mana Renewal Self", "Bludgeon Protection Self", "Bludgeon Bane", "Armor Self", "Impenetrability", "Hermetic Link", "Defender",
+    ];
+
+    [Fact]
+    public void The_cycle_casts_every_line_the_soaks_fight_leans_on_at_a_level_that_lasts_the_hour()
+    {
+        var t = new Rig();
+        t.Caster.ManaRegenPerSecond = 0.2;
+        t.Caster.CastSeconds = 1.85;
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run(maxSeconds: 20000));
+        var casts = t.BuffCasts();
+        Assert.All(FightKeyLines, key => Assert.Contains(casts, c => c.Line == key));
+        Assert.Equal(24, t.Cycle.Result!.Active);
+        Assert.True(t.Cycle.MinRemainingSeconds(t.Now) > BuffOptions.DefaultRebuffMarginSeconds, "the first cycle leaves every line far over the margin");
+    }
+
+    [Fact]
+    public void A_re_buff_pass_that_starts_late_by_the_upkeeps_latency_at_the_mana_floor_recasts_every_line_before_one_lapses_and_a_short_margin_would_not_F12()
+    {
+        // The upkeep (AutopilotScenario.UpkeepDue) asks the fight to stop when a line is under the margin, checked every UpkeepCheckSeconds (5 s); the fight ends at its next safe point (a kill), the buff station waits for 60% mana, then
+        // the pass casts the lines under the margin. Model that latency as 125 s (5 s check + 120 s safe point, walk and mana) with the mana at the floor (D88: the fight runs mana down), at the live economy of the test above
+        // (a cycle of about a minute). A line lapses when its time left reaches 0 before its recast, which RebuffDue(now, ~0) lists (a line with no active buff has none left).
+        const double Latency = 125;
+        foreach (var (margin, lapses) in new[] { (BuffOptions.DefaultRebuffMarginSeconds, false), (30.0, true) })
+        {
+            var t = new Rig(options: new BuffOptions { RebuffMarginSeconds = margin });
+            t.Caster.ManaRegenPerSecond = 0.2;
+            t.Caster.CastSeconds = 1.85;
+            Assert.True(t.Cycle.Start(t.Now));
+            Assert.Equal(BuffStatus.Done, t.Run(maxSeconds: 20000));
+            var first = t.Cycle.MinRemainingSeconds(t.Now);
+            t.R.Tick(first - margin + Latency); // the first line went under the margin Latency seconds ago
+            t.Caster.Pump(); // applies the regeneration of the skipped time, so the floor below is not refilled
+            t.Caster.SetVitals(15, 275);
+            Assert.True(t.Cycle.RebuffDue(t.Now, margin).Count > 0, "the first line is under the margin when the pass starts");
+            var lapsed = t.Cycle.RebuffDue(t.Now, 0.001).Count > 0;
+            Assert.True(t.Cycle.StartRebuff(t.Now, forced: false));
+            var end = t.Now + 20000;
+            var status = BuffStatus.Running;
+            while (status == BuffStatus.Running && t.Now < end)
+            {
+                status = t.Frame(0.25);
+                lapsed |= t.Cycle.RebuffDue(t.Now, 0.001).Count > 0;
+            }
+
+            Assert.Equal(BuffStatus.Done, status);
+            Assert.Equal(lapses, lapsed);
+            output.WriteLine($"margin {margin:0} s, latency {Latency:0} s: lapsed={lapsed}, pass cast {t.Cycle.Result!.Cast} lines, {t.Cycle.Result.Fields}");
+            if (!lapses)
+            {
+                Assert.Equal(24, t.Cycle.Result!.Active);
+                Assert.True(t.Cycle.MinRemainingSeconds(t.Now) > 1000, "every line is a fresh cast, or far from its end");
+            }
+        }
+    }
+    [Fact]
+    public void A_line_learned_by_play_is_skipped_while_the_spellbook_lacks_it_and_kept_up_once_it_holds_a_level_M5_7_P7j()
+    {
+        // M5 7 P7j (D143): Spirit Drinker is a profile line the build never teaches. The spellbook (the state) lacks it: the cycle wants 24 lines, casts none of 3253-3258, records no miss for it, and says why once.
+        var t = new Rig(options: CeilingOrder);
+        var spirit = ArenaProfile.LineNamed("Spirit Drinker")!;
+        Assert.True(spirit.ByPlay);
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        var r = t.Cycle.Result!;
+        Assert.Equal(24, r.Wanted);
+        Assert.Equal(24, t.Cycle.Wanted);
+        Assert.DoesNotContain(spirit.Name, t.Cycle.LineOrder);
+        Assert.DoesNotContain(t.Caster.Answered, a => spirit.Spells.Any(s => s.Id == a.Spell));
+        Assert.DoesNotContain(r.Misses, m => m.StartsWith("Spirit:", StringComparison.Ordinal));
+        Assert.DoesNotContain(spirit.Name, t.Cycle.RebuffDue(t.Now, double.PositiveInfinity)); // never due while unknown: the re-buff driver starts no pass for it
+        var notWanted = "Spirit Drinker: no level is in the spellbook; a line learned by play (D143), so it is not wanted until a level is learned";
+        Assert.Single(t.R.H.Log.Entries, e => e.Message == notWanted); // logged once, not each frame or pass
+
+        // The scroll is read: ACE's MagicUpdateSpell adds IV to the spellbook. The line is wanted from now on, due at once (nothing active), and a re-buff pass casts IV, the only level the book holds.
+        t.R.Raw(Lifestone.Tests.Shared.Net.AceM3Writers.MagicUpdateSpell(WorldActionRig.Player, 90, 3256));
+        Assert.True(t.R.H.State.Self.Spellbook.Knows(3256));
+        Assert.Contains(spirit.Name, t.Cycle.RebuffDue(t.Now, t.Options.RebuffMarginSeconds));
+        Assert.Equal(25, t.Cycle.Wanted);
+        var before = t.Caster.Answered.Count;
+        Assert.True(t.Cycle.StartRebuff(t.Now, forced: false));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        Assert.Contains(3256u, t.Caster.Landed.Skip(before));
+        Assert.DoesNotContain(t.Caster.Answered.Skip(before), a => a.Spell is 3253 or 3254 or 3255 or 3257 or 3258); // only the level the spellbook holds
+        Assert.Contains("Spirit:IV", t.Cycle.Result!.Levels, StringComparison.Ordinal);
+        Assert.Equal(25, t.Cycle.Result.Wanted);
+        Assert.Single(t.R.H.Log.Entries, e => e.Message == "Spirit Drinker: Aura of Spirit Drinker Self IV (3256) is in the spellbook now: the line is wanted and kept up as the other auras (D143)");
+
+        // Kept up: near its end the line is due again (the margin), as Hermetic Link and Defender are.
+        Assert.DoesNotContain(spirit.Name, t.Cycle.RebuffDue(t.Now, t.Options.RebuffMarginSeconds));
+        Assert.Contains(spirit.Name, t.Cycle.RebuffDue(t.Now + 1800 - (t.Options.RebuffMarginSeconds / 2), t.Options.RebuffMarginSeconds));
     }
 }

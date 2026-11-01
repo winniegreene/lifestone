@@ -412,6 +412,8 @@ public sealed partial class RoutePlay : IScenario, IDisposable
         {
             _driver = new RouteDriver(_walker.Controller, _route, session.Actions.Move);
             _driver.Stopped += _ => audit.CompleteLap();
+            _driver.KeysPressedAgain += line => _log.Warn(LogCategory, line); // M5 7 D153 (D141): a held key let go by something else was pressed again
+            AttachObstacles(_driver, session); // M5 8 npc: a solid server object on the leg or the goal is walked around
         }
 
         _movesSubscription = session.Events.Subscribe<ObjectMoved>((in ObjectMoved e) =>

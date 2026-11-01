@@ -30,6 +30,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- M5 item 2 (D22, D43): the hunting-ground profiles, one JSON file per ground, read once by Session/Grounds/GroundCatalog.cs. -->
+    <EmbeddedResource Include="Session\Grounds\profiles\*.json" LogicalName="Lifestone.Client.Session.Grounds.profiles.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Lifestone.Client.Tests" />
     <InternalsVisibleTo Include="Lifestone.Loopback.Tests" />
     <InternalsVisibleTo Include="Lifestone.ServerMod.Tests" />

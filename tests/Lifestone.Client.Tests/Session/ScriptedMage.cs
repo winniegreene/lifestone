@@ -43,14 +43,16 @@ internal sealed class ScriptedMage
     private readonly uint[] _vitalCurrent = [DefaultVital, DefaultVital, DefaultVital];
     private readonly SortedDictionary<uint, SkillState> _skills = [];
     private readonly TeleportDestination _holtburg = TeleportCatalog.FromAce(AcePointsOfInterest.All.Single(p => p.DisplayName == "Holtburg"));
+    private readonly MageBuild _build;
     private byte _sequence;
     private uint _oldGuid;
     private bool _teleportDue;
     private ushort _teleportStamp = 5;
     private ushort _positionStamp = 30;
 
-    private ScriptedMage(XpTableData table, ScriptedAceSession server, string name)
+    private ScriptedMage(XpTableData table, ScriptedAceSession server, string name, MageBuild build = MageBuild.Gate126)
     {
+        _build = build;
         _table = table;
         _server = server;
         Name = name;
@@ -139,9 +141,9 @@ internal sealed class ScriptedMage
     }
 
     /// <summary>A character as the creation leaves it: the template's start values, its specialised skills specialised, the later-trained ones untrained, no experience, no spells.</summary>
-    public static ScriptedMage Fresh(XpTableData table, ScriptedAceSession server, string name)
+    public static ScriptedMage Fresh(XpTableData table, ScriptedAceSession server, string name, MageBuild build = MageBuild.Gate126)
     {
-        var mage = new ScriptedMage(table, server, name);
+        var mage = new ScriptedMage(table, server, name, build);
         mage.InitSkills();
         return mage;
     }
@@ -150,9 +152,10 @@ internal sealed class ScriptedMage
     {
         foreach (var skill in SkillIds())
         {
-            var target = MageTemplate.Targets.FirstOrDefault(t => t.Kind == MageStatKind.Skill && t.Id == skill);
-            var cls = MageTemplate.TrainedLater.Contains(skill) ? HeadlessCharacter.UntrainedSkill
-                : target is { Specialized: true } ? HeadlessCharacter.SpecializedSkill : HeadlessCharacter.TrainedSkill;
+            // M5 7 F6: the creation of the build: the gate's War Magic and Melee Defense, or the traditional mage's War Magic and Life Magic specialised and no Melee Defense at all.
+            var cls = MageTemplate.TrainedLaterFor(_build).Contains(skill) ? HeadlessCharacter.UntrainedSkill
+                : MageTemplate.SpecializedAtCreationFor(_build).Contains(skill) ? HeadlessCharacter.SpecializedSkill
+                : skill == MageTemplate.MeleeDefense ? HeadlessCharacter.UntrainedSkill : HeadlessCharacter.TrainedSkill;
             // ACE's PlayerFactory gives a creation-trained skill 5 ranks and 526 XP (TrainSkill with applyCreationBonusXP, Player_Skills.cs:182-186).
             _skills[skill] = MageTemplate.CreationTrained.Contains(skill) ? new SkillState(CreationBonusRanks, cls, CreationBonusXp) : new SkillState(0, cls, 0);
         }
@@ -185,14 +188,14 @@ internal sealed class ScriptedMage
         InitSkills();
     }
 
-    /// <summary>A character that meets the template exactly (level of the table's level 126, every stat at its target, every skill of the plan at its class, every spell known).</summary>
-    public static ScriptedMage Ready(XpTableData table, ScriptedAceSession server, string name)
+    /// <summary>A character that meets the template exactly (level of the table's level 126, or <paramref name="plan"/>'s level at its targets, M5 7 F3; every stat at its target, every skill of the plan at its class, every spell known).</summary>
+    public static ScriptedMage Ready(XpTableData table, ScriptedAceSession server, string name, MageLevelPlan? plan = null)
     {
-        var mage = Fresh(table, server, name);
-        mage.Total = (long)table.XpForLevel(MageTemplate.TargetLevel);
-        mage.Level = MageTemplate.TargetLevel;
+        var mage = Fresh(table, server, name, plan?.Build ?? MageBuild.Gate126);
+        mage.Total = (long)table.XpForLevel(plan?.Level ?? MageTemplate.TargetLevel);
+        mage.Level = plan?.Level ?? MageTemplate.TargetLevel;
         mage.Available = 1_000;
-        foreach (var t in MageTemplate.Targets)
+        foreach (var t in plan?.Targets ?? MageTemplate.Targets)
         {
             var experience = t.XpList(table)[t.Ranks];
             switch (t.Kind)

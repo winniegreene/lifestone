@@ -68,7 +68,7 @@ public sealed class PlayerToolsCorpsesTests
     }
 
     [Theory]
-    [InlineData(ToolErrors.NotInWorld, "your character is not in the world yet")]
+    [InlineData(ToolErrors.Busy, "you are teleporting")]
     [InlineData(ToolErrors.NotLoopback, "Lifestone's tools answer sessions from this computer (127.0.0.1) only")]
     [InlineData(ToolErrors.Failed, "the server mod failed (InvalidOperationException); see ACE_Log.txt")]
     [InlineData(ToolErrors.BadArgs, "corpses rot takes no arguments")]
@@ -141,6 +141,6 @@ public sealed class PlayerToolsCorpsesTests
     public void The_new_kind_is_appended_so_the_existing_values_stay_stable()
     {
         Assert.Equal(ActionKind.UseManaStone + 1, ActionKind.ToolCorpsesRot);
-        Assert.Equal(ActionKind.ToolCorpsesRot, Enum.GetValues<ActionKind>().Max());
+        Assert.Equal(ActionKind.ToolCorpsesRot + 1, ActionKind.RespondToConfirmation); // M5 6 w2 appends after it
     }
 }

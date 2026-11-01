@@ -80,7 +80,7 @@ public sealed class SoakWatchAndLogCopiesTests
             Assert.DoesNotContain(verb, script, StringComparison.Ordinal);
         }
 
-        Assert.Single(Regex.Matches(script, @"Add-Content")); // the CSV row
+        Assert.Equal(2, Regex.Matches(script, @"Add-Content").Count); // the CSV row and, since M5 7 G2, the alarm line (ALARM.txt in the run folder)
         Assert.Contains("Get-Process -Name $Pattern", script, StringComparison.Ordinal);
         Assert.Contains("'Godot*'", script, StringComparison.Ordinal);
         Assert.Contains("'ACE.Server'", script, StringComparison.Ordinal);

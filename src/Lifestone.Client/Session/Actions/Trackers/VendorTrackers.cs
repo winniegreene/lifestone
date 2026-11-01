@@ -281,7 +281,7 @@ internal abstract class TradeTracker : VendorLaneTracker
 
         if (_failed)
         {
-            Resolve(new ActionOutcome(ActionOutcomeKind.ServerError, 0, "the vendor refused the " + Verb + " (GameEvent 0x00A0): " + Reason(api)));
+            Resolve(new ActionOutcome(ActionOutcomeKind.ServerError, 0, "the vendor refused the " + Verb + " (GameEvent 0x00A0): " + Reason(api), RefusedReason()));
             return;
         }
 
@@ -300,6 +300,22 @@ internal abstract class TradeTracker : VendorLaneTracker
         }
 
         Settle(api, arrived);
+    }
+
+    // M5 7 D141: the typed reason of a vendor's 00A0, from the shortfall the prediction names or ACE's words (Vendor.cs 492-499 @95ef426d); none when neither says.
+    private ActionReason RefusedReason()
+    {
+        if (IsBuy && Text is null && _predicted >= 0 && _predicted > _coinsBefore)
+        {
+            return ActionReason.NotEnoughCoin;
+        }
+
+        return Text switch
+        {
+            "You do not have enough pack space to buy that!" or "You do not have enough container slots to buy that!" => ActionReason.NoFreeSlot,
+            "You are too encumbered to buy that!" => ActionReason.Overloaded,
+            _ => ActionReason.None,
+        };
     }
 
     private string Reason(ActionApi api)
@@ -353,6 +369,17 @@ internal abstract class TradeTracker : VendorLaneTracker
             warn.Add(ActionText.Count(_announced.Count - arrived) + " of " + ActionText.Count(_announced.Count) + " announced objects had no F745 within " + ActionText.Count((long)ActionPolicy.TradeObjectsSeconds) + " s");
         }
 
+        if (_announced.Count == 0 && _removed == 0 && actual == 0)
+        {
+            // M5 7 D141's after-check: a UseDone 0 with no 00A0, but no pyreal moved, no item arrived and none left the pack: the trade did not happen. It fails at once, typed, never Confirmed.
+            var nothing = "the " + Verb + " of " + ActionText.Count(ItemCount) + " item(s) changed nothing: UseDone 0 and no 00A0, but no pyreal moved, no item arrived and none left the pack" +
+                (predicted > 0 ? " (the 0062's rates predict " + ActionText.Count(predicted) + ")" : string.Empty) + (_note is null ? string.Empty : "; " + _note) +
+                (Text is null ? string.Empty : "; the server said: " + Text);
+            api.Log.Warn(SessionLog.Category, "vendor " + nothing);
+            Resolve(new ActionOutcome(ActionOutcomeKind.ServerError, 0, nothing, ActionReason.NoEffect));
+            return;
+        }
+
         var warning = warn.Count == 0 ? null : string.Join("; ", warn);
         _result = new VendorTradeResult(IsBuy, predicted, actual, _announced.Count, arrived, warning);
         var detail = Verb + " of " + ActionText.Count(ItemCount) + " item(s): " + ActionText.Count(actual) + " pyreals " + (IsBuy ? "paid" : "received") +
@@ -386,6 +413,100 @@ internal sealed class BuyTracker(VendorTradeHandle handle, uint vendor, IReadOnl
 
     /// <inheritdoc/>
     protected override bool IsBuy => true;
+
+    /// <summary>The ItemType bit of a container (ACE <c>ItemType.Container</c>): a pack bought takes a container slot, not a pack slot.</summary>
+    internal const uint ContainerItemType = 0x00000200;
+
+    /// <summary>ACE's main pack capacity for a player (<c>ItemCapacity</c> 102), when the player's own description does not carry it.</summary>
+    internal const int PlayerPackCapacity = 102;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// M5 7 D141's before-check, with the vendor's stock open in the model (without it there is no price to compare and the server judges): the pyreals cover the price the 0062's rates predict (ACE refuses a
+    /// shortfall with a bare 00A0, <c>Vendor.cs</c> 546-552), and the packs have the free slots the rows need (ACE's <c>ItemsToReceive</c>: a stack per max stack size, an item each for what does not stack; a
+    /// pack bought is left out). An alternate currency is not checked.
+    /// </remarks>
+    internal override string? Refusal(ActionApi api) => base.Refusal(api) ?? Shortfall(api);
+
+    private string? Shortfall(ActionApi api)
+    {
+        if (api.State.Vendor is not { } stock || stock.Vendor != Vendor)
+        {
+            return null;
+        }
+
+        long price = 0;
+        var slots = 0;
+        foreach (var (item, amount) in items)
+        {
+            if (stock.Find(item) is not { } entry)
+            {
+                continue; // ACE skips a guid it does not sell
+            }
+
+            price += stock.PriceToBuy(entry, amount);
+            if ((entry.ItemType & ContainerItemType) == 0)
+            {
+                slots += SlotsFor(entry.Desc, amount);
+            }
+        }
+
+        if (stock.AlternateCurrencyWcid == 0 && api.State.Self.Qualities.TryGetInt(PlayerQualities.CoinValueProperty, out var coins) && price > coins)
+        {
+            return Refuse(ActionReason.NotEnoughCoin, "not enough pyreals: the buy costs " + ActionText.Count(price) + " at the 0062's rates and the player holds " + ActionText.Count(coins));
+        }
+
+        if (slots > 0 && FreeSlots(api.State) is { } free && slots > free)
+        {
+            return Refuse(ActionReason.NoFreeSlot, "not enough pack space: the buy needs " + ActionText.Count(slots) + " slot(s) and the packs have " + ActionText.Count(free) + " free");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The pack slots <paramref name="amount"/> of an item takes at least (ACE <c>ItemsToReceive.GetItemSlotAndBurdenRequirements</c>): one per max stack size for a stackable item, one each for an item whose maximum
+    /// stack is 1; a row whose 0062 gave no maximum counts one (a lower bound: the refusal must be certain).
+    /// </summary>
+    internal static int SlotsFor(Lifestone.Net.Types.WeenieDesc desc, uint amount) => desc.MaxStackSize switch
+    {
+        { } max and > 1 => (int)Math.Min(int.MaxValue, (amount + max - 1) / max),
+        1 => (int)Math.Min(int.MaxValue, amount),
+        _ => 1,
+    };
+
+    /// <summary>
+    /// The packs' free slots as ACE counts them (<c>Container.GetFreeInventorySlots</c>, <c>Container.cs</c> 214-225 @95ef426d): the main pack's capacity less its items, plus each side pack's capacity less its items;
+    /// a foci takes a main pack slot. An upper bound when the model misses an item; null when the inventory is not known or a side pack's capacity is not.
+    /// </summary>
+    internal static int? FreeSlots(GameState state)
+    {
+        var inventory = state.Self.Inventory;
+        if (!inventory.IsKnown)
+        {
+            return null;
+        }
+
+        var capacity = state.Objects.TryGet(state.Self.Guid, out var self) && self.Weenie.ItemsCapacity is > 0 ? self.Weenie.ItemsCapacity.Value : PlayerPackCapacity;
+        var free = capacity - inventory.Pack.Count;
+        foreach (var pack in inventory.SidePacks)
+        {
+            if (pack.ContainerType != 1)
+            {
+                free--; // a foci sits in a main pack slot
+                continue;
+            }
+
+            if (!state.Objects.TryGet(pack.Guid, out var side) || side.Weenie.ItemsCapacity is not > 0)
+            {
+                return null;
+            }
+
+            free += side.Weenie.ItemsCapacity.Value - inventory.ItemsIn(pack.Guid).Count;
+        }
+
+        return free;
+    }
 
     /// <inheritdoc/>
     protected override string Verb => "buy";
@@ -440,6 +561,29 @@ internal sealed class SellTracker(VendorTradeHandle handle, uint vendor, IReadOn
 
     /// <inheritdoc/>
     protected override bool IsBuy => false;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// M5 7 D141's before-check: every item to sell is held by the player. ACE skips one it cannot find and pays for the rest; a guid the player no longer holds means the sale was planned on an old model, so it is
+    /// refused, named, and the caller plans again.
+    /// </remarks>
+    internal override string? Refusal(ActionApi api)
+    {
+        if (base.Refusal(api) is { } refusal)
+        {
+            return refusal;
+        }
+
+        foreach (var (item, _) in items)
+        {
+            if (!api.State.Self.Inventory.Find(item).Held)
+            {
+                return Refuse(ActionReason.NotHeld, "the item " + ActionText.Hex(item) + " to sell is not held by the player");
+            }
+        }
+
+        return null;
+    }
 
     /// <inheritdoc/>
     protected override string Verb => "sale";

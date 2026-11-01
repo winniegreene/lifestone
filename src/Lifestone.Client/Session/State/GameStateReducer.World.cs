@@ -38,6 +38,13 @@ internal sealed partial class GameStateReducer
     internal ObjectCull Cull { get; } = new();
 
     /// <summary>
+    /// M5 7 P7d: keep orphaned objects as the client did before D139 row f (no contents dropped with a deleted object, no doom for an object that left
+    /// the player's holdings). Off (the rule) by default; the replayer turns it on for a recording whose header predates the rule
+    /// (<see cref="Recording.RecordingHeader.ClientRules"/>), so the recording replays to its own trailer digest.
+    /// </summary>
+    internal bool KeepsOrphans { get; set; }
+
+    /// <summary>
     /// F745 ObjectCreate and F7DB UpdateObject. Re-expresses <c>SmartBox::HandleCreateObject</c> (11.4186 0x00454C80,
     /// 11.6096 0x00454D20) and <c>SmartBox::HandleUpdateObject</c> (0x00455580 / 0x00455620), which is the same call with
     /// a forced re-create:
@@ -74,6 +81,7 @@ internal sealed partial class GameStateReducer
         {
             CreateNew(message, parent, recreated: existing is not null);
             Cull.Seen(message.Guid);
+            Cull.Restore(message.Guid); // M5 7 P7d: a create re-announces the object, so a doom (0024, 0022 away) is lifted (RemoveObjectToBeDestroyed)
             NoteObjectArrived(message.Guid);
             return;
         }
@@ -86,6 +94,7 @@ internal sealed partial class GameStateReducer
 
         UpdateExisting(existing, message, parent);
         Cull.Seen(message.Guid);
+        Cull.Restore(message.Guid);
         NoteObjectArrived(message.Guid);
     }
 
@@ -115,17 +124,60 @@ internal sealed partial class GameStateReducer
         }
 
         RemoveObject(message.Guid);
+        if (!KeepsOrphans)
+        {
+            DropContentsOf(message.Guid);
+        }
+    }
+
+    /// <summary>
+    /// M5 7 P7d (D139 row f): a deleted object's contents, and what it wielded or carried, go with it, at any depth, except what the player holds.
+    /// ACE deletes a rotted corpse (or a chest, or a creature) with one F747 and sends nothing for what was inside it, which it showed this client
+    /// only when the player opened it; the round-13 soak kept about 110 such orphans a den stretch. Retail never keeps them either: closing the
+    /// ground container queues its contents for destruction (<c>ClientUISystem::SetGroundObject</c>, 11.6096 0x005652B0, then
+    /// <c>ACCWeenieObject::AddContentsToDestructionQueue</c>, 0x0058D7D0), and <c>CObjectMaint::DeleteObject</c> (0x00508F30) unparents
+    /// a deleted object's children; with the holder gone nothing can reach them, so they leave at once, through the F747 path, one line per
+    /// delete that took any (category <c>objects</c>).
+    /// </summary>
+    private void DropContentsOf(uint holder)
+    {
+        _culled.Clear();
+        _culled.Add(holder);
+        ObjectCull.AddFollowers(_state, _culled, 0, 0);
+        var count = _culled.Count - 1;
+        if (count == 0)
+        {
+            return;
+        }
+
+        for (var i = 1; i < _culled.Count; i++)
+        {
+            if (_state.Objects.Contains(_culled[i]))
+            {
+                RemoveObject(_culled[i]);
+            }
+        }
+
+        Cull.NoteContentsDropped(count);
+        _log.Info(
+            ObjectsLogCategory,
+            "a deleted object's contents left with it",
+            new LogField("holder", holder.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)),
+            new LogField("count", count),
+            new LogField("first", _culled[1].ToString("X8", System.Globalization.CultureInfo.InvariantCulture)),
+            new LogField("orphans_total", Cull.OrphansDropped),
+            new LogField("objects", _state.Objects.Count));
     }
 
     /// <summary>
     /// Removes an object the way an applied F747 does, for the F747 itself and for the client-side cull: out of the table,
-    /// the inventory, the container views, the vendor, the cull's queue, then <see cref="ObjectDeleted"/>, which every
+    /// the inventory, the container views, the vendor, the cull's queues, then <see cref="ObjectDeleted"/>, which every
     /// consumer follows (the avatar set, the light table, the fight's tables, the wayfinder's creature feed).
     /// </summary>
     private void RemoveObject(uint guid)
     {
         _state.Objects.Remove(guid);
-        Cull.Seen(guid);
+        Cull.Gone(guid);
         ReleaseDeletedHeld(guid);
         ForgetInViews(guid);
         ForgetVendor(guid);
@@ -149,6 +201,12 @@ internal sealed partial class GameStateReducer
             _log.Info(ObjectsLogCategory, "TODO(m5-object-cull-cells): this host gives the cull no cell visibility (ObjectCull.Cells), so inside an interior cell the player's landblock and its eight neighbours count as visible, not a dungeon cell's visible cells");
         }
 
+        if (Cull.LastDoomedKept != 0)
+        {
+            // M5 7 P7d: a doomed object whose time came but which is back with the player, in the open ground container, or in the world.
+            _log.Info(ObjectsLogCategory, "doomed objects kept: back with the player, in the open ground container or placed in the world", new LogField("kept", Cull.LastDoomedKept), new LogField("doom_pending", Cull.DoomPending));
+        }
+
         if (count == 0)
         {
             return;
@@ -169,8 +227,11 @@ internal sealed partial class GameStateReducer
             "culled objects the server stopped sending",
             new LogField("count", count),
             new LogField("first", first.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)),
+            new LogField("orphans", Cull.LastOrphans), // M5 7 P7d: the doomed contained objects and what they held, within count
             new LogField("pending", Cull.Pending),
+            new LogField("doom_pending", Cull.DoomPending),
             new LogField("culled_total", Cull.Culled),
+            new LogField("orphans_total", Cull.OrphansDropped),
             new LogField("objects", _state.Objects.Count));
     }
 
@@ -864,6 +925,7 @@ internal sealed partial class GameStateReducer
     /// </summary>
     private void LeaveWorld()
     {
+        CloseConfirmationsOnWorldExit(); // M5 6 w2: no server question outlives the character (GameStateReducer.Confirmations.cs)
         Cull.Clear(); // CObjectMaint::DestroyObjects (11.6096 0x00509700): the log off clears the cull's queue with the table
         if (_attack.State != AttackSequenceState.Idle || _attack.Number != 0)
         {
@@ -897,6 +959,7 @@ internal sealed partial class GameStateReducer
         self.Qualities.Clear();
         self.Spellbook.Clear();
         self.Inventory.Clear();
+        _dequipZeroed.Clear(); // M5 7 D139 (l)
         self.Shortcuts.Clear();
         var closedGround = _state.Containers.ViewedGuid;
         var closedVendor = DropVendorForLeave();

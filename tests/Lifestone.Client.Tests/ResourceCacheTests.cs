@@ -32,6 +32,44 @@ public sealed class ResourceCacheTests
     }
 
     [Fact]
+    public void A_trim_since_a_mark_drops_the_idle_entries_unused_since_and_keeps_the_held_and_the_recently_used()
+    {
+        // M5 7 P7d (D139 row e): the budget is far above the total, so only the mark decides.
+        var evicted = new List<string>();
+        var cache = new ResourceCache<string, object>("test", budgetBytes: 1_000_000, (k, _) => evicted.Add(k));
+        cache.Add("old-idle", new object(), 10);
+        cache.Add("old-held", new object(), 20);
+        cache.Add("reused", new object(), 40);
+        cache.Release("old-idle");
+        cache.Release("reused");
+        var mark = cache.Mark();
+
+        // After the mark: one idle entry is taken and released again, a new one comes and goes idle, the held one stays held.
+        Assert.True(cache.TryAcquire("reused", out _));
+        cache.Release("reused");
+        cache.Add("new-idle", new object(), 80);
+        cache.Release("new-idle");
+
+        var (count, bytes) = cache.TrimUnusedSince(mark);
+
+        Assert.Equal(1, count);
+        Assert.Equal(10, bytes);
+        Assert.Equal(new[] { "old-idle" }, evicted);
+        Assert.True(cache.Contains("old-held")); // held: never evicted, however old
+        Assert.True(cache.Contains("reused"));
+        Assert.True(cache.Contains("new-idle"));
+        Assert.Equal(140, cache.TotalBytes);
+        Assert.Equal(120, cache.IdleBytes);
+
+        // A later mark with nothing used since: every idle entry goes, the held one stays.
+        var (later, laterBytes) = cache.TrimUnusedSince(cache.Mark());
+        Assert.Equal(2, later);
+        Assert.Equal(120, laterBytes);
+        Assert.Equal(1, cache.Count);
+        Assert.True(cache.Contains("old-held"));
+    }
+
+    [Fact]
     public void Reacquiring_an_idle_entry_protects_it_and_counts_a_hit()
     {
         var cache = new ResourceCache<int, object>("test", 10);

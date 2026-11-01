@@ -347,26 +347,192 @@ public sealed class CorpseLooterTests
         Assert.Equal(1, looter.TimedOut);
     }
 
-    [Fact]
-    public void A_stack_looted_beside_a_held_stack_of_its_class_is_its_own_stack_with_its_own_0022_and_is_named_not_merged()
+    private const uint HeldCoins = 0x80000602;
+    private const uint Pyreal = 273;
+    private static byte _seq;
+
+    /// <summary>A held stack of weenie <paramref name="wcid"/> in the main pack (the model's CreateObject with the container, the size and the maximum).</summary>
+    private static void HeldStack(Rig r, uint guid, uint wcid, ushort size, ushort max, bool describe = true)
     {
-        // the capture (2026-10-21): ACE never merges at pick-up. The held stack stays as it is, the looted one is a second stack, and nothing here calls MergeStack.
+        if (describe)
+        {
+            r.R.Describe([new ContentDesc(guid, 0)], []);
+        }
+
+        var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), null, name: "Pyreal");
+        r.R.H.R.Reducer.OnCreateObject(
+            r.R.H.R.Context,
+            basis with
+            {
+                Weenie = basis.Weenie with
+                {
+                    Header = WeenieHeaderFlags.Container | WeenieHeaderFlags.StackSize | WeenieHeaderFlags.MaxStackSize,
+                    ContainerId = Player,
+                    WeenieClassId = wcid,
+                    StackSize = size,
+                    MaxStackSize = max,
+                },
+            },
+            isUpdate: false);
+        r.R.Tick();
+    }
+
+    /// <summary>A corpse stack of <paramref name="size"/> of weenie <paramref name="wcid"/>, at most 25000, worth 1 each.</summary>
+    private static WorldObject CorpseStack(uint guid, uint wcid, ushort size)
+    {
+        var o = Rig.Thing(guid, Misc, size, wcid: wcid, maxStack: 25000, name: "Pyreal");
+        return new WorldObject(o.Created with { Weenie = o.Created.Weenie with { StackSize = size } }, isSelf: false, createdAt: 0);
+    }
+
+    private static (uint Guid, int Amount, string? Target) OnlyMerge(Rig r)
+    {
+        var sent = Assert.Single(r.R.H.Net.Of(FakeSendKind.StackableMerge));
+        return (sent.Guid, sent.Index, sent.Target);
+    }
+
+    [Fact]
+    public void M5_7_a_coin_stack_looted_beside_a_held_stack_is_merged_into_it_and_the_loop_waits_for_the_merge()
+    {
+        // ACE never merges at pick-up (Container.cs 499-581): the client sends GameAction 0x0054 from the new stack into the held one, for the whole of it when it fits.
         var r = new Rig();
-        r.R.Describe([new ContentDesc(HeldArrows, 0)], []);
-        r.R.Item(HeldArrows, Player);
-        r.Open([Rig.Thing(A, Misc, 50, wcid: 1, maxStack: 250)]);
+        HeldStack(r, HeldCoins, Pyreal, 10000, 25000);
+        r.Open([CorpseStack(A, Pyreal, 1500), Rig.Thing(B)]);
+        var looter = r.Looter();
+
+        r.Drive(looter, 0.3);
+        r.Put(A);
+        Assert.Equal(LootStatus.Running, r.Drive(looter, Hold));
+        Assert.Equal((A, 1500, HeldCoins.ToString("X8")), OnlyMerge(r));
+        Assert.Equal([A], r.SentGuids); // the next pick-up waits for the merge's outcome
+        Assert.Equal(1, looter.StacksBesideHeld);
+
+        r.R.Raw(AceM3Writers.InventoryRemoveObject(A)); // ACE's whole merge: the source's removal, then the target's new size (Player_Inventory.cs 3096, 3121-3123)
+        r.R.Raw(AceM3Writers.SetStackSize(++_seq, HeldCoins, 11500, 0));
+        r.Drive(looter, Hold);
+        Assert.Equal(1, looter.StackMerges);
+        Assert.Equal(0, looter.MergesRefused);
+        Assert.True(looter.WasMergedAway(A));
+        Assert.False(r.R.H.State.Self.Inventory.Contains(A));
+        Assert.Equal([A, B], r.SentGuids);
+
+        r.Put(B);
+        Assert.Equal(LootStatus.Done, r.Drive(looter, Hold));
+        Assert.Equal(2, looter.Looted);
+        Assert.Contains("stack_merges=1 merges_refused=0", looter.Summary, StringComparison.Ordinal);
+        Assert.Contains(r.Log.Lines, l => l.Contains("loot: merged ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void M5_7_a_stackable_with_no_held_stack_of_its_class_is_not_merged()
+    {
+        var r = new Rig();
+        r.Open([CorpseStack(A, Pyreal, 1500)]);
         var looter = r.Looter();
 
         r.Drive(looter, 0.3);
         r.Put(A);
         Assert.Equal(LootStatus.Done, r.Drive(looter, Hold));
-
-        Assert.Equal(1, looter.Looted);
-        Assert.Equal(1, looter.StacksBesideHeld);
-        Assert.Equal(1u, looter.FirstStackBesideHeldWcid);
-        Assert.True(r.R.H.State.Self.Inventory.Find(A).Held && r.R.H.State.Self.Inventory.Find(HeldArrows).Held, "two stacks");
         Assert.Empty(r.R.H.Net.Of(FakeSendKind.StackableMerge));
-        Assert.DoesNotContain(r.Log.Lines, l => l.Contains("m4-pickup-merge", StringComparison.Ordinal));
+        Assert.Equal(0, looter.StackMerges);
+        Assert.Equal(0, looter.StacksBesideHeld);
+    }
+
+    [Fact]
+    public void M5_7_a_held_stack_that_is_full_takes_nothing_and_one_with_less_room_takes_part_of_it()
+    {
+        var full = new Rig();
+        HeldStack(full, HeldCoins, Pyreal, 25000, 25000);
+        full.Open([CorpseStack(A, Pyreal, 1500)]);
+        var fullLooter = full.Looter();
+        full.Drive(fullLooter, 0.3);
+        full.Put(A);
+        Assert.Equal(LootStatus.Done, full.Drive(fullLooter, Hold));
+        Assert.Empty(full.R.H.Net.Of(FakeSendKind.StackableMerge)); // no room: the looted stack stays its own stack
+        Assert.Equal(0, fullLooter.StackMerges);
+        Assert.Equal(1, fullLooter.StacksBesideHeld);
+
+        var part = new Rig();
+        HeldStack(part, HeldCoins, Pyreal, 24000, 25000);
+        part.Open([CorpseStack(A, Pyreal, 1500)]);
+        var partLooter = part.Looter();
+        part.Drive(partLooter, 0.3);
+        part.Put(A);
+        Assert.Equal(LootStatus.Running, part.Drive(partLooter, Hold));
+        Assert.Equal((A, 1000, HeldCoins.ToString("X8")), OnlyMerge(part)); // the room, not the whole stack
+
+        part.R.Raw(AceM3Writers.SetStackSize(++_seq, A, 500, 0)); // ACE's partial merge: the source's new size first, then the target's (3151-3161)
+        part.R.Raw(AceM3Writers.SetStackSize(++_seq, HeldCoins, 25000, 0));
+        Assert.Equal(LootStatus.Done, part.Drive(partLooter, Hold)); // 500 are left and no other stack has room: nothing more is sent
+        Assert.Single(part.R.H.Net.Of(FakeSendKind.StackableMerge));
+        Assert.Equal(1, partLooter.StackMerges);
+        Assert.False(partLooter.WasMergedAway(A));
+        Assert.True(part.R.H.State.Self.Inventory.Contains(A));
+    }
+
+    [Fact]
+    public void M5_7_a_refused_merge_is_logged_and_counted_the_stack_stays_and_the_loop_goes_on()
+    {
+        var r = new Rig();
+        HeldStack(r, HeldCoins, Pyreal, 10000, 25000);
+        r.Open([CorpseStack(A, Pyreal, 1500), Rig.Thing(B)]);
+        var looter = r.Looter();
+
+        r.Drive(looter, 0.3);
+        r.Put(A);
+        r.Drive(looter, Hold);
+        Assert.Single(r.R.H.Net.Of(FakeSendKind.StackableMerge));
+
+        r.R.Server((p, s) => AceM3Writers.InventoryServerSaysFailed(p, s, A, 0)); // ACE's 00A0 for the source
+        r.Drive(looter, Hold);
+        Assert.Equal(1, looter.MergesRefused);
+        Assert.Equal(0, looter.StackMerges);
+        Assert.Equal([A, B], r.SentGuids); // the loop went on with the next entry
+        Assert.Single(r.R.H.Net.Of(FakeSendKind.StackableMerge)); // and did not ask for the same merge again
+        Assert.True(r.R.H.State.Self.Inventory.Contains(A));
+        Assert.Contains(r.Log.Lines, l => l.Contains("the merge of ", StringComparison.Ordinal) && l.Contains("ended ServerError", StringComparison.Ordinal));
+
+        r.Put(B);
+        Assert.Equal(LootStatus.Done, r.Drive(looter, Hold));
+        Assert.Equal(2, looter.Looted);
+        Assert.Contains("stack_merges=0 merges_refused=1", looter.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void M5_7_the_buy_planner_merges_the_smallest_held_stack_into_the_fullest_one_with_room_and_skips_a_refused_source()
+    {
+        var r = new Rig();
+        const uint Small = 0x80000603;
+        const uint Mid = 0x80000604;
+        r.R.Describe([new ContentDesc(HeldCoins, 0), new ContentDesc(Small, 0), new ContentDesc(Mid, 0)], []);
+        HeldStack(r, HeldCoins, Pyreal, 20, 100, describe: false);
+        HeldStack(r, Small, Pyreal, 3, 100, describe: false);
+        HeldStack(r, Mid, Pyreal, 10, 100, describe: false);
+        var scratch = new List<uint>();
+        var skip = new HashSet<uint>();
+
+        Assert.True(StackMerge.TryPlanFor(r.R.H.State, Pyreal, scratch, skip, out var from, out var to, out var amount));
+        Assert.Equal((Small, HeldCoins, 3), (from, to, amount));
+
+        skip.Add(Small); // its merge was refused: the next smallest goes
+        Assert.True(StackMerge.TryPlanFor(r.R.H.State, Pyreal, scratch, skip, out from, out to, out amount));
+        Assert.Equal((Mid, HeldCoins, 10), (from, to, amount));
+
+        Assert.False(StackMerge.TryPlanFor(r.R.H.State, 999, scratch, skip, out _, out _, out _)); // another weenie class: nothing held
+    }
+
+    [Fact]
+    public void M5_7_with_the_merge_off_a_looted_stack_beside_a_held_one_is_left_as_it_landed()
+    {
+        var r = new Rig();
+        HeldStack(r, HeldCoins, Pyreal, 10000, 25000);
+        r.Open([CorpseStack(A, Pyreal, 1500)]);
+        var looter = new CorpseLooter(r.Log, "hunt", Corpse, null, mergeStacks: false);
+
+        r.Drive(looter, 0.3);
+        r.Put(A);
+        Assert.Equal(LootStatus.Done, r.Drive(looter, Hold));
+        Assert.Empty(r.R.H.Net.Of(FakeSendKind.StackableMerge));
+        Assert.Equal(1, looter.StacksBesideHeld);
     }
 
     [Fact]

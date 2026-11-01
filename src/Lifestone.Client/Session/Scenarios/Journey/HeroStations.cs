@@ -163,7 +163,7 @@ public sealed class HotbarStation : IStation
 /// for the corpses to leave the view and then <see cref="ItemRotSeconds"/>, standing at the den's arrival, before the fight is filmed. A second run finds none and goes on at once. Fields:
 /// <c>corpses_found= corpses_rotted= corpses_left= corpses_wait_s=</c>; a refused or failed tool call is a problem, not a failure (the den is the video's set, not a check).
 /// </summary>
-public sealed class CorpsesStation : IStation
+public sealed class CorpsesStation(bool noItemWait = false) : IStation
 {
     /// <summary>The station's name.</summary>
     public const string StationName = "corpses";
@@ -181,9 +181,12 @@ public sealed class CorpsesStation : IStation
     public StationNeeds Needs { get; } = new();
 
     /// <inheritdoc />
-    public IStationRun Start(JourneyContext context) => new CorpsesRun(context);
+    public IStationRun Start(JourneyContext context) => new CorpsesRun(context, noItemWait);
 
-    private sealed class CorpsesRun(JourneyContext context) : StationLeg(StationName, context)
+    /// <summary>True when the station does not wait for the rotted corpses' contents (<see cref="JourneyPlans.NoItemWaitArgument"/>, the one-off clean-up).</summary>
+    public bool NoItemWait => noItemWait;
+
+    private sealed class CorpsesRun(JourneyContext context, bool noItemWait) : StationLeg(StationName, context)
     {
         private int _found = -1;
         private int _rotted = -1;
@@ -214,9 +217,16 @@ public sealed class CorpsesStation : IStation
                 Stage = "corpses-gone";
                 foreach (var h in Until(() => InView(own) == 0, CorpseGoneSeconds)) { yield return h; }
 
-                Stage = "items-rot";
-                Log($"the corpses left the view ({InView(own)} still in view); waiting {ItemRotSeconds:0} s for their contents on the ground to rot");
-                foreach (var h in Pause(ItemRotSeconds)) { yield return h; }
+                if (noItemWait)
+                {
+                    Log($"the corpses left the view ({InView(own)} still in view); their contents rot on the ground by ACE's own decay (no wait: {JourneyPlans.NoItemWaitArgument})");
+                }
+                else
+                {
+                    Stage = "items-rot";
+                    Log($"the corpses left the view ({InView(own)} still in view); waiting {ItemRotSeconds:0} s for their contents on the ground to rot");
+                    foreach (var h in Pause(ItemRotSeconds)) { yield return h; }
+                }
             }
 
             _waited = S.Clock.Now - started;

@@ -24,6 +24,9 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <param name="ViewerLight">The viewer light was in the last frame (<c>viewer_light=on|off</c>; judged since M3 4.2: off fails), or null.</param>
 /// <param name="BlockedPicks">The picks the clear-line rule skipped (<c>blocked_picks</c>, report-only in M3 4.2).</param>
 /// <param name="WallHits">The bolts that exploded short of the target with no damage line (<c>wall_hits</c>, report-only in M3 4.2).</param>
+/// <param name="ManaFields">The fight's mana and rate fields (<c>FightScenario.ManaFields</c>, M5 1 F1: <c>level= mana_wait_max_s= mana_wait_s= kills_per_hour= kills_per_hour_burst=</c>, the cast tally's fields, <c>mana_presses= dances= dances_landed=</c>; report-only), printed at the end of the line, or null.</param>
+/// <param name="TourFields">The tour's fields (<c>FightScenario.TourFields</c>, M5 item 2 g6, D44: <c>storeys_visited= basement_entries= returns= slots_standing=</c>; report-only), printed after <paramref name="ManaFields"/>, or null.</param>
+/// <param name="LootFields">The loot step's fields (<c>FightScenario.LootFields</c>, M5 item 3 m2 and c2a: <c>loot=on|off looted= kept= loot_value=</c>; report-only), printed after <paramref name="TourFields"/>, or null.</param>
 public readonly record struct FightLegMeasures(
     int Kills,
     long DamageDealt,
@@ -42,11 +45,14 @@ public readonly record struct FightLegMeasures(
     int? DynamicLightsMax = null,
     bool? ViewerLight = null,
     int BlockedPicks = 0,
-    int WallHits = 0);
+    int WallHits = 0,
+    string? ManaFields = null,
+    string? TourFields = null,
+    string? LootFields = null);
 
 /// <summary>
 /// The fight leg's verdict (<c>--login-check=bsd-fight</c>, M3 3.1 s0): composed from the scenario's failure (or null) and the measures, so it is built and tested without Godot. The line is
-/// <c>bsd-fight done ok=&lt;true|false&gt; kills= damage_dealt= spells_cast= misses= blocked_picks= wall_hits= xp_gained= damage_taken= hits_taken= evades= projectiles= cast_frame_max_ms= fight_frame_max_ms= bsd_min_fps= fight_s= bolt_light=yes|no dyn_lights_max= viewer_light=on|off[ frame_over_50=yes]</c>
+/// <c>bsd-fight done ok=&lt;true|false&gt; kills= damage_dealt= spells_cast= misses= blocked_picks= wall_hits= xp_gained= damage_taken= hits_taken= evades= projectiles= cast_frame_max_ms= fight_frame_max_ms= bsd_min_fps= fight_s= bolt_light=yes|no dyn_lights_max= viewer_light=on|off[ frame_over_50=yes][ level= mana_wait_max_s= ...][ storeys_visited= basement_entries= returns= slots_standing=]</c>
 /// (no name, no account), logged under the <c>logincheck</c> category.
 /// </summary>
 /// <remarks>
@@ -104,7 +110,7 @@ public static class FightLegVerdict
         var inv = CultureInfo.InvariantCulture;
         var line = string.Create(
             inv,
-            $"bsd-fight done ok={(ok ? "true" : "false")} kills={measures.Kills} damage_dealt={measures.DamageDealt} spells_cast={measures.SpellsCast} misses={measures.Misses} blocked_picks={measures.BlockedPicks} wall_hits={measures.WallHits} xp_gained={measures.XpGained} damage_taken={measures.DamageTaken} hits_taken={measures.HitsTaken} evades={measures.Evades} projectiles={(measures.Projectiles is { } p ? p.ToString(inv) : "n/a")} cast_frame_max_ms={Ms(measures.CastFrameMaxMs)} fight_frame_max_ms={Ms(measures.FightFrameMaxMs)} bsd_min_fps={Ms(measures.BsdMinFps)} fight_s={(measures.FightSeconds is { } s && !double.IsNaN(s) ? Math.Floor(s).ToString("0", inv) : "n/a")}{LightFields(measures)}{(over50 ? " frame_over_50=yes" : string.Empty)}");
+            $"bsd-fight done ok={(ok ? "true" : "false")} kills={measures.Kills} damage_dealt={measures.DamageDealt} spells_cast={measures.SpellsCast} misses={measures.Misses} blocked_picks={measures.BlockedPicks} wall_hits={measures.WallHits} xp_gained={measures.XpGained} damage_taken={measures.DamageTaken} hits_taken={measures.HitsTaken} evades={measures.Evades} projectiles={(measures.Projectiles is { } p ? p.ToString(inv) : "n/a")} cast_frame_max_ms={Ms(measures.CastFrameMaxMs)} fight_frame_max_ms={Ms(measures.FightFrameMaxMs)} bsd_min_fps={Ms(measures.BsdMinFps)} fight_s={(measures.FightSeconds is { } s && !double.IsNaN(s) ? Math.Floor(s).ToString("0", inv) : "n/a")}{LightFields(measures)}{(over50 ? " frame_over_50=yes" : string.Empty)}{(string.IsNullOrEmpty(measures.ManaFields) ? string.Empty : " " + measures.ManaFields)}{(string.IsNullOrEmpty(measures.TourFields) ? string.Empty : " " + measures.TourFields)}{(string.IsNullOrEmpty(measures.LootFields) ? string.Empty : " " + measures.LootFields)}");
         return new FightLegOutcome(ok, line, problems);
     }
 

@@ -454,6 +454,41 @@ internal sealed partial class SessionMachine
         public void OnIdentifyResponse(in InboundContext context, in GameEventHeader header, IdentifyResponseMsg message) =>
             Sink.OnIdentifyResponse(context, header, message);
 
+        // M5 6 w1: the confirmation dialog, the login notices and the property updates.
+
+        public void OnConfirmationRequest(in InboundContext context, in GameEventHeader header, ConfirmationRequestEvent message) =>
+            Sink.OnConfirmationRequest(context, header, message);
+
+        public void OnConfirmationDone(in InboundContext context, in GameEventHeader header, in ConfirmationDoneEvent message) =>
+            Sink.OnConfirmationDone(context, header, message);
+
+        public void OnTurbineChatChannels(in InboundContext context, in GameEventHeader header, TurbineChatChannelsEvent message) =>
+            Sink.OnTurbineChatChannels(context, header, message);
+
+        public void OnCharacterTitle(in InboundContext context, in GameEventHeader header, CharacterTitleEvent message) =>
+            Sink.OnCharacterTitle(context, header, message);
+
+        public void OnFriendsListUpdate(in InboundContext context, in GameEventHeader header, FriendsListUpdateEvent message) =>
+            Sink.OnFriendsListUpdate(context, header, message);
+
+        public void OnPublicPropertyBool(in InboundContext context, in PublicPropertyUpdate<bool> message) => Sink.OnPublicPropertyBool(context, message);
+
+        public void OnPublicPropertyInt64(in InboundContext context, in PublicPropertyUpdate<long> message) => Sink.OnPublicPropertyInt64(context, message);
+
+        public void OnPublicPropertyFloat(in InboundContext context, in PublicPropertyUpdate<double> message) => Sink.OnPublicPropertyFloat(context, message);
+
+        public void OnPublicPropertyString(in InboundContext context, in PublicPropertyUpdate<string> message) => Sink.OnPublicPropertyString(context, message);
+
+        public void OnPublicPropertyDataId(in InboundContext context, in PublicPropertyUpdate<uint> message) => Sink.OnPublicPropertyDataId(context, message);
+
+        public void OnPrivatePropertyBool(in InboundContext context, in PrivatePropertyUpdate<bool> message) => Sink.OnPrivatePropertyBool(context, message);
+
+        public void OnPrivatePropertyInstanceId(in InboundContext context, in PrivatePropertyUpdate<uint> message) => Sink.OnPrivatePropertyInstanceId(context, message);
+
+        public void OnPrivatePropertyDataId(in InboundContext context, in PrivatePropertyUpdate<uint> message) => Sink.OnPrivatePropertyDataId(context, message);
+
+        public void OnPrivatePosition(in InboundContext context, PrivatePositionUpdate message) => Sink.OnPrivatePosition(context, message);
+
         // Everything else.
 
         public void OnUnknown(in InboundContext context, uint opcode, ReadOnlySpan<byte> body) => Sink.OnUnknown(context, opcode, body);

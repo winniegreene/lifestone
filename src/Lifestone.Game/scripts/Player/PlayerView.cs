@@ -141,6 +141,33 @@ public sealed partial class PlayerView : Node3D
     /// </summary>
     public void Prepare(AvatarFrame frame, PlayerAvatar player)
     {
+        PrepareOtherVariant(frame, player);
+        PrepareDrawnVariant(frame, player);
+    }
+
+    /// <summary>
+    /// The first half of <see cref="Prepare"/> (M5 8 build: the player's build runs in three frames): the meshes of the variant the character is NOT drawn with first (indoor when it starts
+    /// outdoors and the other way round), so both shader variants compile before the first frame. They are not assigned to the batches, so nothing can be drawn from them. A frame without the
+    /// player's draw is logged by <see cref="PrepareDrawnVariant"/> alone.
+    /// </summary>
+    public void PrepareOtherVariant(AvatarFrame frame, PlayerAvatar player)
+    {
+        ArgumentNullException.ThrowIfNull(player);
+        if (!TryFindPlayer(frame, out var draw))
+        {
+            return;
+        }
+
+        var parts = frame.Parts.Slice(draw.PartStart, draw.PartCount);
+        BuildMeshes(parts, player, !draw.InEnvCell, assign: false);
+    }
+
+    /// <summary>
+    /// The second half of <see cref="Prepare"/>: the meshes of the variant the character is drawn with, assigned to the part batches (still no instance: the view draws only from <see cref="Update"/>,
+    /// which the controller calls once it is built). Logs when the frame has no draw for the player.
+    /// </summary>
+    public void PrepareDrawnVariant(AvatarFrame frame, PlayerAvatar player)
+    {
         ArgumentNullException.ThrowIfNull(player);
         if (!TryFindPlayer(frame, out var draw))
         {
@@ -149,8 +176,6 @@ public sealed partial class PlayerView : Node3D
         }
 
         var parts = frame.Parts.Slice(draw.PartStart, draw.PartCount);
-        var other = !draw.InEnvCell;
-        BuildMeshes(parts, player, other, assign: false);
         BuildMeshes(parts, player, draw.InEnvCell, assign: true);
         _appearanceVersion = draw.AppearanceVersion;
         _meshesForCell = draw.InEnvCell;

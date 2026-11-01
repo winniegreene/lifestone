@@ -279,7 +279,9 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
             if (describe)
             {
                 Describe();
+                WieldedSetups.Create(R.H.R, WieldedSetups.Wand); // M5 3 F5 (D53): the mage holds its wand, or the death handler's rearm would look for one in the pack and shop for it
             }
+
             var h = R.H.R;
             h.Reducer.OnPlayerTeleport(h.Context, new PlayerTeleportMsg(2));
             h.Reducer.OnUpdatePosition(h.Context, ReducerHarness.Move(ActionHarness.Amy, 1, 2, 2, 1, cell: startCell, x: 50));
@@ -305,7 +307,7 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         public WorldActionRig R { get; }
 
         /// <summary>True: the PlayerDescription lists the wand as wielded (M4 3.1 g's combat-mode guard refuses the magic mode for a mage that holds no caster); set it, then call <see cref="Describe"/> and create the object.</summary>
-        public bool HoldsWand { get; set; }
+        public bool HoldsWand { get; set; } = true;
 
         /// <summary>The PlayerDescription (the qualities become known).</summary>
         public void Describe() =>
@@ -409,9 +411,6 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         /// <summary>The items whose pick-up the server never answers (each such pick-up times out, the others are answered).</summary>
         public HashSet<uint> SilentItems { get; } = [];
 
-        /// <summary>What <see cref="DeathScenario.GuardWhileHeld"/> answered on the last held frame (null: the trip goes on).</summary>
-        public ScenarioStatus? LastGuard { get; private set; }
-
         /// <summary>True: the trip's place is answered with an error (the mage never leaves).</summary>
         public bool RefuseTripPlace { get; set; }
 
@@ -429,9 +428,6 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         /// <summary>True: after the trip's arrival the stamina and mana go to 0 and the health falls (the trip's blows and drains), which must never move the judged vitals.</summary>
         public bool TripDrainsVitals { get; set; }
 
-        /// <summary>True: <see cref="Frame"/> holds the scenario as the death leg's runner does while a review frame is owed: only <see cref="DeathScenario.GuardWhileHeld"/> runs, never Step.</summary>
-        public bool Held { get; set; }
-
         /// <summary>The cell the trip's place lands in (the den's arrival by default).</summary>
         public uint TripCell { get; set; } = DenArrival;
 
@@ -448,7 +444,7 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         /// <summary>Sets the health to <paramref name="percent"/> of its maximum (a 0x02E9).</summary>
         public void SetHealth(uint percent) => Vital(2, Max(1) * percent / 100);
 
-        /// <summary>The weenie classes the mod's item verb was asked for, in order (M4 3.1 d1 F2: the decoy top-up).</summary>
+        /// <summary>The weenie classes the mod's item verb was asked for, in order.</summary>
         public List<uint> ItemGrants { get; } = [];
 
         /// <summary>True: the item verb is never answered (the top-up cannot complete).</summary>
@@ -497,12 +493,6 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
             R.Tick(dt);
             Pump();
             R.Tick();
-            if (Held)
-            {
-                LastGuard = scenario.GuardWhileHeld(View);
-                return LastGuard ?? ScenarioStatus.Running;
-            }
-
             return scenario.Step(View, Now);
         }
 
@@ -684,8 +674,7 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         }
 
         /// <summary>
-        /// The mod's item verb as ACE answers it (the wire order of the live gate): the 0022 into the pack and the verb's reply first, the item's CreateObject a bit later. The item is the decoy of that weenie class when it is one
-        /// (its ItemType, value and burden), else a plain light item.
+        /// The mod's item verb as ACE answers it (the wire order of the live gate): the 0022 into the pack and the verb's reply first, the item's CreateObject a bit later. The item is a plain light item named for its weenie class.
         /// </summary>
         private void GrantItem(string text)
         {
@@ -700,9 +689,8 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
             var wcid = uint.Parse(text[at..end], CultureInfo.InvariantCulture);
             var guid = _nextGrant++;
             ItemGrants.Add(wcid);
-            var decoy = DecoyKit.All.FirstOrDefault(d => d.Wcid == wcid);
-            var name = decoy?.Name ?? "Item " + wcid.ToString(CultureInfo.InvariantCulture);
-            var item = LootRulesTests.Item(decoy?.ItemType ?? 0x80, decoy is null ? 10u : (uint)decoy.UnitValue, (ushort)(decoy?.Burden ?? 5), guid, name, wcid);
+            var name = "Item " + wcid.ToString(CultureInfo.InvariantCulture);
+            var item = LootRulesTests.Item(0x80, 10u, 5, guid, name, wcid);
             var data = new ItemData(guid, wcid, name, 1, null, 1, false);
             var placement = (uint)ItemGrants.Count;
             At(0.2, () =>
@@ -982,7 +970,7 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         var fields = scenario.VerdictFields();
         Assert.Contains(" died=1 suicides=1 ", fields, StringComparison.Ordinal);
         Assert.Contains(" respawn=lifestone ", fields, StringComparison.Ordinal);
-        Assert.Contains(" deaths=2 ", fields, StringComparison.Ordinal);
+        Assert.Contains(" respawn_deaths=2 ", fields, StringComparison.Ordinal);
         Assert.Contains(" unbuff=suicide bound=yes", fields, StringComparison.Ordinal);
     }
 
@@ -1323,7 +1311,14 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
 
         Assert.True(scenario.Bound);
-        Assert.Equal(3, Lines(rig).Count(l => l.StartsWith("bind: ignoring WeenieError 0x051C after the Use (not use-related)", StringComparison.Ordinal)));
+        Assert.Equal(0, Lines(rig).Count(l => l.StartsWith("bind: ignoring WeenieError 0x051C after the Use (not use-related)", StringComparison.Ordinal))); // M5 7 D124: a channel's notice is no failure line now (ChatKind.ChannelNotice), so the bind never weighs it
+        var notices = 0;
+        for (var i = 0; i < rig.View.State.Chat.Count; i++)
+        {
+            notices += rig.View.State.Chat[i] is { Kind: ChatKind.ChannelNotice, ChatType: 0x051Cu } ? 1 : 0;
+        }
+
+        Assert.Equal(3, notices);
         Assert.DoesNotContain(0x051Cu, DeathScenario.BindFailureCodes);
         Assert.Contains(0x0498u, DeathScenario.BindFailureCodes);
     }
@@ -1389,7 +1384,7 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         var scenario = rig.Scenario(new FakeWalk(), DeathStages.Den | DeathStages.Death);
 
         Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
-        Assert.Contains("den: the player settled in cell 0x01050341, which is not a floor cell of the den (floor cell no)", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("den: the player settled in cell 0x01050341, which is not a walkable cell of Black Spawn Den (Aluvian) (floor cell no)", scenario.Failure, StringComparison.Ordinal);
     }
 
     // --- the death wait ---
@@ -1472,7 +1467,7 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         rig.Lethal = false;
         rig.Damage = 1;
         rig.BlowEvery = 20;
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Den | DeathStages.Death | DeathStages.Regear, new DeathOptions { Seconds = 300, StopAfterHits = true });
+        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Den | DeathStages.Death, new DeathOptions { Seconds = 300, StopAfterHits = true });
 
         Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
 
@@ -1482,7 +1477,6 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         Assert.Equal(0, scenario.Tally.Deaths);
         Assert.True(scenario.Tally.HitsTaken >= 1);
         Assert.InRange(scenario.DeathSeconds, 15, 30); // the first blow 20 s after the arrival (the wait began a few seconds after it), then 3 s
-        Assert.Null(scenario.Regear); // nothing died: no regear
         Assert.Contains(Lines(rig), l => l.StartsWith("death: stopping after", StringComparison.Ordinal));
         Assert.Equal(0, rig.ModeChanges);
 
@@ -1503,7 +1497,7 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         rig.Damage = 1;
         rig.BlowEvery = 20;
         var walk = new FakeWalk { TicksPerLeg = int.MaxValue };
-        var scenario = rig.Scenario(walk, DeathStages.Den | DeathStages.Death | DeathStages.Regear, new DeathOptions { Seconds = 300, StopAfterHits = true });
+        var scenario = rig.Scenario(walk, DeathStages.Den | DeathStages.Death, new DeathOptions { Seconds = 300, StopAfterHits = true });
 
         var status = rig.Run(scenario);
         Dump(rig, scenario);
@@ -1514,7 +1508,6 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         Assert.Equal(1, walk.Legs);
         Assert.Equal(1, walk.AbandonsMidLeg); // the stop abandoned the running leg (the conclusion's second abandon found nothing walking)
         Assert.Equal(0, walk.TicksAfterAbandon);
-        Assert.Null(scenario.Regear);
         Assert.DoesNotContain(Lines(rig), l => l.Contains("the walk failed", StringComparison.Ordinal));
         Assert.Equal("done", scenario.Stage);
         Assert.NotEqual(0x0105u, rig.R.H.State.Self.Position!.Value.CellId >> 16);
@@ -1565,7 +1558,7 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         Assert.Equal(ScenarioStatus.Failed, status);
         Assert.Contains("did not kill the player", scenario.Failure, StringComparison.Ordinal);
         Assert.Equal(2, rig.Places.Count); // the den, then Holtburg (the rig answers a send on the frame after it goes out)
-        Assert.InRange(rig.Now - failedAt, DenExit.SettleSeconds, DenExit.SettleSeconds + 1); // the rig lands the player at once; then the settle
+        Assert.InRange(rig.Now - failedAt, GroundExit.SettleSeconds, GroundExit.SettleSeconds + 1); // the rig lands the player at once; then the settle
         Assert.Single(Lines(rig), l => l.StartsWith("leaving the den before the log off", StringComparison.Ordinal));
         Assert.Contains(Lines(rig), l => l.StartsWith("left the den: the player is present in cell 0xA9B40019", StringComparison.Ordinal));
         Assert.Contains("poi", rig.Places[1], StringComparison.Ordinal);
@@ -1596,7 +1589,7 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
 
         Assert.Equal(ScenarioStatus.Failed, status);
         Assert.Equal(2, rig.Places.Count);
-        Assert.True(rig.Now - failedAt <= DenExit.TeleportSeconds + 1, "the leave is bounded: " + (rig.Now - failedAt).ToString("0.0", CultureInfo.InvariantCulture) + " s");
+        Assert.True(rig.Now - failedAt <= GroundExit.TeleportSeconds + 1, "the leave is bounded: " + (rig.Now - failedAt).ToString("0.0", CultureInfo.InvariantCulture) + " s");
         Assert.Contains(Lines(rig), l => l.StartsWith("leaving the den: the place was not confirmed", StringComparison.Ordinal) || l.StartsWith("leaving the den: the player did not arrive", StringComparison.Ordinal));
         Assert.Equal(0x0105u, rig.R.H.State.Self.Position!.Value.CellId >> 16); // where it stands
         Assert.Empty(rig.R.H.Net.Of(FakeSendKind.LogOff));
@@ -1623,7 +1616,7 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
     {
         var rig = new Rig(buffed: false);
         rig.RespawnCell = 0xB0B40019; // no lifestone near: a judged respawn would fail
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Den | DeathStages.Death | DeathStages.Regear, new DeathOptions { StopAfterHits = true });
+        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Den | DeathStages.Death, new DeathOptions { StopAfterHits = true });
 
         // Kill it before the stop: the damage is lethal in one blow, so the death comes with the first blow.
         rig.Damage = 100;
@@ -1636,7 +1629,6 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         Assert.False(scenario.StoppedAfterHits);
         Assert.Equal(1, scenario.Tally.VictimNotices);
         Assert.Equal(1, scenario.Tally.Deaths);
-        Assert.Null(scenario.Regear);
         Assert.Contains(Lines(rig), l => l.Contains("the mage died before the stop", StringComparison.Ordinal));
         Assert.Contains(Lines(rig), l => l.StartsWith("death: the tuskers killed the player after", StringComparison.Ordinal) && l.Contains("(victim notices 1, hits 0, evades 0, protected 0)", StringComparison.Ordinal));
         Assert.Contains(Lines(rig), l => l.StartsWith("respawn: elsewhere (report-only under StopAfterHits)", StringComparison.Ordinal));
@@ -1722,144 +1714,6 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
     // ------------------------------------------------------------------------------------------------ the vitae stage (D37)
 
     [Fact]
-    public void The_vitae_stage_pays_the_experience_ACE_s_rule_asks_and_waits_for_the_penalty_to_leave_the_registry()
-    {
-        var rig = new Rig(buffed: false);
-        rig.HoldVitae(0.60f);
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Vitae);
-        scenario.LevelXp = _ => 1_000_000_000_000UL;
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Null(scenario.Failure);
-        Assert.Equal([6_875_357L], rig.XpAsked); // 40% from level 126: the sum of the thresholds of 0.60 to 0.99
-        var fields = scenario.VerdictFields();
-        Assert.Contains(" vitae=40 ", fields, StringComparison.Ordinal); // the measures were frozen before the grant: the penalty the death put on
-        Assert.Contains(" vitae_paid=6875357 vitae_after=0", fields, StringComparison.Ordinal);
-        Assert.True(scenario.Outcome().Ok); // a run without the death stage judges nothing about the death
-        Assert.False(rig.R.H.State.Self.Qualities.TryGetVitae(out _));
-        Assert.Contains(Lines(rig), l => l.StartsWith("vitae: paid 6,875,357 experience, 0% left", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void The_vitae_stage_counts_the_pool_against_the_sum_and_uses_the_death_level()
-    {
-        var rig = new Rig(buffed: false);
-        rig.HoldVitae(0.95f, level: 100, pool: 1000);
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Vitae);
-        scenario.LevelXp = _ => ulong.MaxValue;
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Equal(EffectRules.VitaeExperienceToClear(0.95f, 100, 1000), Assert.Single(rig.XpAsked));
-        Assert.Contains(" vitae_paid=" + rig.XpAsked[0].ToString(CultureInfo.InvariantCulture) + " vitae_after=0", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_vitae_stage_grants_across_a_level_logs_the_crossing_and_never_grants_more_than_clears_D42()
-    {
-        // Replaces M3 D37's refusal test (a grant that would cross level 127 failed by name without being sent): the owner's D42 allows the crossing, so the same rig now sends exactly the clearing amount and logs it.
-        var rig = new Rig(buffed: false);
-        rig.HoldVitae(0.60f, total: 5_000_000);
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Vitae);
-        scenario.LevelXp = level => level == 127 ? 10_000_000UL : null; // 5,000,000 + 6,875,357 is past level 127's 10,000,000
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Null(scenario.Failure);
-        Assert.Equal([6_875_357L], rig.XpAsked); // exactly what clears the 40%, not a point more
-        Assert.Contains(Lines(rig), l => l.Contains("vitae_level_crossed=yes level=126->127", StringComparison.Ordinal));
-        Assert.Contains(" vitae_paid=6875357 vitae_after=0", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_failed_run_still_pays_the_vitae_with_the_mages_live_numbers_and_ends_failed_with_its_own_reason_P5a_r3()
-    {
-        // Round 3: both death runs failed in the fight, the success-only vitae stage never ran and BSD Mage's vitae grew to 40% (level 126, 4,286,609,098 experience: the build's grant). The failure path now pays it too,
-        // across the level as D42 allows (level 127's threshold is set inside the grant here to prove the crossing is no refusal), and the run still ends Failed with the bind's reason.
-        var rig = new Rig(buffed: false);
-        rig.UseStaminaHalving = false;
-        rig.HoldVitae(0.60f, level: 126, total: 4_286_609_098);
-        var scenario = rig.Scenario(null, DeathStages.Bind | DeathStages.Vitae);
-        scenario.LevelXp = level => level == 127 ? 4_290_000_000UL : null;
-
-        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
-
-        Assert.StartsWith("bind: ", scenario.Failure, StringComparison.Ordinal);
-        Assert.Equal([6_875_357L], rig.XpAsked); // exactly what clears the 40% at level 126
-        Assert.False(rig.R.H.State.Self.Qualities.TryGetVitae(out _));
-        var lines = Lines(rig);
-        Assert.Contains(lines, l => l.StartsWith("vitae after the failure:", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.Contains("vitae_level_crossed=yes level=126->127", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.StartsWith("vitae: paid 6,875,357 experience, 0% left", StringComparison.Ordinal));
-        Assert.Contains(" vitae_paid=6875357 vitae_after=0", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_vitae_grant_that_stays_inside_the_level_logs_no_crossing_D42()
-    {
-        var rig = new Rig(buffed: false);
-        rig.HoldVitae(0.60f, total: 5_000_000);
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Vitae);
-        scenario.LevelXp = level => level == 127 ? 1_000_000_000_000UL : null;
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.DoesNotContain(Lines(rig), l => l.Contains("vitae_level_crossed", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void The_vitae_stage_fails_when_no_experience_table_is_loaded()
-    {
-        var rig = new Rig(buffed: false);
-        rig.HoldVitae(0.99f);
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Vitae); // no LevelXp, and the scripted session has no XpTable
-
-        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
-
-        Assert.Empty(rig.XpAsked);
-        Assert.Contains("TODO(m3-vitae-xptable)", scenario.Failure, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_run_without_the_gear_stage_waits_for_the_description_before_its_first_stage_and_never_logs_in_when_already_in_the_world()
-    {
-        var rig = new Rig(buffed: false, describe: false);
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Vitae);
-        scenario.LevelXp = _ => ulong.MaxValue;
-
-        for (var i = 0; i < 80; i++)
-        {
-            Assert.Equal(ScenarioStatus.Running, rig.Frame(scenario)); // 20 s: past the vitae stage's own 10 s limit
-        }
-
-        Assert.Equal("arriving", scenario.Stage);
-        Assert.Null(scenario.Failure);
-        Assert.Empty(rig.XpAsked);
-
-        rig.Describe();
-        rig.HoldVitae(0.99f);
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Null(scenario.Failure);
-        Assert.Single(rig.XpAsked);
-        Assert.Empty(rig.R.H.Net.Of(FakeSendKind.Login)); // the session was in the world: nothing to log in
-    }
-
-    [Fact]
-    public void The_vitae_stage_is_skipped_when_the_registry_holds_no_vitae()
-    {
-        var rig = new Rig(buffed: false);
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Vitae);
-
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Empty(rig.XpAsked);
-        Assert.Contains(" vitae_paid=0 vitae_after=0", scenario.VerdictFields(), StringComparison.Ordinal);
-        Assert.Contains(Lines(rig), l => l.StartsWith("vitae: the registry holds none", StringComparison.Ordinal));
-    }
-
-    [Fact]
     public void Without_the_vitae_stage_the_fields_read_n_a_and_the_vitae_stays()
     {
         var rig = new Rig(buffed: false);
@@ -1871,45 +1725,6 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         Assert.Empty(rig.XpAsked);
         Assert.Contains(" vitae_paid=n/a vitae_after=n/a", scenario.VerdictFields(), StringComparison.Ordinal);
         Assert.True(rig.R.H.State.Self.Qualities.TryGetVitae(out _));
-    }
-
-    [Fact]
-    public void A_vitae_that_stays_after_the_grant_fails_the_run_after_ten_seconds_naming_the_percentage()
-    {
-        var rig = new Rig(buffed: false) { XpClearsVitae = false };
-        rig.HoldVitae(0.60f);
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Vitae);
-        scenario.LevelXp = _ => ulong.MaxValue;
-
-        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
-
-        Assert.Single(rig.XpAsked);
-        Assert.Contains("vitae: the vitae is still 40% 10 s after the grant", scenario.Failure, StringComparison.Ordinal);
-        Assert.Contains(" vitae_paid=6875357 vitae_after=40", scenario.VerdictFields(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void The_vitae_stage_follows_the_death_in_a_whole_run_and_the_verdict_keeps_the_death_s_vitae()
-    {
-        var rig = new Rig(buffed: false);
-        var scenario = rig.Scenario(new FakeWalk(), DeathStages.Den | DeathStages.Death | DeathStages.Vitae);
-        scenario.LevelXp = _ => ulong.MaxValue;
-        var status = ScenarioStatus.Running;
-        for (var i = 0; i < 4000 && status == ScenarioStatus.Running && scenario.Stage != "respawn-vitals"; i++)
-        {
-            status = rig.Frame(scenario);
-        }
-
-        rig.R.PrivateInt(PlayerQualities.LevelProperty, 126); // the scripted death does not send the level or its death level
-        rig.R.PrivateInt(EffectRules.VitaeLevelProperty, 126);
-        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
-
-        Assert.Null(scenario.Failure);
-        Assert.Equal(EffectRules.VitaeExperienceToClear(0.95f, 126, 0), Assert.Single(rig.XpAsked));
-        var fields = scenario.VerdictFields();
-        Assert.Contains(" vitae=5 ", fields, StringComparison.Ordinal);
-        Assert.Contains(" vitae_after=0", fields, StringComparison.Ordinal);
-        Assert.Contains(" respawn=lifestone ", fields, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2075,47 +1890,6 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
     private static GearKit SmallKit() =>
         GearKit.Of([new GearItem(GearKit.Wand.Wcid, GearKit.Wand.Name, GearKind.Wand, GearKit.Wand.WeenieType, GearKit.Wand.ItemType, GearKit.Wand.ValidLocations, 1, null, GearKit.Wand.Burden), .. GearKit.Armour.Select(Armour)]);
 
-    [Fact]
-    public void The_gear_stage_geared_the_mage_and_the_regear_runs_the_gear_scenario_again_and_reads_gear_restored_yes()
-    {
-        var time = new ManualTimeProvider();
-        var log = new RecordingLogSink();
-        var visit = new StandInVisit { EnterAfter = 0.2, UnhideAfter = 1.0 };
-        using var session = GameSession.Offline(
-            h =>
-            {
-                StandInSessions.CharacterSelect(h);
-                StandInSessions.PlayerVisits(h, visit);
-                StandInSessions.AnswerWorld(h, visit);
-            },
-            time,
-            log);
-        for (var t = 0.0; t < 2.0; t += 0.1)
-        {
-            time.Advance(TimeSpan.FromSeconds(0.1));
-            session.Tick(session.Clock.Now);
-        }
-
-        var scenario = new DeathScenario(SmallKit(), new Dictionary<uint, SpellInfo>(), new DeathOptions(), null, log, endSession: false, stages: DeathStages.Gear | DeathStages.Regear);
-        var status = ScenarioStatus.Running;
-        for (var t = 0.0; t < 400 && status == ScenarioStatus.Running; t += 0.1)
-        {
-            time.Advance(TimeSpan.FromSeconds(0.1));
-            session.Tick(session.Clock.Now);
-            status = scenario.Step(session, session.Clock.Now);
-        }
-
-        Assert.Equal(ScenarioStatus.Succeeded, status);
-        Assert.Null(scenario.Failure);
-        Assert.StartsWith("gear=wielded worn=5", scenario.Gear!.VerdictFields(), StringComparison.Ordinal);
-        Assert.NotNull(scenario.Regear);
-        Assert.True(scenario.GearRestored);
-        Assert.StartsWith("gear=wielded worn=5", scenario.Regear!.VerdictFields(), StringComparison.Ordinal);
-        Assert.Contains("gear_steps=0", scenario.Regear.VerdictFields(), StringComparison.Ordinal); // the second run found everything wielded and sent nothing
-        Assert.Equal("ok", scenario.BarsNote); // the stand-in's book holds no spell (TODO(m3-standin-spellbook-updates)): nothing to put on a bar
-        Assert.Contains(" gear_restored=yes ", scenario.VerdictFields() + " ", StringComparison.Ordinal);
-    }
-
     // --- the drop of a death, then the regear ---
 
     private static ScenarioStatus RunScenario(CastRig cast, IScenario scenario, double limitSeconds)
@@ -2130,80 +1904,11 @@ public sealed partial class DeathScenarioTests(ITestOutputHelper output)
         return status;
     }
 
-    [Fact]
-    public void A_death_that_drops_wielded_items_leaves_the_inventory_settled_and_the_regear_tops_up_and_wields_again()
-    {
-        // A level 126 mage drops level / 20 plus 0 to 2 items, the wielded ones included (Player_Death.cs 347-540, 618-651). A wielded item's drop is ACE's TryDequipObjectWithNetworking(ToCorpseOnDeath): 02DA, 02CE, the sound
-        // and F747 and no 0024 (Player_Inventory.cs 397-441); the model must let go of it with the F747, or the re-gear counts a held item with no world object ("inventory-unsettled", the third live run).
-        var visit = new StandInVisit { EnterAfter = 0.2, UnhideAfter = 1.0, Stats = new StandInPlayerStats { Health = 5, Level = 126 } };
-        using var cast = new CastRig(visit);
-        var server = StandInSessions.Server(cast.Session.Reducer);
-        cast.Begin();
-        var kit = SmallKit();
-
-        var gear = new GearScenario(kit, cast.Log, endSession: false, cast: false);
-        Assert.Equal(ScenarioStatus.Succeeded, RunScenario(cast, gear, 400));
-        Assert.StartsWith("gear=wielded worn=5", gear.VerdictFields(), StringComparison.Ordinal);
-        var inventory = cast.Session.State.Self.Inventory;
-        var equippedBefore = inventory.Equipped.Count;
-        Assert.Equal(6, equippedBefore);
-
-        Assert.NotNull(server.PlaceNear(StandInLifestone.Make(0x80000C01), new System.Numerics.Vector3(1f, 0f, 0f)));
-        cast.Run(0.5);
-        Assert.Equal(ActionOutcomeKind.Confirmed, Use(cast, 0x80000C01));
-        cast.Run(0.5);
-        cast.Begin();
-        var suicide = cast.Session.Actions.Suicide(ActionSource.Host); // M4 4.1 t2: the stand-in holds no monster, so a suicide is the death
-        cast.Run(40.0);
-        Assert.True(suicide.IsCompleted, suicide.Summary);
-        cast.Run(8.0); // the arrival
-        Assert.Equal(SelfTravel.TeleportArrived, cast.Session.State.Self.Travel);
-        // The stand-in's teleport does not model Hidden; ACE's arrival ends with a state without it (as the scripted rig does). The host's portal space would also send LoginComplete.
-        InboundDispatcher.Dispatch(new InboundContext(0, MessageQueue.SmartBox, 0), AceWireWriters.SetState(cast.Session.State.Self.Guid, (uint)PhysicsState.Gravity, 1, 900), cast.Session.Reducer);
-        cast.Run(1.0);
-        Assert.Equal(SelfTravel.Present, cast.Session.State.Self.Travel);
-
-        Assert.Equal(1, cast.World.PlayerDeaths);
-        Assert.True(cast.World.LastDrops.Count >= 5, "drops " + cast.World.LastDrops.Count);
-        Assert.True(inventory.Equipped.Count < equippedBefore - 3, "equipped " + inventory.Equipped.Count); // the wielded drops left the model with their F747
-        GearInventory.CountAll(cast.Session.State, out var unsettled);
-        Assert.Equal(0, unsettled);
-
-        // The re-gear: the settle stage finds nothing unsettled, the gear scenario tops up what the corpse took and wields again.
-        var scenario = new DeathScenario(kit, new Dictionary<uint, SpellInfo>(), new DeathOptions(), null, cast.Log, endSession: false, stages: DeathStages.Regear);
-        var regearStatus = RunScenario(cast, scenario, 400);
-        Assert.True(regearStatus == ScenarioStatus.Succeeded, scenario.Failure);
-        Assert.True(scenario.GearRestored);
-        Assert.StartsWith("gear=wielded worn=5", scenario.Regear!.VerdictFields(), StringComparison.Ordinal);
-        Assert.True(scenario.Regear.GearSteps > 0, "the re-gear should have spawned and wielded what the death dropped");
-    }
-
     private static ActionOutcomeKind Use(CastRig cast, uint guid)
     {
         var use = cast.Session.Actions.Use(guid, ActionSource.Host);
         cast.Run(5.0);
         return use.Outcome?.Kind ?? ActionOutcomeKind.TimedOut;
-    }
-
-    [Fact]
-    public void A_held_item_with_no_world_object_is_named_and_the_regear_fails_naming_it_instead_of_waiting_silently()
-    {
-        var rig = new Rig(buffed: false);
-        // The pack lists an item whose object never existed (what a missed delete left behind).
-        var h = rig.R.H.R;
-        h.Reducer.OnPlayerDescription(
-            h.Context,
-            new GameEventHeader(WorldActionRig.Player, 1, GameEventTypes.PlayerDescription),
-            new PlayerDescriptionMsg { Inventory = [new ContentDesc(0x80000AAAu, 0)], Equipped = [new EquippedDesc(0x80000BBBu, 0x01000000u, 0)] });
-        var scenario = rig.Scenario(null, DeathStages.Regear);
-
-        Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario));
-
-        Assert.Contains("regear: 2 held item(s) still have no world object after 5 s", scenario.Failure, StringComparison.Ordinal);
-        Assert.Contains("guid 0x80000AAA", scenario.Failure, StringComparison.Ordinal);
-        Assert.Contains("guid 0x80000BBB", scenario.Failure, StringComparison.Ordinal);
-        Assert.Contains("Equipped", scenario.Failure, StringComparison.Ordinal);
-        Assert.Contains(Lines(rig), l => l.StartsWith("regear: 2 held item(s) have no world object:", StringComparison.Ordinal));
     }
 
     [Fact]

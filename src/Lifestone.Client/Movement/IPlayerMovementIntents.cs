@@ -60,4 +60,20 @@ public interface IPlayerMovementIntents
 
     /// <summary>True while the player stands on walkable ground (retail transient state Contact and OnWalkable).</summary>
     bool OnGround { get; }
+
+    /// <summary>
+    /// M5 7 P7p (D141): the server MoveTos the controller's stuck rule ended (<c>PlayerMovementController.ServerMoveToStuckEnds</c>, <c>TODO(m5-moveto-stuck)</c>), so a caller can read before and after an
+    /// action whether ACE's walk-to-use ended stuck in between. 0 for a body with no such rule.
+    /// </summary>
+    int ServerMoveToStuckEnds => 0;
+
+    /// <summary>
+    /// M5 7 D153 (D141, check, act, check): whether <paramref name="command"/> (a turn, sidestep or locomotion command) is still held: false after something let it go that
+    /// the caller did not (a lost window focus or a text field taking the keyboard drops every held key, <c>CommandInterpreter::LoseKeyboardFocus</c>), so a driver can press
+    /// it again. Null when this body cannot tell.
+    /// </summary>
+    bool? IsHeld(uint command) => null;
+
+    /// <summary>M5 7 P7p: how the last server MoveTo ended (<c>PlayerMovementController.LastServerMoveToEnd</c>: <c>arrived</c>, <c>cancelled (...)</c>, <c>not started</c>, <c>stuck</c>), or null.</summary>
+    string? LastServerMoveToEnd => null;
 }

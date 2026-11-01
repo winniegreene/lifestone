@@ -41,7 +41,7 @@ public sealed class LiveGateRunnerTests
 
         // The four lanes: test (its re-create, its short classes, then the mage's journey), test-melee (its re-create, then the melee journey), test-archer (its re-create, Shortcut's relog class, then the archer's journey), test-tools (headless, no re-create; M4 fresh G1, D44).
         var parallel = Steps(plan, "PARALLEL");
-        Assert.Equal(["test:recreate", "test:loopback", "test:smoke", "test-melee:recreate", "test-melee:smoke", "test-archer:recreate", "test-archer:loopback", "test-archer:smoke", "test-tools:loopback"], parallel.Select(s => s.Lane + ":" + s.Name).ToArray());
+        Assert.Equal(["test:recreate", "test:loopback", "test:smoke", "test:autopilot-mage", "test-melee:recreate", "test-melee:smoke", "test-archer:recreate", "test-archer:loopback", "test-archer:smoke", "test-tools:loopback"], parallel.Select(s => s.Lane + ":" + s.Name).ToArray());
         var loopbacks = parallel.Where(s => s.Name == "loopback").ToList();
         Assert.Contains("--filter \"Category=Loopback&Tier!=Soak&Account=test&(Lane!=solo|FullyQualifiedName~.AcademyExitLoopbackTests.|FullyQualifiedName~.HoltburgLapsLoopbackTests.)\"", loopbacks[0].Command, StringComparison.Ordinal); // AcademyExit's quest facts run in the lane
         Assert.Contains("--filter \"Category=Loopback&Tier!=Soak&Account=test-archer&Lane!=solo\"", loopbacks[1].Command, StringComparison.Ordinal);
@@ -103,7 +103,7 @@ public sealed class LiveGateRunnerTests
     {
         var one = Plan("-Loopback", "full", "-JourneySolo", "melee");
         Assert.Contains("[gate-plan] phase PARALLEL (4 lanes at once (at most three Godot), each lane in order)", one); // M4 fresh G1: test-melee stays a lane (its re-create), so a Godot run fewer but the lane count is four
-        Assert.Equal(["test:recreate", "test:loopback", "test:smoke", "test-melee:recreate", "test-archer:recreate", "test-archer:loopback", "test-archer:smoke", "test-tools:loopback"], Steps(one, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray()); // M4 fresh G1: the melee re-create stays at the head of its lane
+        Assert.Equal(["test:recreate", "test:loopback", "test:smoke", "test:autopilot-mage", "test-melee:recreate", "test-archer:recreate", "test-archer:loopback", "test-archer:smoke", "test-tools:loopback"], Steps(one, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray()); // M4 fresh G1: the melee re-create stays at the head of its lane
         var solo = Steps(one, "SOLO");
         Assert.Equal(["frame-judge-1", "frame-judge-2", "frame-judge-3", "journey-melee-solo", "live-phase-b", "throwaway-frames-1", "throwaway-frames-2", "throwaway-frames-3", "leak-scan"], solo.Select(s => s.Name).ToArray());
         Assert.Contains("-Only journey-melee -Backend require -NoBuild", solo[3].Command, StringComparison.Ordinal);
@@ -151,13 +151,14 @@ public sealed class LiveGateRunnerTests
     {
         var plan = Plan("-Loopback", "full");
         var projection = plan.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal));
-        Assert.Contains("parallel=1170 s (lane test bounds it; test=1170 test-melee=540 test-archer=560 test-tools=200) solo=810 s total=1980 s about 33 min", projection, StringComparison.Ordinal); // M4 fresh G1: + the mage's 120 s and the fighters' 90 s re-creates
-        Assert.Contains("serial=2320 s", Plan("-Serial", "-Loopback", "full").Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
+        Assert.Contains("parallel=3470 s (lane test bounds it; test=3470 test-melee=540 test-archer=560 test-tools=200) solo=810 s total=4280 s about 71 min", projection, StringComparison.Ordinal); // M4 fresh G1: + the mage's 120 s and the fighters' 90 s re-creates; M5 3 c2b: the mage's journey 800 s (600 + the logistics station's 150 + the death station's new order 50); M5 4 c1: + the autopilot lane's 2,100 s (30 minutes of the session clock, D19) after it in the same lane
+        Assert.Contains("serial=2520 s", Plan("-Serial", "-Loopback", "full").Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
 
         int Limit(string lane, string name) => int.Parse(Regex.Match(plan.Single(l => l.Contains("lane=" + lane + " ", StringComparison.Ordinal) && Regex.IsMatch(l, @"step=\d+ " + name + ":")), @"\(timeout (\d+) s\)$").Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-        Assert.Equal(2950, Limit("test", "smoke")); // max(2 x 600, smoke 2200 + 300 + the lane's loopback 450); unchanged by the re-create (M4 fresh G1: each step's limit is its own, so the earlier steps spend none of it)
+        Assert.Equal(3250, Limit("test", "smoke")); // max(2 x 800, smoke 2500 + 300 + the lane's loopback 450) (M5 3 c2b: the mage's step 2200 -> 2500 for the logistics station); unchanged by the re-create (M4 fresh G1: each step's limit is its own, so the earlier steps spend none of it)
+        Assert.Equal(4200, Limit("test", "autopilot-mage")); // M5 4 c1: max(2 x 2100, smoke 3600 + 300): no loopback cushion (the step follows the journey in the lane, and each step's limit is its own); smoke's 3600 is above the leg's own 3,360 s
         Assert.Equal(2200, Limit("test-melee", "smoke")); // max(2 x 450, smoke 1900 + 300 + no loopback)
-        Assert.Equal(2370, Limit("test-archer", "smoke")); // max(2 x 400, smoke 2000 + 300 + loopback 70)
+        Assert.Equal(3270, Limit("test-archer", "smoke")); // max(2 x 400, smoke 2900 + 300 + loopback 70); smoke's 2000 was under the runner's 2,780 s (M5 2 fix F2, 2-R5)
         Assert.Equal(240, Limit("test", "recreate")); // 2 x 120 (M4 fresh G1, D44: the mage's re-create and build)
         Assert.Equal(180, Limit("test-melee", "recreate")); // 2 x 90 (P5a measured about 65 s for a fighter's re-create and build)
         Assert.Equal(180, Limit("test-archer", "recreate"));
@@ -165,7 +166,7 @@ public sealed class LiveGateRunnerTests
         Assert.Equal(140, Limit("test-archer", "loopback")); // 70
         Assert.Equal(400, Limit("test-tools", "loopback")); // 200 (round 1: 167 s)
 
-        foreach (var key in new[] { "'loopback:test'        = 450", "'journey-mage'         = 600", "'journey-melee'        = 450", "'journey-archer'       = 400", "'loopback:test-archer' = 70", "'loopback:test-tools'  = 200", "'recreate:fighter'     = 90", "'recreate:mage'        = 120" })
+        foreach (var key in new[] { "'loopback:test'        = 450", "'journey-mage'         = 800", "'journey-melee'        = 450", "'journey-archer'       = 400", "'autopilot-mage'       = 2100", "'loopback:test-archer' = 70", "'loopback:test-tools'  = 200", "'recreate:fighter'     = 90", "'recreate:mage'        = 120" })
         {
             Assert.Contains(key, Runner, StringComparison.Ordinal);
         }
@@ -188,17 +189,33 @@ public sealed class LiveGateRunnerTests
             Write-Output ('NOLINE=' + (Get-JourneyReportOnly 'nothing'))
             Write-Output ('BARS=' + (Get-JourneyReportOnly ("[journey] journey station=buff ok=true s=39.2 gear=wielded buffs=24/24 driver=on bars=set:3`n[journey] journey station=death ok=true bars=n/a`n" + $done)))
             Write-Output ('BARSOLD=' + (Get-JourneyReportOnly ("[journey] journey station=buff ok=true s=1.6 gear=n/a buffs=12/12 swapped=yes`n[journey] journey station=death ok=true bars=ok`n" + $done)))
-            $mage = 'journey done ok=true name=mage stations=3/3 failed=none teleports=1 recalls=3 budget=1 route_m=3.2 run_s=1.0 rungs=0 blocked=1 sightless=0 vitals_passes=3 recovery_places=0 granted=0'
+            $mage = 'journey done ok=true name=mage stations=3/3 failed=none teleports=1 recalls=3 budget=1 route_m=3.2 run_s=1.0 rungs=0 blocked=1 sightless=0 vitals_passes=3 recovery_places=0 granted=0 places=0'
+            $logi = 'journey station=logistics ok=true s=141.0 trigger=forced granted=0 places=0 loot=off sold=0 bought=3 spent=1200 notes_sold=0 spent_xp=5000 raises=2'
+            $dead = 'journey station=death ok=true s=118.0 deaths=1 corpse_recovered=yes route=portal items_back=9 vitae_grants=0 rebuffed=yes rebuffed_pretrip=no relines=3 trip_abort=none'
+            $stations = "[x] $logi`n[x] $dead"
             Write-Output ('MAGE=' + (Get-JourneyReportOnly $mage))
             Write-Output ('WIN=' + (Get-JourneyReportOnly ("[journey] journey station=hunt ok=true s=9 attack_frame_max_ms=12.3 loot_frame_max_ms=n/a`n[journey] journey station=vendor ok=true vendor_frame_max_ms=20.5`n" + $done)))
-            Write-Output ('GATEJUDGE=' + (Get-GateJourneyVerdict "[x] $mage").Ok + '/' + (Get-GateJourneyVerdict ("[x] " + ($mage -replace 'recalls=3', 'recalls=1'))).Ok + '/' + (Get-GateJourneyVerdict ("[x] journey station=hunt ok=true attack_frame_max_ms=80.0`n[x] $mage")).Ok + '/' + (Get-GateJourneyVerdict ("[x] journey station=hunt ok=true attack_frame_max_ms=80.0`n[x] $mage") $true).Ok)
+            $fight = 'journey station=den-fight ok=true s=40.0 kills=9 mana_wait_max_s=1.2 mana_wait_s=3.1 storeys_visited=2 basement_entries=0 returns=1 slots_standing=33 legs_recovered=2 kills_unpaired=1 slots_expired=3 loot=off looted=0 kept=0 loot_value=0'
+            $slow = $fight -replace 'mana_wait_max_s=1.2', 'mana_wait_max_s=10.4'
+            $bare = 'journey station=den-fight ok=true s=40.0 kills=9'
+            Write-Output ('GATEJUDGE=' + (Get-GateJourneyVerdict "[x] $fight`n[x] $stations`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict ("[x] $fight`n[x] $stations`n[x] " + ($mage -replace 'recalls=3', 'recalls=1'))).Ok + '/' + (Get-GateJourneyVerdict ("[x] journey station=hunt ok=true attack_frame_max_ms=80.0`n[x] $fight`n[x] $stations`n[x] $mage")).Ok + '/' + (Get-GateJourneyVerdict ("[x] journey station=hunt ok=true attack_frame_max_ms=80.0`n[x] $fight`n[x] $stations`n[x] $mage") $true).Ok)
+            # M5 item 2 k1: mana_wait_max_s<=10 is judged on the mage's den-fight station by the headless gate too (the same function); the tour fields get a report-only bracket of their own.
+            Write-Output ('MANAJUDGE=' + (Get-GateJourneyVerdict "[x] $slow`n[x] $stations`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict "[x] $bare`n[x] $stations`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict "[x] $mage").Ok)
+            Write-Output ('TOUR=' + (Get-JourneyReportOnly ("[journey] $fight`n" + $done)))
+            Write-Output ('TOURNONE=' + (Get-JourneyReportOnly ("[journey] $bare`n" + $done)))
+            # M5 item 3 c2b: storeys_visited>=2 basement_entries=0 are judged on the mage's den-fight station by the headless gate too (the same function); item 3's fields get brackets of their own.
+            $oneStorey = $fight -replace 'storeys_visited=2', 'storeys_visited=1'
+            $entered = $fight -replace 'basement_entries=0', 'basement_entries=3'
+            $noStoreys = $fight -replace ' storeys_visited=2', ''
+            Write-Output ('TOURJUDGE=' + (Get-GateJourneyVerdict "[x] $fight`n[x] $stations`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict "[x] $oneStorey`n[x] $stations`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict "[x] $entered`n[x] $stations`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict "[x] $noStoreys`n[x] $stations`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict "[x] $oneStorey`n[x] $done").Ok)
+            Write-Output ('ITEM3=' + (Get-JourneyReportOnly ("[journey] $fight`n[journey] $logi`n[journey] $dead`n" + $mage)))
             $cmp = @(Get-JourneyComparison -Name melee -HeadlessText $done -GodotText ('[logincheck] ' + $bad1 + "`n[logincheck] " + $bad2) -Commit abc123 -GodotCommit abc123)
             foreach ($c in $cmp) { Write-Output ('CMP=' + $c) }
             Write-Output ('CMPDIFF=' + (@(Get-JourneyComparison -Name melee -HeadlessText $done -GodotText '' -Commit abc -GodotCommit def)[2]))
             """));
 
         Assert.Contains("ROW=hj-ok|True|PASS journey done ok=true name=melee stations=3/3 failed=none", run, StringComparison.Ordinal);
-        Assert.Contains("exit=0 [report-only route_m=912.5 rungs=4 blocked=0 sightless=1 granted=0 vitals_passes=2 run_s=801 keeper_pass=2 bars=n/a windows=n/a]", run, StringComparison.Ordinal);
+        Assert.Contains("exit=0 [report-only route_m=912.5 rungs=4 blocked=0 sightless=1 granted=0 places=n/a vitals_passes=2 run_s=801 keeper_pass=2 bars=n/a windows=n/a]", run, StringComparison.Ordinal);
         Assert.Contains("ROW=hj-bad|False|FAIL ", run, StringComparison.Ordinal);
         Assert.Contains("station(s) ok=false: hunt", run, StringComparison.Ordinal);
         Assert.Contains("ROW=hj-none|False|FAIL no journey done line", run, StringComparison.Ordinal);
@@ -209,9 +226,17 @@ public sealed class LiveGateRunnerTests
         Assert.Contains("BARSOLD= [report-only ", run, StringComparison.Ordinal);
         Assert.Contains(" keeper_pass=2 bars=n/a windows=n/a]", run.Split("BARSOLD=")[1], StringComparison.Ordinal); // a buff line without bars= reads n/a (never another station's)
         // M4 4.2 J2: the judged fields leave the report-only bracket (the melee's granted stays in it, the mage's does not), the window frames join it, and the headless gate row judges the same fields.
-        Assert.Contains("MAGE= [report-only route_m=3.2 rungs=0 blocked=1 sightless=0 vitals_passes=3 run_s=1.0 keeper=n/a bars=n/a windows=n/a]", run, StringComparison.Ordinal);
-        Assert.Contains("WIN= [report-only route_m=912.5 rungs=4 blocked=0 sightless=1 granted=0 vitals_passes=2 run_s=801 keeper_pass=2 bars=n/a windows=hunt:attack_frame_max_ms=12.3,hunt:loot_frame_max_ms=n/a,vendor:vendor_frame_max_ms=20.5]", run, StringComparison.Ordinal);
+        Assert.Contains("MAGE= [report-only route_m=3.2 rungs=0 blocked=1 sightless=0 places=0 vitals_passes=3 run_s=1.0 keeper=n/a bars=n/a windows=n/a]", run, StringComparison.Ordinal);
+        Assert.Contains("WIN= [report-only route_m=912.5 rungs=4 blocked=0 sightless=1 granted=0 places=n/a vitals_passes=2 run_s=801 keeper_pass=2 bars=n/a windows=hunt:attack_frame_max_ms=12.3,hunt:loot_frame_max_ms=n/a,vendor:vendor_frame_max_ms=20.5]", run, StringComparison.Ordinal);
         Assert.Contains("GATEJUDGE=True/False/False/True", run, StringComparison.Ordinal); // pass / mage recalls 1 / hunt window 80 ms / the same window contended
+        Assert.Contains("MANAJUDGE=False/False/False", run, StringComparison.Ordinal); // mana_wait_max_s 10.4 / the field missing from the station / no den-fight station: each fails the mage (k1)
+        Assert.Contains("TOUR= [report-only route_m=912.5 ", run, StringComparison.Ordinal);
+        Assert.Contains("] [report-only den-fight returns=1 slots_standing=33 legs_recovered=2 kills_unpaired=1 slots_expired=3 loot=off looted=0 kept=0 loot_value=0] [report-only logistics trigger=n/a granted=n/a places=n/a loot=n/a sold=n/a bought=n/a spent=n/a notes_sold=n/a spent_xp=n/a raises=n/a] [report-only death deaths=n/a corpse_recovered=n/a route=n/a items_back=n/a vitae_grants=n/a rebuffed=n/a rebuffed_pretrip=n/a relines=n/a trip_abort=n/a]", run, StringComparison.Ordinal);
+        Assert.Contains("TOURNONE= [report-only route_m=912.5 ", run, StringComparison.Ordinal);
+        Assert.Contains("] [report-only den-fight returns=n/a slots_standing=n/a legs_recovered=n/a kills_unpaired=n/a slots_expired=n/a loot=n/a looted=n/a kept=n/a loot_value=n/a] [report-only logistics trigger=n/a ", run, StringComparison.Ordinal);
+        Assert.DoesNotContain("storeys_visited=", run.Split("TOURNONE=")[1].Split('\n')[0], StringComparison.Ordinal); // c2b: the two judged counts left the report-only bracket
+        Assert.Contains("TOURJUDGE=True/False/False/False/True", run, StringComparison.Ordinal); // pass / one storey / three no-go entries / the storeys field missing fail the mage; the same den-fight line fails nothing on a journey that is not the mage's
+        Assert.Contains("ITEM3= [report-only route_m=3.2 rungs=0 blocked=1 sightless=0 places=0 vitals_passes=3 run_s=1.0 keeper=n/a bars=n/a windows=n/a] [report-only den-fight returns=1 slots_standing=33 legs_recovered=2 kills_unpaired=1 slots_expired=3 loot=off looted=0 kept=0 loot_value=0] [report-only logistics trigger=forced granted=0 places=0 loot=off sold=0 bought=3 spent=1200 notes_sold=0 spent_xp=5000 raises=2] [report-only death deaths=1 corpse_recovered=yes route=portal items_back=9 vitae_grants=0 rebuffed=yes rebuffed_pretrip=no relines=3 trip_abort=none]", run, StringComparison.Ordinal);
         Assert.Contains("CMP=[gate] compare journey=melee headless: journey done ok=true name=melee", run, StringComparison.Ordinal);
         Assert.Contains("CMP=[gate] compare journey=melee godot:    journey done ok=false name=melee", run, StringComparison.Ordinal);
         Assert.Contains("CMP=[gate] compare journey=melee verdicts headless=ok godot=FAIL agree=NO commit=same", run, StringComparison.Ordinal);
@@ -220,6 +245,40 @@ public sealed class LiveGateRunnerTests
         // The Godot journey steps get the same report-only fields from their smoke log; a journey step's account is its character's.
         Assert.Contains("(Get-JourneyReportOnly -Text $jt)", File.ReadAllText(GateModule), StringComparison.Ordinal);
         Assert.Contains("if ($Name -match '^(headless-)?journey-(?<j>mage|melee|archer)(-solo)?$')", Runner, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_gate_row_shows_the_physics_door_and_step_off_fields_report_only_and_n_a_when_missing_M5_5_c1()
+    {
+        var run = RunPowerShell(Stub("""
+            # the mage's logistics and death stations and places=0: judged on the mage from M5 item 4's gate (D55, D56), so a passing mage carries them (merge of m5/5 into m5/4)
+            $mage = 'journey station=logistics ok=true s=141.0 trigger=forced granted=0 places=0 loot=off sold=0 bought=3 spent=1200 notes_sold=0 spent_xp=5000 raises=2' + "`n[x] " + 'journey station=death ok=true s=118.0 deaths=1 corpse_recovered=yes route=recall items_back=6 vitae_grants=0 rebuffed=yes rebuffed_pretrip=no relines=2 trip_abort=none' + "`n[x] " + 'journey done ok=true name=mage stations=3/3 failed=none teleports=1 recalls=3 budget=1 route_m=3.2 run_s=1.0 rungs=0 blocked=1 sightless=0 vitals_passes=3 recovery_places=0 granted=0 places=0'
+            $melee = 'journey done ok=true name=melee stations=3/3 failed=none teleports=1 recalls=1 budget=2 route_m=9.5 run_s=80 rungs=4 blocked=0 sightless=1 vitals_passes=2 recovery_places=0 granted=0'
+            $fight = 'journey station=den-fight ok=true s=40.0 kills=9 mana_wait_max_s=1.2 storeys_visited=2 basement_entries=0 returns=1 slots_standing=33 legs_recovered=2 kills_unpaired=1 slots_expired=3 loot=off looted=0 kept=0 loot_value=0 creature_jumps=0 creature_flips=2 transit_ms_max=1.25 place_ms_max=0.40 transits_max=7'
+            $bare = 'journey station=den-fight ok=true s=40.0 kills=9 mana_wait_max_s=1.2 storeys_visited=2 basement_entries=0'
+            $na = $bare + ' creature_jumps=n/a creature_flips=n/a transit_ms_max=n/a place_ms_max=n/a transits_max=n/a'
+            $recall = 'journey station=recall-home ok=true s=6.0 recalls=1 recall_s=4.0 recall_fizzles=0 stepped_off=no'
+            $vendor = 'journey station=vendor ok=true s=20 buy=yes problems=0 vendor_frame_max_ms=20.5 door_opened=yes'
+            $facts = 'journey station=vendor-facts ok=true s=9 buy=no problems=0 granted=0 vendor_frame_max_ms=n/a door_opened=no'
+            Write-Output ('PHYS=' + (Get-JourneyReportOnly ("[journey] $fight`n[journey] $recall`n" + $mage)))
+            Write-Output ('PHYSNONE=' + (Get-JourneyReportOnly ("[journey] $bare`n" + $mage)))
+            Write-Output ('DOORS=' + (Get-JourneyReportOnly ("[journey] $recall`n[journey] $vendor`n[journey] $facts`n" + $melee)))
+            Write-Output ('DOORSNONE=' + (Get-JourneyReportOnly $melee))
+            # report-only: none of the new fields can fail a journey, whatever they say or whether they are there at all
+            $loud = $fight -replace 'creature_jumps=0', 'creature_jumps=999' -replace 'transit_ms_max=1.25', 'transit_ms_max=900.00'
+            $flip = $recall -replace 'stepped_off=no', 'stepped_off=yes'
+            Write-Output ('JUDGE=' + (Get-GateJourneyVerdict "[x] $fight`n[x] $recall`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict "[x] $loud`n[x] $flip`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict "[x] $na`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict "[x] $bare`n[x] $mage").Ok + '/' + (Get-GateJourneyVerdict "[x] $vendor`n[x] $facts`n[x] $melee").Ok + '/' + (Get-GateJourneyVerdict ("[x] " + ($vendor -replace 'door_opened=yes', 'door_opened=no') + "`n[x] $melee")).Ok + '/' + (Get-GateJourneyVerdict ("[x] $vendor`n[x] " + ($facts -replace 'door_opened=no', 'door_opened=yes') + "`n[x] $melee")).Ok)
+            """));
+
+        const string PhysicsNa = "[report-only den-fight-physics creature_jumps=n/a creature_flips=n/a transit_ms_max=n/a place_ms_max=n/a transits_max=n/a]";
+        const string DoorsNa = "[report-only vendor door_opened=n/a] [report-only vendor-facts door_opened=n/a]";
+        Assert.Contains("[report-only den-fight-physics creature_jumps=0 creature_flips=2 transit_ms_max=1.25 place_ms_max=0.40 transits_max=7] [report-only vendor door_opened=n/a] [report-only vendor-facts door_opened=n/a] [report-only recall-home stepped_off=no]", run, StringComparison.Ordinal);
+        Assert.Contains("PHYSNONE=", run, StringComparison.Ordinal);
+        Assert.Contains(PhysicsNa + " " + DoorsNa + " [report-only recall-home stepped_off=n/a]", run.Split("PHYSNONE=")[1].Split('\n')[0], StringComparison.Ordinal); // a den-fight line without the fields reads n/a
+        Assert.Contains("[report-only den-fight-physics creature_jumps=n/a creature_flips=n/a transit_ms_max=n/a place_ms_max=n/a transits_max=n/a] [report-only vendor door_opened=yes] [report-only vendor-facts door_opened=no] [report-only recall-home stepped_off=no]", run.Split("DOORS=")[1].Split('\n')[0], StringComparison.Ordinal);
+        Assert.Contains(PhysicsNa + " " + DoorsNa + " [report-only recall-home stepped_off=n/a]", run.Split("DOORSNONE=")[1].Split('\n')[0], StringComparison.Ordinal);
+        // The physics and stepped_off fields never fail a journey (a loud value, an n/a, a missing field); door_opened=yes is judged on the melee journey from M5 item 7's gate: a door that did not open fails it (the facts station's no, the vendor's no), both yes passes.
+        Assert.Contains("JUDGE=True/True/True/True/False/False/True", run, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------------------------------------ M4 fresh G1 (D44, D45): the re-create step
@@ -273,13 +332,13 @@ public sealed class LiveGateRunnerTests
         var parallel = Plan("-Loopback", "full", "-KeepCharacters");
         Assert.Equal("[gate-plan] " + Line, parallel[1]); // right after the mode line
         Assert.Single(parallel, l => l.Contains("-KeepCharacters:", StringComparison.Ordinal));
-        Assert.Equal(["test:loopback", "test:smoke", "test-melee:smoke", "test-archer:loopback", "test-archer:smoke", "test-tools:loopback"], Steps(parallel, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray());
-        Assert.Contains("parallel=1050 s (lane test bounds it; test=1050 test-melee=450 test-archer=470 test-tools=200) solo=810 s total=1860 s about 31 min", parallel.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
+        Assert.Equal(["test:loopback", "test:smoke", "test:autopilot-mage", "test-melee:smoke", "test-archer:loopback", "test-archer:smoke", "test-tools:loopback"], Steps(parallel, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray());
+        Assert.Contains("parallel=3350 s (lane test bounds it; test=3350 test-melee=450 test-archer=470 test-tools=200) solo=810 s total=4160 s about 69 min", parallel.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
 
         var serial = Plan("-Serial", "-Loopback", "full", "-KeepCharacters");
         Assert.Equal("[gate-plan] " + Line, serial[1]);
         Assert.Equal(["headless-journey-mage", "headless-journey-melee", "headless-journey-archer", "frame-judge-1", "frame-judge-2", "frame-judge-3", "leak-scan"], Steps(serial, "SERIAL").Select(s => s.Name).ToArray());
-        Assert.Contains("serial=2020 s", serial.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
+        Assert.Contains("serial=2220 s", serial.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
 
         foreach (var plan in new[] { parallel, serial })
         {
@@ -319,10 +378,10 @@ public sealed class LiveGateRunnerTests
         Assert.Equal(MeleeRecreateCommand, parallel.Single(s => s.Lane == "test-melee").Command);
         Assert.DoesNotContain(Steps(melee, "SOLO"), s => s.Name.StartsWith("recreate", StringComparison.Ordinal));
         Assert.Contains("journey-melee-solo", Steps(melee, "SOLO").Select(s => s.Name));
-        Assert.Contains("parallel=1170 s (lane test bounds it; test=1170 test-melee=90 test-archer=560 test-tools=200) solo=1260 s total=2430 s about 40 min", melee.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
+        Assert.Contains("parallel=3470 s (lane test bounds it; test=3470 test-melee=90 test-archer=560 test-tools=200) solo=1260 s total=4730 s about 79 min", melee.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
 
         var all = Plan("-Loopback", "full", "-JourneySolo", "mage,melee,archer");
-        Assert.Equal(["test:recreate", "test:loopback", "test-melee:recreate", "test-archer:recreate", "test-archer:loopback", "test-tools:loopback"], Steps(all, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray());
+        Assert.Equal(["test:recreate", "test:loopback", "test:autopilot-mage", "test-melee:recreate", "test-archer:recreate", "test-archer:loopback", "test-tools:loopback"], Steps(all, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray());
         Assert.Equal(["journey-mage-solo", "journey-melee-solo", "journey-archer-solo"], Steps(all, "SOLO").Where(s => s.Name.StartsWith("journey-", StringComparison.Ordinal)).Select(s => s.Name).ToArray());
     }
 
@@ -627,7 +686,8 @@ public sealed class LiveGateRunnerTests
         var table = script[script.IndexOf("$stepAccounts = [ordered]@{", StringComparison.Ordinal)..];
         table = table[..table.IndexOf("\n}\n", StringComparison.Ordinal)];
         var accounts = Regex.Matches(table, @"^\s+'([a-z-]+)'\s+= '([a-z-]+)'", RegexOptions.Multiline).ToDictionary(m => m.Groups[1].Value, m => m.Groups[2].Value);
-        Assert.Equal(["login-check", "login", "login-throwaway", "journey-mage", "journey-melee", "journey-archer"], accounts.Keys.ToArray());
+        Assert.Equal(["login-check", "login", "login-throwaway", "journey-mage", "journey-melee", "journey-archer", "autopilot-mage"], accounts.Keys.ToArray());
+        Assert.Equal("test", accounts["autopilot-mage"]); // BSD Mage again, after the mage's journey in the same lane (M5 4 c1, D19)
         Assert.Equal("test", accounts["journey-mage"]);
         Assert.Equal("test-melee", accounts["journey-melee"]);
         Assert.Equal("test-archer", accounts["journey-archer"]);
@@ -876,9 +936,20 @@ public sealed class LiveGateRunnerTests
     [Fact]
     public void The_leak_scan_reads_the_whole_gate_folder_and_the_log_dir_R4()
     {
+        // The scan reads two folders: the checkout's gate folder and the log dir (the main checkout's). The plan prints a path under the checkout as <worktree> first and then what is left under the main checkout
+        // as <main>, so in a worktree the two differ, and in the main checkout (where the worktree IS the main checkout) the same folder prints as <worktree> twice, since the first replacement takes both (M5 item 2 k1).
+        var inMain = string.Equals(Path.GetFullPath(CheckoutFiles.MainCheckoutRoot).TrimEnd('\\', '/'), Path.GetFullPath(RepositoryFiles.Root).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+        var folders = "<worktree>\\cache\\gate\\gate," + (inMain ? "<worktree>" : "<main>") + "\\cache\\gate\\gate";
         var plan = Steps(Plan("-Loopback", "full"), "SOLO").Single(s => s.Name == "leak-scan").Command;
-        Assert.Contains("-ScanDir <worktree>\\cache\\gate\\gate,<main>\\cache\\gate\\gate", plan, StringComparison.Ordinal);
-        Assert.Contains("-FullScan -ScanDir <worktree>\\cache\\gate\\gate,<main>\\cache\\gate\\gate", Steps(Plan("-Serial", "-Loopback", "full"), "SERIAL").Single(s => s.Name == "leak-scan").Command, StringComparison.Ordinal); // -Serial closes with the leak scan too
+        Assert.Contains("-ScanDir " + folders, plan, StringComparison.Ordinal);
+        Assert.Contains("-FullScan -ScanDir " + folders, Steps(Plan("-Serial", "-Loopback", "full"), "SERIAL").Single(s => s.Name == "leak-scan").Command, StringComparison.Ordinal); // -Serial closes with the leak scan too
+
+        // What it proves in a worktree is unchanged: two different folders, the worktree's and the main checkout's, each read whole. In the main checkout: the one folder, named twice and never as <main>.
+        var scanned = Regex.Match(plan, @"-ScanDir (?<dirs>\S+)").Groups["dirs"].Value.Split(',');
+        Assert.Equal(2, scanned.Length);
+        Assert.Equal(inMain, scanned[0] == scanned[1]);
+        Assert.Equal(inMain, !plan.Contains("<main>", StringComparison.Ordinal));
+        Assert.StartsWith("<worktree>\\cache\\gate\\", scanned[0], StringComparison.Ordinal);
         Assert.Contains("foreach ($extra in $ScanDir)", Smoke, StringComparison.Ordinal);
         Assert.Contains("scanned    = $leaks.Scanned", Smoke, StringComparison.Ordinal);
     }
@@ -988,6 +1059,42 @@ public sealed class LiveGateRunnerTests
         var play = File.ReadAllText(RepositoryFiles.PathOf("tools", "play.ps1"));
         Assert.Contains("Invoke-PlayChild $godotScript $godotParameters -Capture:$Offscreen", play, StringComparison.Ordinal);
         Assert.Contains("Get-PlayAudioVerdict $script:capturedOutput.ToString()", play, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_long_runs_mute_line_is_read_from_its_oldest_rolled_log_and_an_earlier_runs_file_is_left_out_D126()
+    {
+        // Soak round 12 (2026-10-29): the game rolled lifestone.log into lifestone.1.log at 16 MB, so the start-up line was no longer in the current file and a clean run exited 3. Here the run rolled twice: its start is in
+        // lifestone.2.log; lifestone.3.log is an earlier run's (an old write time) and says muted=False; the current file has neither line.
+        var module = RepositoryFiles.PathOf("tools", "lib", "Play.psm1");
+        var run = RunPowerShell($"Import-Module '{module}' -Force -DisableNameChecking\n" + """
+            $d = Join-Path ([IO.Path]::GetTempPath()) ('runlog-d126-' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $d | Out-Null
+            try {
+                $since = Get-Date
+                Set-Content -LiteralPath (Join-Path $d 'lifestone.3.log') -Value 'INFO [audio] audio service installed voices=16 master_db=0 muted=False device=Default ms=8'
+                (Get-Item -LiteralPath (Join-Path $d 'lifestone.3.log')).LastWriteTime = $since.AddHours(-3)
+                Set-Content -LiteralPath (Join-Path $d 'lifestone.2.log') -Value @('INFO [log] start', 'INFO [audio] audio service installed voices=16 master_db=-80 muted=True device=Default ms=8')
+                Set-Content -LiteralPath (Join-Path $d 'lifestone.1.log') -Value 'INFO [fight] the middle of the run'
+                Set-Content -LiteralPath (Join-Path $d 'lifestone.log') -Value 'INFO [autopilot] autopilot done ok=yes'
+                Set-Content -LiteralPath (Join-Path $d 'other.log') -Value 'muted=False'
+                $head = Get-PlayRunLogHead -LogsFolder $d -Since $since
+                $v = Get-PlayAudioVerdict $head
+                Write-Output ('V=' + $v.Ok.ToString() + '|' + $v.Reason)
+                Write-Output ('FIRST=' + ($head -split "`n")[0])
+                Write-Output ('CURRENT=' + (Get-PlayAudioVerdict (Get-Content -LiteralPath (Join-Path $d 'lifestone.log') -Raw)).Ok.ToString())
+                Write-Output ('NONE=[' + (Get-PlayRunLogHead -LogsFolder (Join-Path $d 'missing') -Since $since) + ']')
+            }
+            finally { Remove-Item -LiteralPath $d -Recurse -Force }
+            """);
+
+        Assert.Contains("V=True|", run, StringComparison.Ordinal); // the run's own start says muted=True; the earlier run's muted=False is not read
+        Assert.Contains("FIRST=INFO [log] start", run, StringComparison.Ordinal); // oldest first
+        Assert.Contains("CURRENT=False", run, StringComparison.Ordinal); // the old check's file: no start-up line in it
+        Assert.Contains("NONE=[]", run, StringComparison.Ordinal);
+        var play = File.ReadAllText(RepositoryFiles.PathOf("tools", "play.ps1"));
+        Assert.Contains("Get-PlayRunLogHead -LogsFolder $isolatedLogs -Since $gameStartedAt", play, StringComparison.Ordinal);
+        Assert.True(play.IndexOf("$gameStartedAt = Get-Date", StringComparison.Ordinal) < play.IndexOf("Invoke-PlayChild $godotScript", StringComparison.Ordinal), "the start is marked before the game runs");
     }
 
     // ------------------------------------------------------------------------------------------ rfix-c: the g2 faults, executed
@@ -1181,7 +1288,7 @@ public sealed class LiveGateRunnerTests
     // ------------------------------------------------------------------------------------------ M5 item 0 c5: the gate's frame cap and Godot's errors judged 0
 
     [Fact]
-    public void The_gate_caps_the_journeys_and_the_leak_scan_at_60_fps_but_not_the_frame_judge_and_the_plan_names_both_c5()
+    public void The_gate_runs_the_journeys_uncapped_since_D28_and_never_caps_the_frame_judge_or_the_leak_scan_and_the_plan_says_so_c5()
     {
         foreach (var plan in new[] { Plan("-Loopback", "full"), Plan("-Serial", "-Loopback", "full"), Plan("-Loopback", "full", "-JourneySolo", "mage") })
         {
@@ -1198,25 +1305,25 @@ public sealed class LiveGateRunnerTests
                 {
                     Assert.DoesNotContain("-MaxFps", line, StringComparison.Ordinal);
                 }
-                else // the journeys (parallel or solo)
+                else // the journeys (parallel or solo): uncapped since M5 item 1 (m5-plan.md D28)
                 {
-                    Assert.Contains(" -MaxFps 60", line, StringComparison.Ordinal);
+                    Assert.DoesNotContain("-MaxFps", line, StringComparison.Ordinal);
                 }
             }
 
             Assert.Single(plan, l => l.Contains("frame cap (M5 item 0)", StringComparison.Ordinal)); // said once, not per step
         }
 
-        Assert.Contains(Plan("-Loopback", "full"), l => l.Contains("-Only journey-mage", StringComparison.Ordinal) && l.Contains(" -MaxFps 60", StringComparison.Ordinal));
+        Assert.Contains(Plan("-Loopback", "full"), l => l.Contains("-Only journey-mage", StringComparison.Ordinal) && !l.Contains("-MaxFps", StringComparison.Ordinal));
         Assert.Contains(Plan("-Loopback", "full"), l => l.Contains("-Only login-throwaway ", StringComparison.Ordinal));
         var cap = Plan("-Loopback", "full").Single(l => l.Contains("frame cap (M5 item 0)", StringComparison.Ordinal));
-        Assert.Contains("--max-fps=60", cap, StringComparison.Ordinal);
+        Assert.Contains("none: the journeys run uncapped (D28", cap, StringComparison.Ordinal);
         Assert.Contains("the leak scan runs no Godot and carries no cap", cap, StringComparison.Ordinal);
         Assert.Contains("UNCAPPED on the frame-judge steps (login-check, login) and the throwaway's frames", cap, StringComparison.Ordinal);
         Assert.Contains("Holtburg 60 fps floor", cap, StringComparison.Ordinal);
         Assert.Contains("godot_errors=<n>", cap, StringComparison.Ordinal);
         Assert.Contains("judged 0 on every Godot row", cap, StringComparison.Ordinal);
-        Assert.Contains("$script:GateMaxFps = 60", Runner, StringComparison.Ordinal);
+        Assert.Contains("$script:GateMaxFps = 0", Runner, StringComparison.Ordinal); // D28: dropped in M5 item 1; a value over 0 caps the journeys again
 
         // smoke's own runs outside the gate carry no cap: the parameter defaults to 0 and only the gate passes it.
         Assert.Contains("[int] $MaxFps = 0", Smoke, StringComparison.Ordinal);
@@ -1260,6 +1367,349 @@ public sealed class LiveGateRunnerTests
 
         Assert.Contains("ROW=True|passed=3 failed=0 skipped=0 exit=0 godot_errors=n/a", run, StringComparison.Ordinal);
         Assert.Contains("if (@('test', 'build', 'headless', 'recreate') -contains $s.Kind)", File.ReadAllText(GateModule), StringComparison.Ordinal);
+    }
+
+    // ------------------------------------------------------------------------------------------ M5 item 4 c1: the autopilot lane and its judge (D19, D55, D58)
+
+    [Fact]
+    public void The_autopilot_lane_follows_the_mage_journey_in_the_test_lane_with_its_own_limit_and_name_M5_item_4_c1()
+    {
+        var plan = Plan("-Loopback", "full");
+        var lane = Steps(plan, "PARALLEL").Where(s => s.Lane == "test").ToList();
+        Assert.Equal(["recreate", "loopback", "smoke", "autopilot-mage"], lane.Select(s => s.Name).ToArray()); // one character per account in the world: after the mage's journey, same account, same lane
+        var autopilot = lane[^1];
+        Assert.Contains("smoke.ps1 -Only autopilot-mage -Backend require -NoBuild", autopilot.Command, StringComparison.Ordinal);
+        Assert.Contains("<worktree>\\cache\\gate\\gate\\autopilot-mage", autopilot.Command, StringComparison.Ordinal);
+        Assert.Contains("-NoScan -ContendedFrames -UserDataSlot g1", autopilot.Command, StringComparison.Ordinal); // contended frames (report-only), the journey's own smoke slot
+        Assert.Equal(1, Steps(plan, "PARALLEL").Count(s => s.Name == "autopilot-mage")); // the test lane only (D19); the melee and archer lanes have none
+        Assert.DoesNotContain(Steps(plan, "SOLO"), s => s.Name.Contains("autopilot", StringComparison.Ordinal));
+        Assert.DoesNotContain(Plan("-Serial", "-Loopback", "full"), l => l.Contains("autopilot-mage", StringComparison.Ordinal)); // -Serial is the headless journeys
+
+        // Moving the mage's journey to the solo phase leaves the autopilot in the lane, on a slot of its own.
+        var solo = Plan("-Loopback", "full", "-JourneySolo", "mage");
+        Assert.Equal(["recreate", "loopback", "autopilot-mage"], Steps(solo, "PARALLEL").Where(s => s.Lane == "test").Select(s => s.Name).ToArray());
+        Assert.Contains("-UserDataSlot g4", Steps(solo, "PARALLEL").Single(s => s.Name == "autopilot-mage").Command, StringComparison.Ordinal);
+
+        // -Steps names it; journey-mage does not.
+        var only = Plan("-Loopback", "core", "-Round", "5", "-Steps", "autopilot-mage");
+        var step = Assert.Single(Steps(only, "PARALLEL"));
+        Assert.Equal(("test", "autopilot-mage"), (step.Lane, step.Name));
+        Assert.Contains(only, l => l.StartsWith("[gate-plan] rerun: round=5 tag=gate-r5 -Steps autopilot-mage = autopilot-mage;", StringComparison.Ordinal));
+        Assert.Contains("parallel=2100 s (lane test bounds it; test=2100) solo=0 s total=2100 s about 35 min", only.Single(l => l.StartsWith("[gate-plan] projected", StringComparison.Ordinal)), StringComparison.Ordinal);
+        Assert.Equal(["smoke"], Steps(Plan("-Loopback", "core", "-Round", "5", "-Steps", "journey-mage"), "PARALLEL").Select(s => s.Name).ToArray());
+        Assert.Contains(plan, l => l.StartsWith("[gate-plan] autopilot (M5 item 4 c1, D19): smoke autopilot-mage in lane test after journey-mage", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_autopilot_steps_limits_and_numbers_agree_between_smoke_the_gate_and_the_legs_own_limit_M5_item_4_c1()
+    {
+        var smoke = File.ReadAllText(RepositoryFiles.PathOf("tools", "smoke.ps1"));
+        var gate = Runner;
+        var table = Regex.Match(smoke, @"'autopilot-mage' = @\{ Minutes = (?<m>\d+); TripAfterKills = (?<k>\d+); InterruptAt = (?<i>\d+); HandbackAfter = (?<h>\d+); Seconds = (?<s>\d+) \}");
+        Assert.True(table.Success, "smoke.ps1's $autopilotSteps table changed shape");
+        Assert.Equal(("30", "5", "30", "20", "3600"), (table.Groups["m"].Value, table.Groups["k"].Value, table.Groups["i"].Value, table.Groups["h"].Value, table.Groups["s"].Value)); // the numbers in one place
+        Assert.Contains("$script:SmokeAutopilotSeconds = " + table.Groups["s"].Value, gate, StringComparison.Ordinal); // the gate's limit is built on smoke's
+        Assert.Contains("[math]::Max(2 * $script:ExpectedSeconds['autopilot-mage'], $script:SmokeAutopilotSeconds + 300)", gate, StringComparison.Ordinal);
+
+        // smoke's Godot limit is above the leg's own (AutopilotLegRunner.WholeSecondsFor: the login, the margin, the minutes, the safe point), read from the sources.
+        string Constant(string file, string name) => Regex.Match(File.ReadAllText(RepositoryFiles.PathOf("src", "Lifestone.Game", "scripts", "Session", file)), @"const double " + name + @" = (?<v>[\d.]+);").Groups["v"].Value;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var login = double.Parse(Constant("JourneyLegRunner.cs", "LoginSeconds"), inv);
+        var margin = double.Parse(Constant("JourneyLegRunner.cs", "MarginSeconds"), inv);
+        var safePoint = double.Parse(Constant("AutopilotLegRunner.cs", "SafePointSeconds"), inv);
+        var whole = login + margin + (double.Parse(table.Groups["m"].Value, inv) * 60.0) + safePoint;
+        Assert.Equal(3360.0, whole); // 60 + 300 + 30 x 60 + 1,200
+        Assert.True(double.Parse(table.Groups["s"].Value, inv) >= whole + 180.0, "smoke's autopilot-mage limit must clear the leg's own by a margin");
+    }
+
+    [Fact]
+    public void The_scripted_hand_off_times_fall_inside_the_run_and_the_hand_back_follows_the_interrupt_D58_M5_item_4_c1()
+    {
+        var smoke = File.ReadAllText(RepositoryFiles.PathOf("tools", "smoke.ps1"));
+        var table = Regex.Match(smoke, @"'autopilot-mage' = @\{ Minutes = (?<m>\d+); TripAfterKills = \d+; InterruptAt = (?<i>\d+); HandbackAfter = (?<h>\d+);");
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var interrupt = int.Parse(table.Groups["i"].Value, inv);
+        var handback = int.Parse(table.Groups["h"].Value, inv);
+        var minutes = int.Parse(table.Groups["m"].Value, inv);
+        Assert.InRange(interrupt, 1, (minutes * 60) - 300); // well inside the minutes, so the interrupt and the hand-back both land before the stop rule
+        Assert.InRange(handback, 1, 120); // the person's hold is short: the logic hands back to the state the loop finds
+        Assert.Contains("--autopilot-test-interrupt-at=$($auto.InterruptAt) --autopilot-test-handback-after=$($auto.HandbackAfter)", smoke, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Get_AutopilotVerdict_judges_the_run_itself_and_reports_the_rest_with_fields_read_by_key_M5_item_4_c1()
+    {
+        var run = RunPowerShell($"Import-Module '{GateModule}' -Force\n" + """
+            $c1 = '[logincheck] autopilot cycle n=1 state=death why=test-death:1 kills=1 xp=100 deaths=1 trips=0 sold=0 bought=0 spent_xp=0 granted=0 places=0 interrupted=1 resumed=1 reconnects=0 s=500 later=9'
+            $c2 = '[logincheck] autopilot cycle n=2 state=trip why=forced-trip:1,logistics-trip:1 extra=7 kills=5 xp=300 deaths=0 trips=1 sold=0 bought=4 spent_xp=900 granted=0 places=0 interrupted=0 resumed=0 reconnects=0 s=700'
+            $c3 = '[logincheck] autopilot cycle n=3 state=stopped why=stop-rule:1 kills=2 s=300'
+            $done = '[logincheck] autopilot done ok=yes cycles=2 stop=minutes kills=8 xp=400 deaths=1 trips=1 sold=0 bought=4 spent_xp=900 mana_wait_max_s=3 granted=0 places=0 interrupted=1 resumed=1 reconnects=0 s=1500 newfield=7'
+            $leg = '[logincheck] autopilot leg done ok=true seconds=1800.0 cycles=2 stop=minutes frames_saved=6 frames_not_taken=none failure=none'
+            $hand = "test-interrupt: typed /stop in the fight:den-fight state`ntest-handback: typed /auto"
+            function Show($tag, $v) { Write-Output ($tag + '=' + $v.Ok + '|' + $v.Detail + '|' + $v.ReportOnly + '|' + $v.Frames) }
+            Show 'PASS' (Get-AutopilotVerdict "$c1`n$c2`n$c3`n$hand`n$done`n$leg")
+            Show 'NODONE' (Get-AutopilotVerdict "$c1`n$c2`n$leg")
+            Show 'OKNO' (Get-AutopilotVerdict ("$c1`n$c2`n" + ($done -replace 'done ok=yes', 'done ok=no') + "`n$leg"))
+            Show 'LEGONLY' (Get-AutopilotVerdict $leg)
+            # report-only: every rule broken, the run still passes and each is marked NO
+            $bad = '[logincheck] autopilot done ok=yes cycles=1 stop=minutes deaths=0 trips=0 granted=3 places=1 interrupted=0 resumed=0 reconnects=2 s=900'
+            Show 'BAD' (Get-AutopilotVerdict $bad)
+            # by key, not by position: the done line's fields shuffled and a new one in front
+            $shuffled = '[logincheck] autopilot done ok=yes brand_new=1 reconnects=0 resumed=1 interrupted=1 places=0 granted=0 trips=2 deaths=1 cycles=3 stop=level s=10'
+            Show 'SHUFFLED' (Get-AutopilotVerdict $shuffled)
+            # a field the done line lacks is read from the cycle lines (their sum) and marked
+            Show 'FALLBACK' (Get-AutopilotVerdict "$c1`n$c2`n[logincheck] autopilot done ok=yes cycles=2 stop=minutes s=10")
+            # cycles>=2 is JUDGED from M5 item 7's gate: one cycle, none, no field and a field that is not a number fail the step, named; the cycle lines are not counted in its place
+            Show 'ONECYCLE' (Get-AutopilotVerdict ($done -replace 'cycles=2', 'cycles=1'))
+            Show 'NOCYCLES' (Get-AutopilotVerdict "$c1`n$c2`n[logincheck] autopilot done ok=yes stop=minutes deaths=1 trips=1 interrupted=1 resumed=1 reconnects=0 granted=0 places=0 s=10")
+            Show 'JUNKCYCLES' (Get-AutopilotVerdict ($done -replace 'cycles=2', 'cycles=many'))
+            # no prefix (the headless host prints the bare line)
+            Show 'BARE' (Get-AutopilotVerdict 'autopilot done ok=yes cycles=2 stop=minutes deaths=1 trips=1 granted=0 places=0 interrupted=1 resumed=1 reconnects=0 s=5')
+            """);
+
+        string Row(string tag) => run.Split('\n').Select(l => l.TrimEnd('\r')).Single(l => l.StartsWith(tag + "=", StringComparison.Ordinal));
+        var pass = Row("PASS");
+        Assert.StartsWith("PASS=True|autopilot done ok=yes cycles=2 stop=minutes ", pass, StringComparison.Ordinal);
+        Assert.EndsWith("|saved=6 not_taken=none", pass, StringComparison.Ordinal);
+        Assert.DoesNotContain("cycles=2(>=2", pass, StringComparison.Ordinal); // cycles left the report-only list
+        Assert.Contains("reconnects=0(=0:yes) interrupted=1(=1:yes) resumed=1(=1:yes) deaths=1(>=1:yes) trips=1(>=1:yes) granted=0(=0:yes) places=0(=0:yes) stop=minutes cycle_lines=3 states=death,trip,stopped triggers=forced-trip:1,logistics-trip:1,stop-rule:1,test-death:1 test_interrupt=yes test_handback=yes", pass, StringComparison.Ordinal); // fields appended after why= (extra=7, later=9) change nothing
+
+        Assert.StartsWith("NODONE=False|no autopilot done line|n/a (no autopilot done line); cycle_lines=2 test_interrupt=no test_handback=no", Row("NODONE"), StringComparison.Ordinal);
+        Assert.StartsWith("OKNO=False|autopilot done ok=no cycles=2 ", Row("OKNO"), StringComparison.Ordinal);
+        Assert.Contains("; autopilot done ok is no, not yes", Row("OKNO"), StringComparison.Ordinal);
+        Assert.StartsWith("LEGONLY=False|no autopilot done line", Row("LEGONLY"), StringComparison.Ordinal); // 'autopilot leg done' is not 'autopilot done'
+        Assert.EndsWith("|saved=6 not_taken=none", Row("LEGONLY"), StringComparison.Ordinal);
+
+        var bad = Row("BAD");
+        Assert.StartsWith("BAD=False|", bad, StringComparison.Ordinal); // cycles=1 is judged from item 7's gate; the other broken rules below stay report-only
+        Assert.Contains("; cycles=1 (judged >=2)", bad, StringComparison.Ordinal);
+        Assert.Contains("reconnects=2(=0:NO) interrupted=0(=1:NO) resumed=0(=1:NO) deaths=0(>=1:NO) trips=0(>=1:NO) granted=3(=0:NO) places=1(=0:NO)", bad, StringComparison.Ordinal);
+        Assert.EndsWith("|n/a (no autopilot leg done line)", bad, StringComparison.Ordinal);
+
+        Assert.StartsWith("SHUFFLED=True|", Row("SHUFFLED"), StringComparison.Ordinal);
+        Assert.Contains("reconnects=0(=0:yes) interrupted=1(=1:yes) resumed=1(=1:yes) deaths=1(>=1:yes) trips=2(>=1:yes) granted=0(=0:yes) places=0(=0:yes) stop=level", Row("SHUFFLED"), StringComparison.Ordinal);
+        Assert.Contains("interrupted=1(=1:yes cycle-lines) resumed=1(=1:yes cycle-lines)", Row("FALLBACK"), StringComparison.Ordinal);
+        Assert.Contains("deaths=1(>=1:yes cycle-lines) trips=1(>=1:yes cycle-lines)", Row("FALLBACK"), StringComparison.Ordinal);
+        Assert.StartsWith("BARE=True|", Row("BARE"), StringComparison.Ordinal);
+        Assert.StartsWith("FALLBACK=True|", Row("FALLBACK"), StringComparison.Ordinal);
+        Assert.StartsWith("ONECYCLE=False|", Row("ONECYCLE"), StringComparison.Ordinal);
+        Assert.Contains("; cycles=1 (judged >=2)", Row("ONECYCLE"), StringComparison.Ordinal);
+        Assert.StartsWith("NOCYCLES=False|", Row("NOCYCLES"), StringComparison.Ordinal);
+        Assert.Contains("; cycles=n/a (judged >=2)", Row("NOCYCLES"), StringComparison.Ordinal);
+        Assert.StartsWith("JUNKCYCLES=False|", Row("JUNKCYCLES"), StringComparison.Ordinal);
+        Assert.Contains("; cycles=n/a (judged >=2)", Row("JUNKCYCLES"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_autopilot_step_fails_on_cycles_under_2_and_the_scripts_and_the_plan_say_the_three_judges_are_judged_from_item_7s_gate_M5_7_s4()
+    {
+        var run = RunPowerShell($"Import-Module '{GateModule}' -Force\n" + """
+            $line = '[logincheck] autopilot done ok=yes cycles=@@N@@ stop=minutes deaths=1 trips=1 granted=0 places=0 interrupted=1 resumed=1 reconnects=0 s=5'
+            foreach ($c in '0', '1', '2', '7') { $v = Get-AutopilotVerdict ($line -replace '@@N@@', $c); Write-Output ("C$c=" + $v.Ok + '|' + $v.Detail) }
+            """);
+        string Row(string tag) => run.Split('\n').Select(l => l.TrimEnd('\r')).Single(l => l.StartsWith(tag + "=", StringComparison.Ordinal));
+        Assert.StartsWith("C0=False|", Row("C0"), StringComparison.Ordinal);
+        Assert.EndsWith("; cycles=0 (judged >=2)", Row("C0"), StringComparison.Ordinal);
+        Assert.StartsWith("C1=False|", Row("C1"), StringComparison.Ordinal);
+        Assert.EndsWith("; cycles=1 (judged >=2)", Row("C1"), StringComparison.Ordinal);
+        Assert.StartsWith("C2=True|", Row("C2"), StringComparison.Ordinal);
+        Assert.DoesNotContain("judged >=2", Row("C2"), StringComparison.Ordinal);
+        Assert.StartsWith("C7=True|", Row("C7"), StringComparison.Ordinal);
+
+        // The step fails on the verdict (not only reports it), and the help, the comments and the gate's plan name the three judges as judged from item 7's gate.
+        Assert.Contains("$live = Resolve-LiveFrames ($run.Code -eq 0 -and $judged.Ok) $run", Smoke, StringComparison.Ordinal);
+        Assert.Contains("cycles>=2 (a value under 2, or the field missing, fails the step", Smoke, StringComparison.Ordinal);
+        Assert.Contains("door_opened=yes on a station that ran", Smoke.Replace("\r", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        var gate = File.ReadAllText(RepositoryFiles.PathOf("tools", "live-gate.ps1"));
+        Assert.Contains("[gate-plan] judged from M5 item 7''s gate: autopilot cycles>=2;", gate, StringComparison.Ordinal);
+        Assert.Contains("judged: the done line ok=yes, cycles>=2 (from M5 item 7''s gate) and godot_errors=0; report-only: reconnects=0", gate, StringComparison.Ordinal);
+        Assert.DoesNotContain("report-only in this first gate: cycles>=2", gate, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_autopilot_row_is_a_godot_step_whose_missing_or_nonzero_godot_errors_fail_it_M5_item_4_c1()
+    {
+        var run = RunPowerShell($"Import-Module '{GateModule}' -Force\n" + """
+            $summary = [pscustomobject]@{ secrets = 0; scanned = 1; verdict = 'ALL PASS' }
+            function Row($step, $outcome, $godot, $detail = 'autopilot done ok=yes cycles=2') {
+                $r = [pscustomobject]@{ Step = $step; Outcome = $outcome; Detail = $detail; Seconds = 3; Log = '' }
+                if ($null -ne $godot) { $r | Add-Member -NotePropertyName GodotErrors -NotePropertyValue $godot }
+                $r
+            }
+            function Show($tag, $rows) { Write-Output ($tag + '=' + (($rows | ForEach-Object { $_.Name + ':' + $_.Ok + ':' + $_.Detail }) -join ' // ')) }
+            Show 'ZERO' (Get-SmokeStepRows -StepName 'autopilot-mage' -Code 0 -SmokeRows @((Row 'autopilot-mage' 'PASS' '0')) -Summary $summary)
+            Show 'ONE' (Get-SmokeStepRows -StepName 'autopilot-mage' -Code 1 -SmokeRows @((Row 'autopilot-mage' 'PASS' '1')) -Summary $summary)
+            Show 'MISSING' (Get-SmokeStepRows -StepName 'autopilot-mage' -Code 0 -SmokeRows @((Row 'autopilot-mage' 'PASS' $null)) -Summary $summary)
+            """);
+
+        Assert.Contains("ZERO=autopilot-mage:True:PASS autopilot done ok=yes cycles=2 secrets=0 scanned=1 godot_errors=0", run, StringComparison.Ordinal);
+        Assert.Contains("ONE=autopilot-mage:False:FAIL autopilot done ok=yes cycles=2 secrets=0 scanned=1 godot_errors=1 (FAIL: judged 0, a fact)", run, StringComparison.Ordinal);
+        Assert.Contains("MISSING=autopilot-mage:False:FAIL autopilot done ok=yes cycles=2 secrets=0 scanned=1 godot_errors=missing (FAIL: the smoke row carries no count", run, StringComparison.Ordinal);
+    }
+
+    // ------------------------------------------------------------------------------------------ M5 item 4 c2: the gate's own rows (step rerun, keep backend, display hold, foreign Godot)
+
+    private static string HostModule => RepositoryFiles.PathOf("tools", "lib", "GateHost.psm1");
+
+    [Fact]
+    public void Steps_plans_a_one_step_round_in_its_own_folder_and_starts_nothing_else_m5_gate_step_rerun()
+    {
+        var plan = Plan("-Loopback", "core", "-Round", "7", "-Steps", "journey-mage");
+
+        Assert.Contains("[gate-plan] done steps=1 (nothing was run)", plan);
+        var step = Assert.Single(Steps(plan, "PARALLEL"));
+        Assert.Equal(("test", "smoke"), (step.Lane, step.Name));
+        Assert.Contains("-Only journey-mage -Backend require -NoBuild", step.Command, StringComparison.Ordinal);
+        Assert.Contains("<worktree>\\cache\\gate\\gate-r7\\journey-mage", step.Command, StringComparison.Ordinal); // the round's own folder: the first round's logs are never overwritten
+        Assert.Contains(plan, l => l.StartsWith("[gate-plan] rerun: round=7 tag=gate-r7 -Steps journey-mage = journey-mage;", StringComparison.Ordinal));
+        Assert.Contains(plan, l => l.StartsWith("[gate-plan] backend: server\\start-server.ps1", StringComparison.Ordinal) && l.Contains("stop-server.ps1 in a finally", StringComparison.Ordinal));
+        Assert.DoesNotContain(plan, l => l.StartsWith("[gate-plan] phase SOLO", StringComparison.Ordinal));
+
+        // The names combine: a fresh character first, a class in its lane, the frame judge's three runs; the order is the plan's.
+        var several = Plan("-Loopback", "core", "-Round", "8", "-Steps", "recreate-mage,journey-mage,frame-judge,LoopbackGateTests");
+        Assert.Equal(["test:recreate", "test:loopback", "test:smoke"], Steps(several, "PARALLEL").Select(s => s.Lane + ":" + s.Name).ToArray());
+        Assert.Contains("(FullyQualifiedName~.LoopbackGateTests.)", Steps(several, "PARALLEL")[1].Command, StringComparison.Ordinal); // only the named class
+        Assert.Equal(["frame-judge-1", "frame-judge-2", "frame-judge-3"], Steps(several, "SOLO").Select(s => s.Name).ToArray());
+        Assert.Contains(several, l => l.Contains("classes=LoopbackGateTests", StringComparison.Ordinal));
+
+        // A solo journey, a class that is solo, and a rerun that needs no backend.
+        Assert.Equal(["journey-melee-solo"], Steps(Plan("-Loopback", "core", "-Round", "9", "-Steps", "journey-melee", "-JourneySolo", "melee"), "SOLO").Select(s => s.Name).ToArray());
+        Assert.Equal(["live-phase-b"], Steps(Plan("-Loopback", "core", "-Round", "9", "-Steps", "LivePhaseBTests"), "SOLO").Select(s => s.Name).ToArray());
+        var buildOnly = Plan("-Loopback", "core", "-Round", "9", "-Steps", "build,leak-scan");
+        Assert.Contains("[gate-plan] backend: not needed by the named steps (not started, not stopped)", buildOnly);
+        Assert.Contains("[gate-plan] rerun: no named step needs the backend: it is not started and not stopped", buildOnly);
+        Assert.Contains(buildOnly, l => l.StartsWith("[gate-plan] display (m5-gate-slow-machine): no Godot step in this plan: no hold", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Steps_fails_by_name_on_an_unknown_step_or_one_this_plan_lacks_and_the_round_folder_is_numbered_m5_gate_step_rerun()
+    {
+        var unknown = RunRunner(["-Plan", "-Loopback", "core", "-ChangedPaths", "docs/none.md", "-Steps", "journey-giant"], expectSuccess: false);
+        Assert.Contains("-Steps 'journey-giant': no such step in this plan", unknown, StringComparison.Ordinal);
+        Assert.Contains("journey-mage", unknown, StringComparison.Ordinal); // the valid names are listed
+        Assert.Contains("-Steps 'journey-mage-solo': no such step in this plan", RunRunner(["-Plan", "-Loopback", "core", "-ChangedPaths", "docs/none.md", "-Steps", "journey-mage-solo"], expectSuccess: false), StringComparison.Ordinal);
+
+        // Without -Round the tag is <Tag>-r<n> from 2 up; without -Steps the tag is the plain one (the gate that is not a rerun is unchanged).
+        Assert.Matches(@"tag=gate-r\d+ ", string.Join('\n', Plan("-Loopback", "core", "-Steps", "leak-scan")));
+        Assert.DoesNotContain(Plan("-Loopback", "core"), l => l.Contains("tag=gate-r", StringComparison.Ordinal));
+        Assert.Contains(Plan("-Loopback", "core", "-Round", "3", "-Tag", "m5"), l => l.Contains("tag=m5-r3 ", StringComparison.Ordinal)); // a round with no -Steps is a numbered full gate
+
+        var runner = Runner;
+        Assert.Contains("[Alias('Steps')] [string[]] $OnlySteps", runner, StringComparison.Ordinal); // not a variable named $Steps: it would be the plan array $steps (names are case-insensitive) and cast it to strings
+        Assert.Contains("function Select-GateSteps", runner, StringComparison.Ordinal);
+        Assert.Contains("$needsBackend = @($steps | Where-Object { $_.Kind -ne 'build' -and $_.Name -ne 'leak-scan' }).Count -gt 0", runner, StringComparison.Ordinal);
+        Assert.Contains("if ($needsBackend) {\n        $startLog", runner, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void KeepBackend_leaves_the_backend_up_and_says_so_while_the_default_still_stops_it_m5_gate_stops_backend()
+    {
+        var kept = Plan("-Loopback", "core", "-KeepBackend");
+        Assert.Contains(kept, l => l.StartsWith("[gate-plan] backend: server\\start-server.ps1", StringComparison.Ordinal) && l.Contains("stop-server.ps1 is NOT run (-KeepBackend", StringComparison.Ordinal));
+        Assert.DoesNotContain(Plan("-Loopback", "core"), l => l.Contains("-KeepBackend", StringComparison.Ordinal));
+
+        var runner = Runner;
+        Assert.Contains("[switch] $KeepBackend", runner, StringComparison.Ordinal);
+        Assert.Contains("if ($needsBackend -and $KeepBackend -and $backendUp) {\n        $backendState = 'kept-up'", runner, StringComparison.Ordinal);
+        Assert.Contains("elseif ($needsBackend) {\n        Write-Gate '[gate] backend stop-server.ps1 (finally)'", runner, StringComparison.Ordinal); // the default is the stop, in the finally, as before
+        Assert.Contains("total={2:0}s backend={3} display={4}", runner, StringComparison.Ordinal); // the summary says kept-up | stopped | not-started
+        Assert.Contains("[gate] -KeepBackend: the backend is left up after the gate", runner, StringComparison.Ordinal);
+        Assert.Contains("-KeepBackend                  M5 item 4 c2", runner, StringComparison.Ordinal); // documented in the script's help
+    }
+
+    [Fact]
+    public void The_display_preflight_reads_nvidia_smi_names_a_display_that_is_off_and_the_hold_changes_no_setting_m5_gate_slow_machine()
+    {
+        var run = RunPowerShell($"Import-Module '{HostModule}' -Force -WarningAction SilentlyContinue\n" + """
+            'A=' + (ConvertFrom-NvidiaDisplayCsv "display_active`r`nDisabled`r`n")
+            'B=' + (ConvertFrom-NvidiaDisplayCsv "display_active`nEnabled")
+            'C=' + (ConvertFrom-NvidiaDisplayCsv "display_active`nDisabled`nEnabled")
+            'D=' + (ConvertFrom-NvidiaDisplayCsv "")
+            'E=' + (ConvertFrom-NvidiaDisplayCsv "NVIDIA-SMI has failed")
+            'F=' + (Get-GateDisplayLine -Before @{ State = 'Disabled' } -After @{ State = 'Enabled' } -Held $true -Skipped $false)
+            'G=' + (Get-GateDisplayLine -Before @{ State = 'no-nvidia-smi' } -After $null -Held $true -Skipped $false)
+            'H=' + (Get-GateDisplayLine -Before @{ State = 'Enabled' } -After $null -Held $false -Skipped $true -Why '-NoDisplayHold')
+            """);
+        Assert.Contains("A=Disabled", run, StringComparison.Ordinal);
+        Assert.Contains("B=Enabled", run, StringComparison.Ordinal);
+        Assert.Contains("C=Enabled", run, StringComparison.Ordinal);
+        Assert.Contains("D=unknown", run, StringComparison.Ordinal);
+        Assert.Contains("E=unknown", run, StringComparison.Ordinal);
+        Assert.Contains("F=Disabled->Enabled hold=on", run, StringComparison.Ordinal);
+        Assert.Contains("G=no-nvidia-smi hold=on", run, StringComparison.Ordinal);
+        Assert.Contains("H=Enabled hold=off (-NoDisplayHold)", run, StringComparison.Ordinal);
+
+        // The module's text (the P/Invoke is never run by a test): the query, the absent-nvidia-smi path, the 1-pixel move and back, the three execution-state flags, and no setting touched.
+        var host = File.ReadAllText(HostModule);
+        Assert.Contains("--query-gpu=display_active --format=csv", host, StringComparison.Ordinal);
+        Assert.Contains("nvidia-smi not found: the display cannot be read, the gate goes on", host, StringComparison.Ordinal);
+        Assert.Contains("display_active=Disabled: the display is OFF and Godot renders at about 7 fps", host, StringComparison.Ordinal);
+        Assert.Contains("mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero)", host, StringComparison.Ordinal);
+        Assert.Contains("mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero)", host, StringComparison.Ordinal);
+        Assert.Contains("SetThreadExecutionState(uint esFlags)", host, StringComparison.Ordinal);
+        Assert.Contains("[uint32]2147483651   # ES_CONTINUOUS 0x80000000 | ES_DISPLAY_REQUIRED 0x2 | ES_SYSTEM_REQUIRED 0x1", host, StringComparison.Ordinal);
+        Assert.Contains("Get-Process -Id $ParentPid", host, StringComparison.Ordinal); // the child ends with the gate even when the gate is killed
+        foreach (var forbidden in new[] { "powercfg", "Set-ItemProperty", "New-ItemProperty", "reg add", "schtasks", "Register-ScheduledTask", "New-Service", "Set-Service", "HKLM:", "HKCU:" })
+        {
+            Assert.DoesNotContain(forbidden, host, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // The gate: the preflight and hold before the backend, the hold ended in the finally, -NoDisplayHold, and display= in the start and done lines.
+        var runner = Runner;
+        Assert.True(runner.IndexOf("$displayBefore = Get-GateDisplayState", StringComparison.Ordinal) < runner.IndexOf("& pwsh -NoProfile -File (Join-Path $main 'server\\start-server.ps1')", StringComparison.Ordinal));
+        Assert.Contains("if ($displayBefore.State -ne 'Enabled') { [void](Invoke-GateDisplayWake) }", runner, StringComparison.Ordinal);
+        Assert.Contains("$displayHold = Start-GateDisplayHold -Folder $LogDir", runner, StringComparison.Ordinal);
+        Assert.Contains("    Stop-GateDisplayHold $displayHold\n}", runner, StringComparison.Ordinal);
+        Assert.Contains("[switch] $NoDisplayHold", runner, StringComparison.Ordinal);
+        Assert.Contains("elseif ($NoDisplayHold) { $displaySkip = '-NoDisplayHold' }", runner, StringComparison.Ordinal);
+        Assert.Contains("Write-Gate \"[gate] display=$displayLine\"", runner, StringComparison.Ordinal);
+        Assert.Contains("-NoDisplayHold                M5 item 4 c2", runner, StringComparison.Ordinal); // documented in the script's help
+        Assert.Contains(Plan("-Loopback", "core"), l => l.StartsWith("[gate-plan] display (m5-gate-slow-machine): preflight nvidia-smi --query-gpu=display_active --format=csv", StringComparison.Ordinal) && l.Contains("SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED)", StringComparison.Ordinal));
+        Assert.Contains(Plan("-Loopback", "core", "-NoDisplayHold"), l => l.StartsWith("[gate-plan] display (m5-gate-slow-machine): hold off (-NoDisplayHold)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_solo_step_names_a_foreign_godot_waits_a_bounded_time_and_then_fails_by_name_m5_gate_foreign_godot()
+    {
+        var run = RunPowerShell($"Import-Module '{HostModule}' -Force -WarningAction SilentlyContinue\n" + """
+            $none = Wait-GateForeignGodot -Seconds 5 -PollSeconds 0.1 -Probe { @() }
+            'NONE=' + $none.Ok + '|' + $none.Detail
+            $script:calls = 0
+            $gone = Wait-GateForeignGodot -Seconds 5 -PollSeconds 0.1 -Label 'solo frame-judge-1' -Say { param($l) Write-Host ('SAY=' + $l) } -Probe { $script:calls++; if ($script:calls -le 2) { @([pscustomobject]@{ Pid = 4242; Started = '2026-10-27 09:00:00'; Args = '--login-check=x' }) } else { @() } }
+            'GONE=' + $gone.Ok + '|' + $gone.Detail
+            $stuck = Wait-GateForeignGodot -Seconds 1 -PollSeconds 0.1 -Say { param($l) } -Probe { @([pscustomobject]@{ Pid = 4242; Started = '2026-10-27 09:00:00'; Args = '--play-checks' }) }
+            'STUCK=' + $stuck.Ok + '|' + $stuck.Detail
+            $now = Wait-GateForeignGodot -Seconds 0 -PollSeconds 0.1 -Say { param($l) } -Probe { @([pscustomobject]@{ Pid = 7; Started = 's'; Args = 'a' }) }
+            'NOWAIT=' + $now.Ok
+            'ARGS=' + (Format-GateGameArgs 'C:\g\Godot.exe --path x -- --login-check=journey --password=hunter2 --foo')
+            'NOARGS=' + (Format-GateGameArgs '')
+            """);
+        Assert.Contains("NONE=True|", run, StringComparison.Ordinal);
+        Assert.Contains("GONE=True|foreign Godot ended after", run, StringComparison.Ordinal);
+        Assert.Contains("SAY=[foreign-godot] solo frame-judge-1: a Godot process that is not the gate's is up: pid 4242 started 2026-10-27 09:00:00 args: --login-check=x; waiting up to 5 s", run, StringComparison.Ordinal);
+        Assert.Contains("STUCK=False|foreign-godot: pid 4242 (started 2026-10-27 09:00:00) still up after 1 s; the step was not started", run, StringComparison.Ordinal);
+        Assert.Contains("NOWAIT=False", run, StringComparison.Ordinal);
+        Assert.Contains("ARGS=--login-check=journey --password=<hidden> --foo", run, StringComparison.Ordinal); // the game's own arguments; a secret-named value is hidden
+        Assert.DoesNotContain("hunter2", run, StringComparison.Ordinal);
+        Assert.Contains("NOARGS=(command line not readable)", run, StringComparison.Ordinal);
+
+        // The gate: every solo Godot step carries the bound (and smoke gets it); the lanes' steps, the live walks and the leak scan do not (they run beside each other's Godot, or none).
+        var plan = Plan("-Loopback", "core", "-JourneySolo", "mage", "-ForeignGodotSeconds", "30");
+        var solo = Steps(plan, "SOLO");
+        Assert.All(solo.Where(s => s.Name.StartsWith("frame-judge", StringComparison.Ordinal) || s.Name.StartsWith("throwaway-frames", StringComparison.Ordinal) || s.Name == "journey-mage-solo"), s => Assert.Contains("-ForeignGodotSeconds 30", s.Command, StringComparison.Ordinal));
+        Assert.DoesNotContain("-ForeignGodotSeconds", solo.Single(s => s.Name == "leak-scan").Command, StringComparison.Ordinal);
+        Assert.DoesNotContain("-ForeignGodotSeconds", solo.Single(s => s.Name == "live-phase-b").Command, StringComparison.Ordinal);
+        Assert.All(Steps(plan, "PARALLEL"), s => Assert.DoesNotContain("-ForeignGodotSeconds", s.Command, StringComparison.Ordinal));
+        Assert.Contains(Steps(Plan("-Loopback", "core"), "SOLO"), s => s.Name == "frame-judge-1" && s.Command.Contains("-ForeignGodotSeconds 120", StringComparison.Ordinal)); // the default is 120 s
+
+        // The runner waits before the release wait and the step, and a failed wait is a FAIL row that skips the step.
+        var module = File.ReadAllText(GateModule);
+        var wait = module.IndexOf("$foreign = if ($s.PSObject.Properties['ForeignGodotSeconds'])", StringComparison.Ordinal);
+        Assert.True(wait > 0 && wait < module.IndexOf("$release = Get-GateReleaseWait", StringComparison.Ordinal));
+        Assert.Contains("if (-not $w.Ok) { AddRows $s @(New-GateRow $s.Name $false $w.Detail) 0; continue }", module, StringComparison.Ordinal);
+        Assert.Contains("Import-Module (Join-Path $PSScriptRoot 'GateHost.psm1') -Force", module, StringComparison.Ordinal);
+        Assert.Contains("-ForeignGodotSeconds <s>      M5 item 4 c2", Runner, StringComparison.Ordinal);
+        Assert.Contains("[string] $NeedsRecreate = '', [int] $ForeignGodotSeconds = -1)", Runner, StringComparison.Ordinal);
     }
 
     private sealed record PlanStep(string Phase, string Lane, string Name, string Command);

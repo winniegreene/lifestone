@@ -39,7 +39,8 @@ public enum UiDragEnd
 /// <param name="Source">The cell that was pressed.</param>
 /// <param name="SourceList">The list the cell belongs to.</param>
 /// <param name="Stack">True when the cell shows a stack of more than one (it is dragged whole).</param>
-public readonly record struct UiDragPayload(uint ItemId, UiItem Source, UiItemList? SourceList, bool Stack);
+/// <param name="SpellId">The spell the pressed cell shows (a spellbook or spell-bar cell, M5 6 s1), read at mouse down as <paramref name="ItemId"/> is; 0 for an item. A spell drag has no item (<paramref name="ItemId"/> is 0), so every item target refuses it.</param>
+public readonly record struct UiDragPayload(uint ItemId, UiItem Source, UiItemList? SourceList, bool Stack, uint SpellId = 0);
 
 /// <summary>An element that takes a dragged item (registered with <see cref="UiDrag.RegisterTarget"/>).</summary>
 public interface IUiDropTarget
@@ -81,7 +82,7 @@ public interface IUiDragSourceOwner
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The state machine.</b> A press (left button down) on a non-empty <see cref="UiItem"/> whose list is a <see cref="UiItemList.DragSource"/> arms the drag (<see cref="UiDragPhase.Pressed"/>) and fixes <see cref="ItemId"/>
+/// <b>The state machine.</b> A press (left button down) on a non-empty <see cref="UiItem"/> (an item, or a spell of the spellbook or a spell bar, M5 6 s1: its payload carries <see cref="UiDragPayload.SpellId"/> and no item, so every item target refuses it) whose list is a <see cref="UiItemList.DragSource"/> arms the drag (<see cref="UiDragPhase.Pressed"/>) and fixes <see cref="ItemId"/>
 /// from the pressed cell right then (OpenAC #206: "a quick press-and-drag picked up the item that was pressed": a pointer that has already moved on to another cell by the first move event still carries the pressed item). The drag
 /// begins (<see cref="UiDragPhase.Dragging"/>) when the pointer has moved <see cref="StartDistancePixels"/> from the press with the button held (retail's distance is unknown: <c>TODO(m4-retail-drag)</c>); the source cell lets go of the
 /// mouse capture so the elements under the pointer hear it, an icon of the item follows the pointer (a top-layer root element made once, from the list's own cell template: no Godot node and no allocation per move) and
@@ -106,6 +107,7 @@ public sealed class UiDrag
     private UiItem? _source;
     private UiItemList? _sourceList;
     private uint _itemId;
+    private uint _spellId;
     private bool _stack;
     private int _pressX;
     private int _pressY;
@@ -135,6 +137,15 @@ public sealed class UiDrag
 
     /// <summary>The icon as the hit test must skip it (null before the first drag).</summary>
     internal UiElement? IconRoot => _icon;
+
+    /// <summary>The spell being carried (a spell cell's drag, M5 6 s1), or 0.</summary>
+    public uint SpellId => _spellId;
+
+    /// <summary>
+    /// The picture fields of a spell (the SpellTable's, set by the spell panels): a dragged spell's composed icon (<c>UIElement_ItemList::PrepareDragIcon</c>, 11.4186 0x004E2A50, over <c>ClientMagicSystem::GetSpellIcon</c>)
+    /// follows the pointer. Null, or a spell it does not know, leaves a spell drag without an icon, logged once (<c>TODO(m5-spell-drag-icon)</c>).
+    /// </summary>
+    public Func<uint, UiSpellIcon?>? SpellIconOf { get; set; }
 
     /// <summary>Takes a release where no UI element is at all (the world view); null refuses it (the drag cancels).</summary>
     public IUiDropTarget? NoElementTarget { get; set; }
@@ -230,7 +241,7 @@ public sealed class UiDrag
         }
 
 
-        if (over is not UiItem { IsEmpty: false, ItemId: not 0 } cell || ListOf(cell) is not { DragSource: true } list)
+        if (over is not UiItem { IsEmpty: false } cell || ListOf(cell) is not { DragSource: true } list)
         {
             return false;
         }
@@ -238,6 +249,7 @@ public sealed class UiDrag
         _source = cell;
         _sourceList = list;
         _itemId = cell.ItemId;
+        _spellId = cell.ItemId == 0 ? cell.SpellId : 0; // a spell cell (the spellbook, a spell bar) carries its spell; an item cell its item
         _stack = cell.Quantity > 1;
         _pressX = x;
         _pressY = y;
@@ -347,7 +359,8 @@ public sealed class UiDrag
         {
             Refused++;
             LastEnd = UiDragEnd.Refused;
-            _manager.Services.Log.Info("retailui", $"drag of item 0x{payload.ItemId:X8} refused: {target.Refusal(payload, cell) ?? "the target does not take it"}; nothing was sent");
+            var what = payload.SpellId != 0 ? $"spell {payload.SpellId}" : $"item 0x{payload.ItemId:X8}";
+            _manager.Services.Log.Info("retailui", $"drag of {what} refused: {target.Refusal(payload, cell) ?? "the target does not take it"}; nothing was sent");
             return true;
         }
 
@@ -375,7 +388,7 @@ public sealed class UiDrag
     /// <summary>The cell of the press as the router must release its mouse capture (set only while a drag is on).</summary>
     internal UiItem? CaptureHolder => _phase == UiDragPhase.Dragging ? _source : null;
 
-    private UiDragPayload Payload() => new(_itemId, _source!, _sourceList, _stack);
+    private UiDragPayload Payload() => new(_itemId, _source!, _sourceList, _stack, _spellId);
 
     private static UiItemList? ListOf(UiElement cell)
     {
@@ -459,6 +472,19 @@ public sealed class UiDrag
             icon.SetVisible(true);
             _manager.RootElement.BringChildToTop(icon);
         }
+        else if (icon is not null && _spellId != 0)
+        {
+            if (SpellIconOf?.Invoke(_spellId) is { } spell)
+            {
+                icon.ShowSpell(spell);
+                icon.SetVisible(true);
+                _manager.RootElement.BringChildToTop(icon);
+            }
+            else
+            {
+                _manager.LogOnce("drag:spell-icon", LogSeverity.Warning, "TODO(m5-spell-drag-icon): no spell icon source is set on the drag; the dragged spell has no icon under the pointer (the spell is still carried)");
+            }
+        }
     }
 
     private UiItem? EnsureIcon()
@@ -519,6 +545,7 @@ public sealed class UiDrag
         _source = null;
         _sourceList = null;
         _itemId = 0;
+        _spellId = 0;
         _stack = false;
     }
 }

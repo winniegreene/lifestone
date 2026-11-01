@@ -1,6 +1,7 @@
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.RetailUi.Chat;
 using Lifestone.Client.RetailUi.Core;
+using Lifestone.Client.RetailUi.Dialogs;
 using Lifestone.Client.RetailUi.Flow;
 using Lifestone.Client.RetailUi.Indicators;
 using Lifestone.Client.RetailUi.LifestonePanels;
@@ -69,6 +70,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
     private readonly UiLoginContext _context;
     private readonly List<string> _placeholders = [.. InitialPlaceholders];
     private readonly IDisposable _subscription;
+    private readonly IDisposable _logOffSubscription;
     private bool _disposed;
 
     /// <summary>
@@ -130,6 +132,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         manager.ForceDisplayResolution(false); // gmGamePlayUI::gmGamePlayUI (11.6096 0x004EACA0)
         RegisterClasses(manager.Registry);
         _subscription = context.Session.Events.Subscribe<CharacterListChanged>(OnCharacterListChanged);
+        _logOffSubscription = context.Session.Events.Subscribe<LogOffRequested>(OnLogOffRequested); // M5 6 u1: the window layout is written at log-off
         if (context.StageShell)
         {
             // The root is made over frames (UiStagedRoot, the same tree and order as CreateRootElement), then the windows are wired a controller at a time: the build is the part of the arrival that
@@ -277,7 +280,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
 
         string ClosingText() => double.IsNaN(_noGc.ClosingCollectionMilliseconds)
             ? string.Empty
-            : string.Create(System.Globalization.CultureInfo.InvariantCulture, $", closed by a gen0 collection of {_noGc.ClosingCollectionMilliseconds:0.0} ms");
+            : string.Create(System.Globalization.CultureInfo.InvariantCulture, $", closed by a gen0 collection of {_noGc.ClosingCollectionMilliseconds:0.0} ms (process cpu {_noGc.ClosingCollectionCpuMilliseconds:0.0} ms)");
     }
 
     private double _buildGcPause;
@@ -339,7 +342,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         manager.LogOnce(
             "gameplay:window-layout",
             LogSeverity.Warning,
-            "TODO(g4-window-layout-save): the floating windows' places, sizes and locks last for the session only (D56); retail kept them in the character's options on the server (PlayerModule chat-window options, restored by each floaty window's UpdateFromPlayerModule) and in a layout file UI-<world>-<character>-<width>-<height>.txt (gmGamePlayUI::SaveScreenLayout 11.6096 0x004EB9E0, LoadScreenLayout 0x004EB580)");
+            "TODO(g6-window-locks): the windows' places and sizes are kept per character and window size (M5 6 u1, D33; closes TODO(g4-window-layout-save)), but Lifestone has no window lock (retail's UI lock button 0x10000619 on the radar is not built) and writes no <SBOX> line (TODO(g6-layout-smartbox): the SmartBox is the whole window)");
         yield return true;
 
         // g2: the spew box and the chat windows, registered on the router the game's text notices go to (a notice held for them is shown now).
@@ -356,7 +359,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
 
         yield return true;
 
-        Options = new GameOptions(context.Session, manager.Services.Log); // g6: the session-local option changes live in the session (R8), so no subscription order matters
+        Options = new GameOptions(context.Session, manager.Services.Log); // g6: the options go to the server (D32); the model and GameOptions' own overlay keep every reader current, so no subscription order matters
         Vitals = new GameVitals(context, StackedVitals, SideBySideVitals);
         Options.Changed += _ => Vitals.Refresh(chooseWindow: true); // PlayerModule's option notice: the vitals window follows SideBySideVitals at once
         if (Vitals.Stacked is not null || Vitals.SideBySide is not null)
@@ -386,11 +389,13 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
 
         // g6: character information, the options panel and the logout confirmation fill the host's two hooks (docs/retail-ui.md section 21.8).
         Logout = new GameLogout(context);
+        Confirmations = new ServerConfirmation(manager, context.Session); // M5 6 u1: the server's Yes/No questions (GameEvent 0x0274) as dialogs
         CharacterInfo = new GameCharacterInfo(context, PanelHost);
         OptionsPanel = new GameOptionsPanel(context, PanelHost, Options, Logout);
         yield return true;
 
         ToolbarUi = new GameToolbar(context, Toolbar);
+        ToolbarUi.Attach(PanelHost); // M5 7 P7r (D148): the panel buttons light from the host's page notices, one at a time
         if (Toolbar is not null)
         {
             MarkWindowBuilt("toolbar");
@@ -401,6 +406,8 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         // g5b: the toolbar's selection display (name, health) and the vivid target indicator (docs/retail-ui.md section 21.7).
         SelectionUi = new GameSelection(context, Toolbar, SmartBox, Options);
         ToolbarUi.SelectedSource = () => SelectionUi.Selected;
+        // M5 6 u2: the chat's Selected talk focus tells the selection (docs/retail-ui.md section 21.2).
+        Chat.SelectedProvider = () => SelectionUi.Selected;
         if (Toolbar is not null)
         {
             MarkWindowBuilt("selection"); // the selection display lives in the toolbar
@@ -686,6 +693,8 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         }
 
         Chat?.Update();
+        TryLoadLayout();
+        WatchLayoutSize();
         RadarUi?.Update();
         SelectionUi?.Update();
         ToolsUi?.Update();
@@ -706,6 +715,28 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
 
     /// <summary>The logout confirmation (g6).</summary>
     public GameLogout? Logout { get; private set; }
+
+    /// <summary>The server's questions as dialogs (M5 6 u1); null when the layout has no root.</summary>
+    public ServerConfirmation? Confirmations { get; private set; }
+
+    /// <summary>The window layout's save and restore (M5 6 u1, D33); null until the shell is wired.</summary>
+    public ScreenLayoutKeeper? Layout { get; private set; }
+
+    /// <summary>The name of the layout file this character's windows are kept in at this window size (retail's <c>UI-world-character-w-h.txt</c>), or null until the world and character names are known.</summary>
+    public string? LayoutFileName { get; private set; }
+
+    private string _layoutWorld = "world";
+    private string _layoutCharacter = string.Empty;
+    private (int Width, int Height) _layoutSize;
+
+    /// <summary>What the last read of a layout file found and did (the world entry's, or a size change's); the default value until one was made (M5 6 fix, 6-R6: the keep check reads it).</summary>
+    public ScreenLayoutLoad LastLayoutLoad { get; private set; }
+
+    /// <summary>How many layout files this screen read (one at the world entry, one more at each size change).</summary>
+    public int LayoutReads { get; private set; }
+
+    /// <summary>True once the saved layout was read and applied (or found to be missing) at the world entry.</summary>
+    public bool LayoutLoaded { get; private set; }
 
     /// <summary>The read-only character information page (g6).</summary>
     public GameCharacterInfo? CharacterInfo { get; private set; }
@@ -734,6 +765,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         _disposed = true;
         EndNoGcWindow();
         _subscription.Dispose();
+        _logOffSubscription.Dispose();
         if (_staged is { Done: false } half)
         {
             // Left before the shell was made (a log off in its first frames): finish the tree so it can be deleted whole (one frame, rare), rather than leave half of it in the runtime.
@@ -746,6 +778,10 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             notices.ExpectWindows = false;
         }
 
+        SaveLayout("the world exit"); // before anything is taken down: the windows are where the player left them
+        _context.Manager.DisplayChanging -= OnDisplayChanging;
+        Confirmations?.Dispose();
+        Options?.Dispose();
         Chat?.Dispose();
         Vitals?.Dispose();
         SelectionUi?.Dispose();
@@ -761,6 +797,107 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             _context.Manager.DeleteElement(Root); // gmGamePlayUI::~gmGamePlayUI (11.6096 0x004EAF30) forces the display again; the next screen does
         }
     }
+
+    // M5 6 u1 (D33): the window layout. Read once at the world entry, as soon as the character's name is known (the file is named by world, character and window size), over the layout's own
+    // places; written at log-off and at the world exit. Nothing is written before the read, so a shell that is left in its first frames never replaces a saved layout with the defaults.
+    private void TryLoadLayout()
+    {
+        if (LayoutLoaded || _disposed || !IsBuilt || Root is null)
+        {
+            return;
+        }
+
+        var manager = _context.Manager;
+        var state = _context.Session.State;
+        var selected = state.Characters.Entries.FirstOrDefault(e => e.Guid == state.Characters.SelectedGuid).Name; // the slot the player entered with: known before the world's description of the body
+        if ((state.Self.Name ?? selected) is not { Length: > 0 } character)
+        {
+            return;
+        }
+
+        LayoutLoaded = true;
+        var store = manager.Services.ScreenLayouts;
+        if (store is null)
+        {
+            manager.LogOnce(
+                "gameplay:layout-store",
+                LogSeverity.Warning,
+                "TODO(g6-layout-store): the host gave the shell no layout store; the windows' places last for the session only");
+            return;
+        }
+
+        _layoutWorld = state.WorldName ?? "world";
+        _layoutCharacter = character;
+        _layoutSize = manager.DisplaySize;
+        LayoutFileName = LayoutNameAt(_layoutSize);
+        Layout = new ScreenLayoutKeeper(store, manager.Services.Log);
+        LastLayoutLoad = Layout.Load(LayoutFileName, Root, ChatMasks());
+        LayoutReads++;
+        manager.DisplayChanging += OnDisplayChanging;
+    }
+
+    // The windows are still where the player left them at the old size (the root is resized after this): write them under the old size's name.
+    private void OnDisplayChanging((int Width, int Height) oldSize)
+    {
+        if (!LayoutLoaded || Layout is null || Root is null || _disposed || oldSize != _layoutSize)
+        {
+            return;
+        }
+
+        var oldName = LayoutNameAt(oldSize);
+        if (Layout.Save(oldName, Root, ChatMasks()))
+        {
+            _context.Manager.Services.Log.Info(UiElementManager.Category, $"the window layout was written at a size change, under {oldName}");
+        }
+    }
+
+    private string LayoutNameAt((int Width, int Height) size) => ScreenLayoutFile.Name(_layoutWorld, _layoutCharacter, size.Width, size.Height);
+
+    /// <summary>
+    /// The window changed size (6-R3). Retail names the file from the game window's size when it saves, and reloads "#auto" for the new size when its global message 14 arrives
+    /// (<c>gmGamePlayUI::ListenToGlobalMessage</c>, 11.6096 0x004EC230, which calls <c>LoadScreenLayout</c> 0x004EB580; the message's meaning is read from the 11.4186 code, <c>TODO(m5-6-layout-resize-msg14)</c>:
+    /// not seen on the wire). So the places the player left at the old size are written under the old size's name when the display changes, before the root is resized (<c>OnDisplayChanging</c>; Lifestone's addition, so they are not lost), and the new size's file is read.
+    /// A file that is missing leaves the windows where they are.
+    /// </summary>
+    private void WatchLayoutSize()
+    {
+        if (!LayoutLoaded || Layout is null || Root is null || _disposed)
+        {
+            return;
+        }
+
+        var size = _context.Manager.DisplaySize;
+        if (size == _layoutSize)
+        {
+            return;
+        }
+
+        _layoutSize = size; // the old size's file was written by OnDisplayChanging, before the root was resized
+        LayoutFileName = LayoutNameAt(size);
+        LastLayoutLoad = Layout.Load(LayoutFileName, Root, ChatMasks());
+        LayoutReads++;
+    }
+
+    private void SaveLayout(string reason)
+    {
+        if (!LayoutLoaded || Layout is null || LayoutFileName is null || Root is null)
+        {
+            return;
+        }
+
+        // 6-R3: the name is that of the size at the time of the save, not the size at the world entry.
+        var name = LayoutNameAt(_context.Manager.DisplaySize);
+        LayoutFileName = name;
+        if (Layout.Save(name, Root, ChatMasks()))
+        {
+            _context.Manager.Services.Log.Info(UiElementManager.Category, $"the window layout was written at {reason}");
+        }
+    }
+
+    private List<ChatMaskBinding> ChatMasks() =>
+        Chat is null ? [] : [.. Chat.Windows.Select(static w => new ChatMaskBinding(w.Window.ElementId, () => w.TextTypeMask, mask => w.TextTypeMask = mask))];
+
+    private void OnLogOffRequested(in LogOffRequested e) => SaveLayout("log off");
 
     // The server sends the character list again when a logoff completes (F658): the screen returns to character management then. A lost
     // connection is the screen host's (the disconnected screen), and a quit ends the application.

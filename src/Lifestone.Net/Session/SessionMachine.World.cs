@@ -413,6 +413,88 @@ internal sealed partial class SessionMachine
         return SendAction(connection, writer);
     }
 
+    // M5 6 w2: the first retail tranche's sends, in the existing pattern (slice w1's writers).
+
+    public OutboundTicket SendConfirmationResponse(uint type, uint context, bool accepted)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendConfirmationResponse");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        MagicActionCodecs.WriteConfirmationResponse(writer, connection.NextActionSequence, type, context, accepted);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendSetCharacterOptions(CharacterOptionsBlock block)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendSetCharacterOptions");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        MagicActionCodecs.WriteSetCharacterOptions(writer, connection.NextActionSequence, block);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendTeleToLifestone()
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendTeleToLifestone");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        MagicActionCodecs.WriteTeleToLifestone(writer, connection.NextActionSequence);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendTeleToMarketPlace()
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendTeleToMarketPlace");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        MagicActionCodecs.WriteTeleToMarketPlace(writer, connection.NextActionSequence);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendSetInscription(uint item, ReadOnlySpan<char> inscription)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendSetInscription");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ChatActionCodecs.WriteSetInscription(writer, connection.NextActionSequence, item, inscription);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendEmote(ReadOnlySpan<char> text)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendEmote");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ChatActionCodecs.WriteEmote(writer, connection.NextActionSequence, text);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendSetAfkMode(bool afk)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendSetAfkMode");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ChatActionCodecs.WriteSetAfkMode(writer, connection.NextActionSequence, afk);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendSetAfkMessage(ReadOnlySpan<char> message)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendSetAfkMessage");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ChatActionCodecs.WriteSetAfkMessage(writer, connection.NextActionSequence, message);
+        return SendAction(connection, writer);
+    }
+
     public OutboundTicket SendTalk(ReadOnlySpan<char> text)
     {
         EnterGameThread(capture: false);

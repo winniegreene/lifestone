@@ -184,7 +184,10 @@ public sealed class GameSpellcastingPanelTests(DatSetFixture fixture) : IClassFi
         {
             var cell = g.Cell(0, i);
             var info = Table.Spells[cell.SpellId];
-            Assert.Equal(info.IconId, cell.IconElement!.Image.Did); // the SpellTable's icon
+            Assert.Equal(Lifestone.Client.RetailUi.Rendering.UiImageLookup.Ready, g.Rig.Manager.SpellIcons.TryGetSpell(UiSpellIcon.Of(info), out var picture));
+            Assert.Same(picture, cell.ComposedIcon); // the SpellTable's icon composed as retail's GetSpellIcon (M5 D147)
+            Assert.Same(picture, cell.IconElement!.GeneratedImage);
+            Assert.Equal(Lifestone.Client.RetailUi.Rendering.UiBlitMode.ThreeChannelAlpha, cell.IconElement.Image.Mode);
             Assert.Equal(info.Name + GameSpellcastingPanel.CastHint, cell.TooltipText?.Literal); // the name, then the hint
         }
 

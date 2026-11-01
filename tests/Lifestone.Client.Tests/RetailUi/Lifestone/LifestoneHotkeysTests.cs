@@ -26,7 +26,7 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
         {
             var keyboard = map.Bindings.Where(b => map.DeviceOf(b.Control) == RetailDeviceType.Keyboard).ToArray();
             Assert.NotEmpty(keyboard);
-            foreach (var dik in new[] { LifestoneHotkeys.ToolsKey, LifestoneHotkeys.InspectorKey, LifestoneHotkeys.AutoBuffKey })
+            foreach (var dik in new[] { LifestoneHotkeys.ToolsKey, LifestoneHotkeys.InspectorKey, LifestoneHotkeys.AutoBuffKey, LifestoneHotkeys.AutopilotKey })
             {
                 // No binding of the key in any input map, whatever meta keys it needs; and it is no meta key either.
                 Assert.DoesNotContain(keyboard, b => b.Control.Semantic == dik);
@@ -43,7 +43,7 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
 
         // Lifestone's own input map is none of retail's.
         Assert.DoesNotContain(game.Bindings.Concat(engine.Bindings), b => b.InputMapId == LifestoneHotkeys.InputMap);
-        Assert.DoesNotContain(game.Bindings.Concat(engine.Bindings), b => b.ActionId is LifestoneHotkeys.OpenToolsAction or LifestoneHotkeys.OpenInspectorAction or LifestoneHotkeys.AutoBuffAction);
+        Assert.DoesNotContain(game.Bindings.Concat(engine.Bindings), b => b.ActionId is LifestoneHotkeys.OpenToolsAction or LifestoneHotkeys.OpenInspectorAction or LifestoneHotkeys.AutoBuffAction or LifestoneHotkeys.AutopilotAction);
     }
 
     [RequiresLocalDatsFact]
@@ -53,8 +53,10 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
         Assert.Contains(LifestoneHotkeys.ToolsKey, reachable);
         Assert.Contains(LifestoneHotkeys.InspectorKey, reachable);
         Assert.Contains(LifestoneHotkeys.AutoBuffKey, reachable);
+        Assert.Contains(LifestoneHotkeys.AutopilotKey, reachable);
         Assert.Equal(0x41, LifestoneHotkeys.ToolsKey);
         Assert.Equal(0x46, LifestoneHotkeys.InspectorKey);
+        Assert.Equal(0x45, LifestoneHotkeys.AutopilotKey); // Num Lock (M5 4 h2, D20)
     }
 
     [RequiresLocalDatsFact]
@@ -63,7 +65,7 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
         var retail = RetailKeyBindings.Load(fixture.Dats);
         var both = retail.With(LifestoneHotkeys.Bindings);
 
-        Assert.Equal(retail.Bindings.Count + 3, both.Bindings.Count);
+        Assert.Equal(retail.Bindings.Count + 4, both.Bindings.Count);
         Assert.Equal(retail.Bindings, both.Bindings.Take(retail.Bindings.Count));
         Assert.False(retail.TryFindBestMatch(LifestoneHotkeys.InputMap, RetailKeyBindings.Keyboard(LifestoneHotkeys.ToolsKey), 0, 1, out _));
         Assert.True(both.TryFindBestMatch(LifestoneHotkeys.InputMap, RetailKeyBindings.Keyboard(LifestoneHotkeys.ToolsKey), 0, 1, out var tools));
@@ -72,6 +74,37 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
         Assert.Equal(LifestoneHotkeys.OpenInspectorAction, inspector.ActionId);
         Assert.True(both.TryFindBestMatch(LifestoneHotkeys.InputMap, RetailKeyBindings.Keyboard(LifestoneHotkeys.AutoBuffKey), 0, 1, out var autoBuff));
         Assert.Equal(LifestoneHotkeys.AutoBuffAction, autoBuff.ActionId);
+        Assert.True(both.TryFindBestMatch(LifestoneHotkeys.InputMap, RetailKeyBindings.Keyboard(LifestoneHotkeys.AutopilotKey), 0, 1, out var autopilot));
+        Assert.Equal(LifestoneHotkeys.AutopilotAction, autopilot.ActionId);
+    }
+
+    /// <summary>
+    /// D20 / M5 4 h2: the autopilot's key (Num Lock, DirectInput 0x45) is none of retail's: no binding of it, with any meta keys, in any input map of the key table (not only the two the other proof reads: the
+    /// combat, magic and shortcut maps too), it is no meta key, and it is a key the D20 order reached first: of the keys near Pause, Num Lock is the first that every map leaves unbound.
+    /// </summary>
+    [RequiresLocalDatsFact]
+    public void The_autopilot_key_Num_Lock_is_unbound_in_every_retail_input_map_and_the_keys_before_it_in_the_order_are_taken_D20()
+    {
+        var retail = RetailKeyBindings.Load(fixture.Dats);
+        var control = RetailKeyBindings.Keyboard(LifestoneHotkeys.AutopilotKey);
+        Assert.DoesNotContain(retail.Bindings, b => b.Control == control);
+        Assert.Equal(0x45, LifestoneHotkeys.AutopilotKey);
+
+        foreach (var map in new[] { RetailKeyMap.Load(fixture.Dats), RetailKeyMap.Load(fixture.Dats, RetailKeyBindings.EngineKeyMapEnum) })
+        {
+            Assert.DoesNotContain(map.Bindings, b => map.DeviceOf(b.Control) == RetailDeviceType.Keyboard && b.Control.Semantic == DikScanCodes.NumLock);
+            Assert.DoesNotContain(map.MetaKeys, m => m.Control.Semantic == DikScanCodes.NumLock && m.Control.DeviceIndex == RetailKeyBindings.KeyboardDevice);
+
+            // The keys D20 listed before the numpad's are all taken, so none could be the one: Insert, Home, End, Page Up and Page Down.
+            if (map.Id == 0x14000000u)
+            {
+                var bound = map.Bindings.Where(b => map.DeviceOf(b.Control) == RetailDeviceType.Keyboard).Select(b => b.Control.Semantic).ToHashSet();
+                foreach (var dik in new[] { DikScanCodes.Insert, DikScanCodes.Home, DikScanCodes.End, DikScanCodes.Prior, DikScanCodes.Next })
+                {
+                    Assert.Contains(dik, bound);
+                }
+            }
+        }
     }
 
     [Fact]
@@ -110,6 +143,18 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
         scene.Input.KeyDown(DikScanCodes.Pause);
         scene.Input.KeyUp(DikScanCodes.Pause);
         Assert.Equal((1, 2), (toggled, hotkeys.AutoBuffPresses));
+
+        // Num Lock (M5 7 D145): no longer the autopilot's toggle. Still Lifestone's key (taken, so nothing of retail's sees it), counted and logged; wired, it only hands the host its hint line for the chat.
+        Assert.True(scene.Input.KeyDown(DikScanCodes.NumLock));
+        scene.Input.KeyUp(DikScanCodes.NumLock);
+        Assert.Equal(1, hotkeys.AutopilotPresses);
+        Assert.Contains(scene.Log.Entries, e => e.Message.Contains("Num Lock was pressed: it does nothing to the autopilot", StringComparison.Ordinal));
+        var hints = new List<string>();
+        hotkeys.AutopilotKeyHint = hints.Add;
+        scene.Input.KeyDown(DikScanCodes.NumLock);
+        scene.Input.KeyUp(DikScanCodes.NumLock);
+        Assert.Equal((LifestoneHotkeys.AutopilotKeyHintLine, 2), (Assert.Single(hints), hotkeys.AutopilotPresses));
+        Assert.Contains("/auto", LifestoneHotkeys.AutopilotKeyHintLine, StringComparison.Ordinal);
 
         // A key held down repeats nothing; other keys are none of ours.
         scene.Input.KeyDown(DikScanCodes.F7);

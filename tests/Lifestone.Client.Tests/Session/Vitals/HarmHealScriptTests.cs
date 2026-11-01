@@ -79,6 +79,32 @@ public sealed partial class HarmHealScriptTests
         Assert.True(kit >= 0 && kit < t.IndexOf("potion"), string.Join(' ', t));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void The_mana_rest_hands_the_keeper_the_need_with_its_try_floor_and_the_floor_is_the_ceiling_need_without_Mana_Conversion_or_with_the_tries_off_M5_1_fix_B_G2(bool triesOff)
+    {
+        // Round 4's Brawler again (the rig's character has no Mana Conversion, so every try floor is the ceiling): the harm round's mana need goes to the keeper with NextCastFloor, and the keeper says so only with the tries on.
+        var character = Fighter(231) with { MaxHealth = 231, MaxMana = 287, Mana = 287, MaxStamina = 300, Stamina = 300, Spells = [.. VitalsMeans.HarmSelf.Take(5), .. VitalsMeans.HealSelf, .. VitalsMeans.StaminaToManaSelf] };
+        var rig = new C3HarmRig(character, FighterTemplate.Melee, vitals: triesOff ? VitalsOptions.Default with { Mana = ManaOrderOptions.Ceiling } : VitalsOptions.Default);
+        uint[] liveCosts = [12, 24, 36, 50, 60];
+        for (var i = 0; i < liveCosts.Length; i++)
+        {
+            rig.Inner.Table[VitalsMeans.HarmSelf[i]] = rig.Inner.Table[VitalsMeans.HarmSelf[i]] with { BaseMana = liveCosts[i] };
+        }
+
+        rig.Inner.HealthRegen = 0.6;
+        rig.Inner.ManaRegen = 0.5;
+
+        var state = rig.RunToEnd();
+        Assert.True(state == HarmHealState.Done, "why=" + rig.Script.Why);
+        var need = rig.Script.ManaRestNeed;
+        Assert.True(need > 0 && rig.Script.ManaRests >= 1);
+        Assert.Equal(need, rig.Script.ManaRestFloor); // no Mana Conversion: the floor is the ceiling, so the keeper funds the same mana as before
+        var told = rig.R.H.Log.Lines.Any(l => l.Contains($"{need} for the next cast (its try floor {need})", StringComparison.Ordinal));
+        Assert.Equal(!triesOff, told);
+    }
+
     [Fact]
     public void With_round_5s_Archer_numbers_and_the_potions_the_leg_reaches_its_harm_rounds_with_no_transfer_and_no_actions_cap_M4_P5a_C7()
     {
@@ -259,6 +285,30 @@ public sealed partial class HarmHealScriptTests
         Assert.True(rig.Script.Harms >= 2);
         Assert.Contains("fizzles=2", rig.Script.VerdictLine(), StringComparison.Ordinal);
         Assert.True(rig.Script.Seconds - rig.Script.ManaRestSeconds < 60); // M4 P5a fix r4 (D28): the harm rounds' own time; the mana rest before round 2 is the keeper's, bounded by its rest cap
+    }
+
+    [Fact]
+    public void A_harm_that_fizzles_at_the_affordable_edge_goes_back_to_its_top_up_instead_of_failing_on_0x0401_M5_1_fix_A_1_R1()
+    {
+        // From 142 of 200 the plan wants one Harm Self VI (ceiling 60 in the rig) and the round needs exactly 60 mana, which is held: the cast is at the edge. A fizzle takes 5 (ACE: a failed cast costs 5), so the retry's ceiling is
+        // no longer paid. Before the fix CastRules.Timed set no CeilingBeforeRetry: the retry went out at once, the server refused it 0x0401 and the script failed harm-refused:ServerError:0x0401. Now the attempt ends ManaShort with
+        // nothing sent, the next look sees the mana does not pay the level it wants and tops it up with Stamina to Mana Self, then casts the harm again.
+        var harmVi = VitalsMeans.HarmSelf[5];
+        var rig = new C3HarmRig(Fighter(health: 142) with { Mana = 60 }, FighterTemplate.Melee);
+        rig.Inner.FizzleNext(harmVi, 1);
+
+        var state = rig.RunToEnd();
+        var detail = "why=" + rig.Script.Why + " casts " + string.Join(' ', rig.Inner.Casts.Select(c => c.Spell + (c.Fizzled ? "!" : string.Empty))) + " | " + string.Join(" | ", rig.R.H.Log.Lines.Where(l => l.Contains("harm-heal", StringComparison.Ordinal)));
+        Assert.True(state == HarmHealState.Done, detail);
+
+        Assert.True(rig.Inner.Casts[0] == (harmVi, true), detail); // the first cast fizzled at the edge
+        Assert.Contains(rig.Inner.Casts[1].Spell, VitalsMeans.StaminaToManaSelf); // and the very next cast is the top-up, not a resend of the harm
+        Assert.False(rig.Inner.Casts[1].Fizzled);
+        Assert.Equal(1, rig.Script.Fizzles);
+        Assert.True(rig.Script.Transfers >= 1 || rig.Inner.Casts.Skip(1).Any(c => VitalsMeans.StaminaToManaSelf.Contains(c.Spell)), detail);
+        Assert.True(rig.Script.Harms >= 1);
+        Assert.Null(rig.Script.Why);
+        Assert.DoesNotContain(rig.R.H.Log.Lines, l => l.Contains("0x0401", StringComparison.Ordinal));
     }
 
     [Fact]

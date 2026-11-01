@@ -42,7 +42,7 @@ public readonly record struct UiItemIcon(uint IconId, uint UnderlayId, uint Over
 /// into 32 by 32 pixels. First the icon is copied and the custom overlay alpha-blended over it (four-channel alpha); then every pure white pixel of that is replaced by the pixel at the same place of the UI-effects
 /// texture (<c>SurfaceWindow::ReplaceColor</c>, 11.4186 0x004415B0: enum group 0x10000005 by the lowest set bit of the effects plus one, entry 33 when the effects are 0 or the entry is missing: this is the magical glow). The cell's
 /// picture is the type background (enum group 0x10000004 by the lowest set bit of the item type plus one, entry 33 for type 0) copied, the custom underlay blended over it (three-channel alpha), and that composite blended over
-/// (three-channel alpha). The element draws it with a plain copy. A spell is drawn as its icon alone with three-channel alpha (<c>UIItem_SetIcon</c>'s spell branch), and its name goes in the text child 0x10000344 when the
+/// (three-channel alpha). The element draws it with a plain copy. A spell is drawn with three-channel alpha as retail's composed spell picture (<c>UIItem_SetIcon</c>'s spell branch over <c>ClientMagicSystem::GetSpellIcon</c>; <see cref="UiSpellIcons"/>, M5 D147), and its name goes in the text child 0x10000344 when the
 /// template has one. The composition runs when the picture's fields change, never per frame; an image that is still decoding (<see cref="UiImageLookup.Pending"/>) makes the cell try again each frame until it is ready.
 /// </para>
 /// <para>
@@ -154,6 +154,7 @@ public class UiItem : UiField
     private bool _composed;
     private int _quantityShown = -1;
     private (UiItemIcon Icon, bool Has) _lastIcon;
+    private UiSpellIcon? _pendingSpell;
 
     /// <summary><c>UIElement_UIItem::UIElement_UIItem</c> (11.6096 0x004E1BD0): an empty cell, selectable.</summary>
     public UiItem(in UiElementInit init)
@@ -182,7 +183,7 @@ public class UiItem : UiField
     /// <summary>True while the picture waits for an image that is still decoding.</summary>
     public bool IconPending { get; private set; }
 
-    /// <summary>The picture the cell composed for its item (32 by 32), or null (a spell or an empty cell, or nothing decoded yet). For tests and the owner's checks.</summary>
+    /// <summary>The picture the cell shows, composed for its item or its spell (32 by 32; <see cref="UiSpellIcons"/>), or null (an empty cell, a raw spell DID, or nothing decoded yet). For tests and the owner's checks.</summary>
     public UiImage? ComposedIcon { get; private set; }
 
     /// <summary>How many times the picture was composed (the cell composes only when the picture's fields change).</summary>
@@ -338,6 +339,7 @@ public class UiItem : UiField
         ItemId = 0;
         SpellId = 0;
         _composed = false;
+        _pendingSpell = null;
         ComposedIcon = null;
         IconPending = false;
         _icon?.ClearImage();
@@ -380,23 +382,50 @@ public class UiItem : UiField
     }
 
     /// <summary>
-    /// <c>Init_UIItem_Spell_Shortcut</c> (11.6096 0x004E1DD0) and <c>UIItem_SetIcon</c>'s spell branch: the cell shows spell <paramref name="spellId"/> with <paramref name="iconId"/> (a RenderSurface DID the owner took
-    /// from the SpellTable) drawn with three-channel alpha, and <paramref name="name"/> in the name text when the template has one.
+    /// <c>Init_UIItem_Spell_Shortcut</c> (11.6096 0x004E1DD0) and <c>UIItem_SetIcon</c>'s spell branch: the cell shows spell <paramref name="spell"/> with retail's composed picture (<c>ClientMagicSystem::GetSpellIcon</c>, 0x00569990:
+    /// the power tile, the icon, the outline and the badge; <see cref="UiSpellIcons"/>, kept per spell) drawn with three-channel alpha, and <paramref name="name"/> in the name text when the template has one. A layer still
+    /// decoding leaves the icon empty and the cell tries again each frame.
+    /// </summary>
+    public void ShowSpell(in UiSpellIcon spell, string? name = null)
+    {
+        ShowSpellFields(spell.SpellId, name);
+        _pendingSpell = spell;
+        ComposeSpell();
+    }
+
+    /// <summary>
+    /// The cell shows spell <paramref name="spellId"/> drawn from the raw RenderSurface <paramref name="iconId"/> with three-channel alpha. Not retail's picture (retail always composes, D147): every game site uses
+    /// <see cref="ShowSpell(in UiSpellIcon, string?)"/>; this stays for a caller that names a bare image.
     /// </summary>
     public void ShowSpell(uint spellId, uint iconId, string? name = null)
+    {
+        ShowSpellFields(spellId, name);
+        if (_icon is { } icon)
+        {
+            icon.SetBlitMode(UiBlitMode.ThreeChannelAlpha);
+            icon.SetImageByDid(iconId, UiDrawMode.Overlay);
+        }
+    }
+
+    /// <summary>The cell shows spell <paramref name="spellId"/> with a picture the owner composed itself (a 32 by 32 image); the name is as in <see cref="ShowSpell(in UiSpellIcon, string?)"/>.</summary>
+    public void ShowSpell(uint spellId, UiImage picture, string? name = null)
+    {
+        ArgumentNullException.ThrowIfNull(picture);
+        ShowSpellFields(spellId, name);
+        _icon?.SetBlitMode(UiBlitMode.ThreeChannelAlpha);
+        _icon?.SetGeneratedImage(picture);
+    }
+
+    private void ShowSpellFields(uint spellId, string? name)
     {
         ItemId = 0;
         SpellId = spellId;
         _composed = false;
+        _pendingSpell = null;
         ComposedIcon = null;
+        IconPending = false;
         SetCellState(OccupiedState);
-        if (_icon is { } icon)
-        {
-            _icon.ClearImage();
-            icon.SetBlitMode(UiBlitMode.ThreeChannelAlpha);
-            icon.SetImageByDid(iconId, UiDrawMode.Overlay);
-        }
-
+        _icon?.ClearImage();
         _nameText?.SetText(name ?? string.Empty);
         ShowQuantity(-1);
         ShowBars(default);
@@ -404,12 +433,33 @@ public class UiItem : UiField
         UpdateMouseVisibility();
     }
 
-    /// <summary>The cell shows spell <paramref name="spellId"/> with a picture the owner composed itself (a 32 by 32 image); the name is as in <see cref="ShowSpell(uint, uint, string?)"/>.</summary>
-    public void ShowSpell(uint spellId, UiImage picture, string? name = null)
+    private void ComposeSpell()
     {
-        ArgumentNullException.ThrowIfNull(picture);
-        ShowSpell(spellId, 0, name);
-        _icon?.SetGeneratedImage(picture);
+        if (_icon is not { } icon || _pendingSpell is not { } spell)
+        {
+            return;
+        }
+
+        switch (Manager.SpellIcons.TryGetSpell(spell, out var picture))
+        {
+            case UiImageLookup.Ready:
+                IconPending = false;
+                _pendingSpell = null;
+                ComposedIcon = picture;
+                Compositions++;
+                icon.SetBlitMode(UiBlitMode.ThreeChannelAlpha); // UIItem_SetIcon's spell branch: Blit_3Alpha
+                icon.SetGeneratedImage(picture!);
+                break;
+            case UiImageLookup.Pending:
+                IconPending = true;
+                RegisterFrame();
+                break;
+            default:
+                IconPending = false;
+                _pendingSpell = null;
+                Manager.LogOnce("uiitem:spell-icon-no-images", LogSeverity.Warning, "UIElement_UIItem: a spell's picture cannot be composed (no image services, or spell 0); the cell shows no icon");
+                break;
+        }
     }
 
     /// <summary><c>SetSelectedState</c> (11.6096 0x004E1ED0): a deselect always takes, a select only when the cell is selectable; the selected frame follows.</summary>
@@ -616,9 +666,45 @@ public class UiItem : UiField
         }
 
         Manager.LogOnce("uiitem:quantity-source", LogSeverity.Warning, "TODO(m3-quantity-source): UIElement_UIItem draws m_quantity; 11.4186 sets it only for a vendor's lines, Lifestone sets it from a pack item's stack size (confirm in 11.6096 UIItem_Update)");
-        text.SetText(quantity.ToString(CultureInfo.InvariantCulture));
+        var shown = quantity.ToString(CultureInfo.InvariantCulture);
+        if ((Manager.Services.RetailGlitches & UiRetailGlitches.StackCountClip) != 0)
+        {
+            text.SetSqueeze(0, null); // retail: plain "%d" (UpdateQuantityDisplay 0x004E2A30), clipped by the cell when it is wider
+        }
+        else
+        {
+            (shown, var tracking, var rightMargin) = FitQuantity(text, quantity);
+            text.SetSqueeze(tracking, rightMargin);
+        }
+
+        text.SetText(shown);
         text.SetVisible(true);
     }
+
+    /// <summary>
+    /// The fitted stack count (M5 7 D132; <c>--retail-stack-count</c> restores retail's clip): retail's layout when the digits fit the cell's quantity text; else the
+    /// 3-pixel right margin dropped and each digit drawn a pixel closer, so five digits fit right-aligned in retail's font; else thousands ("100k"), laid out the same way.
+    /// The tooltip keeps the full number.
+    /// </summary>
+    internal static (string Text, int Tracking, int? RightMargin) FitQuantity(UiTextElement text, int quantity)
+    {
+        var digits = quantity.ToString(CultureInfo.InvariantCulture);
+        if (text.Fits(digits, 0, text.DesignRightMargin))
+        {
+            return (digits, 0, null);
+        }
+
+        if (text.Fits(digits, SqueezeTracking, 0))
+        {
+            return (digits, SqueezeTracking, 0);
+        }
+
+        var thousands = (quantity / 1000).ToString(CultureInfo.InvariantCulture) + "k";
+        return text.Fits(thousands, 0, text.DesignRightMargin) ? (thousands, 0, null) : (thousands, SqueezeTracking, 0);
+    }
+
+    /// <summary>The fitted count's spacing: one pixel less a digit (M5 7 D132).</summary>
+    internal const int SqueezeTracking = -1;
 
     private void Compose(in UiItemIcon icon)
     {
@@ -655,6 +741,10 @@ public class UiItem : UiField
         if (_lastIcon.Has && ItemId != 0)
         {
             Compose(_lastIcon.Icon);
+        }
+        else if (SpellId != 0 && _pendingSpell is not null)
+        {
+            ComposeSpell();
         }
 
         if (!IconPending && _frameRegistered)

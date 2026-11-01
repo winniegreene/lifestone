@@ -8,6 +8,7 @@ using Lifestone.Client.Avatars;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Credentials;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Scenarios;
@@ -33,9 +34,9 @@ namespace Lifestone.Game.Sessions;
 /// <para>The verdict is <see cref="FightLegVerdict"/>'s (<c>[logincheck] bsd-fight done ok=...</c>); the process ends with 0 only when it held. A failure at any stage logs off before it is reported (so ACE does not keep the
 /// character in the world for the next run). Per frame the node reads counters and allocates nothing; strings are built at stage changes and at the end.</para>
 /// <para><b>The loading worker</b> reads the SpellTable, builds the gear kit (the login name is hashed into the kit's component formulas inside the worker and stays in its locals), loads the den's floor graph
-/// (<see cref="DenRooms"/>) and then prepares the methods of the fight's types (<see cref="RuntimeHelpers.PrepareMethod(RuntimeMethodHandle)"/>), so none of that is compiled on the game thread in the den.</para>
+/// (<see cref="GroundRooms"/>) and then prepares the methods of the fight's types (<see cref="RuntimeHelpers.PrepareMethod(RuntimeMethodHandle)"/>), so none of that is compiled on the game thread in the den.</para>
 /// <para><b>Limits.</b> <see cref="WholeCheckSecondsFor"/>: the login and the arrival 60 s, the gear 120 s, the buff top-up 240 s (a live cycle of 26 casts took 56 s), the teleport and the settle 30 s, the fight's own
-/// <c>--fight-seconds</c> (default 300), so 750 s by default; the log off after a failure may take <see cref="RecoverySeconds"/> more.</para>
+/// <c>--fight-seconds</c> (default 300; with <c>--fight-minutes</c> the larger of the two, <c>FightOptions.FailSeconds</c>, M5 1 F1), so 750 s by default; the log off after a failure may take <see cref="RecoverySeconds"/> more.</para>
 /// </remarks>
 public sealed partial class FightLegRunner : Node
 {
@@ -86,7 +87,10 @@ public sealed partial class FightLegRunner : Node
     private PlayMode _mode = null!;
     private RetailUiLayer? _ui;
     private RoutePlayHost _walkHost = null!;
+    private Func<uint, float?> _setupRadius = null!;
+    private Func<uint, float?> _setupExtent = null!;
     private FightOptions _options = new();
+    private HuntingGround _ground = null!;
     private double _wholeSeconds = WholeCheckSeconds;
     private Task<(SpellTableData Table, GearKit Kit, RoomGraph Planner, double BuildMilliseconds, double PlannerMilliseconds)>? _loading;
     private FightScenario? _scenario;
@@ -136,6 +140,7 @@ public sealed partial class FightLegRunner : Node
         var dats = services.Dats ?? throw new InvalidOperationException("the fight leg needs the dats (Main checks for them first)");
         var key = host.Options.Account;
         var options = FightOptions.FromArguments(CommandLineArgument.ParseAll(OS.GetCmdlineUserArgs()));
+        var ground = options.GroundProfile; // a bad --fight-ground is in options.Errors and keeps the default: the leg fails at its first frame, naming it
         // 3.1-R11: a bad --fight-kills or --fight-seconds fails the leg at its first frame, as the headless host fails its run (no silent default).
         foreach (var error in options.Errors)
         {
@@ -153,9 +158,12 @@ public sealed partial class FightLegRunner : Node
             _mode = mode,
             _ui = ui,
             _walkHost = walkHost,
+            _setupRadius = HostileCreatureFeed.SetupRadii(dats), // each creature's own radius for the walk's creature layer (nav-creature-radius-host)
+            _setupExtent = DoorCrossings.SetupExtents(dats), // M5 5 d2: the walk's door feed reads the doors' own sizes
             _options = options,
+            _ground = ground,
             _optionError = options.Errors.Count == 0 ? null : "bad fight option: " + string.Join("; ", options.Errors),
-            _wholeSeconds = WholeCheckSecondsFor(options.Seconds),
+            _wholeSeconds = WholeCheckSecondsFor(options.FailSeconds), // M5 1 F1: --fight-minutes raises the fight's own limit
             _shotPath = services.Options.Play.BuffShotPath,
         };
 
@@ -166,10 +174,10 @@ public sealed partial class FightLegRunner : Node
             {
                 var table = SpellTableData.Load(dats);
                 var built = System.Diagnostics.Stopwatch.GetTimestamp();
-                var kit = GearKit.Build(table.Spells, LoginName(key));
+                var kit = GearKit.Build(table.Spells, LoginName(key), ground: ground); // M5 3 w1 (D46): the kit of the leg's --fight-ground (the vendor robe and wand, the four foci, the ground's stock), not the default alone
                 var buildMs = System.Diagnostics.Stopwatch.GetElapsedTime(built).TotalMilliseconds;
                 var planning = System.Diagnostics.Stopwatch.GetTimestamp();
-                var planner = DenRooms.GraphOf(LandblockCellSet.Load(new CellStructureLibrary(dats), new LandblockCoord(1, 5)));
+                var planner = GroundRooms.Load(dats, ground);
                 var plannerMs = System.Diagnostics.Stopwatch.GetElapsedTime(planning).TotalMilliseconds;
                 var warm = System.Diagnostics.Stopwatch.GetTimestamp();
                 var prepared = PrepareFightMethods();
@@ -489,13 +497,18 @@ public sealed partial class FightLegRunner : Node
     {
         var (table, kit, planner, buildMilliseconds, plannerMilliseconds) = _loading!.Result;
         Log.Info(LogCategory, "fight: the gear kit and the den's floor were built on the loading worker, off the game thread", ("build_ms", buildMilliseconds), ("planner_ms", plannerMilliseconds), ("floor_cells", planner.Cells.Cells.Count));
-        var walk = new GameFightWalk(_walkHost, planner, GodotLogSink.Instance);
+        var walk = new GameFightWalk(_walkHost, planner, _ground, GodotLogSink.Instance, _setupRadius, GroundTour.For(_ground, planner, GodotLogSink.Instance), _setupExtent);
         _scenario = new FightScenario(kit, table.Spells, new BuffOptions(), _options, walk, GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false, FightStages.All);
         _avatars = _mode.Avatars;
         if (_avatars is { } avatars)
         {
             _shownBefore = avatars.Stats.ProjectilesShown;
             _plan.Begin(avatars.Stats.ProjectilesCreated, avatars.Stats.ProjectileExplodes, _scenario.Tally.DamageLinesDealt, 0);
+            if (_scenario.ReviewFramesWaitForOtherStorey)
+            {
+                _plan.WaitsForOtherStorey = true; // F3: --fight-storeys-min 2 or more
+                Log.Info(LogCategory, "fight: the review frames wait for a storey other than the arrival's (--fight-storeys-min): first, bolt, hit and kill are taken on a storey other than the arrival's; the viewer frame is unchanged");
+            }
         }
         else
         {
@@ -532,7 +545,7 @@ public sealed partial class FightLegRunner : Node
     {
         var scenario = _scenario!;
         var self = session.State.Self;
-        var inDen = self.Travel == SelfTravel.Present && self.Position is { } at && (at.CellId >> 16) == BlackSpawnDen.Landblock;
+        var inDen = self.Travel == SelfTravel.Present && self.Position is { } at && _ground.InLandblocks(at.CellId);
         var fighting = scenario.Fighting;
         var avatars = _avatars;
         var before = _sampler.FightFrameMaxMs;
@@ -578,7 +591,7 @@ public sealed partial class FightLegRunner : Node
         }
 
         var stats = avatars.Stats;
-        var due = _plan.Step(_runSeconds, stats.ProjectilesCreated, stats.ProjectileExplodes, scenario.Tally.DamageLinesDealt, scenario.Tally.Kills, avatars.ProjectileWindowOpen, _inDenNow, scenario.Walks >= 1, _movingNow);
+        var due = _plan.Step(_runSeconds, stats.ProjectilesCreated, stats.ProjectileExplodes, scenario.Tally.DamageLinesDealt, scenario.Tally.Kills, avatars.ProjectileWindowOpen, _inDenNow, scenario.Walks >= 1, _movingNow, scenario.OffArrivalStorey);
         if (due < 0)
         {
             return;
@@ -794,7 +807,10 @@ public sealed partial class FightLegRunner : Node
             sampled ? _lights.DynamicLightsMax : null,
             sampled ? _lights.ViewerLight : null,
             tally?.BlockedPicks ?? 0,
-            tally?.WallHits ?? 0);
+            tally?.WallHits ?? 0,
+            scenario?.ManaFields(),
+            scenario?.TourFields(),
+            scenario?.LootFields()); // M5 3 c2a: loot= looted= kept= loot_value= on the bsd-fight done line (report-only)
         var outcome = FightLegVerdict.Compose(_failure ?? why ?? scenario?.Failure ?? (_scenarioEnded ? null : "the fight did not finish"), measures);
         if (!outcome.Ok)
         {

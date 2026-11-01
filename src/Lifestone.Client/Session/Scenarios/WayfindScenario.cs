@@ -7,6 +7,7 @@ using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Play;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Client.Session.Tools;
 using Lifestone.Client.World;
 using Lifestone.Data.Animation;
@@ -29,7 +30,10 @@ namespace Lifestone.Client.Session.Scenarios;
 /// human's keys through <see cref="IActionApi.Move"/>, then with <c>--wayfind-back</c> the run back to the start. Each leg prints one line and the run a final one (see <see cref="Lines"/>).
 /// </summary>
 /// <remarks>
-/// <para><b>The run is outdoors.</b> An indoor end is refused before anything moves (TODO(wayfind-indoor): the journeys of P5b walk the room graphs).</para>
+/// <para><b>An end may be indoors</b> (M5 item 2 k1 closed <c>TODO(wayfind-indoor)</c>): <c>--to</c>, <c>--from</c> (both with a position, <c>0xA9B4013F@x,y,z</c>: the scenario does not guess a room's floor,
+/// <c>TODO(wayfind-indoor-default)</c>) and the start the back leg runs to. The leg's path source is the journeys' own (<see cref="JourneyLegPlanner.SourceFor(uint, uint, NavMap?)"/>): the outdoor planner when both ends are outdoors, the
+/// landblock's room graph with its exit route (<see cref="IndoorOutdoorPathSource"/>) when either is indoors. A start in a room the graph cannot leave ends the leg Blocked, named by the planner
+/// (<c>indoor-start-unreachable</c>, <c>TODO(room-steps)</c>: Renald's back room 0xA9B40141); the shop's goal is its front room 0xA9B4013F.</para>
 /// <para><b>The corridor.</b> Every half second the scenario names the next <see cref="HeadlessStreamer.AheadLandblocks"/> landblocks of the route beyond the focus's 3x3 (the runner's path, then the straight line from
 /// the path's end to the goal while the path only reaches the horizon of the attached tiles) to <see cref="CollisionStreamer.SetCorridor"/>, keeping <see cref="HeadlessStreamer.KeepBehind"/> dropped ones; the
 /// runner replans itself when tiles attach near the end of a horizon route. Not retail: the wayfinder is Lifestone's own, and so are these constants.</para>
@@ -140,6 +144,9 @@ public sealed class WayfindScenario : IScenario, IDisposable
     /// <summary>The streamer (collision and tiles), or null before the player's body is made.</summary>
     public HeadlessStreamer? Streamer => _play.Streamer;
 
+    /// <summary>The runner of the leg in progress or the last (null before the first leg begins); its <see cref="NavRunner.Doors"/> is the session's door feed (M5 5 d2). For tests.</summary>
+    internal NavRunner? Runner => _play.Runner;
+
     /// <inheritdoc/>
     public ScenarioStatus Step(IGameSessionView session, double now) => _login.Step(session, now);
 
@@ -180,11 +187,13 @@ public sealed class WayfindScenario : IScenario, IDisposable
         private const string LogCategory = "wayfind";
 
         private readonly DatSet _dats;
+        private readonly Func<uint, float?>? _setupExtent;
         private readonly ILogSink _log;
         private readonly WayfindOptions _options;
         private readonly Func<IGameSessionView, IMovementSink>? _sinkOf;
         private readonly HeadlessBody _body;
         private readonly List<string> _lines = [];
+        private readonly JourneyLegPlanner _planner;
         private NavRunner? _runner;
         private INavPathSource? _source;
         private ActionHandle? _pending;
@@ -216,7 +225,9 @@ public sealed class WayfindScenario : IScenario, IDisposable
         public Play(DatSet dats, ILogSink log, WayfindOptions options, Func<IGameSessionView, IMovementSink>? sinkOf)
         {
             (_dats, _log, _options, _sinkOf) = (dats, log, options, sinkOf);
+            _setupExtent = DoorCrossings.SetupExtents(dats);
             _body = new HeadlessBody(dats, log, LogCategory, sinkOf);
+            _planner = new JourneyLegPlanner(dats);
         }
 
         public string Name => ScenarioName;
@@ -232,6 +243,8 @@ public sealed class WayfindScenario : IScenario, IDisposable
         public IReadOnlyList<string> Lines => _lines;
 
         public HeadlessStreamer? Streamer => _body.Streamer;
+
+        public NavRunner? Runner => _runner;
 
         public string? StreamerLine => _body.Streamer is { } s
             ? string.Create(CultureInfo.InvariantCulture, $"wayfind streamer landblocks_peak={s.PeakAttached} tiles_peak={s.PeakTiles} heap_peak_mb={_body.HeapPeak / 1048576.0:F0} pump_max_ms={s.PumpMaxMilliseconds:F1} attach_max_ms={s.AttachMaxMilliseconds:F1} tile_build_max_ms={s.TileBuildMaxMilliseconds:F1} tile_attach_max_ms={s.TileAttachMaxMilliseconds:F1} attaches={s.Attaches} releases={s.Releases} tile_builds={s.TileBuilds} tile_rebuilds={s.TileRebuilds} tile_failures={s.TileFailures} step_gap_max_ms={_stepGapMax:F1}")
@@ -326,19 +339,9 @@ public sealed class WayfindScenario : IScenario, IDisposable
             }
 
             var to = _options.To!.Value;
-            if (!LandDefs.IsOutdoorCell(to.CellId) || (_options.From is { } f && !LandDefs.IsOutdoorCell(f.CellId)))
-            {
-                return Fail("begin: TODO(wayfind-indoor): the run is outdoors; an indoor end is a journey (P5b)");
-            }
-
             if (self.Position is not { } at)
             {
                 return Fail("begin: the client has no position for the player");
-            }
-
-            if (_options.From is null && !LandDefs.IsOutdoorCell(at.CellId))
-            {
-                return Fail("begin: the player is indoors and no --from was given; the run starts outdoors");
             }
 
             _body.Create(session, now);
@@ -487,16 +490,24 @@ public sealed class WayfindScenario : IScenario, IDisposable
             _legTeleports = leg == "out" ? _body.Teleports - _teleportMark : 0;
             _legCorrectionsAtStart = _body.Audit!.Summary.Corrections;
             _legPeak = _body.World!.AttachedCount;
-            var target = leg == "out" ? NavGoal.ToPoint(PointOf(_options.To!.Value, GroundOf(_options.To.Value))) : NavGoal.ToPoint(NavMap.FromCellFrame(_start));
+            var target = leg == "out" ? GoalOf(_options.To!.Value) : GoalOf(_start);
             _goal = target;
-            _source = new OutdoorPathSource(new PathPlanner(_body.Map!));
+            _source = _planner.SourceFor(_body.Walker!.Position.CellId, JourneyLegPlanner.GoalCellOf(target), _body.Map, out var why);
+            _log.Info(LogCategory, "the leg's path source", new LogField("leg", leg), new LogField("rooms", _source is INavRoomSource r ? $"0x{r.Rooms.LandblockId >> 16:X4}" : null), new LogField("why", why));
             _runner?.Dispose();
             _runner = _body.NewRunner(_source, "wayfind-" + leg, ConfirmBudgetMilliseconds);
+            _runner.Doors = new SessionDoorFeed(session, _log, _setupExtent); // M5 5 d2: a closed door on a leg is opened (purpose=door), not walked into
             _runner.Start(target, session.Clock.Now);
             _nextCorridor = 0;
             _log.Info(LogCategory, "the leg begins", new LogField("leg", leg), new LogField("goal", target.Point.ToString()));
             return Go("running", session);
         }
+
+        /// <summary>The goal of an end named by an option: its point (an outdoor cell without a position takes the terrain's height) in its room when it is indoors.</summary>
+        private NavGoal GoalOf(WayfindPlace place) => NavGoal.ToPoint(PointOf(place, place.Position is null ? GroundOf(place) : 0f), LandDefs.IsOutdoorCell(place.CellId) ? null : place.CellId);
+
+        /// <summary>The goal of the start the back leg runs to: where the body stood, in its room when it stood indoors.</summary>
+        private static NavGoal GoalOf(in CellFrame frame) => NavGoal.ToPoint(NavMap.FromCellFrame(frame), LandDefs.IsOutdoorCell(frame.CellId) ? null : frame.CellId);
 
         private float GroundOf(WayfindPlace place)
         {

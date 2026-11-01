@@ -148,8 +148,10 @@ public static class AvatarWire
         return new AvatarCreate
         {
             Guid = obj.Guid,
+            Name = obj.Name,
             IsSelf = obj.IsSelf,
             IsCreature = (obj.Weenie.ItemType & CreatureItemType) != 0,
+            DescriptionFlags = obj.DescriptionFlags,
             SetupId = physics.SetupId ?? 0,
             MotionTableId = physics.MotionTableId ?? 0,
             SoundTableId = physics.SoundTableId ?? 0,

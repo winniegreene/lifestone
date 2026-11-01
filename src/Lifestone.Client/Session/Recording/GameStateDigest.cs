@@ -315,7 +315,7 @@ public static class GameStateDigest
         for (var i = 0; i < chat.Count; i++)
         {
             var line = chat[i];
-            w.U8((byte)line.Kind);
+            w.U8((byte)(line.Kind == ChatKind.ChannelNotice ? ChatKind.WeenieError : line.Kind)); // M5 7 D124: a channel's notice digests as the 028A/028B it came as, so the recordings made before it still match
             w.U32(line.ChatType);
             w.Text(line.Sender);
             w.U32(line.SenderGuid);

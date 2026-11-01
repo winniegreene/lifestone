@@ -14,6 +14,7 @@ namespace Lifestone.Client.Session.Actions.Trackers;
 internal sealed class UseTracker(ActionHandle handle, uint guid) : ActionTracker(handle, ActionLane.Use, ActionPolicy.UseSeconds)
 {
     private bool _teleported;
+    private bool _seen;
 
     /// <inheritdoc/>
     internal override string WouldSend => "GameAction 0x0036 Use " + ActionText.Hex(guid);
@@ -22,7 +23,11 @@ internal sealed class UseTracker(ActionHandle handle, uint guid) : ActionTracker
     internal override bool ConsumesUseDone => true;
 
     /// <inheritdoc/>
-    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api);
+    internal override void Accepted(ActionApi api) => _seen = api.State.Objects.TryGet(guid, out _);
+
+    /// <inheritdoc/>
+    /// <remarks>M5 7 D141's before-check: in the world, and the object, seen when the use was asked, still in the object table (else ACE's NoObject).</remarks>
+    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api) ?? TargetGone(api, guid, _seen, "object to use");
 
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)

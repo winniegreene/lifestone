@@ -1,4 +1,6 @@
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Tests.Session.Grounds;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Contracts;
@@ -104,6 +106,17 @@ public sealed class J4JourneyHostTests(DatSetFixture fixture, ITestOutputHelper 
         Assert.Equal(1, server!.Talked.Count(t => t.StartsWith("@lifestone place", StringComparison.Ordinal)));
     }
 
+    [Trait("Tier", "Exhaustive")]
+    [RequiresDatsFact]
+    public void The_runner_hosts_den_fight_walk_reports_its_recovered_legs_instead_of_n_a()
+    {
+        // F3: the host's GroundFightWalk keeps its own LegRecovery; the journey's den-fight line read legs_recovered=n/a until it reported the count.
+        using var host = new HeadlessJourneyRunnerHost(Dats, new RecordingLogSink());
+        var walk = host.FightWalk(null!, DenGround.Profile); // the context is not read
+        Assert.Equal(0, walk.LegsRecovered); // none yet: a number, not n/a
+        (walk as IDisposable)?.Dispose();
+    }
+
     /// <summary>
     /// M4 P5b F1-1: the live mage's den fight failed <c>travel:run:not-placed</c> 120 s after the recall into the den, as the body waited for the eight
     /// landblocks round a dungeon's, which the streamer never requests for a closed EnvCell. Here the server places the player at Holtburg, then in the
@@ -129,8 +142,76 @@ public sealed class J4JourneyHostTests(DatSetFixture fixture, ITestOutputHelper 
         Assert.InRange(host.Placements, 2, 3); // Holtburg and the den, after the login cell's own placement when its collision settles before the first place (load-dependent)
         Assert.Equal(1, log.Lines.Count(l => l.Contains("[journey-runner] the body follows the player to 0x01050375", StringComparison.Ordinal)));
         Assert.Equal(0x0105u, host.Body.Walker!.Position.CellId >> 16);
-        Assert.NotEqual(BlackSpawnDen.Arrival.CellId, host.Body.Walker.Position.CellId); // the leg left the arrival cell for a spot
+        Assert.NotEqual(DenGround.Arrival.CellId, host.Body.Walker.Position.CellId); // the leg left the arrival cell for a spot
         Assert.Contains("leg to 0x0105", probe.Walk, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// F6 (the owner's D47 rule that he always moves with purpose): the headless host's den fight honours the tour's hold as <see cref="RunnerLegs"/> does (F5): a tour that names no purpose to walk makes no leg (the host runs
+    /// none, the body stays in the arrival cell), logs the hold, and the walk arrives after <see cref="RunnerLegs.HoldRecheckSeconds"/> for the fight to ask again.
+    /// </summary>
+    [Trait("Tier", "Exhaustive")]
+    [RequiresDatsFact]
+    public void The_hosts_den_fight_walk_makes_no_leg_while_the_tour_holds_and_arrives_after_the_recheck()
+    {
+        var log = new RecordingLogSink();
+        using var host = new HeadlessJourneyRunnerHost(Dats, log);
+        var tour = new FixedTour(0x01050383u, hold: true);
+        var probe = new F1DenProbe(host, tour);
+        using var run = new J4Run(probe, s => s.AcceptsMovement = true);
+        run.Finish(() => host.Body.Streamer is { Busy: true }, maxSeconds: 400);
+        output.WriteLine($"{probe.Stage}: {probe.Failure}; walk {probe.Walk}; legs {host.Legs}");
+
+        Assert.Null(probe.Failure);
+        Assert.Equal("done", probe.Stage);
+        Assert.StartsWith("hold in 0x01050375 (no leg; test tour)", probe.Walk, StringComparison.Ordinal);
+        Assert.Equal(0, host.Legs); // no leg was run
+        Assert.Equal(DenGround.Arrival.CellId, host.Body.Walker!.Position.CellId); // and the player stood
+        Assert.DoesNotContain(log.Lines, l => l.Contains("a leg on foot begins", StringComparison.Ordinal));
+        Assert.Equal(0, tour.Arrivals);
+    }
+
+    /// <summary>F6: a leg the tour does walk tells the tour the runner's walking seconds (<see cref="IGroundTour.LegWalked"/>), as <see cref="RunnerLegs"/> does, not the time from the offer to the arrival.</summary>
+    [Trait("Tier", "Exhaustive")]
+    [RequiresDatsFact]
+    public void The_hosts_den_fight_walk_tells_the_tour_the_runners_walking_seconds()
+    {
+        using var host = new HeadlessJourneyRunnerHost(Dats, new RecordingLogSink());
+        var tour = new FixedTour(0x01050383u, hold: false);
+        var probe = new F1DenProbe(host, tour);
+        using var run = new J4Run(probe, s => s.AcceptsMovement = true);
+        run.Finish(() => host.Body.Streamer is { Busy: true }, maxSeconds: 400);
+        output.WriteLine($"{probe.Stage}: {probe.Failure}; walk {probe.Walk}; legs {host.Legs}; walked {tour.WalkedSeconds}");
+
+        Assert.Null(probe.Failure);
+        Assert.Equal("done", probe.Stage);
+        Assert.Equal(1, host.Legs);
+        Assert.Equal(1, tour.Arrivals);
+        Assert.True(tour.WalkedSeconds is > 1.0 and < 60.0, $"walking seconds {tour.WalkedSeconds}");
+    }
+
+    /// <summary>A tour of one cell, holding or walking, that records the arrivals and the walking seconds it is told.</summary>
+    private sealed class FixedTour(uint cell, bool hold) : IGroundTour
+    {
+        public int Waypoints => 1;
+
+        public TourPurpose Purpose => hold ? TourPurpose.Hold : TourPurpose.Seen;
+
+        public string PurposeNote => "test tour";
+
+        public int Arrivals { get; private set; }
+
+        public double? WalkedSeconds { get; private set; }
+
+        public uint? Next(uint from, double now) => cell;
+
+        public void LegArrived(uint cell, double now) => Arrivals++;
+
+        public void LegWalked(uint cell, double now, double walkSeconds)
+        {
+            WalkedSeconds = walkSeconds;
+            Arrivals++;
+        }
     }
 
     /// <summary>
@@ -352,7 +433,7 @@ public sealed class J4JourneyHostTests(DatSetFixture fixture, ITestOutputHelper 
     }
 
     /// <summary>F1-1: logs in, places the player at Holtburg's lifestone, then in the den's arrival cell (two server places), then walks the den fight's first leg.</summary>
-    private sealed class F1DenProbe(HeadlessJourneyRunnerHost host) : IScenario
+    private sealed class F1DenProbe(HeadlessJourneyRunnerHost host, IGroundTour? tour = null) : IScenario
     {
         private readonly LoginScenario _login = new("Amy") { StayInWorld = true };
         private IFightWalk? _walk;
@@ -392,7 +473,7 @@ public sealed class J4JourneyHostTests(DatSetFixture fixture, ITestOutputHelper 
                 case "holtburg":
                     if (host.Placements >= 1 && host.Body.Placed && host.Body.Walker!.Position.CellId >> 16 == 0xA9B4)
                     {
-                        session.Tools.Place(Destination("den", BlackSpawnDen.Arrival.CellId, BlackSpawnDen.Arrival.Origin), ActionSource.Host);
+                        session.Tools.Place(Destination("den", DenGround.Arrival.CellId, DenGround.Arrival.Origin), ActionSource.Host);
                         return Go("den", session);
                     }
 
@@ -400,7 +481,7 @@ public sealed class J4JourneyHostTests(DatSetFixture fixture, ITestOutputHelper 
                 case "den":
                     if (host.Body.Placed && host.Body.Walker!.Position.CellId >> 16 == 0x0105)
                     {
-                        _walk = host.DenWalk(null!);
+                        _walk = tour is null ? host.FightWalk(null!, DenGround.Profile) : host.FightWalk(null!, DenGround.Profile, tour);
                         _walk.Prepare(session, now);
                         if (!_walk.BeginLeg(session, now, out var description))
                         {

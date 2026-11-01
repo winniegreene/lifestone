@@ -105,7 +105,9 @@ public sealed class F1IndoorStartDatTests(DatSetFixture fixture, ITestOutputHelp
         Assert.True(wider.Runner.State == NavRunState.Arrived, wider.Runner.FailureReason);
         Assert.Equal(0, wider.Runner.ConfirmFailures);
         Assert.Equal(RenaldFrontRoomCell, wider.At.CellId); // the range alone is met from the street through the wall: the goal's room is required
-        Assert.True(Vector2.Distance(new Vector2(wider.At.Origin.X, wider.At.Origin.Y), new Vector2(RenaldAt.X, RenaldAt.Y)) <= 6.5f);
+        // The runner measures the range in global metres (a landblock origin of some 30 km in a float: about 4 mm a step), this test in landblock-local
+        // ones, so an arrival on the range's edge (the indoor straight run's, 6.50 m) may read a few millimetres over it here.
+        Assert.True(Vector2.Distance(new Vector2(wider.At.Origin.X, wider.At.Origin.Y), new Vector2(RenaldAt.X, RenaldAt.Y)) <= 6.5f + 0.01f);
 
         // With sight required the arrival test stays: over the counter every sight line is blocked (ArrivedWithoutSight, a failed leg for the host).
         var sight = Walk(world, new IndoorOutdoorPathSource(new PathPlanner(map), cells), Lifestone(), NavGoal.ToObject(0x7A9B4021, renald, 6.5f, needSight: true, RenaldFrontRoomCell), 60, "f1-renald-sight");

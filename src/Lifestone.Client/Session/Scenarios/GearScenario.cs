@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using DatReaderWriter.Enums;
@@ -30,19 +31,17 @@ namespace Lifestone.Client.Session.Scenarios;
 /// at a time (lane Inventory), and every wait names its reason in the failure (<see cref="ReasonTimer"/>). <b>The swap (M3 4.2 P7):</b> before a kit line is wielded, a worn object that is not a kit line and occupies one of its locations (today's leather, the earlier wand)
 /// is moved to the pack with <see cref="IActionApi.Unwield"/> (each counts as a <c>gear_steps</c>), so a mage geared with an older kit ends wearing exactly this one, and a second run sends nothing.</para>
 /// <para><b>The verdict</b> (<see cref="VerdictFields"/>, logged as <c>[gear] verdict ...</c>, printed by the headless host as <c>gear ...</c>):
-/// <c>gear=wielded|failed worn=&lt;n&gt; kit=&lt;held&gt;/&lt;lines&gt; gear_steps=&lt;n&gt; topup=&lt;n&gt; cast=...</c>. <c>gear=wielded</c> means the read model shows the wand and all five pieces equipped within their locations;
-/// <c>worn</c> counts the pieces (0 to 5); <c>kit</c> counts the kit lines held in full (components summed over stacks); <c>gear_steps</c> counts the requests this run sent for the wand, the armour and the wields (0 on a ready mage); <c>topup</c> counts the
+/// <c>gear=wielded|failed worn=&lt;n&gt; kit=&lt;held&gt;/&lt;lines&gt; gear_steps=&lt;n&gt; topup=&lt;n&gt; cast=...</c>. <c>gear=wielded</c> means the read model shows the wand and every worn line of the kit equipped within its locations;
+/// <c>worn</c> counts the worn pieces (0 to the kit's worn lines: 5 for the M3 loot kit, 1 for a ground's robe); <c>kit</c> counts the kit lines held in full (components summed over stacks); <c>gear_steps</c> counts the requests this run sent for the wand, the armour and the wields (0 on a ready mage); <c>topup</c> counts the
 /// component requests (the kit's component lines the pack was short of: a cast burns components, so a mage that cast since the last run is topped up; report-only, M3 1.4 fix B, review 1.4-R1). No account or
 /// character name is in it.</para>
-/// <para><b>Decoys</b> (M4 3.1 d0, D20). A kit built for the death loop (<see cref="GearKit.ForDeathLoop"/>) ends with <see cref="GearKind.Decoy"/> lines: ordinary expensive items the mage only carries. The same <c>item</c> top-up spawns the ones not held (counted by weenie class, one each,
-/// <see cref="DecoyGrants"/>); the wield steps never see one (<see cref="GearKind.Decoy"/> is not wielded, and a worn one is no kit piece that holds a slot). The verdict fields keep their meaning, and for a decoy kit <c>kit=&lt;held&gt;/&lt;lines&gt;</c> counts the decoy lines too; <c>gear_steps</c> stays the
-/// wand's and the armour's. A plain kit has no decoy line, so its verdict is what it always was.</para>
 /// <para><b>The first cast</b> (M3 1.4 s2; <see cref="GearCasts"/>). After the gear the scenario casts once: <see cref="IActionApi.SetCombatMode"/> to Magic (ACE answers a cast made in another mode with a bare UseDone,
 /// <c>Player_Magic.cs</c> 84 and 275, and holds the Magic mode only with a wielded caster, <c>Player_Combat.cs</c> 872-880 @95ef426d: so the gear comes first), one Creature Enchantment self buff
 /// through <see cref="IActionApi.Cast(uint, ActionSource)"/> (the highest level of the first profile line whose ACE chance from the read model's current skill is at least <see cref="GearCasts.MinChance"/>:
 /// <c>GetCastingPreCheckStatus</c>, <c>Player_Magic.cs</c> 528-545, <c>SkillCheck.GetMagicSkillChance</c>, <c>SkillCheck.cs</c> 7-22), then Non-combat again. The verdict field
 /// <c>cast=ok|fizzled|failed|n/a</c> is report-only (<c>gear=</c> stays the judged field): <c>ok</c> the enchantment arrived, <c>fizzled</c> a ServerError 0x0402, <c>failed</c> anything else, <c>n/a</c> no cast was
-/// sent (the cast is off, or the read model cannot say which spell is safe: the skill is untrained or missing, or no level reaches the chance). A cast never fails the run, and it is not counted in
+/// sent (the cast is off, or the read model cannot say which spell is safe: the skill is untrained or missing, or no level reaches the chance, or, with a SpellTable, no level the pack can pay for: M5 3 F6, <see cref="PackFloor"/>, the buff cycle's level floor, so a ground's kit that carries
+/// the scarabs of its plan's levels only is never asked to cast a level it lacks; ACE refuses that 0x0400 before it looks at the skill, Player_Magic.cs:404-408 and 1227-1248 @95ef426d). A cast never fails the run, and it is not counted in
 /// <c>gear_steps</c>. It burns components and mana each run (M3 1.4 fix B: a host that judges <c>gear_steps=0</c> on a second run passes <c>cast: false</c>, as the live tests do).</para>
 /// <para><b>Mana</b> (M3 1.4 fix B, <see cref="GearCasts.ManaCeiling"/>): before the cast the scenario compares the read model's current mana with the most the cast can cost (ACE's <c>CalculateManaUsage</c>,
 /// <c>Creature_Magic.cs</c> 14-60; Mana Conversion only lowers it) and, when short, waits up to <see cref="ManaWaitSeconds"/> for regeneration (a named precondition wait: nothing was cast, so it is no retry),
@@ -82,6 +81,8 @@ public sealed class GearScenario : IScenario
     private readonly List<uint> _scratch = [];
     private readonly List<GearItem> _gear = [];
     private ActionHandle? _pending;
+    private CastAttempt? _cast;
+    private readonly uint[] _castLevel = new uint[1];
     private GearSpawn? _spawn;
     private ActionHandle? _wield;
     private string? _wielding;
@@ -135,7 +136,7 @@ public sealed class GearScenario : IScenario
         _spawnWait = new ReasonTimer(SpawnLimit);
         foreach (var item in kit.Items)
         {
-            // A decoy (M4 3.1 d0) is carried and never wielded: the wield steps see only the wand and the armour.
+            // The wield steps see only the wand and the armour: the other lines (components, foci, the stock) are carried, never wielded.
             if (item.Kind is GearKind.Wand or GearKind.Armour)
             {
                 _gear.Add(item);
@@ -175,6 +176,22 @@ public sealed class GearScenario : IScenario
     /// </summary>
     public bool RequireCharacter { get; set; }
 
+    /// <summary>
+    /// True (M5 item 3 c1, DoD 6: play grants nothing, the build does): the scenario verifies the kit the pack holds and wields it, and never asks the mod for an item. A worn or wielded kit line (the wand, the armour) or a focus that is not in the
+    /// pack fails the run, named: <c>gear: &lt;item&gt; is not in the pack and play grants nothing (M5 DoD 6)</c>; a component line held short of its stack is only named in a warning (a cast burns components, and buying them is the resupply's).
+    /// False (the default, the build's own gear stage and the fighters' plans): <see cref="PlayerTools.SpawnGear"/> tops the kit up.
+    /// </summary>
+    public bool NoGrant { get; init; }
+
+    /// <summary>
+    /// M5 7 D146 (the owner's own exception to DoD 6 and D143, for one test run): grant exactly this many of this one item over the <c>item</c> verb and nothing else (no kit top-up, no wield, no cast),
+    /// count the pack before and after, then log off. Null (the default): the kit as above. <c>--gear-grant-only=WCID:COUNT</c> on the headless <c>--scenario=gear</c>.
+    /// </summary>
+    public (uint Wcid, int Count)? GrantOnly { get; init; }
+
+    private ToolHandle<ItemResult>? _grantOnly;
+    private int _grantHeldBefore = -1;
+
     /// <summary>The limit on a started kit spawn, in seconds: <see cref="SpawnBaseSeconds"/> plus a second a kit line (the lane allows two requests a second).</summary>
     public double SpawnLimit { get; }
 
@@ -187,14 +204,10 @@ public sealed class GearScenario : IScenario
     /// <summary>The component requests this run sent (<c>topup</c>): the kit's component lines the pack was short of, e.g. after a cast burned some.</summary>
     public int TopUp => GrantsOf(GrantClass.Component);
 
-    /// <summary>The decoy requests this run sent (M4 3.1 d0; always 0 for a plain kit): the decoys the pack did not hold, one request each. Not part of <see cref="GearSteps"/>, which stays the wand's and the armour's.</summary>
-    public int DecoyGrants => GrantsOf(GrantClass.Decoy);
-
     private enum GrantClass
     {
         Gear,
         Component,
-        Decoy,
     }
 
     private int GrantsOf(GrantClass wanted)
@@ -206,7 +219,7 @@ public sealed class GearScenario : IScenario
             for (var i = 0; i < grants.Count; i++)
             {
                 var kind = grants[i].Item.Kind;
-                var of = kind == GearKind.Component ? GrantClass.Component : kind == GearKind.Decoy ? GrantClass.Decoy : GrantClass.Gear;
+                var of = kind == GearKind.Component ? GrantClass.Component : GrantClass.Gear;
                 if (of == wanted)
                 {
                     n++;
@@ -415,6 +428,16 @@ public sealed class GearScenario : IScenario
 
     private ScenarioStatus Spawn(IGameSessionView session)
     {
+        if (GrantOnly is { } only)
+        {
+            return SpawnOnly(session, only.Wcid, only.Count);
+        }
+
+        if (NoGrant)
+        {
+            return VerifyHeld(session);
+        }
+
         if (_spawn is null)
         {
             var now = session.Clock.Now;
@@ -453,6 +476,115 @@ public sealed class GearScenario : IScenario
         }
 
         _log.Info(LogCategory, "kit in the pack: " + _spawn.Describe());
+        _wait.Reset();
+        return Go("wielding");
+    }
+
+    /// <summary>The one-item grant (<see cref="GrantOnly"/>, D146): counts the item once the pack can be counted, sends one <c>item</c> request, waits for it and for the pack's new count, then concludes.</summary>
+    private ScenarioStatus SpawnOnly(IGameSessionView session, uint wcid, int count)
+    {
+        var now = session.Clock.Now;
+        var state = session.State;
+        int? have = null;
+        if (state.Self.Inventory.IsKnown)
+        {
+            var held = GearInventory.CountAll(state, out var unsettled);
+            if (unsettled == 0)
+            {
+                have = held.GetValueOrDefault(wcid);
+            }
+        }
+
+        if (_grantOnly is null)
+        {
+            if (have is not { } before)
+            {
+                return _wait.Expired(now, UnsettledReason) ? Fail(session, $"grant-only: the pack was not countable within {SettleSeconds:0.#} s") : ScenarioStatus.Running;
+            }
+
+            _grantHeldBefore = before;
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"grant-only (D146, the owner's exception to M5 DoD 6 for one test run): weenie {wcid} held {before}: granting {count} over the item verb, nothing else"));
+            _grantOnly = session.Tools.SpawnItem(wcid, count, ActionSource.Host);
+            _spawnWait.Reset();
+            return ScenarioStatus.Running;
+        }
+
+        if (!_grantOnly.IsCompleted)
+        {
+            return _spawnWait.Expired(now, "the grant") ? Fail(session, $"grant-only: the item request did not end within {SpawnLimit:0.#} s") : ScenarioStatus.Running;
+        }
+
+        if (_grantOnly.Result is null)
+        {
+            return Fail(session, "grant-only: the item request failed: " + _grantOnly.Outcome);
+        }
+
+        if (have is not { } after || after < _grantHeldBefore + count)
+        {
+            return _spawnWait.Expired(now, "the granted stack's arrival") ? Fail(session, $"grant-only: the pack shows {have?.ToString(CultureInfo.InvariantCulture) ?? "unknown"} of weenie {wcid}, not {_grantHeldBefore + count}") : ScenarioStatus.Running;
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"grant-only (D146): weenie {wcid} granted {count}: held {_grantHeldBefore} before, {after} now (read from the pack)"));
+        _finished = true;
+        return Conclude(session);
+    }
+
+    /// <summary>The no-grant mode's spawning stage (<see cref="NoGrant"/>): counts what the pack holds once it can be counted, names what is missing, sends nothing.</summary>
+    private ScenarioStatus VerifyHeld(IGameSessionView session)
+    {
+        var now = session.Clock.Now;
+        if (_asked && now - _lastAsk < SpawnAskSeconds)
+        {
+            return _wait.Expired(now, UnsettledReason) ? Fail(session, $"verifying: the pack was not countable within {SettleSeconds:0.#} s: {_lastWhy}") : ScenarioStatus.Running;
+        }
+
+        _asked = true;
+        _lastAsk = now;
+        var state = session.State;
+        Dictionary<uint, int>? held = null;
+        if (!state.Self.Inventory.IsKnown)
+        {
+            _lastWhy = "inventory-unknown: no PlayerDescription has told the pack yet";
+        }
+        else
+        {
+            held = GearInventory.CountAll(state, out var unsettled);
+            if (unsettled > 0)
+            {
+                held = null;
+                _lastWhy = "inventory-unsettled: " + unsettled.ToString(CultureInfo.InvariantCulture) + " held items have no world object yet";
+            }
+        }
+
+        if (held is null)
+        {
+            return _wait.Expired(now, UnsettledReason) ? Fail(session, $"verifying: the pack was not countable within {SettleSeconds:0.#} s: {_lastWhy}") : ScenarioStatus.Running;
+        }
+
+        string? missing = null;
+        foreach (var item in _kit.Items)
+        {
+            var have = held.GetValueOrDefault(item.Wcid);
+            if (item.Counted)
+            {
+                if (have < item.Stack)
+                {
+                    _log.Warn(LogCategory, $"gear: {item.Name} (weenie {item.Wcid.ToString(CultureInfo.InvariantCulture)}) is held {have.ToString(CultureInfo.InvariantCulture)} of {item.Stack.ToString(CultureInfo.InvariantCulture)} and play grants nothing (M5 DoD 6): the resupply buys it");
+                }
+            }
+            else if (have == 0)
+            {
+                missing ??= $"gear: {item.Name} is not in the pack and play grants nothing (M5 DoD 6)";
+                _log.Error(LogCategory, $"gear: {item.Name} (weenie {item.Wcid.ToString(CultureInfo.InvariantCulture)}) is not in the pack and play grants nothing (M5 DoD 6)");
+            }
+        }
+
+        if (missing is not null)
+        {
+            return Fail(session, missing);
+        }
+
+        _log.Info(LogCategory, "kit verified in the pack (no grant, M5 DoD 6)");
         _wait.Reset();
         return Go("wielding");
     }
@@ -501,6 +633,16 @@ public sealed class GearScenario : IScenario
                 if (carried == 0 && inventory.Find(guid).Kind != InventoryPlaceKind.Equipped)
                 {
                     carried = guid;
+                }
+            }
+
+            if (!equipped && PickedCaster(session.State, item) is var picked and not 0)
+            {
+                equipped = true;
+                if (!_pickNoted)
+                {
+                    _pickNoted = true;
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"the held caster 0x{picked:X8} is not the kit's {item.Name} but the self-equip's pick: it keeps the hands (no grant, M5 7 D139 m)"));
                 }
             }
 
@@ -569,7 +711,18 @@ public sealed class GearScenario : IScenario
 
     private ScenarioStatus BeginCast(IGameSessionView session)
     {
-        var pick = GearCasts.Pick(session.State.Self.Qualities, ProfileRole.CreatureBuff, out var why);
+        // M5 3 F6: the check cast is one the pack can pay for. A level whose foci-formula components the pack lacks is passed over (the ground's kit carries the scarabs of the plan's levels only; ACE refuses the others 0x0400 before it
+        // looks at the skill, Player_Magic.cs:404-408 and 1227-1248 @95ef426d), named here, and the level below it that the pack can pay for is the check. Without a SpellTable the formulas are unknown: no floor, a named TODO.
+        var floor = _spells is null ? null : new PackFloor(session.State, _spells);
+        var pick = GearCasts.Pick(session.State.Self.Qualities, ProfileRole.CreatureBuff, out var why, floor);
+        if (floor is not null)
+        {
+            foreach (var passedOver in floor.Skipped)
+            {
+                _log.Info(LogCategory, "cast: " + passedOver);
+            }
+        }
+
         if (pick is null)
         {
             _log.Info(LogCategory, "cast skipped (cast=n/a): " + why);
@@ -596,7 +749,7 @@ public sealed class GearScenario : IScenario
         if (info is null)
         {
             _manaNeeded = 0;
-            _log.Warn(LogCategory, "TODO(m3-cast-mana-unknown): no SpellTable was given to the scenario, so the cast's mana is not checked before it");
+            _log.Warn(LogCategory, "TODO(m3-cast-mana-unknown): no SpellTable was given to the scenario, so the cast's mana is not checked before it and no level is passed over for the pack's components (M5 3 F6)");
         }
         else
         {
@@ -615,7 +768,7 @@ public sealed class GearScenario : IScenario
         {
             // No SpellTable was given (logged as TODO(m3-cast-mana-unknown)): nothing to compare.
             _chatMark = session.State.Chat.Total;
-            _pending = session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
+            _pending = session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation);
             return Go("cast-mode");
         }
 
@@ -634,7 +787,7 @@ public sealed class GearScenario : IScenario
             }
 
             _chatMark = session.State.Chat.Total;
-            _pending = session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Host);
+            _pending = session.Actions.SetCombatMode(CombatMode.Magic, ActionSource.Automation);
             return Go("cast-mode");
         }
 
@@ -663,6 +816,11 @@ public sealed class GearScenario : IScenario
 
     private ScenarioStatus CastStep(IGameSessionView session)
     {
+        if (Stage == "casting")
+        {
+            return CastingStep(session);
+        }
+
         if (!Settled(out var outcome))
         {
             return ScenarioStatus.Running;
@@ -673,22 +831,17 @@ public sealed class GearScenario : IScenario
             case "cast-mode":
                 if (outcome.Kind is ActionOutcomeKind.Confirmed or ActionOutcomeKind.Local)
                 {
+                    // M5 1 K3: the check cast goes through the cast policy as Automation (D13), Once: "a check never retries silently".
                     _chatMark = session.State.Chat.Total;
-                    _pending = session.Actions.Cast(CastSpellId, ActionSource.Host);
+                    _castLevel[0] = CastSpellId;
+                    _cast ??= new CastAttempt(session.Actions, session.State, _log, _spells);
+                    _cast.Start(new CastRequest { Levels = _castLevel, Rules = CastRules.Once, Purpose = "gear check" }, session.Clock.Now);
                     return Go("casting");
                 }
 
                 Cast = "failed";
                 _log.Warn(LogCategory, "cast: the magic combat mode was not entered: " + DescribeOutcome(outcome));
                 return Conclude(session);
-
-            case "casting":
-                Cast = outcome.Kind == ActionOutcomeKind.Confirmed ? "ok" : outcome.Kind == ActionOutcomeKind.ServerError && outcome.Code == GearCasts.FizzleCode ? "fizzled" : "failed";
-                _log.Info(
-                    LogCategory,
-                    "cast " + CastSpell + ": " + Cast + " (" + (Cast == "failed" ? GearCasts.Explain(outcome, session.State, _chatMark, _manaNeeded) : DescribeOutcome(outcome)) + ")");
-                _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Host);
-                return Go("cast-peace");
 
             default:
                 if (outcome.Kind is not (ActionOutcomeKind.Confirmed or ActionOutcomeKind.Local))
@@ -698,6 +851,24 @@ public sealed class GearScenario : IScenario
 
                 return Conclude(session);
         }
+    }
+
+    /// <summary>The check cast's end: the attempt's answer is the old single cast's (ok when the projectile or enchantment is confirmed, fizzled on 0x0402, failed otherwise), then the combat mode back to NonCombat.</summary>
+    private ScenarioStatus CastingStep(IGameSessionView session)
+    {
+        if (_cast!.Step(session.Clock.Now) == CastEnd.Running)
+        {
+            return ScenarioStatus.Running;
+        }
+
+        var report = _cast.Report;
+        var outcome = _cast.LastOutcome;
+        Cast = outcome is { Kind: ActionOutcomeKind.Confirmed } ? "ok" : report.End == CastEnd.Fizzled ? "fizzled" : "failed";
+        _log.Info(
+            LogCategory,
+            "cast " + CastSpell + ": " + Cast + " (" + (outcome is not { } o ? report.End + ": " + report.Why : Cast == "failed" ? GearCasts.Explain(o, session.State, _chatMark, _manaNeeded) : DescribeOutcome(o)) + ")");
+        _pending = session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation);
+        return Go("cast-peace");
     }
 
     private static string DescribeOutcome(in ActionOutcome outcome) =>
@@ -723,12 +894,28 @@ public sealed class GearScenario : IScenario
         return 0;
     }
 
+    /// <summary>
+    /// M5 7 D139 (m): under <see cref="NoGrant"/> (M5's play), the caster the player holds when it is not the kit's wand line: the self-equip's pick (<c>SelfEquipJudge.BestCaster</c>), which keeps the hands; 0 otherwise. Round 13
+    /// (2026-10-30 03:01:33 UTC): the start-up's gear stage took the picked Fire Sceptre off for the kit's Wand ("take off a piece that is not in the kit"), left it unwielded in the main pack, and the trip's pick then swapped it back in
+    /// over a full kit pack. The build's own gear stage (grants on) still wields exactly the kit. Allocation-free.
+    /// </summary>
+    private uint PickedCaster(GameState state, GearItem item)
+    {
+        if (!NoGrant || item.Kind != GearKind.Wand || state.Self.Inventory.EquippedAt((uint)EquipMask.Held) is not { } held)
+        {
+            return 0;
+        }
+
+        return state.Objects.TryGet(held, out var o) && (o.ItemType & CombatModeGuard.ItemTypeCaster) != 0 ? held : 0;
+    }
+
+    private bool _pickNoted;
+
     private bool InKit(uint wcid)
     {
         for (var i = 0; i < _kit.Items.Count; i++)
         {
-            // A decoy is not a piece the mage wears: a worn one (a human's doing) must not hold a slot the armour needs.
-            if (_kit.Items[i].Wcid == wcid && _kit.Items[i].Kind != GearKind.Decoy)
+            if (_kit.Items[i].Wcid == wcid)
             {
                 return true;
             }
@@ -756,7 +943,7 @@ public sealed class GearScenario : IScenario
                 at = state.Objects.TryGet(_scratch[i], out var o) && o.Weenie.WeenieClassId == item.Wcid && IsWornWithin(inventory, _scratch[i], item);
             }
 
-            if (!at)
+            if (!at && PickedCaster(state, item) == 0)
             {
                 continue;
             }
@@ -776,13 +963,13 @@ public sealed class GearScenario : IScenario
         _missingKit.Clear();
         foreach (var item in _kit.Items)
         {
-            if (counts.GetValueOrDefault(item.Wcid) >= (item.Kind == GearKind.Component ? item.Stack : 1))
+            if (counts.GetValueOrDefault(item.Wcid) >= (item.Counted ? item.Stack : 1))
             {
                 _kitHeld++;
             }
             else
             {
-                _missingKit.Add(string.Create(CultureInfo.InvariantCulture, $"{item.Name} (weenie {item.Wcid}, held {counts.GetValueOrDefault(item.Wcid)} of {(item.Kind == GearKind.Component ? item.Stack : 1)})"));
+                _missingKit.Add(string.Create(CultureInfo.InvariantCulture, $"{item.Name} (weenie {item.Wcid}, held {counts.GetValueOrDefault(item.Wcid)} of {(item.Counted ? item.Stack : 1)})"));
             }
         }
 
@@ -945,11 +1132,25 @@ public static class GearCasts
     /// <param name="info">The spell.</param>
     /// <param name="account">The account name the formula is customised for (never stored or printed).</param>
     /// <param name="skill">The caster's current skill in the spell's school when it cast.</param>
-    public static double NoBurnProbability(SpellInfo info, string account, uint skill)
+    /// <param name="foci">True (M5 3 F6): the pack held the school's focus item, so ACE rolled the burn over the foci formula's slots (<see cref="GearKit.FociFormulaCounts"/>: the scarab, chorizite and the Prismatic Tapers), not the account's customised formula, which the ground's kit never casts.</param>
+    public static double NoBurnProbability(SpellInfo info, string account, uint skill, bool foci = false)
     {
         ArgumentNullException.ThrowIfNull(info);
         var skillMod = skill == 0 ? 1.0 : Math.Min(1.0, info.Power / (double)skill);
         var none = 1.0;
+        if (foci)
+        {
+            foreach (var (id, slots) in GearKit.FociFormulaCounts(info.Formula))
+            {
+                if (ComponentWeenies.TryGetByComponent(id, out var fociWeenie))
+                {
+                    none *= Math.Pow(1.0 - Math.Min(1.0, info.ComponentLoss * (double)fociWeenie.Cdm * skillMod), slots);
+                }
+            }
+
+            return none;
+        }
+
         foreach (var id in SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, account))
         {
             if (id == 0 || !ComponentWeenies.TryGetByComponent(id, out var weenie))
@@ -1100,12 +1301,14 @@ public static class GearCasts
 
     /// <summary>
     /// The first profile line of <paramref name="role"/> (the spec's order) that has a level whose chance from the current skill in the line's school is at least <see cref="MinChance"/>,
-    /// and that line's highest such level (the highest <c>Power</c>). Null with the reason when the skill is unavailable or no level qualifies.
+    /// and that line's highest such level (the highest <c>Power</c>). Null with the reason when the skill is unavailable or no level qualifies. M5 3 F6: with <paramref name="floor"/> a level the pack cannot pay for
+    /// is passed over, named in <paramref name="why"/> (the first one passed over when a lower level is picked; all of them in <see cref="PackFloor.Skipped"/>), and a line with no level the pack can pay for is a named miss.
     /// </summary>
     /// <param name="q">The player's qualities.</param>
     /// <param name="role">The kind of line: <see cref="ProfileRole.CreatureBuff"/>, <see cref="ProfileRole.LifeBuff"/> or <see cref="ProfileRole.ItemBuffWand"/>.</param>
-    /// <param name="why">Why there is none.</param>
-    public static CastPick? Pick(PlayerQualities q, ProfileRole role, out string why)
+    /// <param name="why">Why there is none (or, with a pick, the level that was passed over for the pack's sake, else empty).</param>
+    /// <param name="floor">What the pack holds and the spell table (<see cref="PackFloor"/>); null: no level is judged by the pack (the earlier behaviour).</param>
+    public static CastPick? Pick(PlayerQualities q, ProfileRole role, out string why, PackFloor? floor = null)
     {
         ArgumentNullException.ThrowIfNull(q);
         why = $"no {role} line in the profile";
@@ -1122,22 +1325,53 @@ public static class GearCasts
                 return null;
             }
 
+            var held = floor?.HeldFor(line.School);
+            List<(ProfileSpell Spell, string Text)>? passed = null;
             ProfileSpell? best = null;
             foreach (var spell in line.Spells)
             {
-                if (Chance(skill, spell.Power) >= MinChance && (best is null || spell.Power > best.Power))
+                if (Chance(skill, spell.Power) < MinChance)
+                {
+                    continue;
+                }
+
+                if (floor is not null && floor.Passes(held, spell, out var text))
+                {
+                    (passed ??= []).Add((spell, text));
+                    continue;
+                }
+
+                if (best is null || spell.Power > best.Power)
                 {
                     best = spell;
                 }
             }
 
+            // The levels passed over that matter are those the rule would have chosen: the ones above the pick (all of them when none can be paid for). The highest is named in why, like the cycle's first skip.
+            (ProfileSpell Spell, string Text)? top = null;
+            foreach (var p in passed ?? [])
+            {
+                if (best is not null && p.Spell.Power < best.Power)
+                {
+                    continue;
+                }
+
+                floor!.Note(line, p.Text);
+                if (top is null || p.Spell.Power > top.Value.Spell.Power)
+                {
+                    top = p;
+                }
+            }
+
             if (best is not null)
             {
-                why = string.Empty;
+                why = top is { } above ? $"{line.Name}: {above.Text}" : string.Empty;
                 return new CastPick(line, best, skill, Chance(skill, best.Power));
             }
 
-            why = $"no level of {line.Name} reaches a chance of {MinChance} at {line.School} skill {skill}";
+            why = top is { } highest
+                ? $"{line.Name}: no level the pack can pay for ({highest.Text})"
+                : $"no level of {line.Name} reaches a chance of {MinChance} at {line.School} skill {skill}";
         }
 
         return null;
@@ -1151,7 +1385,8 @@ public static class GearCasts
     /// <param name="q">The player's qualities.</param>
     /// <param name="book">The player's spellbook.</param>
     /// <param name="report">The skills and highest known powers seen, when there is no such spell; else empty.</param>
-    public static CastPick? PickFizzle(PlayerQualities q, Spellbook book, out string report)
+    /// <param name="floor">M5 3 F6: what the pack holds and the spell table. ACE checks a cast's components before its skill (<c>CreatePlayerSpell</c>, Player_Magic.cs:1004 then 1026 @95ef426d: <c>ValidateSpell</c> 404-408, <c>HasComponentsForSpell</c> 1227-1248, then <c>GetCastingPreCheckStatus</c>), so a spell the pack cannot pay for ends 0x0400, not 0x0402: it is passed over and named in <see cref="PackFloor.Skipped"/>. Null: no level is judged by the pack.</param>
+    public static CastPick? PickFizzle(PlayerQualities q, Spellbook book, out string report, PackFloor? floor = null)
     {
         ArgumentNullException.ThrowIfNull(q);
         ArgumentNullException.ThrowIfNull(book);
@@ -1171,6 +1406,7 @@ public static class GearCasts
             }
 
             uint highestKnown = 0;
+            var held = floor?.HeldFor(line.School);
             foreach (var spell in line.Spells)
             {
                 if (!book.Knows(spell.Id))
@@ -1181,6 +1417,12 @@ public static class GearCasts
                 highestKnown = Math.Max(highestKnown, spell.Power);
                 if ((long)spell.Power - skill > FizzleMargin && (best is null || spell.Power < best.Spell.Power))
                 {
+                    if (floor is not null && floor.Passes(held, spell, out var text))
+                    {
+                        floor.Note(line, text);
+                        continue;
+                    }
+
                     best = new CastPick(line, spell, skill, Chance(skill, spell.Power));
                 }
             }
@@ -1188,7 +1430,49 @@ public static class GearCasts
             seen.Append(CultureInfo.InvariantCulture, $"{line.Name}: {line.School} skill {skill}, highest known power {highestKnown}; ");
         }
 
-        report = best is null ? $"no known profile spell has a Power more than {FizzleMargin} above the current skill: {seen}" : string.Empty;
+        report = best is null
+            ? $"no known profile spell has a Power more than {FizzleMargin} above the current skill{(floor is { Skipped.Count: > 0 } ? " that the pack can pay for" : string.Empty)}: {seen}{(floor is { Skipped.Count: > 0 } ? "passed over: " + string.Join(" | ", floor.Skipped) : string.Empty)}"
+            : string.Empty;
         return best;
+    }
+}
+
+/// <summary>
+/// What the first casts judge a level by (M5 3 F6): the read model's pack and the SpellTable's spells, so <see cref="GearCasts.Pick"/> and <see cref="GearCasts.PickFizzle"/> apply the same level floor as the buff cycle
+/// (<see cref="LevelFloor"/>): when the pack holds the school's focus, a level whose foci-formula components the pack lacks is passed over. One instance per call (it collects the levels it passed over).
+/// </summary>
+/// <param name="state">The read model (the pack).</param>
+/// <param name="spells">The SpellTable's spells (the formulas).</param>
+public sealed class PackFloor(GameState state, IReadOnlyDictionary<uint, SpellInfo> spells)
+{
+    private readonly List<string> _skipped = [];
+
+    /// <summary>Every level passed over that the rule would have chosen (the levels above the pick), once, as <c>Strength Self: level V needs Gold Scarab 687, which the pack does not hold; skipped</c>.</summary>
+    public IReadOnlyList<string> Skipped => _skipped;
+
+    /// <summary>What the pack holds when the floor applies to <paramref name="school"/> (<see cref="LevelFloor.HeldFor"/>), else null.</summary>
+    internal Dictionary<uint, int>? HeldFor(MagicSchool school) => LevelFloor.HeldFor(state, school);
+
+    /// <summary>True, with the reason in <paramref name="text"/> (no line name), when the floor applies (<paramref name="held"/> is not null) and the pack cannot pay for <paramref name="spell"/>.</summary>
+    internal bool Passes(Dictionary<uint, int>? held, ProfileSpell spell, out string text)
+    {
+        text = string.Empty;
+        if (held is null || !spells.TryGetValue(spell.Id, out var info) || !LevelFloor.ShortOf(held, info, out var need))
+        {
+            return false;
+        }
+
+        text = LevelFloor.SkipText(spell, need);
+        return true;
+    }
+
+    /// <summary>Notes a level of <paramref name="line"/> that was passed over and mattered (once), for <see cref="Skipped"/>.</summary>
+    internal void Note(ProfileLine line, string text)
+    {
+        var named = line.Name + ": " + text;
+        if (!_skipped.Contains(named))
+        {
+            _skipped.Add(named);
+        }
     }
 }

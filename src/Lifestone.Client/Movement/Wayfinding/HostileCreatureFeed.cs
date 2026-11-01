@@ -1,6 +1,9 @@
 using System.Numerics;
+using DatReaderWriter.DBObjs;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Data.Dat;
+using Lifestone.Data.Models;
 
 namespace Lifestone.Client.Movement.Wayfinding;
 
@@ -9,14 +12,19 @@ namespace Lifestone.Client.Movement.Wayfinding;
 /// one red (<c>RadarRules</c>: the creature item type, the attackable bit, not a player) and the census counts one (not a vendor): its CreateObject's
 /// ItemType has the creature bit (0x10), its ObjectDescriptionFlags the attackable bit (0x10) and neither the player (0x8) nor the vendor (0x200)
 /// bit, it has a position, and it is not known to be dead (a health fraction above zero or none yet; its forward motion is not Dead). Each is a
-/// disc of <see cref="NavCreatures.AggroRadius"/> over its <see cref="CreatureAwareness"/>. ACE alerts only an idle creature without a
+/// disc of <see cref="NavCreatures.AggroRadius"/> over its <see cref="CreatureAwareness"/> and its own radius: its Setup's radius (retail
+/// <c>CSetup::radius</c>, through the injected <c>setupRadius</c> lookup, <see cref="SetupRadii"/> over the dats) times its scale (the physics
+/// description's ObjScale), as the physics object's own radius is (<c>PhysicsObj.Radius</c>; ACE @95ef426d measures the awareness between the two
+/// cylinders, PhysicsObj.cs:2519); <see cref="NavCreatures.UnknownCreatureRadiusMetres"/> when the Setup cannot be read (logged once). ACE alerts only an idle creature without a
 /// move-exclude tolerance (<c>AlertMonster</c>, Creature_Combat.cs:1121-1151 @95ef426d); the client sees neither, so every hostile creature counts.
 /// Allocates nothing once the list has grown.
 /// </summary>
 /// <param name="objects">The session's object table.</param>
 /// <param name="self">The player's id (never on the layer).</param>
-/// <param name="log">The log (the first creature's <c>TODO(nav-creature-radius)</c> line), or null.</param>
-public sealed class HostileCreatureFeed(WorldObjectTable objects, uint self, ILogSink? log = null) : INavCreatureFeed
+/// <param name="log">The log (the first creature whose radius falls back to 1 m), or null.</param>
+/// <param name="setupRadius">A Setup's radius by its id (<see cref="SetupRadii"/>), null when it is not in the dats; null for no lookup (every disc then
+/// assumes 1 m, logged once as an unread Setup radius: every host passes <see cref="SetupRadii"/> since M5 item 2 g5, so a feed without one is a host that was not wired).</param>
+public sealed class HostileCreatureFeed(WorldObjectTable objects, uint self, ILogSink? log = null, Func<uint, float?>? setupRadius = null) : INavCreatureFeed
 {
     /// <summary>The ItemType bit of a creature (ACE <c>ItemType.Creature</c>).</summary>
     public const uint CreatureItemType = 0x10;
@@ -61,12 +69,53 @@ public sealed class HostileCreatureFeed(WorldObjectTable objects, uint self, ILo
                 continue;
             }
 
-            into.Add(new NavCreature(o.Guid, centre, NavCreatures.AggroRadius(CreatureAwareness.MetresOf(o.Weenie.WeenieClassId))));
-            if (!_radiusLogged)
+            into.Add(new NavCreature(o.Guid, centre, NavCreatures.AggroRadius(CreatureAwareness.MetresOf(o.Weenie.WeenieClassId), RadiusOf(o)), o.Position!.Value.Origin.Z)); // its height too, for a room route's storey band (M5 2 fix F2)
+        }
+    }
+
+    /// <summary>
+    /// A Setup's radius by its id from <paramref name="dats"/> (retail <c>CSetup::radius</c>, <see cref="ModelAssembly.Radius"/>), or null for a Setup not in
+    /// the dats; cached per id, so a warm feed allocates nothing. For <see cref="HostileCreatureFeed"/>'s <c>setupRadius</c>. Game thread only.
+    /// </summary>
+    /// <param name="dats">The dats.</param>
+    public static Func<uint, float?> SetupRadii(DatSet dats)
+    {
+        ArgumentNullException.ThrowIfNull(dats);
+        var cache = new Dictionary<uint, float?>();
+        return id =>
+        {
+            if (!cache.TryGetValue(id, out var radius))
             {
-                _radiusLogged = true;
-                log?.Warn("wayfinding", "TODO(nav-creature-radius): a creature's own radius is not read; its aggro disc assumes 1 m", new LogField("creature", o.Name), new LogField("assumed_m", NavCreatures.UnknownCreatureRadiusMetres));
+                radius = dats.TryGetPortal<Setup>(id, out var setup) ? ModelAssembly.FromSetup(id, setup).Radius : null;
+                cache[id] = radius;
+            }
+
+            return radius;
+        };
+    }
+
+    /// <summary>The creature's own radius: its Setup's radius times its scale, or <see cref="NavCreatures.UnknownCreatureRadiusMetres"/> (logged once) when it cannot be read.</summary>
+    private float RadiusOf(WorldObject o)
+    {
+        var physics = o.Created.Physics;
+        if (setupRadius is not null && physics.SetupId is { } id and not 0 && setupRadius(id) is { } radius and > 0f)
+        {
+            return radius * (physics.Scale is { } scale and > 0f ? scale : 1f);
+        }
+
+        if (!_radiusLogged)
+        {
+            _radiusLogged = true;
+            if (setupRadius is null)
+            {
+                log?.Warn("wayfinding", "unread Setup radius: the host gave the creature feed no Setup lookup (HostileCreatureFeed.SetupRadii), so every aggro disc assumes a 1 m creature", new LogField("creature", o.Name), new LogField("assumed_m", NavCreatures.UnknownCreatureRadiusMetres));
+            }
+            else
+            {
+                log?.Warn("wayfinding", "a creature's Setup radius could not be read (no Setup id, or not in the dats); its aggro disc assumes 1 m", new LogField("creature", o.Name), new LogField("setup", physics.SetupId ?? 0), new LogField("assumed_m", NavCreatures.UnknownCreatureRadiusMetres));
             }
         }
+
+        return NavCreatures.UnknownCreatureRadiusMetres;
     }
 }

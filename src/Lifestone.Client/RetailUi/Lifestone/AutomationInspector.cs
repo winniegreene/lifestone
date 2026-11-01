@@ -43,6 +43,12 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
     /// <summary>The kill switch and dry run line.</summary>
     public const uint StateId = 0x7F000205;
 
+    /// <summary>The autopilot's three lines (M5 4 h2): its state, its last decision and its next trigger.</summary>
+    public const uint AutopilotId = 0x7F000209;
+
+    /// <summary>The longest decision or trigger the autopilot's lines show before they are cut with an ellipsis (the line is 528 px wide).</summary>
+    public const int AutopilotLineLimit = 84;
+
     /// <summary>The list of rows.</summary>
     public const uint ListId = 0x7F000206;
 
@@ -70,6 +76,8 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
     private UiListBox? _list;
     private UiTextElement? _counters;
     private UiTextElement? _state;
+    private UiTextElement? _autopilotLines;
+    private IAutopilotStatusSource? _autopilot;
     private UiElement? _closeButton;
     private bool _dirty;
     private bool _backlog;
@@ -78,6 +86,7 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
     private long _shownTotal = -1;
     private string _countersText = string.Empty;
     private string _stateText = string.Empty;
+    private string _autopilotText = string.Empty;
 
     /// <summary>An inspector over <paramref name="session"/>'s action log; nothing is made until <see cref="Open"/>.</summary>
     public AutomationInspector(UiElementManager manager, IGameSessionView session)
@@ -104,6 +113,38 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
 
     /// <summary>The kill switch and dry run line now shown.</summary>
     public string StateText => _stateText;
+
+    /// <summary>The autopilot lines now shown (state, last decision, next trigger).</summary>
+    public string AutopilotText => _autopilotText;
+
+    /// <summary>
+    /// The autopilot whose state the inspector shows (M5 4 h2): the play host sets the autopilot host logic (Session/Autopilot). Its <see cref="IAutopilotStatusSource.Changed"/> makes the window refresh on the next frame, like a
+    /// new action does. Null (the default) shows that no autopilot is wired.
+    /// </summary>
+    public IAutopilotStatusSource? Autopilot
+    {
+        get => _autopilot;
+        set
+        {
+            if (ReferenceEquals(_autopilot, value))
+            {
+                return;
+            }
+
+            if (_autopilot is not null)
+            {
+                _autopilot.Changed -= OnLogChanged;
+            }
+
+            _autopilot = value;
+            if (value is not null && !_disposed)
+            {
+                value.Changed += OnLogChanged;
+            }
+
+            _dirty = true;
+        }
+    }
 
     /// <summary>How many times the window brought itself up to date (the first build and each change after).</summary>
     public int Refreshes { get; private set; }
@@ -192,6 +233,7 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
         Refreshes++;
         SetIfChanged(_counters, ref _countersText, FormatCounters(_log));
         SetIfChanged(_state, ref _stateText, FormatState(_session.Actions.KillSwitch, _session.Actions.DryRun));
+        SetIfChanged(_autopilotLines, ref _autopilotText, FormatAutopilot(_autopilot?.Status));
         UpdateRows();
     }
 
@@ -226,6 +268,11 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
 
         _disposed = true;
         _log.Changed -= OnLogChanged;
+        if (_autopilot is not null)
+        {
+            _autopilot.Changed -= OnLogChanged;
+        }
+
         if (_frameRegistered)
         {
             _frameRegistered = false;
@@ -274,6 +321,42 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
     /// <summary>The safety line (read-only).</summary>
     public static string FormatState(bool killSwitch, bool dryRun) =>
         $"Kill switch: {(killSwitch ? "ON" : "off")} | Dry run: {(dryRun ? "ON" : "off")} | read-only here";
+
+    /// <summary>
+    /// The autopilot's three lines (M5 4 h2, DoD 9): <c>Autopilot: running | fight:den-fight | cycle 2 | interrupted 1, resumed 1</c>, <c>Last decision: ...</c> and <c>Next trigger: ...</c> (for example
+    /// <c>trip at 200 tapers: 412 held</c> or <c>stop at 30 min: 12 min left</c>). A null status is a host that wired no autopilot.
+    /// </summary>
+    public static string FormatAutopilot(AutopilotStatus? status)
+    {
+        if (status is not { } s)
+        {
+            return "Autopilot: not available in this session\nLast decision: -\nNext trigger: -";
+        }
+
+        var mode = s.Mode switch
+        {
+            AutopilotMode.Running => "running",
+            AutopilotMode.Stopping => "stopping",
+            AutopilotMode.Interrupted => "stopped (the controls are yours; /auto resumes)",
+            AutopilotMode.Halted => "halted by the kill switch",
+            AutopilotMode.Done => "done",
+            _ => "off (type /auto to start it)",
+        };
+        var head = "Autopilot: " + mode;
+        if (s.State.Length > 0)
+        {
+            head += string.Create(CultureInfo.InvariantCulture, $" | {s.State} | cycle {s.Cycle}");
+        }
+
+        if (s.Interrupted > 0 || s.Resumed > 0)
+        {
+            head += string.Create(CultureInfo.InvariantCulture, $" | interrupted {s.Interrupted}, resumed {s.Resumed}");
+        }
+
+        return Clip(head) + "\nLast decision: " + Clip(s.LastDecision.Length > 0 ? s.LastDecision : "-") + "\nNext trigger: " + Clip(s.NextTrigger.Length > 0 ? s.NextTrigger : "-");
+    }
+
+    private static string Clip(string text) => text.Length <= AutopilotLineLimit ? text : text[..(AutopilotLineLimit - 3)] + "...";
 
     private static string[] BuildOutcomeNames()
     {
@@ -324,10 +407,11 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
         _list = _window.GetChildRecursive(ListId) as UiListBox;
         _counters = _window.GetChildRecursive(CountersId) as UiTextElement;
         _state = _window.GetChildRecursive(StateId) as UiTextElement;
+        _autopilotLines = _window.GetChildRecursive(AutopilotId) as UiTextElement;
         _closeButton = _window.GetChildRecursive(CloseId);
-        if (_list is null || _counters is null || _state is null || _closeButton is null)
+        if (_list is null || _counters is null || _state is null || _autopilotLines is null || _closeButton is null)
         {
-            _manager.LogOnce("inspector:parts", LogSeverity.Error, $"TODO(g7-inspector-layout): the inspector's list, counters, state line or button is missing from layout 0x{LayoutId:X8}; the window may show part of its content");
+            _manager.LogOnce("inspector:parts", LogSeverity.Error, $"TODO(g7-inspector-layout): the inspector's list, counters, state line, autopilot lines or button is missing from layout 0x{LayoutId:X8}; the window may show part of its content");
         }
 
         _window.RegisterForElementMessages(this);

@@ -38,26 +38,39 @@ public sealed class VitaeRuleTests
     [Fact]
     public void The_stages_option_parses_names_all_and_none_and_reports_a_bad_one()
     {
-        Assert.Equal(DeathStages.Vitae, DeathOptions.ParseStages("vitae", out var problem));
+        Assert.Equal(DeathStages.Gear | DeathStages.Rebuff, DeathOptions.ParseStages("Gear, REBUFF", out var problem));
         Assert.Null(problem);
-        Assert.Equal(DeathStages.Gear | DeathStages.Vitae, DeathOptions.ParseStages("Gear, VITAE", out _));
         Assert.Equal(DeathStages.Den | DeathStages.Death, DeathOptions.ParseStages("den+death", out _));
         Assert.Equal(DeathStages.All, DeathOptions.ParseStages("all", out _));
         Assert.Equal(DeathStages.None, DeathOptions.ParseStages("none", out _));
-        Assert.True(DeathStages.All.HasFlag(DeathStages.Vitae));
+        Assert.True(DeathStages.All.HasFlag(DeathStages.Fight));
 
-        DeathOptions.ParseStages("vitae,bogus", out problem);
+        DeathOptions.ParseStages("gear,bogus", out problem);
         Assert.Contains("'bogus' is not a stage", problem, StringComparison.Ordinal);
         DeathOptions.ParseStages(string.Empty, out problem);
         Assert.NotNull(problem);
+    }
+
+    [Theory]
+    [InlineData("vitae", "the vitae clears by earned experience, M5 D51")]
+    [InlineData("Gear, VITAE", "the vitae clears by earned experience, M5 D51")]
+    [InlineData("regear", "the death handler wears and wields what the corpse gives back")]
+    [InlineData("death,corpse,regear", "the stage 'regear' is removed")]
+    public void The_vitae_and_regear_stages_are_refused_by_name_M5_3_d2(string text, string expected)
+    {
+        DeathOptions.ParseStages(text, out var problem);
+        Assert.Contains(expected, problem, StringComparison.Ordinal);
+        var o = DeathOptions.FromArguments([new CommandLineArgument("--death-stages=" + text, "--death-stages", text, true)]);
+        Assert.NotEmpty(o.Errors);
+        Assert.Contains(o.Errors, e => e.Contains(expected, StringComparison.Ordinal));
     }
 
     [Fact]
     public void The_stages_option_is_registered_and_reaches_the_options_object()
     {
         Assert.Contains(OptionCatalog.Death().Options, o => o.Name == "--death-stages");
-        var o = DeathOptions.FromArguments([new CommandLineArgument("--death-stages=vitae", "--death-stages", "vitae", true)]);
-        Assert.Equal(DeathStages.Vitae, o.Stages);
+        var o = DeathOptions.FromArguments([new CommandLineArgument("--death-stages=corpse", "--death-stages", "corpse", true)]);
+        Assert.Equal(DeathStages.Corpse, o.Stages);
         Assert.Empty(o.Errors);
         Assert.Null(DeathOptions.FromArguments([]).Stages);
         Assert.NotEmpty(DeathOptions.FromArguments([new CommandLineArgument("--death-stages=nope", "--death-stages", "nope", true)]).Errors);

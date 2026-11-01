@@ -290,8 +290,29 @@ public sealed partial class SessionHost : Node
     {
         if (what == NotificationWMCloseRequest)
         {
-            QuitNow("the window was closed");
+            // M5 7 F18: the window close is handled here. During an autopilot run the dial is asked to recall home first (WindowCloseGate): the close is deferred, the tree does not quit by itself,
+            // and AutopilotHost quits the game through QuitGame when the run is done (60 s at most) or on a second close. Otherwise the game's own log off, as before.
+            if (CloseDeferral?.Invoke() == true)
+            {
+                GetTree().AutoAcceptQuit = false;
+                return;
+            }
+
+            QuitGame("the window was closed");
         }
+    }
+
+    /// <summary>
+    /// Asked on a close request of the window (M5 7 F18): returns true when the close is deferred (the autopilot recalls home first and the host quits later through <see cref="QuitGame"/>), false for an immediate quit. Set by the autopilot host.
+    /// </summary>
+    public Func<bool>? CloseDeferral { get; set; }
+
+    /// <summary>The game's own log off (<see cref="QuitNow"/>: F653 when in the world, then the disconnect), then the tree quits (exit code 0).</summary>
+    /// <param name="why">For the log.</param>
+    public void QuitGame(string why)
+    {
+        QuitNow(why);
+        GetTree().Quit();
     }
 
     /// <inheritdoc/>

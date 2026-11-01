@@ -3,6 +3,7 @@ using Lifestone.Client.Movement;
 using Lifestone.Client.Movement.Routes;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Navigation;
+using Lifestone.Client.Physics;
 using Lifestone.Client.Play;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.Dat;
@@ -38,11 +39,18 @@ public sealed class HeadlessBody(DatSet dats, ILogSink log, string category, Fun
     private IDisposable? _motionSubscription;
     private RouteConfirmer? _confirmer;
     private HostileCreatureFeed? _creatures;
+    private ObjectTableFeed? _objectFeed;
     private bool _focusSet;
     private bool _disposed;
 
     /// <summary>The collision world, once created.</summary>
     public PhysicsWorld? World { get; private set; }
+
+    /// <summary>
+    /// The server objects' physics in <see cref="World"/> (M5 item 5 h2, D70): one physics object per object with collision, fed from the session's object table
+    /// (<see cref="ObjectTableFeed"/>), so a walk meets doors, lifestones, NPCs and creatures. Once created.
+    /// </summary>
+    public ServerObjectPhysicsHost? ObjectHost { get; private set; }
 
     /// <summary>The wayfinder's tiles, once created.</summary>
     public NavMap? Map { get; private set; }
@@ -78,6 +86,9 @@ public sealed class HeadlessBody(DatSet dats, ILogSink log, string category, Fun
     /// <summary>True while the body stands where the server put the player.</summary>
     public bool Placed { get; private set; }
 
+    /// <summary>Times the placed body was put out of a server object that appeared on it (<see cref="OfflineWalker.ReplaceAfterObjectCreate"/>, <c>TODO(m5-create-overlap)</c>).</summary>
+    public int ObjectReplacements { get; private set; }
+
     /// <summary>The self teleports seen since <see cref="Create"/>.</summary>
     public int Teleports { get; private set; }
 
@@ -109,8 +120,10 @@ public sealed class HeadlessBody(DatSet dats, ILogSink log, string category, Fun
         Audit = new MovementAudit(sink, session.Events, () => session.Clock.Now, category);
         World.SetTime(now);
         Walker = OfflineWalker.Create(_dats, World, _log, Weenie, geometry, id: self.Guid, sink: Audit);
+        ObjectHost = new ServerObjectPhysicsHost(World, _dats, geometry, _log);
+        _objectFeed = new ObjectTableFeed(ObjectHost, session.State.Objects, session.Events, self.Guid); // headless: server positions only, no avatar step, so no transitions (ObjectTableFeed remarks)
         Move = session.Actions.Move; // the human's keys (R2): the runner presses them through IActionApi.Move
-        _creatures = new HostileCreatureFeed(session.State.Objects, self.Guid, _log); // the runs' creature layer (nav-creature-avoid)
+        _creatures = new HostileCreatureFeed(session.State.Objects, self.Guid, _log, HostileCreatureFeed.SetupRadii(_dats)); // the runs' creature layer (nav-creature-avoid), each creature's own radius (nav-creature-radius-host)
         Move.Bind(Walker.Controller, Walker.Controller.Options.RunByDefault);
         _movesSubscription = session.Events.Subscribe<ObjectMoved>((in ObjectMoved e) =>
         {
@@ -145,6 +158,8 @@ public sealed class HeadlessBody(DatSet dats, ILogSink log, string category, Fun
         }
 
         Streamer!.Pump();
+        _objectFeed?.Tick();
+        ReplaceOnNewObjects();
         DrainMoves(now);
         ApplyServerMoves();
         if (Placed)
@@ -152,6 +167,27 @@ public sealed class HeadlessBody(DatSet dats, ILogSink log, string category, Fun
             Walker!.Controller.Tick(now);
             _focusSet = true;
             Streamer.SetFocus(Walker.Position.CellId);
+        }
+    }
+
+    /// <summary>
+    /// Any server object put into the world while the body stands placed (the lifestone's create after a recall's teleport, a creature created on the body's spot, an object
+    /// forced into its cell) puts the body out of it by retail's sliding placement (<see cref="OfflineWalker.ReplaceAfterObjectsEntered"/>, the call the game's player controller
+    /// makes too; <c>TODO(m5-create-overlap)</c>): the walker's transition holds a body that is already inside an object. Only objects entering the world trigger it (a server
+    /// move of an object already there, as a creature's, does not), and a body not yet placed is placed with the objects there.
+    /// </summary>
+    private void ReplaceOnNewObjects()
+    {
+        if (!Placed)
+        {
+            return;
+        }
+
+        var moved = Walker!.ReplaceAfterObjectsEntered(ObjectHost?.Stats);
+        if (moved > 0.01f)
+        {
+            ObjectReplacements++;
+            _log.Info(category, "a server object appeared on the body: placed out of it (TODO(m5-create-overlap): retail creates the objects before it places the player)", new LogField("moved_m", moved.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)), new LogField("at", Walker.Position.ToString()));
         }
     }
 
@@ -245,6 +281,7 @@ public sealed class HeadlessBody(DatSet dats, ILogSink log, string category, Fun
 
         _movesSubscription?.Dispose();
         _motionSubscription?.Dispose();
+        _objectFeed?.Dispose();
         Audit?.Dispose();
         Streamer?.Dispose();
     }

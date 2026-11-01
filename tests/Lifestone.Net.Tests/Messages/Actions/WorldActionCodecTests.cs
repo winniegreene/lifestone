@@ -187,6 +187,24 @@ public sealed class WorldActionCodecTests
         Assert.Equal(0, writer.Position);
     }
 
+    [Fact]
+    public void SetInscription_sends_the_item_then_the_text_as_ACE_reads_them_D137()
+    {
+        // ACE GameActionSetInscription: ReadUInt32 (the item), then ReadString16L (the text: a u16 length, the bytes, padded to 4).
+        var body = Build(w => ChatActionCodecs.WriteSetInscription(w, 9, 0x80000A07, "For the Den"));
+        Assert.Equal(0xF7B1u, BitConverter.ToUInt32(body, 0));
+        Assert.Equal(9u, BitConverter.ToUInt32(body, 4));
+        Assert.Equal(0x00BFu, BitConverter.ToUInt32(body, 8));
+        Assert.Equal(0x80000A07u, BitConverter.ToUInt32(body, 12));
+        Assert.Equal(11, BitConverter.ToUInt16(body, 16));
+        Assert.Equal("For the Den", System.Text.Encoding.ASCII.GetString(body, 18, 11));
+        Assert.Equal(0, (body.Length - 16) % 4);
+        Assert.Equal(GameActionTypes.SetInscription, 0x00BFu);
+
+        var cleared = Build(w => ChatActionCodecs.WriteSetInscription(w, 10, 0x80000A07, string.Empty));
+        Assert.Equal(0, BitConverter.ToUInt16(cleared, 16)); // an empty text clears the inscription
+    }
+
     private static byte[] Build(Action<PacketWriter> write)
     {
         var writer = new PacketWriter();

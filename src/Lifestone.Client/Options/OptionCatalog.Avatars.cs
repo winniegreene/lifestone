@@ -39,6 +39,10 @@ public static partial class OptionCatalog
                 "Walk the offline player through four review frames (the chase camera behind the character in Holtburg, first person, inside a building, mid-jump), save them to DIR (default docs/screenshots/m2/player) and quit. Implies --offline-player.",
                 OptionRole.EndsRun,
                 ValueOptional: true),
+            new(
+                "--server-object-transitions",
+                "on|off",
+                "Server objects (creatures, NPCs, doors) run retail's collision transitions through the client's server-object physics, so creatures stop at each other, the player, doors and lifestones (default on). off moves them without collision, as before M5 item 5: a diagnostics switch for measuring the frame cost, not a glitch flag."),
         ],
         OptionScenes.Main);
 }

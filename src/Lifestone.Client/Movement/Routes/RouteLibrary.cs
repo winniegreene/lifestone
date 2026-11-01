@@ -59,7 +59,9 @@ public static class RouteLibrary
     /// (<see cref="PhysicsWorld.TryGroundZ(in CellFrame, PhysSphere, out float, out Plane)"/> from the terrain's height),
     /// rises or falls no more than <see cref="RingMaxRise"/> from the one before, is outdoors, and has room for the body
     /// (a placement there, which must not move it). The test object it places is a player (so other players do not block
-    /// it) and is destroyed before this returns.
+    /// it) and is destroyed before this returns. Both probes judge the fixed world only (M5 item 5 fix F3,
+    /// <see cref="PhysicsWorld.TryFixedGroundZ"/> and <see cref="PhysicsObj.FixedWorldOnly"/>): the lifestone and passers-by the
+    /// server-object host keeps in the world are met by the walk, not by the ring's choice (not retail: Lifestone's own tool).
     /// </remarks>
     /// <exception cref="InvalidOperationException">No radius gives a clear ring; the message names the last obstacle.</exception>
     public static ScriptedRoute HoltburgLaps(in CellFrame lifestone, PhysicsWorld world, PhysicsSetup body, int laps = DefaultLaps)
@@ -72,7 +74,7 @@ public static class RouteLibrary
             throw new ArgumentException("the body has no spheres to stand on", nameof(body));
         }
 
-        var probe = new PhysicsObj(world, body, id: 0, new ProbeWeenie());
+        var probe = new PhysicsObj(world, body, id: 0, new ProbeWeenie()) { FixedWorldOnly = true }; // F3: the ring is judged on the fixed world, not the lifestone or a passer-by
         try
         {
             string? why = null;
@@ -186,7 +188,7 @@ public static class RouteLibrary
         var plane = terrain.Plane;
         origin.Z = -((plane.Normal.X * origin.X) + (plane.Normal.Y * origin.Y) + plane.D) / plane.Normal.Z;
         var at = new CellFrame(cellId, new AcFrame(origin, Quaternion.Identity));
-        if (!world.TryGroundZ(at, foot, out var z, out _))
+        if (!world.TryFixedGroundZ(at, foot, out var z, out _))
         {
             why = string.Create(CultureInfo.InvariantCulture, $"no walkable ground at {at}");
             return false;

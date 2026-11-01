@@ -22,6 +22,19 @@ public enum RetailUiMode
     Live,
 }
 
+/// <summary>Where the in-game shell keeps its window layout files (<c>--layout-store</c>, M5 6 fix, 6-R2).</summary>
+public enum LayoutStoreKind
+{
+    /// <summary>The host chooses: memory for the check suites and the review frames (no file of an earlier run is read), disk for live play and <c>--login-check=keep</c>.</summary>
+    Auto,
+
+    /// <summary>The Godot user data (<c>user://UI-...txt</c>), as retail keeps its files beside the client's preferences.</summary>
+    Disk,
+
+    /// <summary>A fresh store in memory, shared by the session's logins and gone with the process.</summary>
+    Memory,
+}
+
 /// <summary>
 /// The Retail UI option group's values (registered with their help in <c>OptionCatalog.RetailUi</c>), as the game's retail UI
 /// layer parses them (<see cref="Parse(IEnumerable{string})"/>; docs/retail-ui.md §15).
@@ -40,6 +53,7 @@ public enum RetailUiMode
 /// <item><term>--retail-ui-glitches</term><description>Restore the retail glitches Lifestone fixes by default
 /// (<see cref="UiRetailGlitches.All"/>; docs/retail-ui.md §14), the fidelity rule's flag.</description></item>
 /// <item><term>--examine-icon=on|off</term><description>The examine window's item icon, an addition to retail (default off: the window is drawn as retail draws it).</description></item>
+/// <item><term>--layout-store=auto|disk|memory</term><description>Where the window layout files live (default auto: memory for the checks and frames, disk for live play and the keep check).</description></item>
 /// <item><term>--retail-disconnect</term><description>Retail's exit from the disconnected screen (D43); by default its button reconnects.</description></item>
 /// </list>
 /// </remarks>
@@ -90,6 +104,12 @@ public sealed record RetailUiOptions
 
     /// <summary><c>--examine-icon on|off</c> (default off, retail): the examine window's item icon, an addition to retail (M4 4.1 fix, review R8; <see cref="UiServices.ExamineIcon"/>).</summary>
     public bool ExamineIcon { get; init; }
+
+    /// <summary><c>--examine-set-details on|off</c> (default off, retail): under "Set: name", the pieces of the set worn and the set's spells by pieces, an addition to retail (M5 7 D137, the lead's decision; <see cref="UiServices.ExamineSetDetails"/>).</summary>
+    public bool ExamineSetDetails { get; init; }
+
+    /// <summary><c>--layout-store auto|disk|memory</c> (default auto, M5 6 fix, 6-R2): where the window layout files live. The host resolves auto: memory for <c>--play-checks</c>, the review frames and the login checks other than keep, disk otherwise.</summary>
+    public LayoutStoreKind LayoutStore { get; init; }
 
     /// <summary>The problems <see cref="Parse(IEnumerable{string})"/> found, one line each; the option keeps its default.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
@@ -161,8 +181,20 @@ public sealed record RetailUiOptions
                 case "--retail-effects-stale-info":
                     options = options with { Glitches = options.Glitches | UiRetailGlitches.EffectsStaleInfo };
                     break;
+                case "--retail-confirm-slot":
+                    options = options with { Glitches = options.Glitches | UiRetailGlitches.ConfirmationSingleSlot };
+                    break;
+                case "--retail-stack-count":
+                    options = options with { Glitches = options.Glitches | UiRetailGlitches.StackCountClip };
+                    break;
                 case "--examine-icon":
                     options = options with { ExamineIcon = OptionValues.Choice(argument, errors, options.ExamineIcon, ("on", true), ("off", false)) };
+                    break;
+                case "--examine-set-details":
+                    options = options with { ExamineSetDetails = OptionValues.Choice(argument, errors, options.ExamineSetDetails, ("on", true), ("off", false)) };
+                    break;
+                case "--layout-store":
+                    options = options with { LayoutStore = OptionValues.Choice(argument, errors, options.LayoutStore, ("auto", LayoutStoreKind.Auto), ("disk", LayoutStoreKind.Disk), ("memory", LayoutStoreKind.Memory)) };
                     break;
                 case "--retail-disconnect":
                     options = options with { RetailDisconnect = true };

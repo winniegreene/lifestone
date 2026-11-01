@@ -226,6 +226,7 @@ public sealed partial class PlayerMovementController
     public void LoseControlToServer()
     {
         ControlledByServer = true;
+        BeginServerMoveToWatch();
         SetAutoRun(false, applyMovement: false);
         FinishJump();
     }
@@ -618,6 +619,9 @@ public sealed partial class PlayerMovementController
         _ when (command & SubstateBit) != 0 && (command & LocomotionBit) != 0 => _substates,
         _ => null,
     };
+
+    /// <inheritdoc/>
+    public bool? IsHeld(uint command) => WhichList(command)?.Contains(command);
 
     /// <summary>
     /// Retail <c>CommandInterpreter::ClearAllCommands</c> (11.4186 0x006B31A0, 11.6096 0x006B40E0): every list emptied.

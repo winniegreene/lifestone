@@ -100,17 +100,15 @@ public sealed class DeathOrderOptionsTests
     [Fact]
     public void A_bad_on_off_value_is_an_error_and_keeps_the_default()
     {
-        // The one on/off parser is shared by every death on/off option; each is wired by name here (the corpse and decoys facts folded in by the M4 polish fold).
-        var o = Parse("--death-rebuff=maybe", "--death-fight=perhaps", "--death-decoys=maybe", "--death-recover-corpse=maybe");
+        // The one on/off parser is shared by every death on/off option; each is wired by name here (the corpse fact folded in by the M4 polish fold; the retired decoy option is refused by name in DeathDecoyOptionsTests).
+        var o = Parse("--death-rebuff=maybe", "--death-fight=perhaps", "--death-recover-corpse=maybe");
 
-        Assert.Equal(4, o.Errors.Count);
+        Assert.Equal(3, o.Errors.Count);
         Assert.Contains("--death-rebuff: 'maybe' is not on or off", o.Errors);
         Assert.Contains("--death-fight: 'perhaps' is not on or off", o.Errors);
-        Assert.Contains("--death-decoys: 'maybe' is not on or off", o.Errors);
         Assert.Contains("--death-recover-corpse: 'maybe' is not on or off", o.Errors);
         Assert.True(o.Rebuff);
         Assert.True(o.Fight);
-        Assert.True(o.Decoys);
         Assert.True(o.RecoverCorpse);
     }
 
@@ -122,18 +120,17 @@ public sealed class DeathOrderOptionsTests
         Assert.Equal(90.0, bad.FightSeconds);
         Assert.Equal(120.0, bad.Seconds);
 
-        var all = Parse("--death-rebuff=off", "--death-fight=off", "--death-fight-kills=7", "--death-fight-seconds=60", "--death-decoys=off");
+        var all = Parse("--death-rebuff=off", "--death-fight=off", "--death-fight-kills=7", "--death-fight-seconds=60");
         Assert.Empty(all.Errors);
         Assert.False(all.Rebuff);
         Assert.False(all.Fight);
         Assert.Equal(7, all.FightKills);
         Assert.Equal(60.0, all.FightSeconds);
-        Assert.False(all.Decoys);
-        Assert.Equal("seconds=600 decoys=off rebuff=off fight=off fight_kills=7 fight_seconds=60", all.ToString());
+        Assert.Equal("seconds=600 rebuff=off fight=off fight_kills=7 fight_seconds=60", all.ToString());
     }
 
     [Fact]
-    public void The_four_options_are_registered_for_the_main_scene_and_the_headless_host_after_the_decoys()
+    public void The_four_options_are_registered_for_the_main_scene_and_the_headless_host_after_the_retired_decoys_entry()
     {
         var group = OptionCatalog.Death();
 

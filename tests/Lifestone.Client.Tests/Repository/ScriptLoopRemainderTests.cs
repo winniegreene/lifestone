@@ -162,6 +162,20 @@ public sealed class ScriptLoopRemainderTests
     }
 
     [Fact]
+    public void M5_7_D151_the_godot_process_runs_a_fixed_8_server_GC_heaps_and_the_slow_frame_and_closing_lines_say_where_the_time_went()
+    {
+        var godot = Normal(File.ReadAllText(RepositoryFiles.PathOf("tools", "godot.ps1")));
+
+        // Under DATAS (the dynamic heap count) the collection that closes the shell's no-GC window took 11 to 108 ms at login (3 of 8 logins over 50 ms; 75 and 135 ms at the item-end gate); with 8 heaps 7 to
+        // 22 ms (8 of 8 logins at most 39 ms). Setting the heap count turns DATAS off; the workstation switch leaves it unset.
+        Assert.Contains("if (-not $WorkstationGC) { $godotEnv['DOTNET_GCHeapCount'] = '8' }", godot, StringComparison.Ordinal);
+        var player = File.ReadAllText(RepositoryFiles.PathOf("src", "Lifestone.Game", "scripts", "Player", "PlayerController.cs"));
+        var screen = File.ReadAllText(RepositoryFiles.PathOf("src", "Lifestone.Client", "RetailUi", "Screens", "GamePlayScreen.cs"));
+        Assert.Contains(".. _renderWatch.Fields(),", player, StringComparison.Ordinal); // render_cpu_ms, render_gpu_ms, physics_ms, process_cpu_ms: drawing or waiting
+        Assert.Contains("(process cpu {_noGc.ClosingCollectionCpuMilliseconds:0.0} ms)", screen, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Each_parallel_run_has_its_own_user_data_slot_and_so_its_own_shader_cache()
     {
         var smoke = Smoke;

@@ -329,6 +329,12 @@ internal sealed partial class StandInWorld
             header |= WeenieHeaderFlags.StackSize | WeenieHeaderFlags.MaxStackSize;
         }
 
+        var magic = _magicItems.ContainsKey(item.Guid);
+        if (magic)
+        {
+            header |= WeenieHeaderFlags.UiEffects; // M5 7 S6: a stand-in magic item glows as ACE's loot does (UiEffects Magical)
+        }
+
         var physics = new PhysicsDesc
         {
             Flags = PhysicsDescFlags.CSetup | (at is not null ? PhysicsDescFlags.Position : PhysicsDescFlags.None),
@@ -346,12 +352,13 @@ internal sealed partial class StandInWorld
             ItemType = corpseItem ? corpseType : kit?.ItemType ?? (item.Wcid == StandInItemKind.PyrealWcid ? 0x40u : 0x80u),
             Value = corpseItem ? corpseValue : null,
             Burden = corpseItem ? corpseBurden : null,
-            ObjectDescriptionFlags = 0,
+            ObjectDescriptionFlags = magic ? 0x2u : 0, // M5 7 D137: a stand-in magic item is inscribable (ObjectDescriptionFlags Inscribable), as ACE's loot is
             ContainerId = container,
             WielderId = wielder != 0 ? wielder : null,
             CurrentlyWieldedLocation = wielder != 0 ? location : null,
             StackSize = max is not null ? (ushort)Math.Min(item.Stack, ushort.MaxValue) : null,
             MaxStackSize = max is { } limit ? (ushort)Math.Min(limit, ushort.MaxValue) : null,
+            UiEffects = magic ? 1u : null,
         };
         return new CreateObjectMsg(item.Guid, ModelData.Empty, physics, StandInWeenieArt.Apply(weenie, Log));
     }

@@ -58,4 +58,18 @@ internal sealed class CommandList
     /// <c>ClearKeyboardCommands</c> (11.4186 0x006B4AD0, 11.6096 0x006B5A10).
     /// </summary>
     public void Clear() => _entries.Clear();
+
+    /// <summary>M5 7 D153: true while an entry of <paramref name="command"/> is held (a caller's check that its key is still down).</summary>
+    public bool Contains(uint command)
+    {
+        foreach (var entry in _entries)
+        {
+            if (entry.Command == command)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

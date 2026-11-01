@@ -69,6 +69,11 @@ internal sealed partial class StandInWorld
         [6606] = (0x02000128, 0x100001A0, 18, 0.3),
         [57] = (0x020000D8, 0x10000011, 20, null),
         [107] = (0x020000DE, 0x10000054, 20, null),
+
+        // M5 7 S4 (D122): the live mage's hooded robe and gloves (GearKit.SupplyWeenies), so the stand-in dresses them as ACE does: 5851 robealuvianhood ClothingBase 0x1000018E, palette template 4,
+        // shade 0.5; 56 gauntletsleather ClothingBase 0x10000008, palette template 4, shade 0.66 (weenie_properties_d_i_d type 7, int type 3, float type 12 of the pinned world 0.9.296).
+        [5851] = (0x020001A6, 0x1000018E, 4, 0.5),
+        [56] = (0x020000D8, 0x10000008, 4, 0.66),
     };
 
     /// <summary>
@@ -84,6 +89,14 @@ internal sealed partial class StandInWorld
         {
             var art = KitArt.TryGetValue(w.Wcid, out var a) ? a : (Setup: StandInWeenieArt.SetupOr(w.Wcid, PlaceholderItemSetup), ClothingBase: 0u, Palette: (int?)null, Shade: (double?)null);
             table[w.Wcid] = new StandInKitWeenie(new StandInItemKind(w.Name, null), w.ItemType, (uint)w.ValidLocations, w.Burden, art.Setup, art.ClothingBase, art.Palette, art.Shade);
+        }
+
+        // M5 3 m1: the ground's vendor kit, the four foci, the potion, the pyreal coin and the trade notes (GearKit.SupplyWeenies): placeholder art, the item verb creates them offline.
+        foreach (var w in GearKit.SupplyWeenies)
+        {
+            table[w.Wcid] = KitArt.TryGetValue(w.Wcid, out var dressed)
+                ? new StandInKitWeenie(new StandInItemKind(w.Name, w.MaxStack), w.ItemType, (uint)w.ValidLocations, w.UnitBurden, dressed.Setup, dressed.ClothingBase, dressed.Palette, dressed.Shade)
+                : new StandInKitWeenie(new StandInItemKind(w.Name, w.MaxStack), w.ItemType, (uint)w.ValidLocations, w.UnitBurden, StandInWeenieArt.SetupOr(w.Wcid, PlaceholderItemSetup));
         }
 
         foreach (var c in ComponentWeenies.All)

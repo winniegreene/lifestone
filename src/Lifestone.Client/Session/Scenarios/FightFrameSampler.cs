@@ -171,6 +171,12 @@ public sealed class FightShotPlan
     private double _quietSince = double.NaN;
     private double _stillSince = double.NaN;
 
+    /// <summary>
+    /// F3: with <c>--fight-storeys-min</c> 2 or more the slots <c>first</c>, <c>bolt</c>, <c>hit</c> and <c>kill</c> wait for their trigger on a storey other than the arrival's (the first kill is on the arrival floor, so the owner would have no frame of a lower storey);
+    /// <see cref="Step"/> then reads its <c>offArrivalStorey</c> argument, and the counters are re-based on every frame the player stands on the arrival's storey, so a trigger is an event of the other storey. The <c>viewer</c> slot is unchanged. Default false: nothing changes.
+    /// </summary>
+    public bool WaitsForOtherStorey { get; set; }
+
     /// <summary>Starts watching: the counters now are the bases a rise above is measured from.</summary>
     /// <param name="projectilesCreated">The avatar set's <c>ProjectilesCreated</c> now.</param>
     /// <param name="projectileExplodes">The avatar set's <c>ProjectileExplodes</c> now.</param>
@@ -225,12 +231,20 @@ public sealed class FightShotPlan
     /// <param name="inDen">The player is present in the Black Spawn Den; default false, which never triggers the <c>viewer</c> slot.</param>
     /// <param name="walked">The fight scenario has started its walk on the den's floor (not the arrival's first frames); default false, which never triggers the <c>viewer</c> slot.</param>
     /// <param name="moving">The player moved this frame (it stood still for <see cref="StillSeconds"/> before the <c>viewer</c> frame is due).</param>
+    /// <param name="offArrivalStorey">The player stands on a storey other than the arrival's; read only when <see cref="WaitsForOtherStorey"/> is set; default true.</param>
     /// <returns>The slot (0 bolt, 1 hit, 2 kill, 3 viewer, 4 first) whose frame is due now, or -1. At most one a frame (a save stalls the frame after it).</returns>
-    public int Step(double now, long projectilesCreated, long projectileExplodes, int damageLines, int kills, bool projectileAlive = false, bool inDen = false, bool walked = false, bool moving = false)
+    public int Step(double now, long projectilesCreated, long projectileExplodes, int damageLines, int kills, bool projectileAlive = false, bool inDen = false, bool walked = false, bool moving = false, bool offArrivalStorey = true)
     {
         if (!_begun)
         {
             return -1;
+        }
+
+        if (WaitsForOtherStorey && !offArrivalStorey)
+        {
+            // Still on the arrival's storey: what happens here triggers no frame of these four slots (the counters are the bases a rise on the other storey is measured from).
+            (_createdBase, _createdMark, _explodesBase, _damageBase, _killsBase) = (projectilesCreated, projectilesCreated, projectileExplodes, damageLines, kills);
+            (_damageSeen, _lastExplodeAt, _lastDamageAt) = (false, double.NegativeInfinity, double.NegativeInfinity);
         }
 
         // The first damage line says a cast landed with the target in sight: a projectile created after it is the bolt to show.
@@ -337,7 +351,7 @@ public sealed class FightShotPlan
             var phrase = _state[i] switch
             {
                 State.Taken => "taken",
-                State.Waiting => "trigger never came",
+                State.Waiting => WaitsForOtherStorey ? "trigger never came (waited for a storey other than the arrival's)" : "trigger never came",
                 State.Pending => "trigger came, frame not taken",
                 _ => "not taken (" + _why[i] + ")",
             };

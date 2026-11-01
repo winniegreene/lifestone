@@ -3,6 +3,7 @@ using Lifestone.Client.RetailUi.Flow;
 using Lifestone.Client.RetailUi.Input;
 using Lifestone.Client.RetailUi.LifestonePanels;
 using Lifestone.Client.RetailUi.Screens;
+using Lifestone.Client.RetailUi.Text;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.StandIn;
 using Lifestone.Client.Tests.RetailUi.Screens;
@@ -217,6 +218,55 @@ public sealed class ToolsPanelTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Contains("Lifestone: " + ToolsPanel.NotLoopbackText, screen.Chat!.Main!.LogText, StringComparison.Ordinal);
         Assert.NotNull(panel.Dialog);
         Assert.Contains("not on loopback", ToolsPanel.NotLoopbackText, StringComparison.Ordinal);
+    }
+
+    /// <summary>A stand-in for the dial: a status a test sets, and a Changed it raises.</summary>
+    private sealed class FakeDial : IAutopilotStatusSource
+    {
+        public AutopilotStatus Status { get; set; }
+
+        public event Action? Changed;
+
+        public void Set(AutopilotMode mode)
+        {
+            Status = new AutopilotStatus(mode, string.Empty, string.Empty, string.Empty, 0, 0, 0);
+            Changed?.Invoke();
+        }
+    }
+
+    [Theory]
+    [InlineData(AutopilotMode.Off, "Autopilot")]
+    [InlineData(AutopilotMode.Done, "Autopilot")]
+    [InlineData(AutopilotMode.Running, "Stop")]
+    [InlineData(AutopilotMode.Stopping, "Stopping")]
+    [InlineData(AutopilotMode.Interrupted, "Resume")]
+    [InlineData(AutopilotMode.Halted, "Resume")]
+    public void M5_7_s1_4_r17_the_autopilot_buttons_text_says_what_a_press_will_do_for_each_mode(AutopilotMode mode, string text)
+    {
+        Assert.Equal(text, ToolsPanel.AutopilotButtonText(mode));
+    }
+
+    [RequiresLocalDatsFact]
+    public void M5_7_s1_4_r17_the_autopilot_button_follows_the_dials_mode_from_its_status_only()
+    {
+        var (rig, _, panel) = Enter();
+        using var _ = rig;
+        var dial = new FakeDial();
+        panel.Autopilot = dial; // set before the window exists: the text is written when it is made
+        Assert.Equal("Autopilot", panel.AutopilotText);
+        Tap(rig, LifestoneHotkeys.ToolsKey);
+        var button = Assert.IsAssignableFrom<UiTextElement>(panel.Window!.GetChildRecursive(ToolsPanel.AutopilotButtonId));
+        Assert.Equal("Autopilot", button.Text);
+
+        foreach (var (mode, text) in new[] { (AutopilotMode.Running, "Stop"), (AutopilotMode.Stopping, "Stopping"), (AutopilotMode.Interrupted, "Resume"), (AutopilotMode.Halted, "Resume"), (AutopilotMode.Done, "Autopilot"), (AutopilotMode.Off, "Autopilot") })
+        {
+            dial.Set(mode);
+            Assert.Equal((text, text), (button.Text, panel.AutopilotText));
+        }
+
+        panel.Autopilot = null; // a replaced source no longer moves the button
+        dial.Set(AutopilotMode.Running);
+        Assert.Equal("Autopilot", button.Text);
     }
 
     private static string Statuses(ToolsPanel panel) =>

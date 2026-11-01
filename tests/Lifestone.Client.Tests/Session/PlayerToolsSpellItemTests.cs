@@ -110,8 +110,8 @@ public sealed class PlayerToolsSpellItemTests
         var h = Ready();
         var learn = h.Api.Tools.LearnSpells([2], ActionSource.Host);
         h.Tick();
-        Fail(h, IdOf(learn), ToolVerbs.Spell, ToolErrors.NotInWorld, "your character is not in the world yet");
-        Assert.Equal(new ActionOutcome(ActionOutcomeKind.ServerError, 0, "not-in-world: your character is not in the world yet"), learn.Outcome);
+        Fail(h, IdOf(learn), ToolVerbs.Spell, ToolErrors.Busy, "you are teleporting");
+        Assert.Equal(new ActionOutcome(ActionOutcomeKind.ServerError, 0, "busy: you are teleporting"), learn.Outcome);
         Assert.Null(learn.Result);
     }
 
